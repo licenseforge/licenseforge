@@ -3,6 +3,7 @@
 package migrate
 
 import (
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/schema/field"
 )
@@ -10,12 +11,12 @@ import (
 var (
 	// ProductsColumns holds the columns for the "products" table.
 	ProductsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString, Size: 40},
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
-		{Name: "slug", Type: field.TypeString, Size: 63},
-		{Name: "name", Type: field.TypeString, Size: 200},
-		{Name: "tenant_id", Type: field.TypeString, Size: 40},
+		{Name: "slug", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// ProductsTable holds the schema information for the "products" table.
 	ProductsTable = &schema.Table{
@@ -45,11 +46,11 @@ var (
 	}
 	// TenantsColumns holds the columns for the "tenants" table.
 	TenantsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString, Size: 40},
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
-		{Name: "slug", Type: field.TypeString, Unique: true, Size: 63},
-		{Name: "name", Type: field.TypeString, Size: 200},
+		{Name: "slug", Type: field.TypeString, Unique: true, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
 	}
 	// TenantsTable holds the schema information for the "tenants" table.
 	TenantsTable = &schema.Table{
@@ -66,4 +67,14 @@ var (
 
 func init() {
 	ProductsTable.ForeignKeys[0].RefTable = TenantsTable
+	ProductsTable.Annotation = &entsql.Annotation{}
+	ProductsTable.Annotation.Checks = map[string]string{
+		"products_id_format":   "id ~ '^prd_[a-z2-7]{26}$'",
+		"products_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
+	TenantsTable.Annotation = &entsql.Annotation{}
+	TenantsTable.Annotation.Checks = map[string]string{
+		"tenants_id_format":   "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
 }

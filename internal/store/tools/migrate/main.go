@@ -61,9 +61,27 @@ func devURL() (string, error) {
 	return u, nil
 }
 
+// ensureGroupRoles creates the cluster-wide group roles the migrations grant
+// to and write policies for (ADR-0009), so the dev database can replay them.
+func ensureGroupRoles(ctx context.Context, u string) error {
+	db, err := sql.Open("postgres", u)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	_, err = db.ExecContext(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_app') THEN CREATE ROLE licenseforge_app NOLOGIN; END IF;
+		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_platform') THEN CREATE ROLE licenseforge_platform NOLOGIN; END IF;
+	END $$`)
+	return err
+}
+
 func diff(ctx context.Context, path, name string) error {
 	u, err := devURL()
 	if err != nil {
+		return err
+	}
+	if err := ensureGroupRoles(ctx, u); err != nil {
 		return err
 	}
 	dir, err := atlas.NewLocalDir(path)

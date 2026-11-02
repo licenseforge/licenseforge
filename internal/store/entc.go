@@ -15,8 +15,8 @@ func main() {
 		Target:  "./ent",
 		Package: "licenseforge.io/licenseforge/internal/store/ent",
 		Features: []gen.Feature{
-			gen.FeatureLock,            // SELECT ... FOR UPDATE (activation counting, ADR-0008)
-			gen.FeatureExecQuery,       // raw exec for set_config (tenant context)
+			gen.FeatureLock,      // SELECT ... FOR UPDATE (activation counting, ADR-0008)
+			gen.FeatureExecQuery, // raw exec for set_config (tenant context)
 			gen.FeatureVersionedMigration,
 		},
 	})

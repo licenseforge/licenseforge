@@ -16,7 +16,8 @@ Need a language for a stateless, security-sensitive API server shipped as a cont
 
 ## Implementation note (2026-11-02)
 - **IDs**: text primary keys `<prefix>_<26 lowercase base32 chars>` (128 random bits), e.g. `tnt_…`, `prd_…`: readable in logs and licenses, no UUID dependency.
-- **Migrations**: Atlas (library, via ent) *generates* versioned SQL at dev time (`internal/store/tools/migrate diff|hash|check`); hand-written SQL (RLS policies) sits next to it with `atlas.sum` rehashed. The server *applies* them with a small built-in runner (embedded files, one transaction, `pg_advisory_xact_lock` so replicas starting together apply once, refuses databases with unknown newer migrations). No Atlas CLI in the image or Helm chart.
+- **Migrations**: Atlas (library, via ent) *generates* versioned SQL at dev time (`internal/store/tools/migrate diff|hash|check`); hand-written SQL (grants, RLS policies) sits next to it with `atlas.sum` rehashed. The server *applies* them as the owner login with a small built-in runner: embedded files, one transaction per file with `lock_timeout = 30s`, a session advisory lock so replicas starting together apply once, a SHA-256 checksum per applied file (edited files are refused), and refusal of unknown newer or out-of-order versions. No Atlas CLI in the image or Helm chart.
+- **Database constraints**: column sizes (`varchar(n)`) and `CHECK` constraints for ID and slug formats are enforced by PostgreSQL, not only by ent validators.
 - Migrations live in `internal/store/migrations` (Go embed can't reach a root `migrations/` dir).
 - CI: generated code must be current, and `migrate check` fails if the schema needs a migration that isn't committed.
 

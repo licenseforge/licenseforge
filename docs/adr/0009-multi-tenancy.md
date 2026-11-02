@@ -22,10 +22,20 @@ Shared-database tenancy is accepted by SOC 2 / ISO 27001 when isolation is enfor
 - Per-tenant **data-encryption keys** (envelope encryption) are possible later through the same key interface used for signing keys.
 - Cross-tenant isolation test in CI is a release blocker.
 
-## Implementation note (2026-11-02)
-- Every tenant table (and `tenants`) has `ENABLE` + **`FORCE`** row-level security with policy `app_is_platform() OR tenant_id = app_tenant_id()`, reading transaction-local settings `app.tenant_id` / `app.scope` set by `store.WithTenant` / `store.WithPlatform`. Nothing set → no rows, no writes (fail closed).
-- `store.Open` refuses a database role that is a superuser or has `BYPASSRLS`.
-- Release-blocking tests run against a real PostgreSQL as a non-superuser role: cross-tenant read/update/delete/insert, unscoped access, setting leakage across pooled connections, and a check that **every** table with `tenant_id` has RLS enabled, forced and a policy. Removing `FORCE` was verified to fail them.
+## Amendment: database role model (2026-11-02, from security review; accepted)
+Row-level security is only a backstop if the serving process can't switch it off or widen its own scope. So:
+
+| Login | Group | Used for | Can |
+|---|---|---|---|
+| owner | – | `licenseforge migrate` (Helm job / init container) only | Owns the schema; `migrator_all` policy lets data migrations see all rows |
+| api | `licenseforge_app` | every tenant request (tenant pool) | Only rows where `tenant_id = app.tenant_id` (set per transaction); `tenants`: read own row only |
+| admin | `licenseforge_platform` | platform-admin operations (separate pool) | All tenants |
+
+- Platform access is a **database identity**, not a setting: the api login is not a member of `licenseforge_platform`, so a SQL bug in a tenant request can't reach other tenants (no `SET ROLE`, no GUC).
+- `store.Open` refuses a login that switched role via connection options, is superuser / BYPASSRLS / CREATEROLE (covers `rds_superuser`, `cloudsqlsuperuser`), is a member of such a role or of the other pool's group, owns any relation, or has `app.tenant_id` preset.
+- Every relation follows one canonical pattern (enable + force RLS, exactly the expected policies, explicit grants, no default privileges). Views, materialized views, partitioned and foreign tables are refused until reviewed. A release-blocking test checks all of it, plus cross-tenant read/write/delete/insert, own-tenant-row writes, escalation attempts, unscoped access and setting leakage on a reused connection.
+- Setup for operators: `deploy/database-setup.sql` (group roles, three logins, `REVOKE CONNECT ... FROM PUBLIC` so other installs on the same cluster are kept out).
+- Limitation (documented): arbitrary SQL execution as the api login could still set another `app.tenant_id`; tenant IDs are 128-bit random, and RLS remains a backstop for application bugs, not a defence against full SQL injection.
 
 ## Alternatives considered
 - **Database per tenant**: stronger isolation, painful migrations and ops at scale. Could be an enterprise option later.
