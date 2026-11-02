@@ -4,6 +4,11 @@ permissions:
   contents: read
 jobs:
   dco:
+    # Dependabot can't sign off commits. Skip only PRs Dependabot opened (the PR
+    # author can't be forged, unlike a commit's author name); a skipped job
+    # satisfies the required check. Human commits pushed to such a PR are rare
+    # and still reviewed.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
