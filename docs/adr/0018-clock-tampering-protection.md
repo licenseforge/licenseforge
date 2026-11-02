@@ -16,6 +16,9 @@ SDKs and agent apply three checks:
 - High-water mark is stored with the lease ([ADR-0011 Secret manager integrations](0011-secret-manager-integrations.md) storage). Memory-only storage resets it on restart, so offline/air-gapped use requires persistent storage (file, ConfigMap, Secret, or add-on); the SDK warns otherwise.
 - The high-water value is HMAC'd with a key derived from the license key, so editing the stored value by hand is detectable (raises the bar; not a guarantee, see threat model in [ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md)).
 
+## Implementation note (2026-11-02)
+Go SDK package `sdk/go/clock`. The HMAC key is `SHA-256("licenseforge clock v1|" + license key)`, not HKDF: FIPS 140-only mode rejects HKDF inputs shorter than 112 bits and license keys can be shorter. The time returned for checks is `max(local, mark)`, so it never moves backwards; `Reset(serverTime)` after an online refresh is the way out of a rollback or tampered state.
+
 ## Consequences
 - An attacker can gain at most 24h by rolling the clock back.
 - Legitimate drift up to 24h never locks anyone out.
