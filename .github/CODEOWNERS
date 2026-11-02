@@ -1,0 +1,5 @@
+# Default reviewers for everything.
+*                     @licenseforge/maintainers
+# Security-sensitive areas.
+/spec/                @licenseforge/maintainers
+/docs/adr/            @licenseforge/maintainers

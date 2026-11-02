@@ -1,0 +1,26 @@
+name: DCO
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          fail=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            want="Signed-off-by: $(git log -1 --format='%an <%ae>' "$c")"
+            if ! git log -1 --format=%B "$c" | grep -qiF -- "$want"; then
+              echo "Commit $c is missing: $want"
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] || { echo "Sign off with: git commit -s (see CONTRIBUTING.md)"; exit 1; }
