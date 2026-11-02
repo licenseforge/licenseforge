@@ -13,8 +13,11 @@ import (
 // LockFileEx on Windows; the OS releases it if a process dies) and written
 // atomically: temp file with mode 0600, fsync, rename, fsync of the directory.
 //
-// If the lock can't be taken (read-only directory, contention) the state is
-// still read and checked, and only the write is skipped (ErrNotPersisted).
+// The rollback check always runs. If another process holds the lock the write
+// is skipped (ErrNotPersisted); if locking is unavailable (read-only
+// directory, network filesystem, unsupported platform) the write is attempted
+// without it, since rename is atomic. An unreadable state file counts as no
+// state (like deletion) and is reported as ErrNotPersisted.
 // Use persistent storage for offline licenses: with memory-only storage the
 // mark resets on every restart (ADR-0018).
 type FileStore struct{ Path string }
@@ -22,24 +25,35 @@ type FileStore struct{ Path string }
 // lockWait bounds how long a check waits for another process's lock.
 const lockWait = 2 * time.Second
 
+// errLockBusy means another process held the lock for the whole wait.
+var errLockBusy = errors.New("clock: state locked by another process")
+
 // Update implements Store.
 func (f FileStore) Update(fn func(current []byte) ([]byte, error)) error {
 	unlock, lockErr := lockFile(f.Path+".lock", lockWait)
 	if lockErr == nil {
 		defer unlock()
 	}
-	cur, err := os.ReadFile(f.Path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("%w: %w", ErrUnreadable, err)
+	cur, readErr := os.ReadFile(f.Path)
+	if errors.Is(readErr, os.ErrNotExist) {
+		readErr = nil
 	}
-	next, err := fn(cur)
-	if err != nil || next == nil {
+	next, err := fn(cur) // cur is nil if unreadable: treated as no state
+	if err != nil {
 		return err
 	}
-	if lockErr != nil {
-		return fmt.Errorf("lock: %w", lockErr)
+	var writeErr error
+	switch {
+	case next == nil:
+	case errors.Is(lockErr, errLockBusy):
+		writeErr = lockErr // another process is updating; skip our write
+	default:
+		writeErr = f.write(next)
 	}
-	return f.write(next)
+	if readErr != nil {
+		return errors.Join(fmt.Errorf("read: %w", readErr), writeErr)
+	}
+	return writeErr
 }
 
 func (f FileStore) write(b []byte) error {

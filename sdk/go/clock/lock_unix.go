@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !solaris && !aix
 
 package clock
 
@@ -25,9 +25,13 @@ func lockFile(path string, wait time.Duration) (func(), error) {
 				_ = f.Close()
 			}, nil
 		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			_ = f.Close()
-			return nil, err
+			return nil, err // locking unsupported (e.g. some network filesystems)
+		}
+		if time.Now().After(deadline) {
+			_ = f.Close()
+			return nil, errLockBusy
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

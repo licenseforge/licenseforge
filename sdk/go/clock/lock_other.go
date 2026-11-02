@@ -1,4 +1,4 @@
-//go:build !unix && !windows
+//go:build (!unix && !windows) || solaris || aix
 
 package clock
 
@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// lockFile is unavailable here; Update still reads and checks the state but
-// does not write it.
+// lockFile is unavailable here; Update still checks the state and writes it
+// without a lock (rename is atomic; only concurrent updates can be lost).
 func lockFile(string, time.Duration) (func(), error) {
 	return nil, errors.New("file locking not supported on this platform")
 }

@@ -16,6 +16,7 @@ var (
 const (
 	lockfileFailImmediately = 0x1
 	lockfileExclusiveLock   = 0x2
+	errorLockViolation      = syscall.Errno(33) // ERROR_LOCK_VIOLATION: held by another process
 )
 
 // lockFile takes an exclusive LockFileEx lock on path, waiting up to wait.
@@ -37,9 +38,13 @@ func lockFile(path string, wait time.Duration) (func(), error) {
 				_ = f.Close()
 			}, nil
 		}
-		if time.Now().After(deadline) {
+		if callErr != errorLockViolation {
 			_ = f.Close()
 			return nil, callErr
+		}
+		if time.Now().After(deadline) {
+			_ = f.Close()
+			return nil, errLockBusy
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

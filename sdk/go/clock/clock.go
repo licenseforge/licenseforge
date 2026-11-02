@@ -11,8 +11,9 @@
 // server's time after a successful online refresh, the only way to lower it).
 //
 // The stored mark is authenticated with HMAC-SHA256 under a key derived from
-// the license key; state that fails authentication (hand-edited, corrupt, or
-// written for another license key) is ignored, exactly like deleted state.
+// the license key, which ties the state to one license (a renewed key starts
+// fresh). State that fails authentication, is corrupt or can't be read is
+// ignored, exactly like deleted state.
 // Deleting, corrupting or replacing the state with an old copy therefore
 // resets the mark; that is within the threat model (ADR-0014), and
 // max_offline bounds the gain. The MAC is not a FIPS security function: its
@@ -40,8 +41,8 @@ const persistEvery = time.Minute
 var (
 	// ErrRollback means the local clock is too far behind the latest trusted time.
 	ErrRollback = errors.New("clock: system clock is behind the last trusted time; fix the clock, refresh the license online, or (offline) delete the clock state")
-	// ErrUnreadable means the stored state exists but can't be read, so the
-	// rollback check can't run. There is no usable time.
+	// ErrUnreadable means the store couldn't run the rollback check at all.
+	// There is no usable time.
 	ErrUnreadable = errors.New("clock: state unreadable")
 	// ErrNotPersisted means the time returned is valid but the new mark could
 	// not be saved (e.g. read-only storage). Callers may continue.
@@ -54,10 +55,10 @@ type Store interface {
 	// bytes fn returns; fn returning nil means "no change". It should be
 	// atomic with respect to other processes using the same state.
 	//
-	// Whenever the current state can be read, Update must call fn, even if it
-	// can't lock or write (then it returns the lock/write error after fn).
-	// If the state can't be read at all it must not call fn and must return
-	// an error wrapping ErrUnreadable.
+	// Update must call fn, even if it can't lock or write (then it returns
+	// the lock/write error after fn). State that can't be read may be passed
+	// as nil (no state). A store that can't call fn at all must return an
+	// error; the Guard reports ErrUnreadable either way.
 	Update(fn func(current []byte) ([]byte, error)) error
 }
 
@@ -144,15 +145,15 @@ func (g *Guard) update(fn func(mark time.Time) (time.Time, error)) error {
 		return g.encode(next)
 	})
 	switch {
+	case !ran: // the check never ran: no usable time, whatever the store said
+		if err == nil || errors.Is(err, ErrUnreadable) {
+			return errors.Join(ErrUnreadable, err)
+		}
+		return fmt.Errorf("%w: %w", ErrUnreadable, err)
 	case fnErr != nil:
 		return fnErr
 	case err == nil:
 		return nil
-	case !ran:
-		if errors.Is(err, ErrUnreadable) {
-			return err
-		}
-		return fmt.Errorf("%w: %w", ErrUnreadable, err)
 	default:
 		return fmt.Errorf("%w: %w", ErrNotPersisted, err)
 	}
