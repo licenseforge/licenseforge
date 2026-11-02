@@ -73,9 +73,13 @@ type Options struct {
 
 // Hash derives the fingerprint for a tenant's product from a raw ID: the
 // UTF-8 bytes of "lf-fp-v1", tenant, product and raw ID joined by single 0x00
-// bytes. Tenant and product must be non-empty and contain no NUL; all fields
-// must be valid UTF-8. Under those rules no combination of IDs can collide.
+// bytes. Tenant, product and raw ID must be non-empty, tenant and product
+// must contain no NUL, and all must be valid UTF-8. Under those rules no
+// combination of IDs can collide.
 func Hash(tenantID, productID, rawID string) (string, error) {
+	if rawID == "" {
+		return "", errors.New("fingerprint: empty raw ID")
+	}
 	if tenantID == "" || productID == "" || strings.ContainsRune(tenantID+productID, 0) {
 		return "", errors.New("fingerprint: tenant and product IDs must be non-empty and contain no NUL")
 	}
@@ -103,9 +107,13 @@ func Compute(ctx context.Context, tenantID, productID string, opts Options) (Res
 	return compute(ctx, tenantID, productID, opts, env{getenv: os.Getenv, k8s: kubeSystemUID, machineID: osMachineID})
 }
 
-// ForLicense computes the fingerprint for an already verified license, taking
-// the tenant and product IDs from its claims so they can't be misconfigured.
+// ForLicense computes the fingerprint for an already verified, bound license
+// (machine or cluster), taking the tenant and product IDs from its claims so
+// they can't be misconfigured. Unbound licenses need no fingerprint.
 func ForLicense(ctx context.Context, c *licensefile.Claims, opts Options) (Result, error) {
+	if c == nil {
+		return Result{}, errors.New("fingerprint: nil claims")
+	}
 	return Compute(ctx, c.Tenant, c.Product, opts)
 }
 
@@ -119,7 +127,7 @@ type env struct {
 func trimASCII(s string) string { return strings.Trim(s, " \t\r\n") }
 
 func compute(ctx context.Context, tenantID, productID string, opts Options, e env) (Result, error) {
-	if _, err := Hash(tenantID, productID, ""); err != nil {
+	if _, err := Hash(tenantID, productID, "-"); err != nil {
 		return Result{}, err // validate IDs before touching any source
 	}
 	if opts.Override != nil {

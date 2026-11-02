@@ -153,7 +153,7 @@ func buildClaimVectors(t *testing.T) claimVectorFile {
 			// Keys: exact case, no duplicates.
 			c("case_variant_key_ignored", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","EXP":"2026-11-02T00:00:00Z"}`, opts(mid), "valid"),
 			c("malformed_duplicate_key", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","exp":"2027-01-01T00:00:00Z","exp":"2026-11-02T00:00:00Z"}`, opts(mid), "malformed"),
-			c("malformed_duplicate_nested_key", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","bind":{"type":"machine","fp":"sha256:abc","fp":"sha256:xyz"}}`, opts(mid), "malformed"),
+			c("malformed_duplicate_nested_key", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","tenant":"t","bind":{"type":"machine","fp":"sha256:abc","fp":"sha256:xyz"}}`, opts(mid), "malformed"),
 			c("malformed_trailing_data", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z"} {}`, opts(mid), "malformed"),
 			// Binding edge cases.
 			c("malformed_bind_empty_type", p(map[string]any{"bind": map[string]any{"type": "", "fp": "sha256:abc"}}), opts(mid), "malformed"),

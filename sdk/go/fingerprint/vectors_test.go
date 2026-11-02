@@ -42,7 +42,7 @@ func buildHashVectors(t *testing.T) hashVectors {
 		Note:   "Fingerprint derivation vectors (spec/license-format.md, Fingerprints). Every SDK must produce exactly these values and reject the cases without a fingerprint.",
 		Conventions: []string{
 			"fingerprint = \"sha256:\" + lowercase hex of SHA-256 over the UTF-8 bytes of \"lf-fp-v1\", tenant, product and raw_id joined by single 0x00 bytes; no trailing separator, no Unicode normalisation.",
-			"Standard UTF-8 (not Java modified UTF-8). Cases without a fingerprint must be rejected (empty tenant/product, or NUL inside them).",
+			"Standard UTF-8 (not Java modified UTF-8). Cases without a fingerprint must be rejected (empty tenant, product or raw ID, or NUL inside tenant/product).",
 		},
 		Cases: []hashCase{
 			c("basic", "tnt_acme", "acme-db", "0123456789abcdef0123456789abcdef", true),
@@ -53,6 +53,7 @@ func buildHashVectors(t *testing.T) hashVectors {
 			c("nul_inside_raw_id_allowed", "tnt_acme", "acme-db", "a\x00b", true),
 			c("reject_empty_tenant", "", "acme-db", "x", false),
 			c("reject_empty_product", "tnt_acme", "", "x", false),
+			c("reject_empty_raw_id", "tnt_acme", "acme-db", "", false),
 			c("reject_nul_in_tenant", "tnt\x00acme", "db", "x", false),
 			c("reject_nul_in_product", "tnt", "acme\x00db", "x", false),
 		},

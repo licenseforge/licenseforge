@@ -3,7 +3,7 @@
   "note": "Fingerprint derivation vectors (spec/license-format.md, Fingerprints). Every SDK must produce exactly these values and reject the cases without a fingerprint.",
   "conventions": [
     "fingerprint = \"sha256:\" + lowercase hex of SHA-256 over the UTF-8 bytes of \"lf-fp-v1\", tenant, product and raw_id joined by single 0x00 bytes; no trailing separator, no Unicode normalisation.",
-    "Standard UTF-8 (not Java modified UTF-8). Cases without a fingerprint must be rejected (empty tenant/product, or NUL inside them)."
+    "Standard UTF-8 (not Java modified UTF-8). Cases without a fingerprint must be rejected (empty tenant, product or raw ID, or NUL inside tenant/product)."
   ],
   "cases": [
     {
@@ -59,6 +59,12 @@
       "tenant": "tnt_acme",
       "product": "",
       "raw_id": "x"
+    },
+    {
+      "name": "reject_empty_raw_id",
+      "tenant": "tnt_acme",
+      "product": "acme-db",
+      "raw_id": ""
     },
     {
       "name": "reject_nul_in_tenant",

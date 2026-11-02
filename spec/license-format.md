@@ -98,7 +98,7 @@ Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result)
 
 ### Fingerprints
 Design: [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md).
-- `bind.fp` = `"sha256:"` + lowercase hex of SHA-256 over the **UTF-8 bytes of `lf-fp-v1`, tenant, product and raw ID, joined by single `0x00` bytes** (no trailing separator, no Unicode normalisation, standard UTF-8, not Java's modified UTF-8). Tenant and product must be non-empty and contain no NUL; all fields must be valid UTF-8; otherwise the SDK rejects the input.
+- `bind.fp` = `"sha256:"` + lowercase hex of SHA-256 over the **UTF-8 bytes of `lf-fp-v1`, tenant, product and raw ID, joined by single `0x00` bytes** (no trailing separator, no Unicode normalisation, standard UTF-8, not Java's modified UTF-8). Tenant, product and raw ID must be non-empty; tenant and product must contain no NUL; all fields must be valid UTF-8; otherwise the SDK rejects the input.
 - `tenant` and `product` are the license's claims: the **tenant ID** (e.g. `tnt_8f2c`), never a dashboard slug. To check an existing license, SDKs take them from the verified claims (Go: `fingerprint.ForLicense`). Including the tenant means two vendors on a hosted server can't correlate the same customer machine.
 - Test value: tenant `tnt_acme`, product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684`. More cases: `spec/vectors/fingerprint.json`.
 - "Trim" below means removing only SP, HT, CR, LF at both ends (not Unicode spaces). No case changes anywhere.

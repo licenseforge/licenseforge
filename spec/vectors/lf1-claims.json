@@ -685,7 +685,7 @@
     },
     {
       "name": "malformed_duplicate_nested_key",
-      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"bind\":{\"type\":\"machine\",\"fp\":\"sha256:abc\",\"fp\":\"sha256:xyz\"}}",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"tenant\":\"t\",\"bind\":{\"type\":\"machine\",\"fp\":\"sha256:abc\",\"fp\":\"sha256:xyz\"}}",
       "options": {
         "now": "2026-11-15T00:00:00Z",
         "product": "acme-db",
