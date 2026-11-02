@@ -1,0 +1,110 @@
+{
+  "format": "lf1",
+  "note": "Conformance vectors for the lf1 license format. Keys are TEST ONLY. Every SDK must produce the expected result for every case.",
+  "test_seed": "licenseforge-test-vector-seed-01",
+  "keys": [
+    {
+      "kid": "test:2026-11",
+      "alg": "ed25519",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    },
+    {
+      "kid": "test:other",
+      "alg": "ed25519",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    },
+    {
+      "kid": "test:rsa",
+      "alg": "rsa-pss-sha256",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    }
+  ],
+  "cases": [
+    {
+      "name": "valid_armored",
+      "license": "-----BEGIN LICENSEFORGE LICENSE-----\nlf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg\n-----END LICENSEFORGE LICENSE-----\n",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "valid_bare",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "valid_wrapped_crlf",
+      "license": "-----BEGIN LICENSEFORGE LICENSE-----\r\nlf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJ\r\nhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8N\r\nKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcH\r\nnyBSZytwBg\r\n-----END LICENSEFORGE LICENSE-----\r\n",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "bad_signature_payload_tampered",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLXh4IiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "bad_signature_kid_swapped",
+      "license": "lf1.test:other.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "unknown_key",
+      "license": "lf1.test:missing.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.Ac0xrep9HC11eSlicoxuYG2ZjoVJ4bphkOvB4KMUNTDE9Ft3YiPu2lq410UKWFxirwLf0OyIwmn4Hjw2a5syDA",
+      "expect": "unknown_key"
+    },
+    {
+      "name": "unsupported_alg",
+      "license": "lf1.test:rsa.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.k7Q4_iYIvJaUfRA-01cpLMyN5tXNEiV5yV1jWG9ppkUlL3MgWBl6CgLI934ps_SBZn6MetFzYZPHEyjTEB1GAw",
+      "expect": "unsupported_alg"
+    },
+    {
+      "name": "malformed_version",
+      "license": "lf2.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_missing_part",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_extra_part",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg.x",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_padded_base64",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg==",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_noncanonical_base64",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBh",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_invalid_kid",
+      "license": "lf1.bad/kid.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_signature_length",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_missing_end_armor",
+      "license": "-----BEGIN LICENSEFORGE LICENSE-----\nlf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg\n",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_empty",
+      "license": "",
+      "expect": "malformed"
+    }
+  ]
+}

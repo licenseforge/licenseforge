@@ -15,6 +15,17 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 - **Algorithm is bound to the key, never read from the file.** The SDK's trusted key set is a list of `{kid, alg, public_key}`; `alg` comes from that list. v1 supports `ed25519`; `ecdsa-p256` and `ml-dsa-65` (post-quantum, FIPS 204) can be added later by issuing new keys, without a format change and without JWT-style `alg` confusion. ([ADR-0021 Certification readiness](../docs/adr/0021-certification-readiness.md))
 - PEM-ish armor so it survives email, copy-paste, ConfigMaps.
 
+### Encoding rules
+- `base64url` = RFC 4648 §5 URL-safe alphabet, **no padding**, canonical only (non-canonical trailing bits are rejected; prevents malleability).
+- `kid`: 1–128 chars from `[A-Za-z0-9_:-]` (no `.`).
+- Ed25519 signatures are exactly 64 bytes.
+- Armor is optional for machine-to-machine transport (online leases may be sent bare). If present, everything between the BEGIN/END lines is joined after removing whitespace, so wrapped lines and CRLF are fine.
+- Maximum encoded size: 64 KiB; larger input is rejected before parsing.
+- Error classes (shared by all SDKs and the conformance vectors): `malformed`, `unknown_key`, `unsupported_alg`, `bad_signature`.
+
+### Conformance vectors
+`spec/vectors/lf1.json` in the main repo: fixed test keys, encoded licenses and the expected result for each. Every SDK must pass all of them ([ADR-0010 Official SDKs Go, Java, TypeScript](../docs/adr/0010-official-sdks-go-java-typescript.md)).
+
 ## Payload
 ```json
 {

@@ -13,7 +13,11 @@ jobs:
         with: { go-version-file: go.mod }
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-      - run: go vet ./...
-      - run: go test -race ./...
+      - run: make vet
+      - run: make test
+      - name: Test in FIPS 140-3 mode (CMVP-validated Go module)
+        run: make test-fips
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with: { working-directory: sdk/go }
       - run: make build
