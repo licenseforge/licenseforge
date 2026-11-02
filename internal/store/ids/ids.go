@@ -19,5 +19,8 @@ func New(prefix string) string {
 }
 
 // Generators for each entity, used as ent default functions.
-func Tenant() string  { return New("tnt") }
-func Product() string { return New("prd") }
+func Tenant() string      { return New("tnt") }
+func Product() string     { return New("prd") }
+func Feature() string     { return New("ftr") }
+func Plan() string        { return New("pln") }
+func PlanFeature() string { return New("plf") }

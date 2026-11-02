@@ -3,6 +3,8 @@
 package schema
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"entgo.io/ent"
@@ -10,6 +12,35 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"entgo.io/ent/schema/mixin"
+)
+
+// notBlank rejects empty and whitespace-only strings, like the btrim CHECKs.
+func notBlank(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return errors.New("must not be blank")
+	}
+	return nil
+}
+
+// CHECK expressions must be written in PostgreSQL's normalized form (e.g.
+// "(x)::text = ANY (ARRAY['a'::text])" rather than "x IN ('a')"), so the
+// migration and the ent schema render identically (TestMigrationsMatchEntSchema).
+
+// enumCheck renders "col must be one of values" in PostgreSQL's normalized
+// form, from the same slice that feeds field.Enum().Values(), so the two can't
+// disagree.
+func enumCheck(col string, values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = "'" + v + "'::text"
+	}
+	return "(" + col + ")::text = ANY (ARRAY[" + strings.Join(quoted, ", ") + "])"
+}
+
+// Enum values, shared by ent fields and CHECK constraints.
+var (
+	featureTypes = []string{"boolean", "limit"}
+	expiryBases  = []string{"from_issue", "from_first_activation"}
 )
 
 // Column types enforced by the database too, not only by ent's validators.
@@ -22,6 +53,9 @@ var (
 // Slug and ID rules, shared by ent validators and database CHECK constraints.
 const (
 	slugPattern = `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` // lowercase words joined by single dashes
+	keyPattern  = `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` // feature keys: snake_case, e.g. max_users
+	maxSafeInt  = "9007199254740991"              // 2^53-1, JSON-safe (spec: limits)
+	maxSeconds  = 3153600000                      // 36,500 days, the license format's duration limit
 	idChars     = `[a-z2-7]{26}`
 )
 

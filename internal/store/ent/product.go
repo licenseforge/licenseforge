@@ -38,9 +38,13 @@ type Product struct {
 type ProductEdges struct {
 	// Tenant holds the value of the tenant edge.
 	Tenant *Tenant `json:"tenant,omitempty"`
+	// Features holds the value of the features edge.
+	Features []*Feature `json:"features,omitempty"`
+	// Plans holds the value of the plans edge.
+	Plans []*Plan `json:"plans,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [1]bool
+	loadedTypes [3]bool
 }
 
 // TenantOrErr returns the Tenant value or an error if the edge
@@ -52,6 +56,24 @@ func (e ProductEdges) TenantOrErr() (*Tenant, error) {
 		return nil, &NotFoundError{label: tenant.Label}
 	}
 	return nil, &NotLoadedError{edge: "tenant"}
+}
+
+// FeaturesOrErr returns the Features value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProductEdges) FeaturesOrErr() ([]*Feature, error) {
+	if e.loadedTypes[1] {
+		return e.Features, nil
+	}
+	return nil, &NotLoadedError{edge: "features"}
+}
+
+// PlansOrErr returns the Plans value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProductEdges) PlansOrErr() ([]*Plan, error) {
+	if e.loadedTypes[2] {
+		return e.Plans, nil
+	}
+	return nil, &NotLoadedError{edge: "plans"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -130,6 +152,16 @@ func (_m *Product) Value(name string) (ent.Value, error) {
 // QueryTenant queries the "tenant" edge of the Product entity.
 func (_m *Product) QueryTenant() *TenantQuery {
 	return NewProductClient(_m.config).QueryTenant(_m)
+}
+
+// QueryFeatures queries the "features" edge of the Product entity.
+func (_m *Product) QueryFeatures() *FeatureQuery {
+	return NewProductClient(_m.config).QueryFeatures(_m)
+}
+
+// QueryPlans queries the "plans" edge of the Product entity.
+func (_m *Product) QueryPlans() *PlanQuery {
+	return NewProductClient(_m.config).QueryPlans(_m)
 }
 
 // Update returns a builder for updating this Product.

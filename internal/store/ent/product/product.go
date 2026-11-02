@@ -26,6 +26,10 @@ const (
 	FieldName = "name"
 	// EdgeTenant holds the string denoting the tenant edge name in mutations.
 	EdgeTenant = "tenant"
+	// EdgeFeatures holds the string denoting the features edge name in mutations.
+	EdgeFeatures = "features"
+	// EdgePlans holds the string denoting the plans edge name in mutations.
+	EdgePlans = "plans"
 	// Table holds the table name of the product in the database.
 	Table = "products"
 	// TenantTable is the table that holds the tenant relation/edge.
@@ -35,6 +39,20 @@ const (
 	TenantInverseTable = "tenants"
 	// TenantColumn is the table column denoting the tenant relation/edge.
 	TenantColumn = "tenant_id"
+	// FeaturesTable is the table that holds the features relation/edge.
+	FeaturesTable = "features"
+	// FeaturesInverseTable is the table name for the Feature entity.
+	// It exists in this package in order to avoid circular dependency with the "feature" package.
+	FeaturesInverseTable = "features"
+	// FeaturesColumn is the table column denoting the features relation/edge.
+	FeaturesColumn = "product_id"
+	// PlansTable is the table that holds the plans relation/edge.
+	PlansTable = "plans"
+	// PlansInverseTable is the table name for the Plan entity.
+	// It exists in this package in order to avoid circular dependency with the "plan" package.
+	PlansInverseTable = "plans"
+	// PlansColumn is the table column denoting the plans relation/edge.
+	PlansColumn = "product_id"
 )
 
 // Columns holds all SQL columns for product fields.
@@ -115,10 +133,52 @@ func ByTenantField(field string, opts ...sql.OrderTermOption) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newTenantStep(), sql.OrderByField(field, opts...))
 	}
 }
+
+// ByFeaturesCount orders the results by features count.
+func ByFeaturesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newFeaturesStep(), opts...)
+	}
+}
+
+// ByFeatures orders the results by features terms.
+func ByFeatures(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newFeaturesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByPlansCount orders the results by plans count.
+func ByPlansCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newPlansStep(), opts...)
+	}
+}
+
+// ByPlans orders the results by plans terms.
+func ByPlans(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newPlansStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newTenantStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(TenantInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2O, true, TenantTable, TenantColumn),
+	)
+}
+func newFeaturesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(FeaturesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, FeaturesTable, FeaturesColumn),
+	)
+}
+func newPlansStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(PlansInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, PlansTable, PlansColumn),
 	)
 }

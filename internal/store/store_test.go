@@ -334,9 +334,6 @@ func TestTenantIsolation(t *testing.T) {
 		if n, err := tx.Product.Update().Where(product.ID(bProduct.ID)).SetName("pwned").Save(ctx); err != nil || n != 0 {
 			t.Errorf("update B's product: n=%d err=%v, want 0 rows", n, err)
 		}
-		if n, err := tx.Product.Delete().Where(product.ID(bProduct.ID)).Exec(ctx); err != nil || n != 0 {
-			t.Errorf("delete B's product: n=%d err=%v, want 0 rows", n, err)
-		}
 		return nil
 	})
 	if err != nil {
@@ -351,6 +348,13 @@ func TestTenantIsolation(t *testing.T) {
 			n, err := tx.Tenant.Update().Where(tenant.ID(a.ID)).SetName("self-upgraded").Save(ctx)
 			if err == nil && n == 0 {
 				return errors.New("no rows") // denied by policy: treat as refusal
+			}
+			return err
+		},
+		"delete B's product": func(tx *ent.Tx) error {
+			n, err := tx.Product.Delete().Where(product.ID(bProduct.ID)).Exec(ctx)
+			if err == nil && n == 0 {
+				return errors.New("no rows")
 			}
 			return err
 		},

@@ -388,6 +388,52 @@ func HasTenantWith(preds ...predicate.Tenant) predicate.Product {
 	})
 }
 
+// HasFeatures applies the HasEdge predicate on the "features" edge.
+func HasFeatures() predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, FeaturesTable, FeaturesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasFeaturesWith applies the HasEdge predicate on the "features" edge with a given conditions (other predicates).
+func HasFeaturesWith(preds ...predicate.Feature) predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := newFeaturesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasPlans applies the HasEdge predicate on the "plans" edge.
+func HasPlans() predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, PlansTable, PlansColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasPlansWith applies the HasEdge predicate on the "plans" edge with a given conditions (other predicates).
+func HasPlansWith(preds ...predicate.Plan) predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := newPlansStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Product) predicate.Product {
 	return predicate.Product(sql.AndPredicates(predicates...))

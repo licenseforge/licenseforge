@@ -4,6 +4,7 @@ package ent
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"math"
 
@@ -12,6 +13,8 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -20,12 +23,14 @@ import (
 // ProductQuery is the builder for querying Product entities.
 type ProductQuery struct {
 	config
-	ctx        *QueryContext
-	order      []product.OrderOption
-	inters     []Interceptor
-	predicates []predicate.Product
-	withTenant *TenantQuery
-	modifiers  []func(*sql.Selector)
+	ctx          *QueryContext
+	order        []product.OrderOption
+	inters       []Interceptor
+	predicates   []predicate.Product
+	withTenant   *TenantQuery
+	withFeatures *FeatureQuery
+	withPlans    *PlanQuery
+	modifiers    []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -77,6 +82,50 @@ func (_q *ProductQuery) QueryTenant() *TenantQuery {
 			sqlgraph.From(product.Table, product.FieldID, selector),
 			sqlgraph.To(tenant.Table, tenant.FieldID),
 			sqlgraph.Edge(sqlgraph.M2O, true, product.TenantTable, product.TenantColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryFeatures chains the current query on the "features" edge.
+func (_q *ProductQuery) QueryFeatures() *FeatureQuery {
+	query := (&FeatureClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(product.Table, product.FieldID, selector),
+			sqlgraph.To(feature.Table, feature.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, product.FeaturesTable, product.FeaturesColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryPlans chains the current query on the "plans" edge.
+func (_q *ProductQuery) QueryPlans() *PlanQuery {
+	query := (&PlanClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(product.Table, product.FieldID, selector),
+			sqlgraph.To(plan.Table, plan.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, product.PlansTable, product.PlansColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -271,12 +320,14 @@ func (_q *ProductQuery) Clone() *ProductQuery {
 		return nil
 	}
 	return &ProductQuery{
-		config:     _q.config,
-		ctx:        _q.ctx.Clone(),
-		order:      append([]product.OrderOption{}, _q.order...),
-		inters:     append([]Interceptor{}, _q.inters...),
-		predicates: append([]predicate.Product{}, _q.predicates...),
-		withTenant: _q.withTenant.Clone(),
+		config:       _q.config,
+		ctx:          _q.ctx.Clone(),
+		order:        append([]product.OrderOption{}, _q.order...),
+		inters:       append([]Interceptor{}, _q.inters...),
+		predicates:   append([]predicate.Product{}, _q.predicates...),
+		withTenant:   _q.withTenant.Clone(),
+		withFeatures: _q.withFeatures.Clone(),
+		withPlans:    _q.withPlans.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -291,6 +342,28 @@ func (_q *ProductQuery) WithTenant(opts ...func(*TenantQuery)) *ProductQuery {
 		opt(query)
 	}
 	_q.withTenant = query
+	return _q
+}
+
+// WithFeatures tells the query-builder to eager-load the nodes that are connected to
+// the "features" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProductQuery) WithFeatures(opts ...func(*FeatureQuery)) *ProductQuery {
+	query := (&FeatureClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withFeatures = query
+	return _q
+}
+
+// WithPlans tells the query-builder to eager-load the nodes that are connected to
+// the "plans" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProductQuery) WithPlans(opts ...func(*PlanQuery)) *ProductQuery {
+	query := (&PlanClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withPlans = query
 	return _q
 }
 
@@ -372,8 +445,10 @@ func (_q *ProductQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Prod
 	var (
 		nodes       = []*Product{}
 		_spec       = _q.querySpec()
-		loadedTypes = [1]bool{
+		loadedTypes = [3]bool{
 			_q.withTenant != nil,
+			_q.withFeatures != nil,
+			_q.withPlans != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -400,6 +475,20 @@ func (_q *ProductQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Prod
 	if query := _q.withTenant; query != nil {
 		if err := _q.loadTenant(ctx, query, nodes, nil,
 			func(n *Product, e *Tenant) { n.Edges.Tenant = e }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withFeatures; query != nil {
+		if err := _q.loadFeatures(ctx, query, nodes,
+			func(n *Product) { n.Edges.Features = []*Feature{} },
+			func(n *Product, e *Feature) { n.Edges.Features = append(n.Edges.Features, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withPlans; query != nil {
+		if err := _q.loadPlans(ctx, query, nodes,
+			func(n *Product) { n.Edges.Plans = []*Plan{} },
+			func(n *Product, e *Plan) { n.Edges.Plans = append(n.Edges.Plans, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -432,6 +521,66 @@ func (_q *ProductQuery) loadTenant(ctx context.Context, query *TenantQuery, node
 		for i := range nodes {
 			assign(nodes[i], n)
 		}
+	}
+	return nil
+}
+func (_q *ProductQuery) loadFeatures(ctx context.Context, query *FeatureQuery, nodes []*Product, init func(*Product), assign func(*Product, *Feature)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Product)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(feature.FieldProductID)
+	}
+	query.Where(predicate.Feature(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(product.FeaturesColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.ProductID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "product_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *ProductQuery) loadPlans(ctx context.Context, query *PlanQuery, nodes []*Product, init func(*Product), assign func(*Product, *Plan)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Product)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(plan.FieldProductID)
+	}
+	query.Where(predicate.Plan(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(product.PlansColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.ProductID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "product_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
 	}
 	return nil
 }

@@ -19,15 +19,15 @@ func (Tenant) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.Tenant),
 		field.String("slug").Unique().NotEmpty().MaxLen(63).Match(slugRE).SchemaType(slugType),
-		field.String("name").NotEmpty().MaxLen(200).SchemaType(nameType),
+		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 	}
 }
 
 func (Tenant) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
-		"tenants_id_format":   `id ~ '^tnt_` + idChars + `$'`,
-		"tenants_slug_format": `slug ~ '` + slugPattern + `'`,
-		"tenants_name_set":    `name <> ''`,
+		"tenants_id_format":      `id ~ '^tnt_` + idChars + `$'`,
+		"tenants_slug_format":    `slug ~ '` + slugPattern + `'`,
+		"tenants_name_not_blank": `btrim(name) <> ''`,
 	}}}
 }
 

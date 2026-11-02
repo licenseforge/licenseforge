@@ -6,6 +6,15 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
+// Feature is the predicate function for feature builders.
+type Feature func(*sql.Selector)
+
+// Plan is the predicate function for plan builders.
+type Plan func(*sql.Selector)
+
+// PlanFeature is the predicate function for planfeature builders.
+type PlanFeature func(*sql.Selector)
+
 // Product is the predicate function for product builders.
 type Product func(*sql.Selector)
 

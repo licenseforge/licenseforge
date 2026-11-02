@@ -14,8 +14,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	atlas "ariga.io/atlas/sql/migrate"
+	atlasschema "ariga.io/atlas/sql/schema"
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql/schema"
 
@@ -93,7 +95,40 @@ func diff(ctx context.Context, path, name string) error {
 		schema.WithMigrationMode(schema.ModeReplay),
 		schema.WithDialect(dialect.Postgres),
 		schema.WithFormatter(atlas.DefaultFormatter),
+		schema.WithDiffHook(keepSameTenantFKs),
 	)
+}
+
+// sameTenantSuffix marks hand-written composite foreign keys (tenant_id, x_id)
+// that stop a row from referencing another tenant's row (foreign key checks
+// bypass row-level security). ent can't model them, so the diff must not drop them.
+const sameTenantSuffix = "_same_tenant"
+
+func keepSameTenantFKs(next schema.Differ) schema.Differ {
+	return schema.DiffFunc(func(current, desired *atlasschema.Schema) ([]atlasschema.Change, error) {
+		changes, err := next.Diff(current, desired)
+		if err != nil {
+			return nil, err
+		}
+		var out []atlasschema.Change
+		for _, c := range changes {
+			if m, ok := c.(*atlasschema.ModifyTable); ok {
+				var kept []atlasschema.Change
+				for _, tc := range m.Changes {
+					if d, ok := tc.(*atlasschema.DropForeignKey); ok && strings.HasSuffix(d.F.Symbol, sameTenantSuffix) {
+						continue
+					}
+					kept = append(kept, tc)
+				}
+				if len(kept) == 0 {
+					continue
+				}
+				m.Changes = kept
+			}
+			out = append(out, c)
+		}
+		return out, nil
+	})
 }
 
 func hash(path string) error {
