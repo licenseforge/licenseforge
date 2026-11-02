@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test test-fips vet vet-cross lint fmt run
+.PHONY: build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 build:
@@ -31,3 +31,24 @@ fmt:
 
 run:
 	go run ./cmd/licenseforge
+
+# Code generation (ent). CI fails if generated code is stale.
+generate:
+	go generate ./internal/store
+
+# Throwaway PostgreSQL for tests and migration generation.
+DEV_DB_IMAGE := postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+DEV_DB_URL := postgres://postgres:dev@127.0.0.1:55432/postgres?sslmode=disable
+dev-db:
+	docker run -d --rm --name lf-dev-db -e POSTGRES_PASSWORD=dev -p 127.0.0.1:55432:5432 $(DEV_DB_IMAGE)
+	until docker exec lf-dev-db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	docker exec lf-dev-db psql -U postgres -qc 'CREATE DATABASE lf_dev'
+	@echo "export LICENSEFORGE_TEST_DATABASE_URL='$(DEV_DB_URL)'"
+	@echo "export LICENSEFORGE_DEV_DATABASE_URL='postgres://postgres:dev@127.0.0.1:55432/lf_dev?sslmode=disable'"
+
+dev-db-stop:
+	docker stop lf-dev-db
+
+# Fails if the ent schema needs a migration that isn't in internal/store/migrations.
+migrate-check:
+	go run ./internal/store/tools/migrate check

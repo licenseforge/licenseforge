@@ -1,0 +1,4 @@
+version: "2"
+linters:
+  exclusions:
+    generated: strict # skip files marked "Code generated ... DO NOT EDIT" (ent)

@@ -22,6 +22,22 @@ Shared-database tenancy is accepted by SOC 2 / ISO 27001 when isolation is enfor
 - Per-tenant **data-encryption keys** (envelope encryption) are possible later through the same key interface used for signing keys.
 - Cross-tenant isolation test in CI is a release blocker.
 
+## Amendment: database role model (2026-11-02, from security review; accepted)
+Row-level security is only a backstop if the serving process can't switch it off or widen its own scope. So:
+
+| Login | Group | Used for | Can |
+|---|---|---|---|
+| owner | – | `licenseforge migrate` (Helm job / init container) only | Owns the schema; `migrator_all` policy lets data migrations see all rows |
+| api | `licenseforge_app` | every tenant request (tenant pool) | Only rows where `tenant_id = app.tenant_id` (set per transaction); `tenants`: read own row only |
+| admin | `licenseforge_platform` | platform-admin operations (separate pool) | All tenants |
+
+- Platform access is a **database identity**, not a setting: the api login is not a member of `licenseforge_platform`, so a SQL bug in a tenant request can't reach other tenants (no `SET ROLE`, no GUC).
+- `store.Open` refuses a login that switched role via connection options; has SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION (covers `rds_superuser`, `cloudsqlsuperuser`), or whose group does; is a member of **any role other than its own group** (allow-list: rules out the owner, the other group and predefined roles like `pg_execute_server_program`); owns or is a member of the owner of the database, schema or any relation; can create **temporary tables** (a temp table can shadow a real one for later requests on a pooled connection) or create schemas/objects in any schema (functions or operators could intercept queries); or has `app.tenant_id` preset. **PostgreSQL 15+ is required** (older versions let every role create objects in `public` by default).
+- **No session state survives between requests**: serving pools run statements unnamed (pgx `QueryExecModeExec`, so no cached prepared statements to replace) and run `DISCARD ALL` before every connection reuse (session settings, prepared statements, temp state, advisory locks). Together with no TEMPORARY privilege, one request can't plant anything on a pooled connection for the next tenant.
+- Every relation follows one canonical pattern (enable + force RLS, exactly the expected policies, explicit grants, no default privileges). Schemas other than `public`, views, materialized views, partitioned and foreign tables, triggers, rules, and any function other than `app_tenant_id` (exact body, not SECURITY DEFINER, not executable by PUBLIC) are refused until reviewed; functions are not executable by PUBLIC by default. A release-blocking test checks all of it, plus cross-tenant read/write/delete/insert, own-tenant-row writes, escalation attempts, unscoped access and setting leakage on a reused connection.
+- Setup for operators: `deploy/database-setup.sql` (group roles, three logins, `REVOKE CONNECT` and `REVOKE TEMPORARY ... FROM PUBLIC`).
+- Limitation (documented): arbitrary SQL execution as the api login could still set another tenant's `app.tenant_id` if it knows the ID (IDs appear in licenses, so they are not secrets). RLS is a backstop for application bugs; SQL injection is prevented at the application layer (ent's parameterized queries, no string-built SQL).
+
 ## Alternatives considered
 - **Database per tenant**: stronger isolation, painful migrations and ops at scale. Could be an enterprise option later.
 - **Single-tenant only**: simpler now, rewrite later when hosting.
