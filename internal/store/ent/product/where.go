@@ -434,6 +434,29 @@ func HasPlansWith(preds ...predicate.Plan) predicate.Product {
 	})
 }
 
+// HasLicenses applies the HasEdge predicate on the "licenses" edge.
+func HasLicenses() predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, LicensesTable, LicensesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasLicensesWith applies the HasEdge predicate on the "licenses" edge with a given conditions (other predicates).
+func HasLicensesWith(preds ...predicate.License) predicate.Product {
+	return predicate.Product(func(s *sql.Selector) {
+		step := newLicensesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Product) predicate.Product {
 	return predicate.Product(sql.AndPredicates(predicates...))

@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -171,6 +172,20 @@ func (_u *PlanUpdate) ClearMaxRehosts() *PlanUpdate {
 	return _u
 }
 
+// SetBindType sets the "bind_type" field.
+func (_u *PlanUpdate) SetBindType(v plan.BindType) *PlanUpdate {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *PlanUpdate) SetNillableBindType(v *plan.BindType) *PlanUpdate {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
+	return _u
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_u *PlanUpdate) SetOfflineAllowed(v bool) *PlanUpdate {
 	_u.mutation.SetOfflineAllowed(v)
@@ -289,6 +304,21 @@ func (_u *PlanUpdate) AddPlanFeatures(v ...*PlanFeature) *PlanUpdate {
 	return _u.AddPlanFeatureIDs(ids...)
 }
 
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_u *PlanUpdate) AddLicenseIDs(ids ...string) *PlanUpdate {
+	_u.mutation.AddLicenseIDs(ids...)
+	return _u
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_u *PlanUpdate) AddLicenses(v ...*License) *PlanUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddLicenseIDs(ids...)
+}
+
 // Mutation returns the PlanMutation object of the builder.
 func (_u *PlanUpdate) Mutation() *PlanMutation {
 	return _u.mutation
@@ -313,6 +343,27 @@ func (_u *PlanUpdate) RemovePlanFeatures(v ...*PlanFeature) *PlanUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlanFeatureIDs(ids...)
+}
+
+// ClearLicenses clears all "licenses" edges to the License entity.
+func (_u *PlanUpdate) ClearLicenses() *PlanUpdate {
+	_u.mutation.ClearLicenses()
+	return _u
+}
+
+// RemoveLicenseIDs removes the "licenses" edge to License entities by IDs.
+func (_u *PlanUpdate) RemoveLicenseIDs(ids ...string) *PlanUpdate {
+	_u.mutation.RemoveLicenseIDs(ids...)
+	return _u
+}
+
+// RemoveLicenses removes "licenses" edges to License entities.
+func (_u *PlanUpdate) RemoveLicenses(v ...*License) *PlanUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveLicenseIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -381,6 +432,11 @@ func (_u *PlanUpdate) check() error {
 	if v, ok := _u.mutation.MaxRehosts(); ok {
 		if err := plan.MaxRehostsValidator(v); err != nil {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
@@ -461,6 +517,9 @@ func (_u *PlanUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(plan.FieldMaxRehosts, field.TypeInt)
 	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
+	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)
 	}
@@ -529,6 +588,51 @@ func (_u *PlanUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(planfeature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedLicensesIDs(); len(nodes) > 0 && !_u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {
@@ -698,6 +802,20 @@ func (_u *PlanUpdateOne) ClearMaxRehosts() *PlanUpdateOne {
 	return _u
 }
 
+// SetBindType sets the "bind_type" field.
+func (_u *PlanUpdateOne) SetBindType(v plan.BindType) *PlanUpdateOne {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *PlanUpdateOne) SetNillableBindType(v *plan.BindType) *PlanUpdateOne {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
+	return _u
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_u *PlanUpdateOne) SetOfflineAllowed(v bool) *PlanUpdateOne {
 	_u.mutation.SetOfflineAllowed(v)
@@ -816,6 +934,21 @@ func (_u *PlanUpdateOne) AddPlanFeatures(v ...*PlanFeature) *PlanUpdateOne {
 	return _u.AddPlanFeatureIDs(ids...)
 }
 
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_u *PlanUpdateOne) AddLicenseIDs(ids ...string) *PlanUpdateOne {
+	_u.mutation.AddLicenseIDs(ids...)
+	return _u
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_u *PlanUpdateOne) AddLicenses(v ...*License) *PlanUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddLicenseIDs(ids...)
+}
+
 // Mutation returns the PlanMutation object of the builder.
 func (_u *PlanUpdateOne) Mutation() *PlanMutation {
 	return _u.mutation
@@ -840,6 +973,27 @@ func (_u *PlanUpdateOne) RemovePlanFeatures(v ...*PlanFeature) *PlanUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlanFeatureIDs(ids...)
+}
+
+// ClearLicenses clears all "licenses" edges to the License entity.
+func (_u *PlanUpdateOne) ClearLicenses() *PlanUpdateOne {
+	_u.mutation.ClearLicenses()
+	return _u
+}
+
+// RemoveLicenseIDs removes the "licenses" edge to License entities by IDs.
+func (_u *PlanUpdateOne) RemoveLicenseIDs(ids ...string) *PlanUpdateOne {
+	_u.mutation.RemoveLicenseIDs(ids...)
+	return _u
+}
+
+// RemoveLicenses removes "licenses" edges to License entities.
+func (_u *PlanUpdateOne) RemoveLicenses(v ...*License) *PlanUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveLicenseIDs(ids...)
 }
 
 // Where appends a list predicates to the PlanUpdate builder.
@@ -921,6 +1075,11 @@ func (_u *PlanUpdateOne) check() error {
 	if v, ok := _u.mutation.MaxRehosts(); ok {
 		if err := plan.MaxRehostsValidator(v); err != nil {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
@@ -1018,6 +1177,9 @@ func (_u *PlanUpdateOne) sqlSave(ctx context.Context) (_node *Plan, err error) {
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(plan.FieldMaxRehosts, field.TypeInt)
 	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
+	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)
 	}
@@ -1086,6 +1248,51 @@ func (_u *PlanUpdateOne) sqlSave(ctx context.Context) (_node *Plan, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(planfeature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedLicensesIDs(); len(nodes) > 0 && !_u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

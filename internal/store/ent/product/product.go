@@ -30,6 +30,8 @@ const (
 	EdgeFeatures = "features"
 	// EdgePlans holds the string denoting the plans edge name in mutations.
 	EdgePlans = "plans"
+	// EdgeLicenses holds the string denoting the licenses edge name in mutations.
+	EdgeLicenses = "licenses"
 	// Table holds the table name of the product in the database.
 	Table = "products"
 	// TenantTable is the table that holds the tenant relation/edge.
@@ -53,6 +55,13 @@ const (
 	PlansInverseTable = "plans"
 	// PlansColumn is the table column denoting the plans relation/edge.
 	PlansColumn = "product_id"
+	// LicensesTable is the table that holds the licenses relation/edge.
+	LicensesTable = "licenses"
+	// LicensesInverseTable is the table name for the License entity.
+	// It exists in this package in order to avoid circular dependency with the "license" package.
+	LicensesInverseTable = "licenses"
+	// LicensesColumn is the table column denoting the licenses relation/edge.
+	LicensesColumn = "product_id"
 )
 
 // Columns holds all SQL columns for product fields.
@@ -161,6 +170,20 @@ func ByPlans(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newPlansStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByLicensesCount orders the results by licenses count.
+func ByLicensesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newLicensesStep(), opts...)
+	}
+}
+
+// ByLicenses orders the results by licenses terms.
+func ByLicenses(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newLicensesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newTenantStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -180,5 +203,12 @@ func newPlansStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(PlansInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, PlansTable, PlansColumn),
+	)
+}
+func newLicensesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(LicensesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, LicensesTable, LicensesColumn),
 	)
 }

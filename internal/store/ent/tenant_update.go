@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -78,6 +79,21 @@ func (_u *TenantUpdate) AddProducts(v ...*Product) *TenantUpdate {
 	return _u.AddProductIDs(ids...)
 }
 
+// AddCustomerIDs adds the "customers" edge to the Customer entity by IDs.
+func (_u *TenantUpdate) AddCustomerIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddCustomerIDs(ids...)
+	return _u
+}
+
+// AddCustomers adds the "customers" edges to the Customer entity.
+func (_u *TenantUpdate) AddCustomers(v ...*Customer) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCustomerIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -102,6 +118,27 @@ func (_u *TenantUpdate) RemoveProducts(v ...*Product) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveProductIDs(ids...)
+}
+
+// ClearCustomers clears all "customers" edges to the Customer entity.
+func (_u *TenantUpdate) ClearCustomers() *TenantUpdate {
+	_u.mutation.ClearCustomers()
+	return _u
+}
+
+// RemoveCustomerIDs removes the "customers" edge to Customer entities by IDs.
+func (_u *TenantUpdate) RemoveCustomerIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveCustomerIDs(ids...)
+	return _u
+}
+
+// RemoveCustomers removes "customers" edges to Customer entities.
+func (_u *TenantUpdate) RemoveCustomers(v ...*Customer) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCustomerIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -221,6 +258,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.CustomersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCustomersIDs(); len(nodes) > 0 && !_u.mutation.CustomersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CustomersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -290,6 +372,21 @@ func (_u *TenantUpdateOne) AddProducts(v ...*Product) *TenantUpdateOne {
 	return _u.AddProductIDs(ids...)
 }
 
+// AddCustomerIDs adds the "customers" edge to the Customer entity by IDs.
+func (_u *TenantUpdateOne) AddCustomerIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddCustomerIDs(ids...)
+	return _u
+}
+
+// AddCustomers adds the "customers" edges to the Customer entity.
+func (_u *TenantUpdateOne) AddCustomers(v ...*Customer) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddCustomerIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -314,6 +411,27 @@ func (_u *TenantUpdateOne) RemoveProducts(v ...*Product) *TenantUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveProductIDs(ids...)
+}
+
+// ClearCustomers clears all "customers" edges to the Customer entity.
+func (_u *TenantUpdateOne) ClearCustomers() *TenantUpdateOne {
+	_u.mutation.ClearCustomers()
+	return _u
+}
+
+// RemoveCustomerIDs removes the "customers" edge to Customer entities by IDs.
+func (_u *TenantUpdateOne) RemoveCustomerIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveCustomerIDs(ids...)
+	return _u
+}
+
+// RemoveCustomers removes "customers" edges to Customer entities.
+func (_u *TenantUpdateOne) RemoveCustomers(v ...*Customer) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveCustomerIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -456,6 +574,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(product.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.CustomersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedCustomersIDs(); len(nodes) > 0 && !_u.mutation.CustomersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.CustomersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

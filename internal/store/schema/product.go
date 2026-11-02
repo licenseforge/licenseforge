@@ -34,6 +34,7 @@ func (Product) Edges() []ent.Edge {
 		edge.From("tenant", Tenant.Type).Ref("products").Field("tenant_id").Unique().Required().Immutable(),
 		edge.To("features", Feature.Type),
 		edge.To("plans", Plan.Type),
+		edge.To("licenses", License.Type),
 	}
 }
 

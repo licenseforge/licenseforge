@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -144,6 +145,20 @@ func (_c *PlanCreate) SetNillableMaxRehosts(v *int) *PlanCreate {
 	return _c
 }
 
+// SetBindType sets the "bind_type" field.
+func (_c *PlanCreate) SetBindType(v plan.BindType) *PlanCreate {
+	_c.mutation.SetBindType(v)
+	return _c
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_c *PlanCreate) SetNillableBindType(v *plan.BindType) *PlanCreate {
+	if v != nil {
+		_c.SetBindType(*v)
+	}
+	return _c
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_c *PlanCreate) SetOfflineAllowed(v bool) *PlanCreate {
 	_c.mutation.SetOfflineAllowed(v)
@@ -248,6 +263,21 @@ func (_c *PlanCreate) AddPlanFeatures(v ...*PlanFeature) *PlanCreate {
 	return _c.AddPlanFeatureIDs(ids...)
 }
 
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_c *PlanCreate) AddLicenseIDs(ids ...string) *PlanCreate {
+	_c.mutation.AddLicenseIDs(ids...)
+	return _c
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_c *PlanCreate) AddLicenses(v ...*License) *PlanCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddLicenseIDs(ids...)
+}
+
 // Mutation returns the PlanMutation object of the builder.
 func (_c *PlanCreate) Mutation() *PlanMutation {
 	return _c.mutation
@@ -294,6 +324,10 @@ func (_c *PlanCreate) defaults() {
 	if _, ok := _c.mutation.ExpiryBasis(); !ok {
 		v := plan.DefaultExpiryBasis
 		_c.mutation.SetExpiryBasis(v)
+	}
+	if _, ok := _c.mutation.BindType(); !ok {
+		v := plan.DefaultBindType
+		_c.mutation.SetBindType(v)
 	}
 	if _, ok := _c.mutation.OfflineAllowed(); !ok {
 		v := plan.DefaultOfflineAllowed
@@ -379,6 +413,14 @@ func (_c *PlanCreate) check() error {
 	if v, ok := _c.mutation.MaxRehosts(); ok {
 		if err := plan.MaxRehostsValidator(v); err != nil {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.BindType(); !ok {
+		return &ValidationError{Name: "bind_type", err: errors.New(`ent: missing required field "Plan.bind_type"`)}
+	}
+	if v, ok := _c.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.OfflineAllowed(); !ok {
@@ -488,6 +530,10 @@ func (_c *PlanCreate) createSpec() (*Plan, *sqlgraph.CreateSpec) {
 		_spec.SetField(plan.FieldMaxRehosts, field.TypeInt, value)
 		_node.MaxRehosts = &value
 	}
+	if value, ok := _c.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
+		_node.BindType = value
+	}
 	if value, ok := _c.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)
 		_node.OfflineAllowed = value
@@ -534,6 +580,22 @@ func (_c *PlanCreate) createSpec() (*Plan, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(planfeature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   plan.LicensesTable,
+			Columns: []string{plan.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

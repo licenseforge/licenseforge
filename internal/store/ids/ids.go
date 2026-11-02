@@ -24,3 +24,6 @@ func Product() string     { return New("prd") }
 func Feature() string     { return New("ftr") }
 func Plan() string        { return New("pln") }
 func PlanFeature() string { return New("plf") }
+func Customer() string    { return New("cus") }
+func License() string     { return New("lic") }
+func Activation() string  { return New("act") }

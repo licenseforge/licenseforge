@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -28,6 +29,7 @@ type PlanQuery struct {
 	predicates       []predicate.Plan
 	withProduct      *ProductQuery
 	withPlanFeatures *PlanFeatureQuery
+	withLicenses     *LicenseQuery
 	modifiers        []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -102,6 +104,28 @@ func (_q *PlanQuery) QueryPlanFeatures() *PlanFeatureQuery {
 			sqlgraph.From(plan.Table, plan.FieldID, selector),
 			sqlgraph.To(planfeature.Table, planfeature.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, plan.PlanFeaturesTable, plan.PlanFeaturesColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryLicenses chains the current query on the "licenses" edge.
+func (_q *PlanQuery) QueryLicenses() *LicenseQuery {
+	query := (&LicenseClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(plan.Table, plan.FieldID, selector),
+			sqlgraph.To(license.Table, license.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, plan.LicensesTable, plan.LicensesColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -303,6 +327,7 @@ func (_q *PlanQuery) Clone() *PlanQuery {
 		predicates:       append([]predicate.Plan{}, _q.predicates...),
 		withProduct:      _q.withProduct.Clone(),
 		withPlanFeatures: _q.withPlanFeatures.Clone(),
+		withLicenses:     _q.withLicenses.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -328,6 +353,17 @@ func (_q *PlanQuery) WithPlanFeatures(opts ...func(*PlanFeatureQuery)) *PlanQuer
 		opt(query)
 	}
 	_q.withPlanFeatures = query
+	return _q
+}
+
+// WithLicenses tells the query-builder to eager-load the nodes that are connected to
+// the "licenses" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *PlanQuery) WithLicenses(opts ...func(*LicenseQuery)) *PlanQuery {
+	query := (&LicenseClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withLicenses = query
 	return _q
 }
 
@@ -409,9 +445,10 @@ func (_q *PlanQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Plan, e
 	var (
 		nodes       = []*Plan{}
 		_spec       = _q.querySpec()
-		loadedTypes = [2]bool{
+		loadedTypes = [3]bool{
 			_q.withProduct != nil,
 			_q.withPlanFeatures != nil,
+			_q.withLicenses != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -445,6 +482,13 @@ func (_q *PlanQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Plan, e
 		if err := _q.loadPlanFeatures(ctx, query, nodes,
 			func(n *Plan) { n.Edges.PlanFeatures = []*PlanFeature{} },
 			func(n *Plan, e *PlanFeature) { n.Edges.PlanFeatures = append(n.Edges.PlanFeatures, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withLicenses; query != nil {
+		if err := _q.loadLicenses(ctx, query, nodes,
+			func(n *Plan) { n.Edges.Licenses = []*License{} },
+			func(n *Plan, e *License) { n.Edges.Licenses = append(n.Edges.Licenses, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -495,6 +539,36 @@ func (_q *PlanQuery) loadPlanFeatures(ctx context.Context, query *PlanFeatureQue
 	}
 	query.Where(predicate.PlanFeature(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(plan.PlanFeaturesColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.PlanID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "plan_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *PlanQuery) loadLicenses(ctx context.Context, query *LicenseQuery, nodes []*Plan, init func(*Plan), assign func(*Plan, *License)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Plan)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(license.FieldPlanID)
+	}
+	query.Where(predicate.License(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(plan.LicensesColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

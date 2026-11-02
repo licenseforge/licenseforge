@@ -6,8 +6,17 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
+// Activation is the predicate function for activation builders.
+type Activation func(*sql.Selector)
+
+// Customer is the predicate function for customer builders.
+type Customer func(*sql.Selector)
+
 // Feature is the predicate function for feature builders.
 type Feature func(*sql.Selector)
+
+// License is the predicate function for license builders.
+type License func(*sql.Selector)
 
 // Plan is the predicate function for plan builders.
 type Plan func(*sql.Selector)

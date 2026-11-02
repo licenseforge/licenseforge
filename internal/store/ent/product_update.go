@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -80,6 +81,21 @@ func (_u *ProductUpdate) AddPlans(v ...*Plan) *ProductUpdate {
 	return _u.AddPlanIDs(ids...)
 }
 
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_u *ProductUpdate) AddLicenseIDs(ids ...string) *ProductUpdate {
+	_u.mutation.AddLicenseIDs(ids...)
+	return _u
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_u *ProductUpdate) AddLicenses(v ...*License) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddLicenseIDs(ids...)
+}
+
 // Mutation returns the ProductMutation object of the builder.
 func (_u *ProductUpdate) Mutation() *ProductMutation {
 	return _u.mutation
@@ -125,6 +141,27 @@ func (_u *ProductUpdate) RemovePlans(v ...*Plan) *ProductUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlanIDs(ids...)
+}
+
+// ClearLicenses clears all "licenses" edges to the License entity.
+func (_u *ProductUpdate) ClearLicenses() *ProductUpdate {
+	_u.mutation.ClearLicenses()
+	return _u
+}
+
+// RemoveLicenseIDs removes the "licenses" edge to License entities by IDs.
+func (_u *ProductUpdate) RemoveLicenseIDs(ids ...string) *ProductUpdate {
+	_u.mutation.RemoveLicenseIDs(ids...)
+	return _u
+}
+
+// RemoveLicenses removes "licenses" edges to License entities.
+func (_u *ProductUpdate) RemoveLicenses(v ...*License) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveLicenseIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -284,6 +321,51 @@ func (_u *ProductUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedLicensesIDs(); len(nodes) > 0 && !_u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{product.Label}
@@ -354,6 +436,21 @@ func (_u *ProductUpdateOne) AddPlans(v ...*Plan) *ProductUpdateOne {
 	return _u.AddPlanIDs(ids...)
 }
 
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_u *ProductUpdateOne) AddLicenseIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.AddLicenseIDs(ids...)
+	return _u
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_u *ProductUpdateOne) AddLicenses(v ...*License) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddLicenseIDs(ids...)
+}
+
 // Mutation returns the ProductMutation object of the builder.
 func (_u *ProductUpdateOne) Mutation() *ProductMutation {
 	return _u.mutation
@@ -399,6 +496,27 @@ func (_u *ProductUpdateOne) RemovePlans(v ...*Plan) *ProductUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlanIDs(ids...)
+}
+
+// ClearLicenses clears all "licenses" edges to the License entity.
+func (_u *ProductUpdateOne) ClearLicenses() *ProductUpdateOne {
+	_u.mutation.ClearLicenses()
+	return _u
+}
+
+// RemoveLicenseIDs removes the "licenses" edge to License entities by IDs.
+func (_u *ProductUpdateOne) RemoveLicenseIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.RemoveLicenseIDs(ids...)
+	return _u
+}
+
+// RemoveLicenses removes "licenses" edges to License entities.
+func (_u *ProductUpdateOne) RemoveLicenses(v ...*License) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveLicenseIDs(ids...)
 }
 
 // Where appends a list predicates to the ProductUpdate builder.
@@ -581,6 +699,51 @@ func (_u *ProductUpdateOne) sqlSave(ctx context.Context) (_node *Product, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedLicensesIDs(); len(nodes) > 0 && !_u.mutation.LicensesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {
