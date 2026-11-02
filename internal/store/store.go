@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"embed"
 	"encoding/hex"
 	"errors"
@@ -28,6 +29,10 @@ const (
 	AppRole      = "licenseforge_app"
 	PlatformRole = "licenseforge_platform"
 )
+
+// minPostgres is the oldest supported server (server_version_num). Before 15,
+// the public schema let every role create objects by default.
+const minPostgres = 150000
 
 // migrationLock is the pg_advisory_lock key serializing migrations, so
 // replicas starting at the same time apply them once.
@@ -79,8 +84,10 @@ func openPool(dsn string) (*sql.DB, error) {
 	}
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
 	return stdlib.OpenDB(*cfg, stdlib.OptionResetSession(func(ctx context.Context, c *pgx.Conn) error {
-		_, err := c.Exec(ctx, "DISCARD ALL")
-		return err
+		if _, err := c.Exec(ctx, "DISCARD ALL"); err != nil {
+			return driver.ErrBadConn // database/sql only discards the connection on ErrBadConn
+		}
+		return nil
 	})), nil
 }
 
@@ -102,8 +109,9 @@ func openChecked(ctx context.Context, dsn, want string) (*sql.DB, error) {
 // predefined roles such as pg_execute_server_program or pg_read_all_data.
 func checkRole(ctx context.Context, db *sql.DB, want string) error {
 	var (
-		switched, privileged, wantPrivileged, inWant, otherMember, owns, canTemp bool
-		preset                                                                   string
+		switched, privileged, wantPrivileged, inWant, otherMember, owns, canTemp, canCreate bool
+		preset                                                                              string
+		version                                                                             int
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT session_user <> current_user,
@@ -118,13 +126,20 @@ func checkRole(ctx context.Context, db *sql.DB, want string) error {
 		         OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datname = current_database() AND pg_has_role(r.oid, d.datdba, 'MEMBER'))
 		         OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = 'public' AND pg_has_role(r.oid, n.nspowner, 'MEMBER')),
 		       has_database_privilege(r.oid, current_database(), 'TEMPORARY'),
-		       COALESCE(current_setting('app.tenant_id', true), '')
+		       EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+		               AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%'
+		               AND has_schema_privilege(r.oid, n.oid, 'CREATE'))
+		         OR has_database_privilege(r.oid, current_database(), 'CREATE'),
+		       COALESCE(current_setting('app.tenant_id', true), ''),
+		       current_setting('server_version_num')::int
 		FROM pg_roles r WHERE r.rolname = session_user`, want).
-		Scan(&switched, &privileged, &wantPrivileged, &inWant, &otherMember, &owns, &canTemp, &preset)
+		Scan(&switched, &privileged, &wantPrivileged, &inWant, &otherMember, &owns, &canTemp, &canCreate, &preset, &version)
 	if err != nil {
 		return fmt.Errorf("store: check role: %w", err)
 	}
 	switch {
+	case version < minPostgres:
+		return fmt.Errorf("store: PostgreSQL %d.x is not supported; 15 or newer is required", version/10000)
 	case switched:
 		return fmt.Errorf("%w: connection switched role (SET ROLE in options)", ErrUnsafeRole)
 	case privileged || wantPrivileged:
@@ -135,6 +150,8 @@ func checkRole(ctx context.Context, db *sql.DB, want string) error {
 		return fmt.Errorf("%w: login must be a member of %s only (no owner, other group or predefined roles)", ErrUnsafeRole, want)
 	case owns:
 		return fmt.Errorf("%w: login owns the database, schema or tables; use a separate owner login for migrations", ErrUnsafeRole)
+	case canCreate:
+		return fmt.Errorf("%w: login can create schemas or objects in a schema (functions or operators could intercept queries); REVOKE CREATE", ErrUnsafeRole)
 	case canTemp:
 		return fmt.Errorf("%w: login can create temporary tables, which shadow real tables on pooled connections; REVOKE TEMPORARY ON DATABASE ... FROM PUBLIC", ErrUnsafeRole)
 	case preset != "":

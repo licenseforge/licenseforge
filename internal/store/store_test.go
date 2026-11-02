@@ -154,8 +154,8 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 	s := suffix()
 	ownerRole := "lf_own_" + strings.TrimPrefix(env.name, "lf_test_")
 	creator, byp, member := "lf_cr_"+s, "lf_byp_"+s, "lf_mem_"+s
-	inOwner, inProgram, temp := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s
-	logins := []string{creator, member, inOwner, inProgram, temp}
+	inOwner, inProgram, temp, creates := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s
+	logins := []string{creator, member, inOwner, inProgram, temp, creates}
 	for _, r := range append(logins, byp) {
 		addCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
 	}
@@ -167,6 +167,8 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, pg_execute_server_program`, inProgram),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, temp),
 		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.name, temp),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, creates),
+		fmt.Sprintf(`GRANT CREATE ON DATABASE %s TO %s`, env.name, creates),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.name, strings.Join(logins, ", ")),
 	); err != nil {
 		t.Fatal(err)
@@ -181,6 +183,7 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 		"member of owner role":                userURL(inOwner, env.name),
 		"member of pg_execute_server_program": userURL(inProgram, env.name),
 		"can create temp tables":              userURL(temp, env.name),
+		"can create schemas":                  userURL(creates, env.name),
 		"preset tenant":                       userURL(tenantUser, env.name, "app.tenant_id", "tnt_x"),
 		"switched role":                       userURL(tenantUser, env.name, "role", "licenseforge_app"),
 		"superuser switched too":              strings.Replace(adminURL, "/postgres?", "/"+env.name+"?role="+tenantUser+"&", 1),
