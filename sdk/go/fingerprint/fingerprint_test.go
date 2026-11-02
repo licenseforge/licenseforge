@@ -47,7 +47,8 @@ func TestComputeSourceOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Source != tc.source || r.Fingerprint != Hash("tnt_acme", "acme-db", tc.raw) || r.Binding != tc.bind {
+			want, _ := Hash("tnt_acme", "acme-db", tc.raw)
+			if r.Source != tc.source || r.Fingerprint != want || r.Binding != tc.bind {
 				t.Fatalf("got %+v, want source %s raw %q", r, tc.source, tc.raw)
 			}
 		})
@@ -75,17 +76,27 @@ func TestComputeErrors(t *testing.T) {
 	}
 }
 
+func mustHash(t *testing.T, tenant, product, raw string) string {
+	t.Helper()
+	h, err := Hash(tenant, product, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func TestHash(t *testing.T) {
-	if Hash("t1", "p", "id") == Hash("t2", "p", "id") || Hash("t", "p1", "id") == Hash("t", "p2", "id") {
+	if mustHash(t, "t1", "p", "id") == mustHash(t, "t2", "p", "id") || mustHash(t, "t", "p1", "id") == mustHash(t, "t", "p2", "id") {
 		t.Fatal("different tenants or products must give different fingerprints")
 	}
-	// Separators can't be forged by IDs that contain the other separator chars.
-	if Hash("a/b", "c", "id") == Hash("a", "b/c", "id") {
-		t.Fatal("ambiguous hash input")
+	// NUL in tenant or product would make the input ambiguous; it is rejected.
+	for _, ids := range [][2]string{{"a\x00b", "c"}, {"a", "b\x00c"}, {"", "p"}, {"t", ""}, {"t\xff", "p"}} {
+		if _, err := Hash(ids[0], ids[1], "id"); err == nil {
+			t.Errorf("Hash(%q, %q) accepted", ids[0], ids[1])
+		}
 	}
-	// Pinned in the spec so every SDK derives the same value.
-	if got, want := Hash("tnt_acme", "acme-db", "0123456789abcdef0123456789abcdef"), "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"; got != want {
-		t.Fatalf("Hash = %s, want %s", got, want)
+	if _, err := Hash("t", "p", "bad\xffutf8"); err == nil {
+		t.Error("invalid UTF-8 raw ID accepted")
 	}
 }
 

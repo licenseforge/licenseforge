@@ -39,7 +39,7 @@ type claimVectorFile struct {
 func payload(t *testing.T, overrides map[string]any) string {
 	t.Helper()
 	m := map[string]any{
-		"v": 1, "lid": "lic_test", "product": "acme-db",
+		"v": 1, "lid": "lic_test", "tenant": "tnt_acme", "product": "acme-db",
 		"iat": "2026-11-01T00:00:00Z", "exp": "2026-12-01T00:00:00Z", "grace": "P7D",
 		"bind": map[string]any{"type": "machine", "fp": "sha256:abc"},
 	}
@@ -170,6 +170,11 @@ func buildClaimVectors(t *testing.T) claimVectorFile {
 			c("malformed_time_lowercase_z", p(map[string]any{"exp": "2026-12-01T00:00:00z"}), opts(mid), "malformed"),
 			c("malformed_time_lowercase_t", p(map[string]any{"exp": "2026-12-01t00:00:00Z"}), opts(mid), "malformed"),
 			c("malformed_time_extended_year", p(map[string]any{"exp": "+002026-12-01T00:00:00Z"}), opts(mid), "malformed"),
+			c("malformed_bound_without_tenant", p(map[string]any{"tenant": nil}), opts(mid), "malformed"),
+			c("malformed_bound_with_empty_tenant", p(map[string]any{"tenant": ""}), opts(mid), "malformed"),
+			c("valid_unbound_without_tenant", p(map[string]any{"tenant": nil, "bind": nil}), opts(mid, func(o *claimOptions) { o.Fingerprint = "" }), "valid"),
+			c("malformed_product_with_nul", p(map[string]any{"product": "acme\u0000db"}), opts(mid), "malformed"),
+			c("malformed_tenant_with_nul", p(map[string]any{"tenant": "tnt\u0000acme"}), opts(mid), "malformed"),
 			c("malformed_time_before_1970", p(map[string]any{"exp": "1969-12-31T23:59:59Z"}), opts(mid), "malformed"),
 			// Well-formedness is checked for the whole payload, before v.
 			c("malformed_duplicate_key_in_unknown_field", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","future":{"a":1,"a":2}}`, opts(mid), "malformed"),

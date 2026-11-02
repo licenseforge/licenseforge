@@ -73,7 +73,8 @@ Every rule here is *fail closed*: a violation makes the license `malformed`. SDK
 - **Required** (v1): `lid` and `product` (non-empty strings), `iat`.
 - **Timestamps** (`iat`, `nbf`, `exp`, `refresh_after`, `updates_until`): exactly `YYYY-MM-DDTHH:MM:SSZ`, uppercase `T` and `Z`, year 1970–9999, a real calendar date, hour 00–23, minute and second 00–59 (no leap second `:60`, no `24:00:00`).
 - **Durations** (`grace`, `max_offline`): `P[nD][T[nH][nM][nS]]`, uppercase, each `n` 1–6 decimal digits, at least one component, no years/months/weeks, total ≤ 36,500 days. A **zero duration is set**: `max_offline: "PT0S"` means "only usable at `iat`" (needs an online refresh before any later use).
-- Optional: `tenant`, `plan` (strings); `customer` (object: `id`, `name` strings); `nbf`, `exp` (absent = perpetual, offline licenses only), `refresh_after`, `updates_until`; `grace` (absent = 0); `max_offline` (absent = no limit); `bind`; `entitlements` (object: `features` array of strings, `limits` object of integers).
+- `tenant` (string): the issuer always writes it (self-hosted installs use their single tenant's ID); **required, non-empty, when `bind.type` is `machine` or `cluster`** (the fingerprint is derived from it). `tenant` and `product` must not contain NUL.
+- Optional: `plan` (string); `customer` (object: `id`, `name` strings); `nbf`, `exp` (absent = perpetual, offline licenses only), `refresh_after`, `updates_until`; `grace` (absent = 0); `max_offline` (absent = no limit); `bind`; `entitlements` (object: `features` array of strings, `limits` object of integers).
 - **`bind`** (object): `type` absent or `bind` absent → `none`. `type` must be one of `none`, `machine`, `cluster`; any other value, including `""` → `malformed`. `machine`/`cluster` require a non-empty `fp`; `none` must not have `fp`.
 - **Limits**: integers in −1 … 2^53−1 (JSON-safe), `-1` = unlimited; other negatives → `malformed`.
 - **Entitlement lookups** (SDK API, [ADR-0015 Feature catalog per product](../docs/adr/0015-feature-catalog-per-product.md)): `hasFeature(key)` is an exact, case-sensitive match in `features` only (never looks at `limits`); `limit(key)` returns the value from `limits` only, or `0` when absent (exported constant `UNLIMITED` = `-1`); `allows(key, n)` takes the **resulting total** after the action (e.g. current users + 1) and is true when `n ≥ 0` and (`limit = -1` or `n ≤ limit`); an absent limit behaves as `0`; a negative, non-integer or non-safe-integer `n` (JS) is false. Unknown keys are never an error.
@@ -97,8 +98,9 @@ Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result)
 
 ### Fingerprints
 Design: [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md).
-- `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8("lf-fp-v1" ‖ 0x00 ‖ tenant ‖ 0x00 ‖ product ‖ 0x00 ‖ raw_id)))`, where `tenant` and `product` are the license's `tenant` and `product` claims (non-empty, no NUL). Including the tenant means two vendors on a hosted server can't correlate the same customer machine.
-- Test value: tenant `tnt_acme`, product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684`.
+- `bind.fp` = `"sha256:"` + lowercase hex of SHA-256 over the **UTF-8 bytes of `lf-fp-v1`, tenant, product and raw ID, joined by single `0x00` bytes** (no trailing separator, no Unicode normalisation, standard UTF-8, not Java's modified UTF-8). Tenant and product must be non-empty and contain no NUL; all fields must be valid UTF-8; otherwise the SDK rejects the input.
+- `tenant` and `product` are the license's claims: the **tenant ID** (e.g. `tnt_8f2c`), never a dashboard slug. To check an existing license, SDKs take them from the verified claims (Go: `fingerprint.ForLicense`). Including the tenant means two vendors on a hosted server can't correlate the same customer machine.
+- Test value: tenant `tnt_acme`, product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684`. More cases: `spec/vectors/fingerprint.json`.
 - "Trim" below means removing only SP, HT, CR, LF at both ends (not Unicode spaces). No case changes anywhere.
 
 | Order | Source | Raw ID | `bind.type` |
