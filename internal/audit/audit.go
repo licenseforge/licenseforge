@@ -118,8 +118,9 @@ func deref(s *string) string {
 	return *s
 }
 
-// Verify checks tenantID's whole chain in tx: seqs contiguous from the first
-// kept entry, each prev_hash equal to the previous hash, each hash correct.
+// Verify checks tenantID's whole chain in tx: each prev_hash equals the
+// previous entry's hash and each hash is correct. seq is hashed, so a removed
+// or reordered entry breaks a link.
 // After retention the first kept entry's prev_hash is the anchor; compare it
 // with the exported hash of the entry before it.
 //
@@ -132,8 +133,6 @@ func Verify(ctx context.Context, tx *ent.Tx, tenantID string) error {
 	}
 	for i, e := range events {
 		switch {
-		case i > 0 && e.Seq != events[i-1].Seq+1:
-			return fmt.Errorf("%w: seq %d follows %d", ErrBroken, e.Seq, events[i-1].Seq)
 		case i > 0 && !bytes.Equal(e.PrevHash, events[i-1].Hash):
 			return fmt.Errorf("%w: seq %d doesn't link to the previous entry", ErrBroken, e.Seq)
 		case !bytes.Equal(e.Hash, Hash(e)):

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -242,4 +243,75 @@ func hexs(b []byte) string {
 		out = append(out, digits[c>>4], digits[c&15])
 	}
 	return string(out)
+}
+
+// Moving characters between adjacent fields changes the hash (length
+// prefixes), and so does every single field.
+func TestHashCoversEveryFieldUnambiguously(t *testing.T) {
+	s := func(v string) *string { return &v }
+	base := ent.AuditEvent{TenantID: "tnt_1", Seq: 1, ActorType: auditevent.ActorTypeUser, ActorID: s("ab"),
+		Action: "c.d", Outcome: auditevent.OutcomeSuccess, Details: "{}", PrevHash: zeroHash}
+	h := Hash(&base)
+	shifted := base
+	shifted.ActorID, shifted.Action = s("a"), "bc.d"
+	if bytes.Equal(h, Hash(&shifted)) {
+		t.Fatal("field boundary not encoded")
+	}
+	for name, change := range map[string]func(e *ent.AuditEvent){
+		"tenant": func(e *ent.AuditEvent) { e.TenantID = "tnt_2" }, "seq": func(e *ent.AuditEvent) { e.Seq = 2 },
+		"time":    func(e *ent.AuditEvent) { e.OccurredAt = e.OccurredAt.Add(time.Microsecond) },
+		"actor":   func(e *ent.AuditEvent) { e.ActorType = auditevent.ActorTypeToken },
+		"outcome": func(e *ent.AuditEvent) { e.Outcome = auditevent.OutcomeDenied },
+		"object":  func(e *ent.AuditEvent) { e.ObjectType, e.ObjectID = s("license"), s("lic_1") },
+		"ip":      func(e *ent.AuditEvent) { e.SourceIP = s("10.0.0.1") },
+		"ua":      func(e *ent.AuditEvent) { e.UserAgent = s("x") },
+		"details": func(e *ent.AuditEvent) { e.Details = `{"a":1}` },
+		"prev":    func(e *ent.AuditEvent) { e.PrevHash = bytes.Repeat([]byte{1}, 32) },
+	} {
+		e := base
+		change(&e)
+		if bytes.Equal(h, Hash(&e)) {
+			t.Errorf("%s not covered by the hash", name)
+		}
+	}
+}
+
+func TestAuditConstraintsInDatabase(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	owner := sqlDB(t, env.OwnerURL)
+	tn := newTenant(t, d)
+	r := record(t, d, tn, ev)
+	// Each case copies the valid row with seq 2 and one field broken.
+	ins := func(set string) string {
+		return `INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, actor_id, action, object_type, object_id, outcome, source_ip, user_agent, details, prev_hash, hash)
+			SELECT 'aud_bbbbbbbbbbbbbbbbbbbbbbbbbb', tenant_id, 2, occurred_at, actor_type, actor_id, action, object_type, object_id, outcome, source_ip, user_agent, details, prev_hash, hash
+			FROM audit_events WHERE id = $1; UPDATE audit_events SET ` + set + ` WHERE id = 'aud_bbbbbbbbbbbbbbbbbbbbbbbbbb'`
+	}
+	for name, set := range map[string]string{
+		"action without verb":  `action = 'promote'`,
+		"empty actor":          `actor_id = ''`,
+		"empty user agent":     `user_agent = ''`,
+		"object type not key":  `object_type = 'Signing Key'`,
+		"details not object":   `details = '[]'`,
+		"short hash":           `hash = '\x00'`,
+		"first entry has prev": `seq = 1, tenant_id = tenant_id, prev_hash = hash`,
+		"bad id":               `id = 'aud_X'`,
+		"unknown outcome":      `outcome = 'maybe'`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx, err := owner.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			stmts := strings.SplitN(ins(set), "; ", 2)
+			if _, err := tx.ExecContext(ctx, stmts[0], r.ID); err != nil {
+				t.Fatalf("valid copy refused: %v", err)
+			}
+			if _, err := tx.ExecContext(ctx, stmts[1]); err == nil {
+				t.Fatalf("%s accepted", name)
+			}
+		})
+	}
 }
