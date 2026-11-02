@@ -14,6 +14,7 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: make vet
+      - run: make vet-cross
       - run: make test
       - name: Test in FIPS 140-3 mode (CMVP-validated Go module)
         run: make test-fips
@@ -21,3 +22,16 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with: { working-directory: sdk/go }
       - run: make build
+  sdk-os:
+    # Fingerprint sources are OS-specific; run them where they live.
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: sdk/go/go.mod }
+      - name: Test SDK
+        working-directory: sdk/go
+        run: go test ./...

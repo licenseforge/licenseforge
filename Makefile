@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test test-fips vet lint fmt run
+.PHONY: build test test-fips vet vet-cross lint fmt run
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 build:
@@ -18,8 +18,13 @@ test-fips:
 vet:
 	for m in $(MODULES); do (cd $$m && go vet ./...) || exit 1; done
 
+# The SDK has OS-specific code (fingerprints); vet it for every supported OS.
+vet-cross:
+	for os in linux windows darwin freebsd; do (cd sdk/go && GOOS=$$os go vet ./...) || exit 1; done
+
 lint: vet
 	for m in $(MODULES); do (cd $$m && golangci-lint run) || exit 1; done
+	for os in windows darwin; do (cd sdk/go && GOOS=$$os golangci-lint run ./...) || exit 1; done
 
 fmt:
 	gofmt -w .

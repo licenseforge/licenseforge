@@ -94,6 +94,27 @@ Run after signature verification, in this order; the first failure decides the r
 
 Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result).
 
+### Fingerprints
+Design: [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md).
+- `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8(product + ":" + raw_id)))`.
+- Test value: product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:44fd0d30659f018c9db00ba857ac97aa63d9b1e99471a6899c49796cfc1698c0`.
+- "Trim" below means removing only SP, HT, CR, LF at both ends (not Unicode spaces). No case changes anywhere.
+
+| Order | Source | Raw ID | `bind.type` |
+|---|---|---|---|
+| 1 | Vendor-supplied override function (SDK option) | returned value, trimmed; empty → error | `machine` |
+| 2 | `LICENSEFORGE_FINGERPRINT` env var, **only if the vendor enables it** (off by default) | value, trimmed; empty → skipped | `machine` |
+| 3 | Kubernetes (when `KUBERNETES_SERVICE_HOST` is set): `GET /api/v1/namespaces/kube-system` with the pod service account | `metadata.uid` as returned. Failure is an error (no fallback); 429/5xx/network errors are retried, then reported as transient | `cluster` |
+| 4a | Linux | `/etc/machine-id`, else `/var/lib/dbus/machine-id`; trimmed; must be 32 lowercase hex chars | `machine` |
+| 4b | Windows | `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` (64-bit registry view), REG_SZ, as stored | `machine` |
+| 4c | macOS | `IOPlatformUUID` from `ioreg -rd1 -c IOPlatformExpertDevice`, as printed (uppercase) | `machine` |
+
+Linux stability rules (no fingerprint rather than a wrong one):
+- **Containing mount**: in `/proc/self/mountinfo` (fields: 4 = root, 5 = mount point, first field after ` - ` = fstype; octal escapes like `\040` decoded), find the longest mount point equal to or a parent of `/etc/machine-id`; if several entries have that mount point, the **last** one wins (it is on top). If its fstype is `tmpfs` or `ramfs`, the ID is regenerated every boot → no fingerprint.
+- **Application containers**: `/.dockerenv` or `/run/.containerenv` exists, or the container type (content of `/run/systemd/container`, else `container=` in `/proc/1/environ`) is anything other than empty, `lxc`, `lxc-libvirt` or `systemd-nspawn` (unknown types fail closed). There, only a bind mount whose mount point is `/etc/machine-id` and whose root **ends with** `/etc/machine-id` (the host's file) is used; no dbus fallback. An image's own machine-id is shared by every container → no fingerprint.
+- **System containers** (LXC/LXD/Incus, systemd-nspawn) keep their own machine-id like a VM and use the normal rules.
+- Windows containers are not detected: their MachineGuid comes from the image. Vendors shipping Windows containers should supply an override.
+
 ## SDK verify algorithm
 Steps run in this order; the first failing step decides the error class.
 1. Input larger than 64 KiB → `malformed`.

@@ -13,3 +13,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - Claim conformance vectors in `spec/vectors/lf1-claims.json` (93 cases).
 - Go SDK `clock` package: clock rollback protection (ADR-0018) with an HMAC-authenticated high-water mark, 24h default tolerance, `Reset` after online refresh, and an atomic `FileStore`.
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).
+- Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per product.

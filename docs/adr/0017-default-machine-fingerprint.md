@@ -20,6 +20,13 @@ SDKs and the agent pick the first available source:
 - **Vendor override**: SDK option to supply their own fingerprint function or value (e.g. a hardware serial, a cloud instance ID, a TPM-backed ID).
 - Fingerprint source is recorded in the activation (`fp_source`), so support can see why a machine changed.
 
+## Amendment (2026-11-02, from implementation review; pending maintainer confirmation)
+- `LICENSEFORGE_FINGERPRINT` is honoured **only when the vendor enables it** in the SDK (off by default). Anyone who can set an env var could otherwise reuse one binding on every machine without root. Vendors supporting plain Docker enable it, or customers mount the host `/etc/machine-id`.
+- Linux: machine-ids on tmpfs/ramfs (regenerated each boot) are refused; in application containers (Docker, Podman, OCI, unknown types) only a bind-mounted host machine-id is trusted; system containers (LXC/LXD/Incus, nspawn) use their own machine-id like VMs.
+- Kubernetes lookups retry transient failures and report them as transient, separate from RBAC/permission and certificate errors; `Compute` takes a context.
+- Exact per-source normalisation is in [License File Format](../../spec/license-format.md) (Fingerprints).
+- Open: hash input uses the product ID only. On a multi-tenant hosted server two tenants could use the same product slug, giving identical fingerprints for the same machine across vendors. Decide whether the hash input becomes tenant-qualified.
+
 ## Consequences
 - Zero config on Kubernetes, Linux, Windows, macOS.
 - Known limit: cloned VMs that didn't reset `machine-id` share a fingerprint. Documented; vendors who care use the override.
