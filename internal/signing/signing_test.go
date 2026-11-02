@@ -231,6 +231,13 @@ func TestSigningKeysInDatabase(t *testing.T) {
 	if err := l.Promote(ctx, tn, next.ID); err != nil {
 		t.Fatal(err)
 	}
+	want := map[string]string{
+		"retired regains key": "signing_keys_retired_destroyed", "active loses key": "signing_keys_retired_destroyed",
+		"second active key": "signingkey_tenant_id_status", "active without activated": "signing_keys_activated_at",
+		"pending with activated_at": "signing_keys_activated_at", "retired without retired_at": "signing_keys_retired_at",
+		"malformed ciphertext": "signing_keys_ciphertext", "bad id": "signing_keys_id_format",
+		"short public key": "signing_keys_ed25519_len", "unknown alg": "signing_keys_alg_valid",
+	}
 	for name, q := range map[string][]any{
 		"retired regains key":        {`UPDATE signing_keys SET private_key_ciphertext = (SELECT private_key_ciphertext FROM signing_keys WHERE id = $2) WHERE id = $1`, k.ID, next.ID},
 		"active loses key":           {`UPDATE signing_keys SET private_key_ciphertext = NULL WHERE id = $1`, next.ID},
@@ -244,8 +251,9 @@ func TestSigningKeysInDatabase(t *testing.T) {
 		"unknown alg":                {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('sk_aaaaaaaaaaaaaaaaaaaaaaaaab', $1, now(), now(), 'rsa', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := owner.ExecContext(ctx, q[0].(string), q[1:]...); err == nil {
-				t.Fatalf("%s accepted", name)
+			_, err := owner.ExecContext(ctx, q[0].(string), q[1:]...)
+			if err == nil || !strings.Contains(err.Error(), want[name]) {
+				t.Fatalf("%s: %v, want violation of %s", name, err, want[name])
 			}
 		})
 	}
@@ -366,5 +374,13 @@ func TestConcurrentCreateMakesOneActiveKey(t *testing.T) {
 	}
 	if active != 1 || pending > 1 {
 		t.Fatalf("%d active, %d pending keys", active, pending)
+	}
+}
+
+func TestCreateReportsOtherErrorsAsIs(t *testing.T) {
+	l, _, _ := setup(t)
+	_, err := l.Create(context.Background(), "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa") // no such tenant
+	if err == nil || errors.Is(err, ErrPendingExists) {
+		t.Fatalf("unknown tenant: %v", err)
 	}
 }

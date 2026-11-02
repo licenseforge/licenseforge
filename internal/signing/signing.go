@@ -12,7 +12,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"time"
+
+	"entgo.io/ent/dialect/sql/sqlgraph"
 
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
@@ -94,7 +97,9 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 			c.SetStatus(signingkey.StatusActive).SetActivatedAt(time.Now())
 		}
 		k, err = c.Save(ctx)
-		if ent.IsConstraintError(err) { // one active / one pending per tenant
+		// Only the one-active / one-pending index; other violations (unknown
+		// tenant, CHECKs) are returned as they are.
+		if sqlgraph.IsUniqueConstraintError(err) && strings.Contains(err.Error(), "signingkey_tenant_id_status") {
 			return ErrPendingExists
 		}
 		return err
@@ -179,6 +184,8 @@ func (l Local) Sign(ctx context.Context, tenantID, kid string, msg []byte) ([]by
 	}
 	var sig []byte
 	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// ponytail: FOR SHARE writes a row lock per signature on one hot row;
+		// check the row version instead if signing throughput ever matters.
 		k, err := tx.SigningKey.Query().Where(signingkey.ID(kid)).ForShare().Only(ctx)
 		if err != nil {
 			return err
