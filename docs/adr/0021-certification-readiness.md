@@ -2,6 +2,8 @@
 
 *Status: accepted · Date: 2026-11-02*
 
+> [!note] Extended by [ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md) (2026-11-02): FedRAMP, HIPAA and NIST readiness move to day 1.
+
 ## Context
 To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regulated products, we will be asked for certifications. None are needed for v0.1, but architecture choices made now must not block them. Reviewed against ADR-0004, 0005, 0006, 0009 on 2026-11-02.
 
@@ -51,8 +53,8 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 - CMVP-validated status: depend on the Go module's certificate; don't validate our own module.
 
 ## Open verification items
-- [ ] Confirm current CMVP certificate status of the Go Cryptographic Module.
-- [ ] Confirm Ed25519 availability in the FIPS providers used by Java (e.g. BouncyCastle FIPS) and Node (OpenSSL 3 FIPS provider). If missing, FIPS customers get ECDSA P-256 keys.
+- [x] Go Cryptographic Module v1.0.0: CMVP #5247 active, EdDSA approved (see Compliance verification 2026-11).
+- [ ] Confirm Ed25519 in Bouncy Castle FIPS (Java); OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved. If missing, FIPS customers get ECDSA P-256 keys.
 - [ ] Confirm CRA obligations for open-source projects vs. commercial distributors (we are both).
 
 ## Consequences
