@@ -29,7 +29,7 @@ func TestNewIsCanonicalAndUnique(t *testing.T) {
 func TestNormalize(t *testing.T) {
 	k := New()
 	body := strings.ReplaceAll(strings.TrimPrefix(k, "LF-"), "-", "")
-	for _, in := range []string{k, strings.ToLower(k), body, " " + body + " ", "lf " + strings.ToLower(body), strings.ReplaceAll(k, "-", " ")} {
+	for _, in := range []string{k, strings.ToLower(k), body, " " + body + " ", "lf " + strings.ToLower(body), strings.ReplaceAll(k, "-", " "), k + "\n", k + "\r\n", "\n" + k + "\n"} {
 		if got, err := Normalize(in); err != nil || got != k {
 			t.Errorf("Normalize(%q) = %q, %v; want %q", in, got, err, k)
 		}

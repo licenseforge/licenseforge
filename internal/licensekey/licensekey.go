@@ -32,7 +32,7 @@ func Normalize(s string) (string, error) {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
-		case c == '-' || c == ' ' || c == '\t':
+		case c == '-' || c == ' ' || c == '\t' || c == '\n' || c == '\r': // pasted from email, terminals, files
 			continue
 		case c >= 0x80:
 			return "", ErrInvalid // no Unicode case folding (e.g. U+017F folds to S)
