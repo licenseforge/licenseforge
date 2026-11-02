@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0024 (0024: HIPAA, NIST and FedRAMP readiness) and the `lf1` license file format draft.
 - Minimal server with `/healthz` and `/readyz`.
+- Server data layer foundation (`internal/store`): ent with PostgreSQL, prefixed IDs, versioned migrations with a built-in advisory-locked runner, and forced row-level security per tenant with release-blocking isolation tests; tenants and products tables.
 - Go SDK module `licenseforge.io/licenseforge/sdk/go` with `licensefile`: sign and verify `lf1` licenses (Ed25519, key ID in the envelope, algorithm bound to the trusted key).
 - `lf1` conformance vectors in `spec/vectors/lf1.json`.
 - `licensefile.ParseClaims`, `Claims.Check` and `Open`: parse and check lf1 claims (version, product, binding, clock skew, not-before, max offline, expiry with grace, updates_until) in the order defined by the spec.

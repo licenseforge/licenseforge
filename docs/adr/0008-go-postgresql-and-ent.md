@@ -14,6 +14,12 @@ Need a language for a stateless, security-sensitive API server shipped as a cont
 - Activation counting: lock the license row (`ent` `ForUpdate()` with the sql/lock feature flag) inside a transaction to enforce `max_activations` under concurrency.
 - No cache, queue, or search engine in v0.1.
 
+## Implementation note (2026-11-02)
+- **IDs**: text primary keys `<prefix>_<26 lowercase base32 chars>` (128 random bits), e.g. `tnt_…`, `prd_…`: readable in logs and licenses, no UUID dependency.
+- **Migrations**: Atlas (library, via ent) *generates* versioned SQL at dev time (`internal/store/tools/migrate diff|hash|check`); hand-written SQL (RLS policies) sits next to it with `atlas.sum` rehashed. The server *applies* them with a small built-in runner (embedded files, one transaction, `pg_advisory_xact_lock` so replicas starting together apply once, refuses databases with unknown newer migrations). No Atlas CLI in the image or Helm chart.
+- Migrations live in `internal/store/migrations` (Go embed can't reach a root `migrations/` dir).
+- CI: generated code must be current, and `migrate check` fails if the schema needs a migration that isn't committed.
+
 ## Consequences
 - One repo, one binary, one DB. Easy for self-hosters.
 - ent codegen adds a `go generate` step to the build; generated code is committed.

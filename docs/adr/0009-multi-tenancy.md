@@ -22,6 +22,11 @@ Shared-database tenancy is accepted by SOC 2 / ISO 27001 when isolation is enfor
 - Per-tenant **data-encryption keys** (envelope encryption) are possible later through the same key interface used for signing keys.
 - Cross-tenant isolation test in CI is a release blocker.
 
+## Implementation note (2026-11-02)
+- Every tenant table (and `tenants`) has `ENABLE` + **`FORCE`** row-level security with policy `app_is_platform() OR tenant_id = app_tenant_id()`, reading transaction-local settings `app.tenant_id` / `app.scope` set by `store.WithTenant` / `store.WithPlatform`. Nothing set → no rows, no writes (fail closed).
+- `store.Open` refuses a database role that is a superuser or has `BYPASSRLS`.
+- Release-blocking tests run against a real PostgreSQL as a non-superuser role: cross-tenant read/update/delete/insert, unscoped access, setting leakage across pooled connections, and a check that **every** table with `tenant_id` has RLS enabled, forced and a policy. Removing `FORCE` was verified to fail them.
+
 ## Alternatives considered
 - **Database per tenant**: stronger isolation, painful migrations and ops at scale. Could be an enterprise option later.
 - **Single-tenant only**: simpler now, rewrite later when hosting.

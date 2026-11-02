@@ -7,6 +7,17 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      LICENSEFORGE_TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
+      LICENSEFORGE_DEV_DATABASE_URL: postgres://postgres:ci@localhost:5432/lf_dev?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -14,6 +25,12 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: make vet
+      - name: Generated code is up to date
+        run: make generate && git diff --exit-code
+      - name: Migrations match the schema
+        run: |
+          psql "$LICENSEFORGE_TEST_DATABASE_URL" -qc 'CREATE DATABASE lf_dev'
+          make migrate-check
       - run: make vet-cross
       - run: make test
       - name: Test in FIPS 140-3 mode (CMVP-validated Go module)
