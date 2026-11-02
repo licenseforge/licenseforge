@@ -11,12 +11,13 @@
 // server's time after a successful online refresh, the only way to lower it).
 //
 // The stored mark is authenticated with HMAC-SHA256 under a key derived from
-// the license key, so a hand-edited mark fails with ErrTampered. This is
-// tamper evidence, not a FIPS security function: the key lives on the client
-// (ADR-0014). Deleting or replacing the state with an old copy resets the
-// mark; that is within the threat model, and max_offline bounds the gain.
-// Offline recovery from ErrRollback (after fixing the clock) or ErrTampered is
-// deleting the state file.
+// the license key; state that fails authentication (hand-edited, corrupt, or
+// written for another license key) is ignored, exactly like deleted state.
+// Deleting, corrupting or replacing the state with an old copy therefore
+// resets the mark; that is within the threat model (ADR-0014), and
+// max_offline bounds the gain. The MAC is not a FIPS security function: its
+// key lives on the client. Offline recovery from ErrRollback, after fixing the
+// clock, is deleting the state file.
 package clock
 
 import (
@@ -39,18 +40,24 @@ const persistEvery = time.Minute
 var (
 	// ErrRollback means the local clock is too far behind the latest trusted time.
 	ErrRollback = errors.New("clock: system clock is behind the last trusted time; fix the clock, refresh the license online, or (offline) delete the clock state")
-	// ErrTampered means the stored mark failed authentication.
-	ErrTampered = errors.New("clock: stored clock state was modified")
+	// ErrUnreadable means the stored state exists but can't be read, so the
+	// rollback check can't run. There is no usable time.
+	ErrUnreadable = errors.New("clock: state unreadable")
 	// ErrNotPersisted means the time returned is valid but the new mark could
 	// not be saved (e.g. read-only storage). Callers may continue.
 	ErrNotPersisted = errors.New("clock: mark not persisted")
 )
 
-// Store persists the guard's state. Implementations must make Update atomic
-// with respect to other processes and Guards using the same state.
+// Store persists the guard's state.
 type Store interface {
 	// Update calls fn with the current state (nil if none) and stores the
-	// bytes fn returns; fn returning nil means "no change".
+	// bytes fn returns; fn returning nil means "no change". It should be
+	// atomic with respect to other processes using the same state.
+	//
+	// Whenever the current state can be read, Update must call fn, even if it
+	// can't lock or write (then it returns the lock/write error after fn).
+	// If the state can't be read at all it must not call fn and must return
+	// an error wrapping ErrUnreadable.
 	Update(fn func(current []byte) ([]byte, error)) error
 }
 
@@ -99,22 +106,20 @@ func (g *Guard) mac(mark string) []byte {
 	return h.Sum(nil)
 }
 
-// decode returns the stored mark. Empty or unparsable state counts as no
-// state (equivalent to deletion, which the threat model accepts); a valid
-// structure with a wrong MAC is ErrTampered.
-func (g *Guard) decode(b []byte) (time.Time, error) {
+// decode returns the stored mark, or the zero time for no state. State that
+// is empty, unparsable or fails the MAC counts as no state: an attacker could
+// get the same by deleting it, and treating it as an error would only lock out
+// honest users (crash damage, a new license key).
+func (g *Guard) decode(b []byte) time.Time {
 	var s state
-	if len(b) == 0 || json.Unmarshal(b, &s) != nil || s.Mark == "" {
-		return time.Time{}, nil
-	}
-	if !hmac.Equal(s.MAC, g.mac(s.Mark)) {
-		return time.Time{}, ErrTampered
+	if len(b) == 0 || json.Unmarshal(b, &s) != nil || !hmac.Equal(s.MAC, g.mac(s.Mark)) {
+		return time.Time{}
 	}
 	t, err := time.Parse(time.RFC3339Nano, s.Mark)
 	if err != nil {
-		return time.Time{}, ErrTampered
+		return time.Time{}
 	}
-	return t, nil
+	return t
 }
 
 func (g *Guard) encode(t time.Time) ([]byte, error) {
@@ -124,34 +129,40 @@ func (g *Guard) encode(t time.Time) ([]byte, error) {
 
 // update runs fn on the stored mark under the store's lock. fn returns the
 // new mark, or the zero time for "no change".
+// The check always runs on the stored state; if it can't (unreadable state)
+// the error is returned as is, never as ErrNotPersisted.
 func (g *Guard) update(fn func(mark time.Time) (time.Time, error)) error {
+	var ran bool
 	var fnErr error
 	err := g.store.Update(func(cur []byte) ([]byte, error) {
-		mark, err := g.decode(cur)
-		if err != nil {
-			fnErr = err
-			return nil, nil
-		}
-		next, err := fn(mark)
+		ran = true
+		next, err := fn(g.decode(cur))
 		if err != nil || next.IsZero() {
 			fnErr = err
 			return nil, nil
 		}
 		return g.encode(next)
 	})
-	if fnErr != nil {
+	switch {
+	case fnErr != nil:
 		return fnErr
+	case err == nil:
+		return nil
+	case !ran:
+		if errors.Is(err, ErrUnreadable) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrUnreadable, err)
+	default:
+		return fmt.Errorf("%w: %w", ErrNotPersisted, err)
 	}
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrNotPersisted, err)
-	}
-	return nil
 }
 
 // Now returns the time to use for license checks given the system clock.
 //
-// Errors: ErrRollback and ErrTampered mean no usable time. ErrNotPersisted
-// means the returned time is valid but the mark could not be saved.
+// Errors: ErrRollback and ErrUnreadable mean no usable time. ErrNotPersisted
+// means the check passed and the returned time is valid, but the mark could
+// not be saved (read-only storage, lock contention).
 func (g *Guard) Now(local time.Time) (time.Time, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -193,13 +204,11 @@ func (g *Guard) Observe(t, local time.Time) error {
 }
 
 // Reset sets the mark to serverTime after a successful online refresh, even
-// if that lowers it. It is the online way out of ErrRollback and ErrTampered.
+// if that lowers it. It is the online way out of ErrRollback. serverTime must
+// be authenticated (the iat of a signature-verified lease), never an
+// unauthenticated value such as an HTTP Date header.
 func (g *Guard) Reset(serverTime time.Time) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	err := g.store.Update(func([]byte) ([]byte, error) { return g.encode(serverTime) })
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrNotPersisted, err)
-	}
-	return nil
+	return g.update(func(time.Time) (time.Time, error) { return serverTime, nil })
 }

@@ -12,16 +12,21 @@ import (
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
 )
 
-// memStore is an in-process Store; failSave simulates read-only storage.
+// memStore is an in-process Store; failSave simulates read-only storage,
+// unreadable simulates state that exists but can't be read.
 type memStore struct {
-	mu       sync.Mutex
-	b        []byte
-	failSave bool
+	mu         sync.Mutex
+	b          []byte
+	failSave   bool
+	unreadable bool
 }
 
 func (m *memStore) Update(fn func([]byte) ([]byte, error)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.unreadable {
+		return ErrUnreadable
+	}
 	next, err := fn(m.b)
 	if err != nil || next == nil {
 		return err
@@ -168,25 +173,26 @@ func TestWritesOnlyWhenMarkMovesAMinute(t *testing.T) {
 	}
 }
 
-func TestTamperAndCorruption(t *testing.T) {
+func TestTamperedOrForeignStateIsIgnored(t *testing.T) {
 	s := &memStore{}
 	g := newGuard(t, s)
-	mustNow(t, g, t0)
+	mustNow(t, g, t0.Add(30*24*time.Hour))
 	edited := append([]byte(nil), s.b...)
-	copy(edited[len(`{"mark":"`):], "2020") // move the mark back by hand
+	copy(edited[len(`{"mark":"`):], "2099") // raise the mark by hand
 	s.b = edited
-	if _, err := g.Now(t0); !errors.Is(err, ErrTampered) {
-		t.Fatalf("edited mark: got %v, want ErrTampered", err)
+	// A forged mark is not trusted (here: it would wrongly lock out the user).
+	if got := mustNow(t, g, t0.Add(30*24*time.Hour)); !got.Equal(t0.Add(30 * 24 * time.Hour)) {
+		t.Fatalf("edited mark trusted: %v", got)
 	}
-	// State from another license key does not verify.
+	// A new license key on the same store starts fresh instead of locking out.
 	s2 := &memStore{}
-	mustNow(t, newGuard(t, s2), t0)
-	other, err := New(s2, "LF-OTHER-KEY", Options{})
+	mustNow(t, newGuard(t, s2), t0.Add(30*24*time.Hour))
+	renewed, err := New(s2, "LF-RENEWED-KEY", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.Now(t0); !errors.Is(err, ErrTampered) {
-		t.Fatalf("other key: got %v, want ErrTampered", err)
+	if _, err := renewed.Now(t0); err != nil {
+		t.Fatalf("new key: %v", err)
 	}
 	// Empty or truncated state (crash, disk issue) counts as no state.
 	for _, b := range []string{"", `{"mark":"2026-11-15T12:0`, "garbage"} {
@@ -194,6 +200,13 @@ func TestTamperAndCorruption(t *testing.T) {
 		if _, err := g.Now(t0); err != nil {
 			t.Fatalf("corrupt %q: %v", b, err)
 		}
+	}
+}
+
+func TestUnreadableStateIsAHardError(t *testing.T) {
+	g := newGuard(t, &memStore{unreadable: true})
+	if _, err := g.Now(t0); !errors.Is(err, ErrUnreadable) || errors.Is(err, ErrNotPersisted) {
+		t.Fatalf("got %v, want ErrUnreadable (not ErrNotPersisted)", err)
 	}
 }
 
@@ -236,20 +249,26 @@ func TestFileStore(t *testing.T) {
 			t.Fatalf("mode = %v, %v; want 0600", info.Mode().Perm(), err)
 		}
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-		t.Fatalf("temp or lock files left behind: %v", entries)
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
 	}
-	// A stale lock from a crashed process is taken over.
-	lock := path + ".lock"
-	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+	if len(names) != 2 { // state file and its lock file, no temp files
+		t.Fatalf("files left: %v", names)
+	}
+}
+
+func TestFileStoreCheckRunsWhileLockIsHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clock.json")
+	mustNow(t, newGuard(t, FileStore{Path: path}), t0.Add(30*24*time.Hour))
+	unlock, err := lockFile(path+".lock", time.Second) // another process holds the lock
+	if err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-time.Minute)
-	if err := os.Chtimes(lock, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newGuard(t, FileStore{Path: path}).Now(t0.Add(time.Hour)); err != nil {
-		t.Fatalf("stale lock: %v", err)
+	defer unlock()
+	if _, err := newGuard(t, FileStore{Path: path}).Now(t0); !errors.Is(err, ErrRollback) {
+		t.Fatalf("got %v, want ErrRollback even without the lock", err)
 	}
 }
 
@@ -257,15 +276,42 @@ func TestFileStoreReadOnlyDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Getuid() == 0 {
 		t.Skip("permission semantics differ")
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "clock.json")
+	for _, withLockFile := range []bool{true, false} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "clock.json")
+		mark := t0.Add(30 * 24 * time.Hour)
+		mustNow(t, newGuard(t, FileStore{Path: path}), mark)
+		if !withLockFile {
+			_ = os.Remove(path + ".lock")
+		}
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		g := newGuard(t, FileStore{Path: path})
+		// The rollback check still runs on a read-only directory...
+		if _, err := g.Now(t0); !errors.Is(err, ErrRollback) {
+			t.Errorf("lock file %v: rollback got %v, want ErrRollback", withLockFile, err)
+		}
+		// ...and a forward clock is usable, just not persisted.
+		now, err := g.Now(mark.Add(time.Hour))
+		if !errors.Is(err, ErrNotPersisted) || !now.Equal(mark.Add(time.Hour)) {
+			t.Errorf("lock file %v: forward got %v, %v; want the time plus ErrNotPersisted", withLockFile, now, err)
+		}
+		_ = os.Chmod(dir, 0o700)
+	}
+}
+
+func TestFileStoreUnreadableFile(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("permission semantics differ")
+	}
+	path := filepath.Join(t.TempDir(), "clock.json")
 	mustNow(t, newGuard(t, FileStore{Path: path}), t0)
-	if err := os.Chmod(dir, 0o500); err != nil {
+	if err := os.Chmod(path, 0); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chmod(dir, 0o700) }()
-	now, err := newGuard(t, FileStore{Path: path}).Now(t0.Add(time.Hour))
-	if !errors.Is(err, ErrNotPersisted) || !now.Equal(t0.Add(time.Hour)) {
-		t.Fatalf("read-only dir: %v, %v; want the time plus ErrNotPersisted", now, err)
+	defer func() { _ = os.Chmod(path, 0o600) }()
+	if _, err := newGuard(t, FileStore{Path: path}).Now(t0); !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("got %v, want ErrUnreadable", err)
 	}
 }

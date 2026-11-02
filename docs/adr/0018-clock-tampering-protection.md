@@ -20,11 +20,12 @@ SDKs and agent apply three checks:
 Go SDK package `sdk/go/clock`, revised after review:
 - `Now(local)` returns `max(local, mark)` for `CheckOptions.Now`; it never folds the license `iat` in, so the future-`iat` check (#2) still works.
 - `Observe(t, local)` raises the mark with a genuine time (a license `iat` *after* it passed its claim checks), **capped at local + tolerance** so a fast vendor clock can't lock out an air-gapped user. `Reset(serverTime)` after an online refresh is the only way to lower the mark.
-- Read-only or full storage never blocks a check: the time is returned with `ErrNotPersisted`. The mark is only rewritten when it moves ≥ 1 minute.
+- The rollback check always runs when the state can be read, even if it can't be locked or written (read-only directory, ConfigMap mount, contention): then the time is returned with `ErrNotPersisted`. State that exists but can't be read is `ErrUnreadable` (no usable time). The mark is only rewritten when it moves ≥ 1 minute.
 - Tolerance: nil = 24h, 0 = strict, negative rejected.
-- `FileStore` serializes processes with an exclusive lock file and writes atomically (temp, fsync, rename with retries for Windows, directory fsync). Empty or unparsable state counts as no state (equivalent to deletion); a wrong MAC is `ErrTampered`.
+- `FileStore` serializes processes with an OS advisory lock (flock / LockFileEx, released by the OS if a process dies, so no clock-dependent stale-lock logic) and writes atomically (temp, fsync, rename with retries for Windows, directory fsync).
+- State that is empty, unparsable or fails the MAC (hand-edited, crash damage, a new license key) counts as **no state**, like deletion. A hard "tampered" error was dropped: an attacker could bypass it by writing garbage, so it would only lock out honest users.
 - HMAC key = `SHA-256("licenseforge clock v1|" + license key)`, not HKDF: FIPS 140-only mode rejects HKDF inputs under 112 bits. The MAC is tamper evidence, not a FIPS security function (the key is on the client, [ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md)). Replaying an old state file is equivalent to deleting it and is accepted.
-- Offline recovery from `ErrRollback` (after fixing the clock) or `ErrTampered`: delete the state file.
+- Offline recovery from `ErrRollback`, after fixing the clock: delete the state file. `Reset` must only receive an authenticated server time (a verified lease `iat`).
 
 ## Consequences
 - An attacker can gain at most 24h by rolling the clock back.

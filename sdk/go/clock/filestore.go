@@ -9,59 +9,37 @@ import (
 )
 
 // FileStore keeps the state in a file. Updates are serialized across
-// processes with a lock file (Path + ".lock", created exclusively) and written
+// processes with an OS advisory lock on Path + ".lock" (flock on Unix,
+// LockFileEx on Windows; the OS releases it if a process dies) and written
 // atomically: temp file with mode 0600, fsync, rename, fsync of the directory.
+//
+// If the lock can't be taken (read-only directory, contention) the state is
+// still read and checked, and only the write is skipped (ErrNotPersisted).
 // Use persistent storage for offline licenses: with memory-only storage the
 // mark resets on every restart (ADR-0018).
 type FileStore struct{ Path string }
 
-const (
-	lockWait  = 2 * time.Second  // give up acquiring the lock after this
-	lockStale = 30 * time.Second // a lock older than this was left by a crashed process
-)
+// lockWait bounds how long a check waits for another process's lock.
+const lockWait = 2 * time.Second
 
 // Update implements Store.
 func (f FileStore) Update(fn func(current []byte) ([]byte, error)) error {
-	unlock, err := f.lock()
-	if err != nil {
-		return err
+	unlock, lockErr := lockFile(f.Path+".lock", lockWait)
+	if lockErr == nil {
+		defer unlock()
 	}
-	defer unlock()
-
 	cur, err := os.ReadFile(f.Path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("%w: %w", ErrUnreadable, err)
 	}
 	next, err := fn(cur)
 	if err != nil || next == nil {
 		return err
 	}
-	return f.write(next)
-}
-
-func (f FileStore) lock() (func(), error) {
-	lockPath := f.Path + ".lock"
-	deadline := time.Now().Add(lockWait)
-	for {
-		lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			_ = lf.Close()
-			return func() { _ = os.Remove(lockPath) }, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > lockStale {
-			// ponytail: two processes can both see the lock as stale and race; harmless
-			// at a 30s threshold for a state that changes at most once a minute.
-			_ = os.Remove(lockPath) // stale lock from a crashed process
-			continue
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for %s", lockPath)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if lockErr != nil {
+		return fmt.Errorf("lock: %w", lockErr)
 	}
+	return f.write(next)
 }
 
 func (f FileStore) write(b []byte) error {
@@ -82,8 +60,8 @@ func (f FileStore) write(b []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	// On Windows, rename fails while another process has the target open
-	// (sharing violation); readers hold it only briefly, so retry.
+	// On Windows, rename fails while another program (antivirus, backup) has
+	// the target open; retry briefly.
 	for attempt := 0; ; attempt++ {
 		err = os.Rename(tmp.Name(), f.Path)
 		if err == nil || attempt == 4 {
@@ -95,7 +73,7 @@ func (f FileStore) write(b []byte) error {
 		return err
 	}
 	// Make the rename durable. Opening a directory fails on Windows, where
-	// rename durability is handled by the filesystem; ignore that case.
+	// the filesystem handles this; ignore that case.
 	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
 		_ = d.Close()
