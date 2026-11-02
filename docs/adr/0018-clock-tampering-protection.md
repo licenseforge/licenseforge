@@ -17,7 +17,14 @@ SDKs and agent apply three checks:
 - The high-water value is HMAC'd with a key derived from the license key, so editing the stored value by hand is detectable (raises the bar; not a guarantee, see threat model in [ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md)).
 
 ## Implementation note (2026-11-02)
-Go SDK package `sdk/go/clock`. The HMAC key is `SHA-256("licenseforge clock v1|" + license key)`, not HKDF: FIPS 140-only mode rejects HKDF inputs shorter than 112 bits and license keys can be shorter. The time returned for checks is `max(local, mark)`, so it never moves backwards; `Reset(serverTime)` after an online refresh is the way out of a rollback or tampered state.
+Go SDK package `sdk/go/clock`, revised after review:
+- `Now(local)` returns `max(local, mark)` for `CheckOptions.Now`; it never folds the license `iat` in, so the future-`iat` check (#2) still works.
+- `Observe(t, local)` raises the mark with a genuine time (a license `iat` *after* it passed its claim checks), **capped at local + tolerance** so a fast vendor clock can't lock out an air-gapped user. `Reset(serverTime)` after an online refresh is the only way to lower the mark.
+- Read-only or full storage never blocks a check: the time is returned with `ErrNotPersisted`. The mark is only rewritten when it moves ≥ 1 minute.
+- Tolerance: nil = 24h, 0 = strict, negative rejected.
+- `FileStore` serializes processes with an exclusive lock file and writes atomically (temp, fsync, rename with retries for Windows, directory fsync). Empty or unparsable state counts as no state (equivalent to deletion); a wrong MAC is `ErrTampered`.
+- HMAC key = `SHA-256("licenseforge clock v1|" + license key)`, not HKDF: FIPS 140-only mode rejects HKDF inputs under 112 bits. The MAC is tamper evidence, not a FIPS security function (the key is on the client, [ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md)). Replaying an old state file is equivalent to deleting it and is accepted.
+- Offline recovery from `ErrRollback` (after fixing the clock) or `ErrTampered`: delete the state file.
 
 ## Consequences
 - An attacker can gain at most 24h by rolling the clock back.
