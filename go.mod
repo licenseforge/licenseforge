@@ -1,9 +1,9 @@
 module licenseforge.io/licenseforge
 
-go 1.26
+go 1.26.4
 
 require (
-	ariga.io/atlas v0.36.2-0.20250730182955-2c6300d0a3e1
+	ariga.io/atlas v1.3.0
 	entgo.io/ent v0.14.6
 	github.com/jackc/pgx/v5 v5.12.0
 )
@@ -17,7 +17,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
-	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
