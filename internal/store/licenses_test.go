@@ -12,6 +12,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/schema"
 )
@@ -38,6 +39,7 @@ func newLicense(t *testing.T, d *DB, kr *secrets.Keyring) licensed {
 	t.Helper()
 	ctx := context.Background()
 	l := licensed{catalog: newCatalog(t, d), key: licensekey.New()}
+	now := time.Now()
 	err := d.WithTenant(ctx, l.tenant.ID, func(tx *ent.Tx) error {
 		var err error
 		if l.customer, err = tx.Customer.Create().SetTenantID(l.tenant.ID).SetName("Contoso").
@@ -59,7 +61,7 @@ func newLicense(t *testing.T, d *DB, kr *secrets.Keyring) licensed {
 			SetPlanSlug(l.plan.Slug).SetExpiryBasis(license.ExpiryBasis(l.plan.ExpiryBasis)).SetNillableDurationMonths(l.plan.DurationMonths).
 			SetBindType(license.BindType(l.plan.BindType)).SetOfflineAllowed(l.plan.OfflineAllowed).SetLeaseSeconds(l.plan.LeaseSeconds).SetGraceSeconds(l.plan.GraceSeconds).
 			SetEntitlements(schema.LicenseEntitlements{Features: []string{}, Limits: map[string]int64{"max_users": 50}}).
-			SetIssuedAt(time.Now()).Save(ctx)
+			SetIssuedAt(now).SetExpiresAt(now.AddDate(0, 12, 0)).Save(ctx)
 		return err
 	})
 	if err != nil {
@@ -238,37 +240,54 @@ func TestLicenseConstraintsInDatabase(t *testing.T) {
 	ctx := context.Background()
 	d := openDB(t)
 	l := newLicense(t, d, testKeyring(t))
+	var sitePlan *ent.Plan
+	if err := d.WithTenant(ctx, l.tenant.ID, func(tx *ent.Tx) error {
+		var err error
+		sitePlan, err = tx.Plan.Create().SetTenantID(l.tenant.ID).SetProductID(l.product.ID).SetSlug("site").SetName("Site").
+			SetBindType(plan.BindTypeNone).Save(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for name, q := range map[string][]any{
-		"revoked without revoked_at":  {`UPDATE licenses SET status = 'revoked' WHERE id = $1`, l.license.ID},
-		"revoked_at while active":     {`UPDATE licenses SET revoked_at = now() WHERE id = $1`, l.license.ID},
-		"suspended without timestamp": {`UPDATE licenses SET status = 'suspended' WHERE id = $1`, l.license.ID},
-		"unknown status":              {`UPDATE licenses SET status = 'expired' WHERE id = $1`, l.license.ID},
-		"plaintext key":               {`UPDATE licenses SET key_ciphertext = 'LF-AAAAA-AAAAA' WHERE id = $1`, l.license.ID},
-		"bad lookup hash":             {`UPDATE licenses SET key_lookup = 'xyz' WHERE id = $1`, l.license.ID},
-		"bad key hint":                {`UPDATE licenses SET key_hint = 'lf-123' WHERE id = $1`, l.license.ID},
-		"entitlements not an object":  {`UPDATE licenses SET entitlements = '[]' WHERE id = $1`, l.license.ID},
-		"features not an array":       {`UPDATE licenses SET entitlements = '{"features": "sso", "limits": {}}' WHERE id = $1`, l.license.ID},
-		"two durations":               {`UPDATE licenses SET duration_seconds = 60 WHERE id = $1`, l.license.ID},
-		"negative rehosts":            {`UPDATE licenses SET rehost_count = -1 WHERE id = $1`, l.license.ID},
-		"bad email":                   {`UPDATE customers SET email = 'not-an-email' WHERE id = $1`, l.customer.ID},
-		"refs not an object":          {`UPDATE customers SET external_refs = '["x"]' WHERE id = $1`, l.customer.ID},
-		"customer refs not strings":   {`UPDATE customers SET external_refs = '{"crm": {"email": "x@y"}}' WHERE id = $1`, l.customer.ID},
-		"license refs not strings":    {`UPDATE licenses SET external_refs = '{"n": 5}' WHERE id = $1`, l.license.ID},
-		"short ciphertext":            {`UPDATE licenses SET key_ciphertext = 'v1.k1.A' WHERE id = $1`, l.license.ID},
-		"feature not a string":        {`UPDATE licenses SET entitlements = '{"features": [1], "limits": {}}' WHERE id = $1`, l.license.ID},
-		"feature null":                {`UPDATE licenses SET entitlements = '{"features": [null], "limits": {}}' WHERE id = $1`, l.license.ID},
-		"feature bad key":             {`UPDATE licenses SET entitlements = '{"features": ["Max-Users"], "limits": {}}' WHERE id = $1`, l.license.ID},
-		"limit a string":              {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": "ten"}}' WHERE id = $1`, l.license.ID},
-		"limit below -1":              {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": -5}}' WHERE id = $1`, l.license.ID},
-		"limit fractional":            {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 1.5}}' WHERE id = $1`, l.license.ID},
-		"limit above 2^53-1":          {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 9007199254740992}}' WHERE id = $1`, l.license.ID},
-		"limit null":                  {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": null}}' WHERE id = $1`, l.license.ID},
-		"expires before issue":        {`UPDATE licenses SET expires_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
-		"activated before issue":      {`UPDATE licenses SET first_activated_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
-		"perpetual with expiry":       {`UPDATE licenses SET duration_months = NULL, expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},
-		"unstarted with expiry":       {`UPDATE licenses SET expiry_basis = 'from_first_activation', expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},
-		"started without expiry":      {`UPDATE licenses SET expiry_basis = 'from_first_activation', first_activated_at = issued_at WHERE id = $1`, l.license.ID},
-		"rehosts over the limit":      {`UPDATE licenses SET max_rehosts = 0, rehost_count = 5 WHERE id = $1`, l.license.ID},
+		"revoked without revoked_at":         {`UPDATE licenses SET status = 'revoked' WHERE id = $1`, l.license.ID},
+		"revoked_at while active":            {`UPDATE licenses SET revoked_at = now() WHERE id = $1`, l.license.ID},
+		"suspended without timestamp":        {`UPDATE licenses SET status = 'suspended' WHERE id = $1`, l.license.ID},
+		"unknown status":                     {`UPDATE licenses SET status = 'expired' WHERE id = $1`, l.license.ID},
+		"plaintext key":                      {`UPDATE licenses SET key_ciphertext = 'LF-AAAAA-AAAAA' WHERE id = $1`, l.license.ID},
+		"bad lookup hash":                    {`UPDATE licenses SET key_lookup = 'xyz' WHERE id = $1`, l.license.ID},
+		"bad key hint":                       {`UPDATE licenses SET key_hint = 'lf-123' WHERE id = $1`, l.license.ID},
+		"entitlements not an object":         {`UPDATE licenses SET entitlements = '[]' WHERE id = $1`, l.license.ID},
+		"features not an array":              {`UPDATE licenses SET entitlements = '{"features": "sso", "limits": {}}' WHERE id = $1`, l.license.ID},
+		"two durations":                      {`UPDATE licenses SET duration_seconds = 60 WHERE id = $1`, l.license.ID},
+		"negative rehosts":                   {`UPDATE licenses SET rehost_count = -1 WHERE id = $1`, l.license.ID},
+		"bad email":                          {`UPDATE customers SET email = 'not-an-email' WHERE id = $1`, l.customer.ID},
+		"refs not an object":                 {`UPDATE customers SET external_refs = '["x"]' WHERE id = $1`, l.customer.ID},
+		"customer refs not strings":          {`UPDATE customers SET external_refs = '{"crm": {"email": "x@y"}}' WHERE id = $1`, l.customer.ID},
+		"license refs not strings":           {`UPDATE licenses SET external_refs = '{"n": 5}' WHERE id = $1`, l.license.ID},
+		"short ciphertext":                   {`UPDATE licenses SET key_ciphertext = 'v1.k1.A' WHERE id = $1`, l.license.ID},
+		"feature not a string":               {`UPDATE licenses SET entitlements = '{"features": [1], "limits": {}}' WHERE id = $1`, l.license.ID},
+		"feature null":                       {`UPDATE licenses SET entitlements = '{"features": [null], "limits": {}}' WHERE id = $1`, l.license.ID},
+		"feature bad key":                    {`UPDATE licenses SET entitlements = '{"features": ["Max-Users"], "limits": {}}' WHERE id = $1`, l.license.ID},
+		"limit a string":                     {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": "ten"}}' WHERE id = $1`, l.license.ID},
+		"limit below -1":                     {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": -5}}' WHERE id = $1`, l.license.ID},
+		"limit fractional":                   {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 1.5}}' WHERE id = $1`, l.license.ID},
+		"limit above 2^53-1":                 {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 9007199254740992}}' WHERE id = $1`, l.license.ID},
+		"limit null":                         {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": null}}' WHERE id = $1`, l.license.ID},
+		"expires before issue":               {`UPDATE licenses SET expires_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
+		"activated before issue":             {`UPDATE licenses SET first_activated_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
+		"perpetual with expiry":              {`UPDATE licenses SET duration_months = NULL, expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},
+		"unstarted with expiry":              {`UPDATE licenses SET expiry_basis = 'from_first_activation', expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},
+		"started without expiry":             {`UPDATE licenses SET expiry_basis = 'from_first_activation', first_activated_at = issued_at, expires_at = NULL WHERE id = $1`, l.license.ID},
+		"rehosts over the limit":             {`UPDATE licenses SET max_rehosts = 0, rehost_count = 5 WHERE id = $1`, l.license.ID},
+		"site plan from first activation":    {`UPDATE plans SET expiry_basis = 'from_first_activation' WHERE id = $1`, sitePlan.ID},
+		"site plan with activation limit":    {`UPDATE plans SET max_activations = 3 WHERE id = $1`, sitePlan.ID},
+		"term license loses expiry":          {`UPDATE licenses SET expires_at = NULL WHERE id = $1`, l.license.ID},
+		"site license from first activation": {`UPDATE licenses SET bind_type = 'none', expiry_basis = 'from_first_activation', expires_at = NULL WHERE id = $1`, l.license.ID},
+		"site license with activation limit": {`UPDATE licenses SET bind_type = 'none', max_activations = 3 WHERE id = $1`, l.license.ID},
+		"limit written as 1.0":               {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 1.0}}' WHERE id = $1`, l.license.ID},
+		"limit name not a key":               {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"Bad Key": 1}}' WHERE id = $1`, l.license.ID},
+		"limit name empty":                   {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"": 1}}' WHERE id = $1`, l.license.ID},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := d.platformDB.ExecContext(ctx, q[0].(string), q[1:]...); err == nil {

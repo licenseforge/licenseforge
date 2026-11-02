@@ -55,19 +55,21 @@ func (Plan) Edges() []ent.Edge {
 func (Plan) Annotations() []schema.Annotation {
 	maxS := strconv.Itoa(maxSeconds)
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
-		"plans_id_format":       `id ~ '^pln_` + idChars + `$'`,
-		"plans_slug_format":     `slug ~ '` + slugPattern + `'`,
-		"plans_name_not_blank":  `btrim(name) <> ''`,
-		"plans_expiry_valid":    enumCheck("expiry_basis", expiryBases),
-		"plans_bind_type_valid": enumCheck("bind_type", bindPolicies),
-		"plans_duration_secs":   `duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= ` + maxS + `)`,
-		"plans_duration_months": `duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)`,
-		"plans_one_duration":    `num_nonnulls(duration_months, duration_seconds) <= 1`,
-		"plans_activations_rng": `max_activations IS NULL OR (max_activations >= 1 AND max_activations <= 1000000)`,
-		"plans_rehosts_rng":     `max_rehosts IS NULL OR (max_rehosts >= 0 AND max_rehosts <= 1000000)`,
-		"plans_lease_range":     `lease_seconds >= 1 AND lease_seconds <= ` + maxS,
-		"plans_max_offline_rng": `max_offline_seconds IS NULL OR (max_offline_seconds >= 0 AND max_offline_seconds <= ` + maxS + `)`,
-		"plans_grace_range":     `grace_seconds >= 0 AND grace_seconds <= ` + maxS,
+		"plans_id_format":              `id ~ '^pln_` + idChars + `$'`,
+		"plans_slug_format":            `slug ~ '` + slugPattern + `'`,
+		"plans_name_not_blank":         `btrim(name) <> ''`,
+		"plans_expiry_valid":           enumCheck("expiry_basis", expiryBases),
+		"plans_bind_type_valid":        enumCheck("bind_type", bindPolicies),
+		"plans_site_starts_at_issue":   `(bind_type)::text <> 'none'::text OR (expiry_basis)::text <> 'from_first_activation'::text`,
+		"plans_site_no_activation_max": `(bind_type)::text <> 'none'::text OR max_activations IS NULL`,
+		"plans_duration_secs":          `duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= ` + maxS + `)`,
+		"plans_duration_months":        `duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)`,
+		"plans_one_duration":           `num_nonnulls(duration_months, duration_seconds) <= 1`,
+		"plans_activations_rng":        `max_activations IS NULL OR (max_activations >= 1 AND max_activations <= 1000000)`,
+		"plans_rehosts_rng":            `max_rehosts IS NULL OR (max_rehosts >= 0 AND max_rehosts <= 1000000)`,
+		"plans_lease_range":            `lease_seconds >= 1 AND lease_seconds <= ` + maxS,
+		"plans_max_offline_rng":        `max_offline_seconds IS NULL OR (max_offline_seconds >= 0 AND max_offline_seconds <= ` + maxS + `)`,
+		"plans_grace_range":            `grace_seconds >= 0 AND grace_seconds <= ` + maxS,
 	}}}
 }
 

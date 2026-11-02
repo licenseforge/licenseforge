@@ -97,7 +97,7 @@ func (License) Annotations() []schema.Annotation {
 		"licenses_type_valid":      enumCheck("type", licenseTypes),
 		"licenses_status_valid":    enumCheck("status", statuses),
 		"licenses_expiry_valid":    enumCheck("expiry_basis", expiryBases),
-		"licenses_key_ciphertext":  `key_ciphertext ~ '^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{60,}$'`, // nonce + tag + key: >= 60 chars
+		"licenses_key_ciphertext":  `key_ciphertext ~ '^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{60,}$'`, // 12-byte nonce + 16-byte tag + the 33-byte formatted key = 61 bytes, 82 chars
 		"licenses_key_lookup":      `key_lookup ~ '^[0-9a-f]{64}$'`,
 		"licenses_key_hint":        `key_hint ~ '^[A-Z2-7]{6}$'`,
 		"licenses_plan_slug":       `plan_slug ~ '` + slugPattern + `'`,
@@ -124,6 +124,16 @@ func (License) Annotations() []schema.Annotation {
 		"licenses_unstarted_no_expiry":   `(expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NOT NULL OR expires_at IS NULL`,
 		"licenses_started_has_expiry":    `num_nonnulls(duration_months, duration_seconds) = 0 OR (expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NULL OR expires_at IS NOT NULL`,
 		"licenses_rehosts_within_limit":  `max_rehosts IS NULL OR rehost_count <= max_rehosts`,
+		// A from_issue term license always has its expiry (else it would read as perpetual).
+		"licenses_issued_has_expiry": `(expiry_basis)::text <> 'from_issue'::text OR num_nonnulls(duration_months, duration_seconds) = 0 OR expires_at IS NOT NULL`,
+		// Site licenses have no activations, so their term can't start at first activation,
+		// and an activation limit means nothing for them.
+		"licenses_site_starts_at_issue":   `(bind_type)::text <> 'none'::text OR (expiry_basis)::text <> 'from_first_activation'::text`,
+		"licenses_site_no_activation_max": `(bind_type)::text <> 'none'::text OR max_activations IS NULL`,
+		// Limits are integers written without a fraction or exponent (1.0 is malformed in the spec
+		// and doesn't decode into int64), and limit names are feature keys.
+		"licenses_ent_limit_ints": `NOT jsonb_path_exists(entitlements, 'strict $."limits".*?(@.string() like_regex "[.eE]")'::jsonpath)`,
+		"licenses_ent_limit_keys": `NOT jsonb_path_exists(entitlements, 'strict $."limits".keyvalue()?(!(@."key" like_regex "` + keyPattern + `"))'::jsonpath)`,
 		// Status and its timestamps agree.
 		"licenses_suspended_at": `(status = 'suspended') = (suspended_at IS NOT NULL)`,
 		"licenses_revoked_at":   `(status = 'revoked') = (revoked_at IS NOT NULL)`,
