@@ -1,6 +1,12 @@
 {
   "format": "lf1",
-  "note": "Conformance vectors for the lf1 license format. Keys are TEST ONLY. Every SDK must produce the expected result for every case.",
+  "note": "Conformance vectors for the lf1 license format (spec/license-format.md). Keys are TEST ONLY. Every SDK must produce the expected result for every case.",
+  "conventions": [
+    "public_key is base64url without padding (RFC 4648 section 5).",
+    "test_seed is the raw ASCII bytes used as the 32-byte Ed25519 seed; signing the valid payload under kid test:2026-11 reproduces the valid licenses exactly.",
+    "Keys are loaded as given; an unknown alg or a bad key must not fail at load time but surface during Verify (unsupported_alg / invalid_key_set).",
+    "expect is the error class of the first failing step in the spec's verify algorithm, or valid."
+  ],
   "test_seed": "licenseforge-test-vector-seed-01",
   "keys": [
     {
@@ -17,6 +23,21 @@
       "kid": "test:rsa",
       "alg": "rsa-pss-sha256",
       "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    },
+    {
+      "kid": "test:dup",
+      "alg": "ed25519",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    },
+    {
+      "kid": "test:dup",
+      "alg": "ed25519",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"
+    },
+    {
+      "kid": "test:short",
+      "alg": "ed25519",
+      "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqIw"
     }
   ],
   "cases": [
@@ -40,6 +61,52 @@
       "expect": "valid",
       "kid": "test:2026-11",
       "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "valid_bare_trailing_lf",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg\n",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "valid_bom_prefix",
+      "license": "﻿-----BEGIN LICENSEFORGE LICENSE-----\nlf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg\n-----END LICENSEFORGE LICENSE-----\n",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "valid_armor_single_line",
+      "license": "-----BEGIN LICENSEFORGE LICENSE-----lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg-----END LICENSEFORGE LICENSE-----",
+      "expect": "valid",
+      "kid": "test:2026-11",
+      "payload": "{\"v\":1,\"lid\":\"lic_test\",\"product\":\"acme-db\",\"exp\":\"2027-01-01T00:00:00Z\"}"
+    },
+    {
+      "name": "bad_signature_noncanonical_s",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdJFkQKzRr0mcgjO5DbyG7_H67BK_EtOwcHnyBSZytwFg",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "unknown_key_with_bad_signature",
+      "license": "lf1.test:missing.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLXh4IiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.Ac0xrep9HC11eSlicoxuYG2ZjoVJ4bphkOvB4KMUNTDE9Ft3YiPu2lq410UKWFxirwLf0OyIwmn4Hjw2a5syDA",
+      "expect": "unknown_key"
+    },
+    {
+      "name": "malformed_wins_over_unknown_key",
+      "license": "lf1.test:missing.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.Ac0xrep9HC11eSlicoxuYG2ZjoVJ4bphkOvB4KMUNTDE9Ft3YiPu2lq410UKWFxirwLf0OyIwmn4Hjw2a5syDA==",
+      "expect": "malformed"
+    },
+    {
+      "name": "invalid_key_set_duplicate_kid",
+      "license": "lf1.test:dup.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.X8mAQi_Wskoc0FPu36haHo4bnrH4kbdWF5lfLxGsRi5HdSPAx1A5E8PUEkgIYU9fvv1AD8ECTxbGLxZg8BDEAA",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_short_key",
+      "license": "lf1.test:short.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.ZVDcW03iuVNXO8KnnWQtf090JUdeweoL46mvSyrS4Nv96M2aLKoCYEDXefGaIa8lSSxKBJpzDNOaJDMc2-SbDg",
+      "expect": "invalid_key_set"
     },
     {
       "name": "bad_signature_payload_tampered",
@@ -84,6 +151,26 @@
     {
       "name": "malformed_noncanonical_base64",
       "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBh",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_noncanonical_payload_base64",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifR.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_empty_payload",
+      "license": "lf1.test:2026-11..23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_nbsp_inside",
+      "license": "lf1.test:2 026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_empty_armor",
+      "license": "-----BEGIN LICENSEFORGE LICENSE-----\n-----END LICENSEFORGE LICENSE-----\n",
       "expect": "malformed"
     },
     {

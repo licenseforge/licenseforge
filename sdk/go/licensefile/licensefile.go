@@ -40,6 +40,9 @@ var (
 	ErrUnknownKey     = errors.New("licensefile: unknown key")
 	ErrUnsupportedAlg = errors.New("licensefile: unsupported algorithm")
 	ErrBadSignature   = errors.New("licensefile: bad signature")
+	// ErrInvalidKeySet is a configuration error in the trusted keys (duplicate
+	// kid or wrong key length), not a verdict about the license.
+	ErrInvalidKeySet = errors.New("licensefile: invalid key set")
 )
 
 // PublicKey is a trusted verification key. Alg binds the algorithm to the key.
@@ -52,13 +55,22 @@ type PublicKey struct {
 // KeySet holds the trusted keys an application accepts, usually embedded at build time.
 type KeySet []PublicKey
 
-func (ks KeySet) find(kid string) (PublicKey, bool) {
+// find returns the key for kid. Duplicate kids are a configuration error.
+func (ks KeySet) find(kid string) (PublicKey, error) {
+	var found []PublicKey
 	for _, k := range ks {
 		if k.KID == kid {
-			return k, true
+			found = append(found, k)
 		}
 	}
-	return PublicKey{}, false
+	switch len(found) {
+	case 0:
+		return PublicKey{}, ErrUnknownKey
+	case 1:
+		return found[0], nil
+	default:
+		return PublicKey{}, fmt.Errorf("%w: duplicate kid %q", ErrInvalidKeySet, kid)
+	}
 }
 
 var (
@@ -72,6 +84,9 @@ func Sign(kid string, signer crypto.Signer, payload []byte) (string, error) {
 	if !kidRE.MatchString(kid) {
 		return "", fmt.Errorf("%w: invalid kid", ErrMalformed)
 	}
+	if len(payload) == 0 {
+		return "", fmt.Errorf("%w: empty payload", ErrMalformed)
+	}
 	if _, ok := signer.Public().(ed25519.PublicKey); !ok {
 		return "", ErrUnsupportedAlg
 	}
@@ -80,12 +95,18 @@ func Sign(kid string, signer crypto.Signer, payload []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("licensefile: sign: %w", err)
 	}
-	return beginArmor + "\n" + msg + "." + b64.EncodeToString(sig) + "\n" + endArmor + "\n", nil
+	out := beginArmor + "\n" + msg + "." + b64.EncodeToString(sig) + "\n" + endArmor + "\n"
+	if len(out) > MaxSize {
+		return "", fmt.Errorf("%w: license exceeds %d bytes", ErrMalformed, MaxSize)
+	}
+	return out, nil
 }
 
 // Verify checks the license's envelope and signature against keys and returns
-// the verified payload and the key ID used. The payload is only decoded after
-// the signature is valid. Verify does not check expiry, binding or other claims.
+// the verified payload and the key ID used. Checks run in the order defined by
+// the spec, so every SDK reports the same error class. The payload bytes are
+// returned only after the signature is valid; callers parse them afterwards.
+// Verify does not check expiry, binding or other claims.
 func Verify(license string, keys KeySet) (payload []byte, kid string, err error) {
 	if len(license) > MaxSize {
 		return nil, "", fmt.Errorf("%w: too large", ErrMalformed)
@@ -95,7 +116,7 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 		return nil, "", err
 	}
 	parts := strings.Split(token, ".")
-	if len(parts) != 4 || parts[0] != Version || !kidRE.MatchString(parts[1]) {
+	if len(parts) != 4 || parts[0] != Version || !kidRE.MatchString(parts[1]) || parts[2] == "" {
 		return nil, "", ErrMalformed
 	}
 	kid = parts[1]
@@ -107,19 +128,20 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 		return nil, "", fmt.Errorf("%w: payload encoding", ErrMalformed)
 	}
 
-	key, ok := keys.find(kid)
-	if !ok {
-		return nil, "", ErrUnknownKey
+	key, err := keys.find(kid)
+	if err != nil {
+		return nil, "", err
 	}
 	msg := []byte(parts[0] + "." + parts[1] + "." + parts[2])
 	switch key.Alg {
 	case AlgEd25519:
 		if len(key.Key) != ed25519.PublicKeySize {
-			return nil, "", fmt.Errorf("%w: bad ed25519 key length", ErrUnsupportedAlg)
+			return nil, "", fmt.Errorf("%w: ed25519 key for %q has length %d", ErrInvalidKeySet, kid, len(key.Key))
 		}
 		if len(sig) != ed25519.SignatureSize {
 			return nil, "", fmt.Errorf("%w: signature length", ErrMalformed)
 		}
+		// crypto/ed25519 rejects non-canonical S (S >= L), as the spec requires.
 		if !ed25519.Verify(ed25519.PublicKey(key.Key), msg, sig) {
 			return nil, "", ErrBadSignature
 		}
@@ -131,18 +153,27 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 	return payload, kid, nil
 }
 
-// unarmor strips optional armor and all whitespace, returning the bare token.
+// unarmor applies the spec's whitespace, BOM and armor rules and returns the bare token.
 func unarmor(s string) (string, error) {
-	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "\uFEFF")
+	s = strings.Trim(s, specWhitespace)
 	if body, ok := strings.CutPrefix(s, beginArmor); ok {
 		if body, ok = strings.CutSuffix(body, endArmor); !ok {
 			return "", fmt.Errorf("%w: missing end armor", ErrMalformed)
 		}
 		s = body
 	}
-	s = strings.Join(strings.Fields(s), "")
+	s = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(specWhitespace, r) {
+			return -1
+		}
+		return r
+	}, s)
 	if s == "" {
 		return "", ErrMalformed
 	}
 	return s, nil
 }
+
+// specWhitespace is the only whitespace the spec allows: SP, HT, CR, LF.
+const specWhitespace = " \t\r\n"

@@ -19,9 +19,14 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 - `base64url` = RFC 4648 §5 URL-safe alphabet, **no padding**, canonical only (non-canonical trailing bits are rejected; prevents malleability).
 - `kid`: 1–128 chars from `[A-Za-z0-9_:-]` (no `.`).
 - Ed25519 signatures are exactly 64 bytes.
-- Armor is optional for machine-to-machine transport (online leases may be sent bare). If present, everything between the BEGIN/END lines is joined after removing whitespace, so wrapped lines and CRLF are fine.
-- Maximum encoded size: 64 KiB; larger input is rejected before parsing.
-- Error classes (shared by all SDKs and the conformance vectors): `malformed`, `unknown_key`, `unsupported_alg`, `bad_signature`.
+- **Whitespace** means exactly SP, HT, CR, LF (`0x20 0x09 0x0D 0x0A`). It is ignored anywhere (around and inside the token, armored or bare), so wrapped lines, CRLF and trailing newlines are fine. Any other character (NBSP, U+2028, …) is not whitespace and makes the license `malformed`.
+- A single leading UTF-8 BOM (`EF BB BF`) is ignored.
+- Armor is optional (online leases may be sent bare). If the input starts with the BEGIN marker it must end with the END marker; markers may be on the same line as the token.
+- Maximum size: 64 KiB (65,536 **bytes** of the raw input); larger input is `malformed` before any parsing.
+- The payload part must be non-empty.
+- Ed25519 verification must be strict: non-canonical `S` (S ≥ L) is rejected (`bad_signature`).
+- Error classes (shared by all SDKs and the conformance vectors): `malformed`, `unknown_key`, `unsupported_alg`, `bad_signature`. A trusted key set with duplicate `kid`s or a key of the wrong length is a configuration error, `invalid_key_set`, reported when that key is used.
+- A trusted key with an unknown `alg` is not a configuration error: it surfaces as `unsupported_alg` when a license uses that `kid`.
 
 ### Conformance vectors
 `spec/vectors/lf1.json` in the main repo: fixed test keys, encoded licenses and the expected result for each. Every SDK must pass all of them ([ADR-0010 Official SDKs Go, Java, TypeScript](../docs/adr/0010-official-sdks-go-java-typescript.md)).
@@ -58,12 +63,17 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 | `customer` | ID only by default; vendor may opt in to include a display name. Keeps personal data out of files copied to customer machines (GDPR data minimisation). |
 
 ## SDK verify algorithm
-1. Parse armor, split on `.` into 4 parts; first must be `lf1`.
-2. Look up `{alg, public_key}` by `kid` in the trusted key set embedded in the vendor's build. Unknown kid → invalid.
-3. Verify signature over `lf1.<kid>.<payload_b64>` with that key's `alg`. Fail → invalid. Only now decode the payload JSON.
-4. Check `v == 1`, `product` matches, `bind` matches local fingerprint.
-5. Time: `iat` in the future → invalid (clock tamper); `now < nbf` → invalid; `now > exp + grace` → expired; `now > exp` → grace (warn).
-6. If set, `updates_until` < app build date → invalid for this build.
-7. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
+Steps run in this order; the first failing step decides the error class.
+1. Input larger than 64 KiB → `malformed`.
+2. Drop one leading BOM; trim whitespace at both ends. If it starts with the BEGIN marker, it must end with the END marker (else `malformed`); keep what is between. Remove all whitespace.
+3. Split on `.`: exactly 4 parts, first is `lf1`, `kid` matches its pattern, payload part non-empty, payload and signature parts are canonical base64url → else `malformed`.
+4. Look up `kid` in the trusted key set embedded in the vendor's build → `unknown_key` if absent; `invalid_key_set` if duplicated or the key has the wrong length.
+5. Key's `alg` not supported → `unsupported_alg`.
+6. Signature length wrong for `alg` → `malformed`. Verify the signature over the ASCII bytes `lf1.<kid>.<payload_b64>` → `bad_signature` on failure.
+7. Only now parse the payload JSON.
+8. Check `v == 1`, `product` matches, `bind` matches local fingerprint.
+9. Time: `iat` in the future → invalid (clock tamper); `now < nbf` → invalid; `now > exp + grace` → expired; `now > exp` → grace (warn).
+10. If set, `updates_until` < app build date → invalid for this build.
+11. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
 
 That's the whole SDK core. Any language with Ed25519 (libsodium covers C/C++) can implement it in ~100 lines.
