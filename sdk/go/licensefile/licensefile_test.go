@@ -94,6 +94,13 @@ func buildVectors(t *testing.T) vectorFile {
 	// Unknown kid combined with a second fault, to pin error precedence.
 	missingTok := sign("test:missing", payload)
 	mp := strings.Split(missingTok, ".")
+	rp := strings.Split(sign("test:rsa", payload), ".")
+
+	// Size limit counts bytes: pad with spaces to exactly MaxSize bytes (valid),
+	// and to MaxSize+1 bytes with a leading 3-byte BOM (malformed; a counter of
+	// characters instead of bytes would wrongly accept it).
+	atLimit := tok + strings.Repeat(" ", MaxSize-len(tok))
+	overLimitBOM := "\uFEFF" + tok + strings.Repeat(" ", MaxSize+1-3-len(tok))
 
 	return vectorFile{
 		Format: "lf1",
@@ -121,7 +128,8 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "valid_bom_prefix", License: "\uFEFF" + beginArmor + "\n" + tok + "\n" + endArmor + "\n", Expect: "valid", KID: "test:2026-11", Payload: payload},
 			{Name: "valid_armor_single_line", License: beginArmor + tok + endArmor, Expect: "valid", KID: "test:2026-11", Payload: payload},
 			{Name: "bad_signature_noncanonical_s", License: join(parts[0], parts[1], parts[2], b64.EncodeToString(malleated)), Expect: "bad_signature"},
-			{Name: "unknown_key_with_bad_signature", License: join(mp[0], mp[1], otherPayload, mp[3]), Expect: "unknown_key"},
+			{Name: "unknown_key_with_short_signature", License: join(mp[0], mp[1], mp[2], shortSig), Expect: "unknown_key"},
+			{Name: "unsupported_alg_with_short_signature", License: join(rp[0], rp[1], rp[2], shortSig), Expect: "unsupported_alg"},
 			{Name: "malformed_wins_over_unknown_key", License: join(mp[0], mp[1], mp[2], mp[3]+"=="), Expect: "malformed"},
 			{Name: "invalid_key_set_duplicate_kid", License: sign("test:dup", payload), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_short_key", License: sign("test:short", payload), Expect: "invalid_key_set"},
@@ -137,6 +145,10 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "malformed_noncanonical_payload_base64", License: join(parts[0], parts[1], string(payEnc), parts[3]), Expect: "malformed"},
 			{Name: "malformed_empty_payload", License: join(parts[0], parts[1], "", parts[3]), Expect: "malformed"},
 			{Name: "malformed_nbsp_inside", License: tok[:10] + "\u00a0" + tok[10:], Expect: "malformed"},
+			{Name: "malformed_bom_inside", License: tok[:10] + "\uFEFF" + tok[10:], Expect: "malformed"},
+			{Name: "malformed_u2028_inside", License: tok[:10] + "\u2028" + tok[10:], Expect: "malformed"},
+			{Name: "valid_at_size_limit", License: atLimit, Expect: "valid", KID: "test:2026-11", Payload: payload},
+			{Name: "malformed_over_size_limit_bytes", License: overLimitBOM, Expect: "malformed"},
 			{Name: "malformed_empty_armor", License: beginArmor + "\n" + endArmor + "\n", Expect: "malformed"},
 			{Name: "malformed_invalid_kid", License: join(parts[0], "bad/kid", parts[2], parts[3]), Expect: "malformed"},
 			{Name: "malformed_signature_length", License: join(parts[0], parts[1], parts[2], shortSig), Expect: "malformed"},
@@ -185,10 +197,12 @@ func TestVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := os.ReadFile(vectorsPath)
-	if errors.Is(err, os.ErrNotExist) {
-		t.Skip("spec/vectors/lf1.json not present (module tested outside the repository)")
+	// Skip only when the module is tested outside the repository (no repo root);
+	// inside the repo a missing vector file is a failure.
+	if _, err := os.Stat("../../../go.mod"); errors.Is(err, os.ErrNotExist) {
+		t.Skip("not inside the licenseforge repository; conformance vectors unavailable")
 	}
+	got, err := os.ReadFile(vectorsPath)
 	if err != nil {
 		t.Fatal(err)
 	}

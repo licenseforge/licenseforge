@@ -22,7 +22,7 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 - **Whitespace** means exactly SP, HT, CR, LF (`0x20 0x09 0x0D 0x0A`). It is ignored anywhere (around and inside the token, armored or bare), so wrapped lines, CRLF and trailing newlines are fine. Any other character (NBSP, U+2028, …) is not whitespace and makes the license `malformed`.
 - A single leading UTF-8 BOM (`EF BB BF`) is ignored.
 - Armor is optional (online leases may be sent bare). If the input starts with the BEGIN marker it must end with the END marker; markers may be on the same line as the token.
-- Maximum size: 64 KiB (65,536 **bytes** of the raw input); larger input is `malformed` before any parsing.
+- Maximum size: 64 KiB (65,536 **bytes** of the raw UTF-8 input, not characters); larger input is `malformed` before any parsing.
 - The payload part must be non-empty.
 - Ed25519 verification must be strict: non-canonical `S` (S ≥ L) is rejected (`bad_signature`).
 - Error classes (shared by all SDKs and the conformance vectors): `malformed`, `unknown_key`, `unsupported_alg`, `bad_signature`. A trusted key set with duplicate `kid`s or a key of the wrong length is a configuration error, `invalid_key_set`, reported when that key is used.
@@ -67,9 +67,9 @@ Steps run in this order; the first failing step decides the error class.
 1. Input larger than 64 KiB → `malformed`.
 2. Drop one leading BOM; trim whitespace at both ends. If it starts with the BEGIN marker, it must end with the END marker (else `malformed`); keep what is between. Remove all whitespace.
 3. Split on `.`: exactly 4 parts, first is `lf1`, `kid` matches its pattern, payload part non-empty, payload and signature parts are canonical base64url → else `malformed`.
-4. Look up `kid` in the trusted key set embedded in the vendor's build → `unknown_key` if absent; `invalid_key_set` if duplicated or the key has the wrong length.
+4. Look up `kid` in the trusted key set embedded in the vendor's build → `unknown_key` if absent; `invalid_key_set` if the `kid` appears more than once.
 5. Key's `alg` not supported → `unsupported_alg`.
-6. Signature length wrong for `alg` → `malformed`. Verify the signature over the ASCII bytes `lf1.<kid>.<payload_b64>` → `bad_signature` on failure.
+6. Key length wrong for `alg` → `invalid_key_set`. Signature length wrong for `alg` → `malformed`. Verify the signature over the ASCII bytes `lf1.<kid>.<payload_b64>` → `bad_signature` on failure.
 7. Only now parse the payload JSON.
 8. Check `v == 1`, `product` matches, `bind` matches local fingerprint.
 9. Time: `iat` in the future → invalid (clock tamper); `now < nbf` → invalid; `now > exp + grace` → expired; `now > exp` → grace (warn).
