@@ -13,7 +13,8 @@ import (
 	"strings"
 
 	entsql "entgo.io/ent/dialect/sql"
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib" // also registers the "pgx" database/sql driver
 
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
@@ -66,8 +67,25 @@ func Open(ctx context.Context, tenantDSN, platformDSN string) (*DB, error) {
 // Close closes both pools.
 func (d *DB) Close() error { return errors.Join(d.tenantDB.Close(), d.platformDB.Close()) }
 
+// openPool opens a serving pool on which no session state survives between
+// uses: statements run unnamed (QueryExecModeExec), so there are no cached
+// prepared statements a request could replace, and DISCARD ALL before every
+// reuse drops anything a request left behind (session settings, prepared
+// statements, temp state, advisory locks, LISTENs).
+func openPool(dsn string) (*sql.DB, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
+	return stdlib.OpenDB(*cfg, stdlib.OptionResetSession(func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "DISCARD ALL")
+		return err
+	})), nil
+}
+
 func openChecked(ctx context.Context, dsn, want string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	db, err := openPool(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -273,13 +291,29 @@ func Migrate(ctx context.Context, ownerDSN string) (err error) {
 // should contain a single statement so a failure leaves nothing half-applied.
 const noTxMarker = "-- lf:no-transaction"
 
+// invalidIndexes reports indexes left invalid by a failed CREATE INDEX
+// CONCURRENTLY, which PostgreSQL maintains on every write but never uses.
+func invalidIndexes(ctx context.Context, conn *sql.Conn) error {
+	var names sql.NullString
+	err := conn.QueryRowContext(ctx, `SELECT string_agg(c.relname, ', ') FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid WHERE NOT i.indisvalid`).Scan(&names)
+	if err != nil {
+		return err
+	}
+	if names.Valid {
+		return fmt.Errorf("invalid index(es) %s from a failed concurrent build: DROP INDEX CONCURRENTLY them, then migrate again", names.String)
+	}
+	return nil
+}
+
 func applyOne(ctx context.Context, conn *sql.Conn, m migration) (err error) {
 	if strings.HasPrefix(m.body, noTxMarker) {
-		if _, err := conn.ExecContext(ctx, `SET lock_timeout = '30s'`); err != nil {
-			return err
-		}
-		defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), `RESET lock_timeout`) }()
+		// No lock_timeout: CREATE INDEX CONCURRENTLY waits for old snapshots
+		// without blocking other traffic, and a timeout would leave an invalid index.
 		if _, err := conn.ExecContext(ctx, m.body); err != nil {
+			return errors.Join(err, invalidIndexes(ctx, conn))
+		}
+		if err := invalidIndexes(ctx, conn); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)`, m.version, m.checksum)

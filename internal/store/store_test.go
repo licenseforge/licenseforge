@@ -376,6 +376,38 @@ func TestTenantIsolation(t *testing.T) {
 	}
 }
 
+// Nothing a request leaves in its session (settings, prepared statements)
+// may survive to the next request on the same pooled connection.
+func TestSessionStateIsResetBetweenRequests(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	d.tenantDB.SetMaxOpenConns(1) // force reuse of the same connection
+	tn := createTenants(t, d, 1)[0]
+	if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+		// A buggy request leaves session-level state behind.
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, false), set_config('app.stolen', 'x', false)`, tn.ID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `PREPARE planted AS SELECT 1`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var tenantSetting, stolen string
+	var prepared int
+	if err := d.tenantDB.QueryRowContext(ctx, `SELECT COALESCE(current_setting('app.tenant_id', true), ''),
+		COALESCE(current_setting('app.stolen', true), ''), (SELECT count(*) FROM pg_prepared_statements)`).
+		Scan(&tenantSetting, &stolen, &prepared); err != nil {
+		t.Fatal(err)
+	}
+	if tenantSetting != "" || stolen != "" || prepared != 0 {
+		t.Fatalf("session state survived: app.tenant_id=%q app.stolen=%q prepared statements=%d", tenantSetting, stolen, prepared)
+	}
+	if n, err := d.tenant.Product.Query().Count(ctx); err != nil || n != 0 {
+		t.Fatalf("unscoped query after a leaked session setting saw %d rows (err %v)", n, err)
+	}
+}
+
 // The tenant setting must not survive the transaction on a reused connection.
 func TestTenantScopeDoesNotLeak(t *testing.T) {
 	ctx := context.Background()
@@ -481,7 +513,8 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	frows, err := owner.Query(`
 		SELECT p.proname, p.prosecdef, p.prosrc, COALESCE(array_to_string(p.proconfig, ','), ''),
 		       has_function_privilege('public', p.oid, 'EXECUTE')
-		FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'`)
+		FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,11 +536,11 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	_ = frows.Close()
 	var triggers, rules int
 	if err := owner.QueryRow(`SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal`).Scan(&triggers); err != nil {
+		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND NOT t.tgisinternal`).Scan(&triggers); err != nil {
 		t.Fatal(err)
 	}
 	if err := owner.QueryRow(`SELECT count(*) FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class
-		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND r.rulename <> '_RETURN'`).Scan(&rules); err != nil {
+		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND r.rulename <> '_RETURN'`).Scan(&rules); err != nil {
 		t.Fatal(err)
 	}
 	if triggers+rules != 0 {
@@ -521,6 +554,15 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		if any {
 			t.Errorf("%s has privileges on schema_migrations", role)
 		}
+	}
+
+	var schemas sql.NullString
+	if err := owner.QueryRow(`SELECT string_agg(nspname, ', ') FROM pg_namespace
+		WHERE nspname NOT IN ('public','pg_catalog','information_schema') AND nspname NOT LIKE 'pg_toast%' AND nspname NOT LIKE 'pg_temp%'`).Scan(&schemas); err != nil {
+		t.Fatal(err)
+	}
+	if schemas.Valid {
+		t.Errorf("schemas other than public: %s (functions or objects there escape these checks)", schemas.String)
 	}
 
 	tenantTables := 0
@@ -569,5 +611,28 @@ func TestNoTransactionMigration(t *testing.T) {
 	m.body = "CREATE INDEX CONCURRENTLY products_name_idx ON products (name);"
 	if err := applyOne(ctx, conn, m); err == nil {
 		t.Fatal("without the marker the statement must fail inside a transaction")
+	}
+	// A leftover invalid index (failed concurrent build) stops the migration.
+	if _, err := conn.ExecContext(ctx, `CREATE INDEX products_bad_idx ON products (name)`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, `DROP INDEX IF EXISTS products_bad_idx`) }()
+	// Simulating the failed build needs superuser (pg_index is a catalog).
+	su, err := sql.Open("pgx", strings.Replace(adminURL, "/postgres?", "/"+env.name+"?", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = su.Close() }()
+	if _, err := su.Exec(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'products_bad_idx'::regclass`); err != nil {
+		t.Fatal(err)
+	}
+	m = migration{version: "29990101000001_noop", checksum: "x", body: noTxMarker + "\nSELECT 1;"}
+	if err := applyOne(ctx, conn, m); err == nil || !strings.Contains(err.Error(), "products_bad_idx") {
+		t.Fatalf("got %v, want an error naming the invalid index", err)
+	}
+	var recorded bool
+	_ = conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, m.version).Scan(&recorded)
+	if recorded {
+		t.Fatal("migration recorded as applied despite an invalid index")
 	}
 }

@@ -1,6 +1,11 @@
 -- One-time PostgreSQL setup for LicenseForge (ADR-0009). Run as an admin
--- (superuser, or rds_superuser / cloudsqlsuperuser on managed Postgres).
--- Replace the passwords, or use your cloud's IAM authentication.
+-- (superuser, or rds_superuser / cloudsqlsuperuser on managed Postgres), the
+-- same admin for every statement. Replace the passwords, or use your cloud's
+-- IAM authentication.
+--
+-- Create the logins with SQL as below. On Cloud SQL, users created through the
+-- console or gcloud become members of cloudsqlsuperuser, and the server
+-- refuses them.
 --
 -- Three logins, never shared:
 --   licenseforge_owner     runs migrations (`licenseforge migrate`); owns the schema
@@ -19,6 +24,9 @@ CREATE ROLE licenseforge_owner LOGIN PASSWORD 'change-me-owner';
 CREATE ROLE licenseforge_api   LOGIN PASSWORD 'change-me-api'   IN ROLE licenseforge_app;
 CREATE ROLE licenseforge_admin LOGIN PASSWORD 'change-me-admin' IN ROLE licenseforge_platform;
 
+-- PostgreSQL 16+: a non-superuser admin must be able to SET ROLE to the owner
+-- to create a database owned by it.
+GRANT licenseforge_owner TO CURRENT_USER WITH SET TRUE;
 CREATE DATABASE licenseforge OWNER licenseforge_owner;
 
 -- Only these logins may connect. Group grants are cluster-wide, so this is what
