@@ -43,11 +43,11 @@ func TestComputeSourceOrder(t *testing.T) {
 		{"env trims ASCII whitespace only", Options{AllowEnvOverride: true}, map[string]string{EnvOverride: " x\t"}, SourceEnv, " x", "machine"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := compute(context.Background(), "acme-db", tc.opts, fakeEnv(tc.vars))
+			r, err := compute(context.Background(), "tnt_acme", "acme-db", tc.opts, fakeEnv(tc.vars))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Source != tc.source || r.Fingerprint != Hash("acme-db", tc.raw) || r.Binding != tc.bind {
+			if r.Source != tc.source || r.Fingerprint != Hash("tnt_acme", "acme-db", tc.raw) || r.Binding != tc.bind {
 				t.Fatalf("got %+v, want source %s raw %q", r, tc.source, tc.raw)
 			}
 		})
@@ -57,28 +57,34 @@ func TestComputeSourceOrder(t *testing.T) {
 func TestComputeErrors(t *testing.T) {
 	e := fakeEnv(map[string]string{"KUBERNETES_SERVICE_HOST": "10.0.0.1"})
 	e.k8s = func(context.Context) (string, error) { return "", errors.New("forbidden") }
-	if _, err := compute(context.Background(), "acme-db", Options{}, e); err == nil {
+	if _, err := compute(context.Background(), "tnt_acme", "acme-db", Options{}, e); err == nil {
 		t.Error("kubernetes failure must be an error, not a fallback to the node machine-id")
 	}
 	e = fakeEnv(nil)
 	e.machineID = func() (string, error) { return "", ErrNoFingerprint }
-	if _, err := compute(context.Background(), "acme-db", Options{}, e); !errors.Is(err, ErrNoFingerprint) {
+	if _, err := compute(context.Background(), "tnt_acme", "acme-db", Options{}, e); !errors.Is(err, ErrNoFingerprint) {
 		t.Errorf("got %v, want ErrNoFingerprint", err)
 	}
-	if _, err := compute(context.Background(), "acme-db", Options{Override: func() (string, error) { return " ", nil }}, fakeEnv(nil)); err == nil {
+	if _, err := compute(context.Background(), "tnt_acme", "acme-db", Options{Override: func() (string, error) { return " ", nil }}, fakeEnv(nil)); err == nil {
 		t.Error("empty override must be an error")
 	}
-	if _, err := compute(context.Background(), "", Options{}, fakeEnv(nil)); err == nil {
-		t.Error("empty product must be an error")
+	for _, ids := range [][2]string{{"tnt_acme", ""}, {"", "acme-db"}, {"t\x00x", "p"}} {
+		if _, err := compute(context.Background(), ids[0], ids[1], Options{}, fakeEnv(nil)); err == nil {
+			t.Errorf("IDs %q must be an error", ids)
+		}
 	}
 }
 
 func TestHash(t *testing.T) {
-	if Hash("p1", "id") == Hash("p2", "id") {
-		t.Fatal("different products must give different fingerprints")
+	if Hash("t1", "p", "id") == Hash("t2", "p", "id") || Hash("t", "p1", "id") == Hash("t", "p2", "id") {
+		t.Fatal("different tenants or products must give different fingerprints")
+	}
+	// Separators can't be forged by IDs that contain the other separator chars.
+	if Hash("a/b", "c", "id") == Hash("a", "b/c", "id") {
+		t.Fatal("ambiguous hash input")
 	}
 	// Pinned in the spec so every SDK derives the same value.
-	if got, want := Hash("acme-db", "0123456789abcdef0123456789abcdef"), "sha256:44fd0d30659f018c9db00ba857ac97aa63d9b1e99471a6899c49796cfc1698c0"; got != want {
+	if got, want := Hash("tnt_acme", "acme-db", "0123456789abcdef0123456789abcdef"), "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"; got != want {
 		t.Fatalf("Hash = %s, want %s", got, want)
 	}
 }

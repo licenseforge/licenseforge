@@ -14,7 +14,9 @@
 // both are refused.
 //
 // The raw ID never leaves the machine: the fingerprint is
-// "sha256:" + hex(sha256(productID + ":" + rawID)).
+// "sha256:" + hex(sha256("lf-fp-v1" NUL tenant NUL product NUL rawID)), so
+// different vendors (tenants) and products see unrelated fingerprints for the
+// same machine.
 package fingerprint
 
 import (
@@ -66,16 +68,18 @@ type Options struct {
 	AllowEnvOverride bool
 }
 
-// Hash derives the fingerprint for productID from a raw ID.
-func Hash(productID, rawID string) string {
-	sum := sha256.Sum256([]byte(productID + ":" + rawID))
+// Hash derives the fingerprint for a tenant's product from a raw ID. Fields
+// are NUL-separated so no combination of IDs can collide.
+func Hash(tenantID, productID, rawID string) string {
+	sum := sha256.Sum256([]byte("lf-fp-v1\x00" + tenantID + "\x00" + productID + "\x00" + rawID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// Compute returns the default fingerprint for productID on this machine. ctx
+// Compute returns the default fingerprint for a tenant's product on this
+// machine. tenantID and productID are the same IDs the license carries. ctx
 // bounds the Kubernetes lookup (up to ~17s with retries).
-func Compute(ctx context.Context, productID string, opts Options) (Result, error) {
-	return compute(ctx, productID, opts, env{getenv: os.Getenv, k8s: kubeSystemUID, machineID: osMachineID})
+func Compute(ctx context.Context, tenantID, productID string, opts Options) (Result, error) {
+	return compute(ctx, tenantID, productID, opts, env{getenv: os.Getenv, k8s: kubeSystemUID, machineID: osMachineID})
 }
 
 type env struct {
@@ -87,9 +91,9 @@ type env struct {
 // trimASCII removes only SP, HT, CR and LF, so every SDK trims identically.
 func trimASCII(s string) string { return strings.Trim(s, " \t\r\n") }
 
-func compute(ctx context.Context, productID string, opts Options, e env) (Result, error) {
-	if productID == "" {
-		return Result{}, errors.New("fingerprint: empty product ID")
+func compute(ctx context.Context, tenantID, productID string, opts Options, e env) (Result, error) {
+	if tenantID == "" || productID == "" || strings.ContainsRune(tenantID+productID, 0) {
+		return Result{}, errors.New("fingerprint: tenant and product IDs must be non-empty and contain no NUL")
 	}
 	if opts.Override != nil {
 		raw, err := opts.Override()
@@ -99,11 +103,11 @@ func compute(ctx context.Context, productID string, opts Options, e env) (Result
 		if raw = trimASCII(raw); raw == "" {
 			return Result{}, errors.New("fingerprint: override returned an empty ID")
 		}
-		return Result{Hash(productID, raw), SourceOverride, "machine"}, nil
+		return Result{Hash(tenantID, productID, raw), SourceOverride, "machine"}, nil
 	}
 	if opts.AllowEnvOverride {
 		if raw := trimASCII(e.getenv(EnvOverride)); raw != "" {
-			return Result{Hash(productID, raw), SourceEnv, "machine"}, nil
+			return Result{Hash(tenantID, productID, raw), SourceEnv, "machine"}, nil
 		}
 	}
 	if e.getenv("KUBERNETES_SERVICE_HOST") != "" {
@@ -111,7 +115,7 @@ func compute(ctx context.Context, productID string, opts Options, e env) (Result
 		if err != nil {
 			return Result{}, fmt.Errorf("fingerprint: kubernetes: %w", err)
 		}
-		return Result{Hash(productID, uid), SourceKubernetes, "cluster"}, nil
+		return Result{Hash(tenantID, productID, uid), SourceKubernetes, "cluster"}, nil
 	}
 	id, err := e.machineID()
 	if err != nil {
@@ -120,5 +124,5 @@ func compute(ctx context.Context, productID string, opts Options, e env) (Result
 		}
 		return Result{}, fmt.Errorf("%w: %v", ErrNoFingerprint, err)
 	}
-	return Result{Hash(productID, id), SourceMachineID, "machine"}, nil
+	return Result{Hash(tenantID, productID, id), SourceMachineID, "machine"}, nil
 }

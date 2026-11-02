@@ -97,8 +97,8 @@ Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result)
 
 ### Fingerprints
 Design: [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md).
-- `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8(product + ":" + raw_id)))`.
-- Test value: product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:44fd0d30659f018c9db00ba857ac97aa63d9b1e99471a6899c49796cfc1698c0`.
+- `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8("lf-fp-v1" ‖ 0x00 ‖ tenant ‖ 0x00 ‖ product ‖ 0x00 ‖ raw_id)))`, where `tenant` and `product` are the license's `tenant` and `product` claims (non-empty, no NUL). Including the tenant means two vendors on a hosted server can't correlate the same customer machine.
+- Test value: tenant `tnt_acme`, product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684`.
 - "Trim" below means removing only SP, HT, CR, LF at both ends (not Unicode spaces). No case changes anywhere.
 
 | Order | Source | Raw ID | `bind.type` |
