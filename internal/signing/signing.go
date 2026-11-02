@@ -7,11 +7,11 @@
 package signing
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/secrets"
@@ -26,8 +26,15 @@ var (
 	// retired. After a rotation, read the active kid again and rebuild the
 	// message.
 	ErrNotActive = errors.New("signing: key is not active")
-	// ErrNoActiveKey means the tenant has no active key yet.
+	// ErrNoActiveKey means the tenant has no active key.
 	ErrNoActiveKey = errors.New("signing: tenant has no active key")
+	// ErrPendingExists means the tenant already has a pending key (or a
+	// concurrent Create won); promote or discard it first.
+	ErrPendingExists = errors.New("signing: tenant already has a pending key")
+	// ErrNotPending means the key isn't the tenant's pending key.
+	ErrNotPending = errors.New("signing: key is not the pending key")
+	// ErrWrongMessage means msg isn't an lf1 message for this kid.
+	ErrWrongMessage = errors.New("signing: message is not lf1.<kid>.<payload>")
 )
 
 // Signer signs for one tenant's keys. msg is the full signed message,
@@ -60,9 +67,11 @@ func binding(tenantID, kid string) secrets.Binding {
 	return secrets.Binding{Purpose: PurposeSigningKey, TenantID: tenantID, RowID: kid}
 }
 
-// Create generates a key: active if the tenant has none yet, else pending
-// (published for vendors to trust, then Promote). It fails if the tenant
-// already has a pending key.
+// Create generates a key: active if it is the tenant's first key ever, else
+// pending (published for vendors to trust, then Promote). A tenant left
+// without an active key still gets a pending one: activating a key no build
+// trusts would break every deployed build (ADR-0026). It fails with
+// ErrPendingExists if the tenant already has a pending key.
 func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -75,16 +84,19 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 	}
 	var k *ent.SigningKey
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		hasActive, err := tx.SigningKey.Query().Where(signingkey.StatusEQ(signingkey.StatusActive)).Exist(ctx)
+		hasKeys, err := tx.SigningKey.Query().Exist(ctx)
 		if err != nil {
 			return err
 		}
 		c := tx.SigningKey.Create().SetID(kid).SetTenantID(tenantID).SetAlg(signingkey.AlgEd25519).
 			SetPublicKey(pub).SetPrivateKeyCiphertext(ct).SetStatus(signingkey.StatusPending)
-		if !hasActive {
+		if !hasKeys {
 			c.SetStatus(signingkey.StatusActive).SetActivatedAt(time.Now())
 		}
 		k, err = c.Save(ctx)
+		if ent.IsConstraintError(err) { // one active / one pending per tenant
+			return ErrPendingExists
+		}
 		return err
 	})
 	return k, err
@@ -113,7 +125,7 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 			}
 		}
 		if pending == nil || pending.ID != kid {
-			return fmt.Errorf("signing: %s is not the pending key", kid)
+			return ErrNotPending
 		}
 		if active != nil {
 			if err := retire(ctx, tx, active.ID, now); err != nil {
@@ -132,7 +144,7 @@ func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
 			Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).
 			SetStatus(signingkey.StatusRetired).SetRetiredAt(time.Now()).ClearPrivateKeyCiphertext().Save(ctx)
 		if err == nil && n == 0 {
-			err = fmt.Errorf("signing: %s is not the pending key", kid)
+			err = ErrNotPending
 		}
 		return err
 	})
@@ -157,30 +169,41 @@ func (l Local) Active(ctx context.Context, tenantID string) (string, error) {
 	return kid, err
 }
 
-// Sign signs msg with the tenant's key kid, which must be active.
+// Sign signs msg, which must be "lf1.<kid>.<payload>", with the tenant's
+// key kid, which must be active. It signs inside a transaction holding a
+// share lock on the key, so a concurrent Promote waits and a key never signs
+// after its retirement committed.
 func (l Local) Sign(ctx context.Context, tenantID, kid string, msg []byte) ([]byte, error) {
-	k, err := l.key(ctx, tenantID, kid)
-	if err != nil {
-		return nil, err
+	if !bytes.HasPrefix(msg, []byte("lf1."+kid+".")) {
+		return nil, ErrWrongMessage
 	}
-	if k.Status != signingkey.StatusActive || k.PrivateKeyCiphertext == nil {
-		return nil, ErrNotActive
-	}
-	seed, err := l.Keys.Decrypt(*k.PrivateKeyCiphertext, binding(tenantID, kid))
-	if err != nil {
-		return nil, err
-	}
-	if len(seed) != ed25519.SeedSize {
-		return nil, errors.New("signing: bad private key")
-	}
-	priv := ed25519.NewKeyFromSeed(seed)
-	clear(seed)
-	// The stored public key is what vendors trust; refuse a private key that
-	// doesn't match it rather than sign files nobody can verify.
-	if !priv.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(k.PublicKey)) {
-		return nil, errors.New("signing: private key doesn't match public key")
-	}
-	return ed25519.Sign(priv, msg), nil
+	var sig []byte
+	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		k, err := tx.SigningKey.Query().Where(signingkey.ID(kid)).ForShare().Only(ctx)
+		if err != nil {
+			return err
+		}
+		if k.Status != signingkey.StatusActive || k.PrivateKeyCiphertext == nil {
+			return ErrNotActive
+		}
+		seed, err := l.Keys.Decrypt(*k.PrivateKeyCiphertext, binding(tenantID, kid))
+		if err != nil {
+			return err
+		}
+		if len(seed) != ed25519.SeedSize {
+			return errors.New("signing: bad private key")
+		}
+		priv := ed25519.NewKeyFromSeed(seed)
+		clear(seed)
+		// The stored public key is what vendors trust; refuse a private key
+		// that doesn't match it rather than sign files nobody can verify.
+		if !priv.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(k.PublicKey)) {
+			return errors.New("signing: private key doesn't match public key")
+		}
+		sig = ed25519.Sign(priv, msg)
+		return nil
+	})
+	return sig, err
 }
 
 // Public returns the trusted-key entry for kid (any status), as vendors

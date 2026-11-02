@@ -5,9 +5,13 @@
 -- rules that need the old value (pending -> active -> retired, never back; a
 -- destroyed private key is never set again) are enforced by the signing service
 -- and recorded in the audit log.
-GRANT SELECT, INSERT ON "signing_keys" TO licenseforge_app, licenseforge_platform;
+-- Key operations are tenant-scoped (WithTenant). The platform pool may only
+-- read keys and rewrap private keys after a master-key rotation (ADR-0025).
+GRANT SELECT, INSERT ON "signing_keys" TO licenseforge_app;
 GRANT UPDATE ("status", "private_key_ciphertext", "activated_at", "retired_at", "updated_at")
-  ON "signing_keys" TO licenseforge_app, licenseforge_platform;
+  ON "signing_keys" TO licenseforge_app;
+GRANT SELECT ON "signing_keys" TO licenseforge_platform;
+GRANT UPDATE ("private_key_ciphertext", "updated_at") ON "signing_keys" TO licenseforge_platform;
 
 ALTER TABLE "signing_keys" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "signing_keys" FORCE ROW LEVEL SECURITY;
