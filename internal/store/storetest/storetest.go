@@ -106,9 +106,11 @@ func Main(m *testing.M, env *Env, migrate func(ctx context.Context, ownerURL str
 
 func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error) error {
 	// Group roles are cluster-wide and shared by concurrent test runs.
+	// Test binaries of several packages run in parallel: a concurrent CREATE
+	// ROLE fails with duplicate_object or unique_violation, which is fine.
 	if err := AdminExec(admin, `DO $$ BEGIN
-		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_app') THEN CREATE ROLE licenseforge_app NOLOGIN; END IF;
-		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_platform') THEN CREATE ROLE licenseforge_platform NOLOGIN; END IF;
+		BEGIN CREATE ROLE licenseforge_app NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
+		BEGIN CREATE ROLE licenseforge_platform NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
 	END $$`); err != nil {
 		return err
 	}
