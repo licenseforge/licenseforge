@@ -62,6 +62,38 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 | `bind` | `machine` (fingerprint), `cluster` (k8s kube-system namespace UID), or `none` (site license). |
 | `customer` | ID only by default; vendor may opt in to include a display name. Keeps personal data out of files copied to customer machines (GDPR data minimisation). |
 
+### Claim encoding rules
+Every rule here is *fail closed*: a violation makes the license `malformed`. SDKs must not be more lenient than this (e.g. JS `Date` or Java `Instant` defaults are too lenient).
+- **Well-formedness, checked first (before `v`) on the whole payload**: valid UTF-8 with **no BOM**; exactly one JSON object and nothing after it; **no duplicate keys in any object**, including unknown fields; nesting depth ≤ 32 (the top-level object is depth 1); no `\uD800`–`\uDFFF` escapes that don't form a valid surrogate pair. Violations → `malformed`, even when `v ≠ 1`.
+- Object keys are **case-sensitive**. Unknown keys are ignored (after the well-formedness check).
+- **`null`** for any defined field → `malformed` (absent and null are different).
+- **Types**: every defined field must have its defined type (string, object, array, integer). Wrong type → `malformed`.
+- **Integers** (`v`, limits): the JSON number token must match `-?(0|[1-9][0-9]*)` (no fraction, no exponent, so `1.0` and `1e0` are malformed).
+- **`v`** is read right after the well-formedness check: missing or not an integer → `malformed`; any integer other than `1` (even a huge one) → `unsupported_version`, without applying any of the field rules below (a future version may change them).
+- **Required** (v1): `lid` and `product` (non-empty strings), `iat`.
+- **Timestamps** (`iat`, `nbf`, `exp`, `refresh_after`, `updates_until`): exactly `YYYY-MM-DDTHH:MM:SSZ`, uppercase `T` and `Z`, year 1970–9999, a real calendar date, hour 00–23, minute and second 00–59 (no leap second `:60`, no `24:00:00`).
+- **Durations** (`grace`, `max_offline`): `P[nD][T[nH][nM][nS]]`, uppercase, each `n` 1–6 decimal digits, at least one component, no years/months/weeks, total ≤ 36,500 days. A **zero duration is set**: `max_offline: "PT0S"` means "only usable at `iat`" (needs an online refresh before any later use).
+- Optional: `tenant`, `plan` (strings); `customer` (object: `id`, `name` strings); `nbf`, `exp` (absent = perpetual, offline licenses only), `refresh_after`, `updates_until`; `grace` (absent = 0); `max_offline` (absent = no limit); `bind`; `entitlements` (object: `features` array of strings, `limits` object of integers).
+- **`bind`** (object): `type` absent or `bind` absent → `none`. `type` must be one of `none`, `machine`, `cluster`; any other value, including `""` → `malformed`. `machine`/`cluster` require a non-empty `fp`; `none` must not have `fp`.
+- **Limits**: integers in −1 … 2^53−1 (JSON-safe), `-1` = unlimited; other negatives → `malformed`.
+
+> [!note] For implementers
+> A plain `JSON.parse` (JS) or default Jackson/Gson (Java) is **not** enough: they accept duplicate keys, turn `1.0` into `1`, keep lone surrogates or have different depth limits. Use a parser that exposes raw tokens (e.g. Jackson streaming with `STRICT_DUPLICATE_DETECTION`, or a small tokenizer in TS) and decode with BOM stripping disabled (`TextDecoder` with `ignoreBOM: true`).
+
+### Claim checks
+Run after signature verification, in this order; the first failure decides the result. Inputs: `now`, expected `product`, local `fingerprint`, optional app `build_date`, optional `clock_tolerance` (≥ 0; absent = 24h default, [ADR-0018 Clock tampering protection](../docs/adr/0018-clock-tampering-protection.md); `0` is allowed and means strict).
+1. Apply the encoding rules above: `malformed` or `unsupported_version`.
+2. `product` ≠ expected → `wrong_product`.
+3. Binding doesn't match → `binding_mismatch`.
+4. `iat` > `now` + `clock_tolerance` → `clock_skew`.
+5. `nbf` set and `now` < `nbf` → `not_yet_valid`.
+6. `max_offline` set (including zero) and `now` > `iat` + `max_offline` → `offline_exceeded`.
+7. `exp` set and `now` > `exp` + `grace` → `expired`. If `now` > `exp` the license is in **grace** (usable, warn); grace is not a failure, so checks continue.
+8. `updates_until` and `build_date` set and `build_date` > `updates_until` → `updates_expired`.
+9. Otherwise → **`grace`** if step 7 found it in grace, else **`valid`**. Comparisons are strict: `now` equal to `exp` is still valid.
+
+Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result).
+
 ## SDK verify algorithm
 Steps run in this order; the first failing step decides the error class.
 1. Input larger than 64 KiB → `malformed`.
@@ -71,9 +103,7 @@ Steps run in this order; the first failing step decides the error class.
 5. Key's `alg` not supported → `unsupported_alg`.
 6. Key length wrong for `alg` → `invalid_key_set`. Signature length wrong for `alg` → `malformed`. Verify the signature over the ASCII bytes `lf1.<kid>.<payload_b64>` → `bad_signature` on failure.
 7. Only now parse the payload JSON.
-8. Check `v == 1`, `product` matches, `bind` matches local fingerprint.
-9. Time: `iat` in the future → invalid (clock tamper); `now < nbf` → invalid; `now > exp + grace` → expired; `now > exp` → grace (warn).
-10. If set, `updates_until` < app build date → invalid for this build.
-11. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
+8. Run the **claim checks** above.
+9. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
 
 That's the whole SDK core. Any language with Ed25519 (libsodium covers C/C++) can implement it in ~100 lines.
