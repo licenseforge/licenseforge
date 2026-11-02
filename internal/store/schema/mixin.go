@@ -41,6 +41,11 @@ func enumCheck(col string, values []string) string {
 var (
 	featureTypes = []string{"boolean", "limit"}
 	expiryBases  = []string{"from_issue", "from_first_activation"}
+	licenseTypes = []string{"dev", "trial", "paid", "community"}
+	statuses     = []string{"active", "suspended", "revoked"}
+	bindTypes    = []string{"machine", "cluster"}
+	fpSources    = []string{"override", "env", "kubernetes", "machine-id"}
+	modes        = []string{"online", "offline"}
 )
 
 // Column types enforced by the database too, not only by ent's validators.

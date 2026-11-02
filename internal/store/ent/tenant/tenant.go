@@ -24,6 +24,8 @@ const (
 	FieldName = "name"
 	// EdgeProducts holds the string denoting the products edge name in mutations.
 	EdgeProducts = "products"
+	// EdgeCustomers holds the string denoting the customers edge name in mutations.
+	EdgeCustomers = "customers"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -33,6 +35,13 @@ const (
 	ProductsInverseTable = "products"
 	// ProductsColumn is the table column denoting the products relation/edge.
 	ProductsColumn = "tenant_id"
+	// CustomersTable is the table that holds the customers relation/edge.
+	CustomersTable = "customers"
+	// CustomersInverseTable is the table name for the Customer entity.
+	// It exists in this package in order to avoid circular dependency with the "customer" package.
+	CustomersInverseTable = "customers"
+	// CustomersColumn is the table column denoting the customers relation/edge.
+	CustomersColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -112,10 +121,31 @@ func ByProducts(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newProductsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByCustomersCount orders the results by customers count.
+func ByCustomersCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newCustomersStep(), opts...)
+	}
+}
+
+// ByCustomers orders the results by customers terms.
+func ByCustomers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newCustomersStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(ProductsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, ProductsTable, ProductsColumn),
+	)
+}
+func newCustomersStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(CustomersInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, CustomersTable, CustomersColumn),
 	)
 }

@@ -9,6 +9,30 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
 
+// The ActivationFunc type is an adapter to allow the use of ordinary
+// function as Activation mutator.
+type ActivationFunc func(context.Context, *ent.ActivationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ActivationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ActivationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActivationMutation", m)
+}
+
+// The CustomerFunc type is an adapter to allow the use of ordinary
+// function as Customer mutator.
+type CustomerFunc func(context.Context, *ent.CustomerMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CustomerFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.CustomerMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.CustomerMutation", m)
+}
+
 // The FeatureFunc type is an adapter to allow the use of ordinary
 // function as Feature mutator.
 type FeatureFunc func(context.Context, *ent.FeatureMutation) (ent.Value, error)
@@ -19,6 +43,18 @@ func (f FeatureFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, err
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.FeatureMutation", m)
+}
+
+// The LicenseFunc type is an adapter to allow the use of ordinary
+// function as License mutator.
+type LicenseFunc func(context.Context, *ent.LicenseMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f LicenseFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.LicenseMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.LicenseMutation", m)
 }
 
 // The PlanFunc type is an adapter to allow the use of ordinary

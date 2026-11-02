@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
@@ -88,6 +89,21 @@ func (_c *TenantCreate) AddProducts(v ...*Product) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddProductIDs(ids...)
+}
+
+// AddCustomerIDs adds the "customers" edge to the Customer entity by IDs.
+func (_c *TenantCreate) AddCustomerIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddCustomerIDs(ids...)
+	return _c
+}
+
+// AddCustomers adds the "customers" edges to the Customer entity.
+func (_c *TenantCreate) AddCustomers(v ...*Customer) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddCustomerIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -228,6 +244,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(product.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.CustomersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.CustomersTable,
+			Columns: []string{tenant.CustomersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

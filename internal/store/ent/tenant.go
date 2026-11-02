@@ -35,9 +35,11 @@ type Tenant struct {
 type TenantEdges struct {
 	// Products holds the value of the products edge.
 	Products []*Product `json:"products,omitempty"`
+	// Customers holds the value of the customers edge.
+	Customers []*Customer `json:"customers,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [1]bool
+	loadedTypes [2]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -47,6 +49,15 @@ func (e TenantEdges) ProductsOrErr() ([]*Product, error) {
 		return e.Products, nil
 	}
 	return nil, &NotLoadedError{edge: "products"}
+}
+
+// CustomersOrErr returns the Customers value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) CustomersOrErr() ([]*Customer, error) {
+	if e.loadedTypes[1] {
+		return e.Customers, nil
+	}
+	return nil, &NotLoadedError{edge: "customers"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -119,6 +130,11 @@ func (_m *Tenant) Value(name string) (ent.Value, error) {
 // QueryProducts queries the "products" edge of the Tenant entity.
 func (_m *Tenant) QueryProducts() *ProductQuery {
 	return NewTenantClient(_m.config).QueryProducts(_m)
+}
+
+// QueryCustomers queries the "customers" edge of the Tenant entity.
+func (_m *Tenant) QueryCustomers() *CustomerQuery {
+	return NewTenantClient(_m.config).QueryCustomers(_m)
 }
 
 // Update returns a builder for updating this Tenant.

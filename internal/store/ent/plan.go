@@ -62,9 +62,11 @@ type PlanEdges struct {
 	Product *Product `json:"product,omitempty"`
 	// PlanFeatures holds the value of the plan_features edge.
 	PlanFeatures []*PlanFeature `json:"plan_features,omitempty"`
+	// Licenses holds the value of the licenses edge.
+	Licenses []*License `json:"licenses,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [2]bool
+	loadedTypes [3]bool
 }
 
 // ProductOrErr returns the Product value or an error if the edge
@@ -85,6 +87,15 @@ func (e PlanEdges) PlanFeaturesOrErr() ([]*PlanFeature, error) {
 		return e.PlanFeatures, nil
 	}
 	return nil, &NotLoadedError{edge: "plan_features"}
+}
+
+// LicensesOrErr returns the Licenses value or an error if the edge
+// was not loaded in eager-loading.
+func (e PlanEdges) LicensesOrErr() ([]*License, error) {
+	if e.loadedTypes[2] {
+		return e.Licenses, nil
+	}
+	return nil, &NotLoadedError{edge: "licenses"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -244,6 +255,11 @@ func (_m *Plan) QueryProduct() *ProductQuery {
 // QueryPlanFeatures queries the "plan_features" edge of the Plan entity.
 func (_m *Plan) QueryPlanFeatures() *PlanFeatureQuery {
 	return NewPlanClient(_m.config).QueryPlanFeatures(_m)
+}
+
+// QueryLicenses queries the "licenses" edge of the Plan entity.
+func (_m *Plan) QueryLicenses() *LicenseQuery {
+	return NewPlanClient(_m.config).QueryLicenses(_m)
 }
 
 // Update returns a builder for updating this Plan.

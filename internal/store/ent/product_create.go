@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -116,6 +117,21 @@ func (_c *ProductCreate) AddPlans(v ...*Plan) *ProductCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddPlanIDs(ids...)
+}
+
+// AddLicenseIDs adds the "licenses" edge to the License entity by IDs.
+func (_c *ProductCreate) AddLicenseIDs(ids ...string) *ProductCreate {
+	_c.mutation.AddLicenseIDs(ids...)
+	return _c
+}
+
+// AddLicenses adds the "licenses" edges to the License entity.
+func (_c *ProductCreate) AddLicenses(v ...*License) *ProductCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddLicenseIDs(ids...)
 }
 
 // Mutation returns the ProductMutation object of the builder.
@@ -300,6 +316,22 @@ func (_c *ProductCreate) createSpec() (*Product, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.LicensesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.LicensesTable,
+			Columns: []string{product.LicensesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(license.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -9,6 +9,90 @@ import (
 )
 
 var (
+	// ActivationsColumns holds the columns for the "activations" table.
+	ActivationsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "fingerprint", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(71)"}},
+		{Name: "fp_source", Type: field.TypeEnum, Enums: []string{"override", "env", "kubernetes", "machine-id"}},
+		{Name: "binding", Type: field.TypeEnum, Enums: []string{"machine", "cluster"}},
+		{Name: "mode", Type: field.TypeEnum, Enums: []string{"online", "offline"}},
+		{Name: "hostname", Type: field.TypeString, Nullable: true, Size: 253, SchemaType: map[string]string{"postgres": "varchar(253)"}},
+		{Name: "app_version", Type: field.TypeString, Nullable: true, Size: 64, SchemaType: map[string]string{"postgres": "varchar(64)"}},
+		{Name: "sdk_version", Type: field.TypeString, Nullable: true, Size: 64, SchemaType: map[string]string{"postgres": "varchar(64)"}},
+		{Name: "first_seen_at", Type: field.TypeTime},
+		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "deactivated_at", Type: field.TypeTime, Nullable: true},
+		{Name: "license_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// ActivationsTable holds the schema information for the "activations" table.
+	ActivationsTable = &schema.Table{
+		Name:       "activations",
+		Columns:    ActivationsColumns,
+		PrimaryKey: []*schema.Column{ActivationsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "activations_licenses_activations",
+				Columns:    []*schema.Column{ActivationsColumns[14]},
+				RefColumns: []*schema.Column{LicensesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "activation_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{ActivationsColumns[1]},
+			},
+			{
+				Name:    "activation_license_id_fingerprint",
+				Unique:  true,
+				Columns: []*schema.Column{ActivationsColumns[14], ActivationsColumns[4]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deactivated_at IS NULL",
+				},
+			},
+		},
+	}
+	// CustomersColumns holds the columns for the "customers" table.
+	CustomersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "email", Type: field.TypeString, Nullable: true, Size: 320, SchemaType: map[string]string{"postgres": "varchar(320)"}},
+		{Name: "external_refs", Type: field.TypeJSON},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// CustomersTable holds the schema information for the "customers" table.
+	CustomersTable = &schema.Table{
+		Name:       "customers",
+		Columns:    CustomersColumns,
+		PrimaryKey: []*schema.Column{CustomersColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "customers_tenants_customers",
+				Columns:    []*schema.Column{CustomersColumns[7]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "customer_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{CustomersColumns[7]},
+			},
+			{
+				Name:    "customer_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{CustomersColumns[7], CustomersColumns[0]},
+			},
+		},
+	}
 	// FeaturesColumns holds the columns for the "features" table.
 	FeaturesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -56,6 +140,88 @@ var (
 				Name:    "feature_tenant_id_product_id_id_type",
 				Unique:  true,
 				Columns: []*schema.Column{FeaturesColumns[1], FeaturesColumns[10], FeaturesColumns[0], FeaturesColumns[7]},
+			},
+		},
+	}
+	// LicensesColumns holds the columns for the "licenses" table.
+	LicensesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "type", Type: field.TypeEnum, Enums: []string{"dev", "trial", "paid", "community"}, Default: "paid"},
+		{Name: "status", Type: field.TypeEnum, Enums: []string{"active", "suspended", "revoked"}, Default: "active"},
+		{Name: "key_ciphertext", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "key_lookup", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(64)"}},
+		{Name: "key_hint", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(6)"}},
+		{Name: "plan_slug", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "expiry_basis", Type: field.TypeEnum, Enums: []string{"from_issue", "from_first_activation"}},
+		{Name: "duration_months", Type: field.TypeInt, Nullable: true},
+		{Name: "duration_seconds", Type: field.TypeInt64, Nullable: true},
+		{Name: "max_activations", Type: field.TypeInt, Nullable: true},
+		{Name: "max_rehosts", Type: field.TypeInt, Nullable: true},
+		{Name: "offline_allowed", Type: field.TypeBool},
+		{Name: "lease_seconds", Type: field.TypeInt64},
+		{Name: "max_offline_seconds", Type: field.TypeInt64, Nullable: true},
+		{Name: "grace_seconds", Type: field.TypeInt64},
+		{Name: "entitlements", Type: field.TypeJSON},
+		{Name: "issued_at", Type: field.TypeTime},
+		{Name: "expires_at", Type: field.TypeTime, Nullable: true},
+		{Name: "first_activated_at", Type: field.TypeTime, Nullable: true},
+		{Name: "updates_until", Type: field.TypeTime, Nullable: true},
+		{Name: "suspended_at", Type: field.TypeTime, Nullable: true},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true},
+		{Name: "rehost_count", Type: field.TypeInt, Default: 0},
+		{Name: "external_refs", Type: field.TypeJSON},
+		{Name: "customer_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "plan_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "product_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// LicensesTable holds the schema information for the "licenses" table.
+	LicensesTable = &schema.Table{
+		Name:       "licenses",
+		Columns:    LicensesColumns,
+		PrimaryKey: []*schema.Column{LicensesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "licenses_customers_licenses",
+				Columns:    []*schema.Column{LicensesColumns[28]},
+				RefColumns: []*schema.Column{CustomersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "licenses_plans_licenses",
+				Columns:    []*schema.Column{LicensesColumns[29]},
+				RefColumns: []*schema.Column{PlansColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "licenses_products_licenses",
+				Columns:    []*schema.Column{LicensesColumns[30]},
+				RefColumns: []*schema.Column{ProductsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "license_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{LicensesColumns[1]},
+			},
+			{
+				Name:    "license_key_lookup",
+				Unique:  true,
+				Columns: []*schema.Column{LicensesColumns[7]},
+			},
+			{
+				Name:    "license_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[0]},
+			},
+			{
+				Name:    "license_tenant_id_customer_id",
+				Unique:  false,
+				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[28]},
 			},
 		},
 	}
@@ -215,7 +381,10 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		ActivationsTable,
+		CustomersTable,
 		FeaturesTable,
+		LicensesTable,
 		PlansTable,
 		PlanFeaturesTable,
 		ProductsTable,
@@ -224,6 +393,24 @@ var (
 )
 
 func init() {
+	ActivationsTable.ForeignKeys[0].RefTable = LicensesTable
+	ActivationsTable.Annotation = &entsql.Annotation{}
+	ActivationsTable.Annotation.Checks = map[string]string{
+		"activations_binding":     "(binding)::text = ANY (ARRAY['machine'::text, 'cluster'::text])",
+		"activations_fingerprint": "fingerprint ~ '^sha256:[0-9a-f]{64}$'",
+		"activations_id_format":   "id ~ '^act_[a-z2-7]{26}$'",
+		"activations_mode":        "(mode)::text = ANY (ARRAY['online'::text, 'offline'::text])",
+		"activations_seen_order":  "last_seen_at >= first_seen_at",
+		"activations_source":      "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
+	}
+	CustomersTable.ForeignKeys[0].RefTable = TenantsTable
+	CustomersTable.Annotation = &entsql.Annotation{}
+	CustomersTable.Annotation.Checks = map[string]string{
+		"customers_email_format":   "email IS NULL OR email ~ '^[^@[:space:]]+@[^@[:space:]]+$'",
+		"customers_id_format":      "id ~ '^cus_[a-z2-7]{26}$'",
+		"customers_name_not_blank": "btrim(name) <> ''",
+		"customers_refs_object":    "jsonb_typeof(external_refs) = 'object'",
+	}
 	FeaturesTable.ForeignKeys[0].RefTable = ProductsTable
 	FeaturesTable.Annotation = &entsql.Annotation{}
 	FeaturesTable.Annotation.Checks = map[string]string{
@@ -233,6 +420,33 @@ func init() {
 		"features_name_not_blank": "btrim(name) <> ''",
 		"features_type_valid":     "(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
 		"features_unit_set":       "unit IS NULL OR btrim(unit) <> ''",
+	}
+	LicensesTable.ForeignKeys[0].RefTable = CustomersTable
+	LicensesTable.ForeignKeys[1].RefTable = PlansTable
+	LicensesTable.ForeignKeys[2].RefTable = ProductsTable
+	LicensesTable.Annotation = &entsql.Annotation{}
+	LicensesTable.Annotation.Checks = map[string]string{
+		"licenses_activations_rng": "max_activations IS NULL OR (max_activations >= 1 AND max_activations <= 1000000)",
+		"licenses_duration_months": "duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)",
+		"licenses_duration_secs":   "duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= 3153600000)",
+		"licenses_entitlements":    "jsonb_typeof(entitlements) = 'object' AND jsonb_typeof(entitlements -> 'features') = 'array' AND jsonb_typeof(entitlements -> 'limits') = 'object'",
+		"licenses_expiry_valid":    "(expiry_basis)::text = ANY (ARRAY['from_issue'::text, 'from_first_activation'::text])",
+		"licenses_grace_range":     "grace_seconds >= 0 AND grace_seconds <= 3153600000",
+		"licenses_id_format":       "id ~ '^lic_[a-z2-7]{26}$'",
+		"licenses_key_ciphertext":  "key_ciphertext ~ '^v1\\.[a-z0-9-]{1,32}\\.[A-Za-z0-9_-]+$'",
+		"licenses_key_hint":        "key_hint ~ '^[A-Z2-7]{6}$'",
+		"licenses_key_lookup":      "key_lookup ~ '^[0-9a-f]{64}$'",
+		"licenses_lease_range":     "lease_seconds >= 1 AND lease_seconds <= 3153600000",
+		"licenses_max_offline_rng": "max_offline_seconds IS NULL OR (max_offline_seconds >= 0 AND max_offline_seconds <= 3153600000)",
+		"licenses_one_duration":    "num_nonnulls(duration_months, duration_seconds) <= 1",
+		"licenses_plan_slug":       "plan_slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"licenses_refs_object":     "jsonb_typeof(external_refs) = 'object'",
+		"licenses_rehosts_nonneg":  "rehost_count >= 0",
+		"licenses_rehosts_rng":     "max_rehosts IS NULL OR (max_rehosts >= 0 AND max_rehosts <= 1000000)",
+		"licenses_revoked_at":      "(status = 'revoked') = (revoked_at IS NOT NULL)",
+		"licenses_status_valid":    "(status)::text = ANY (ARRAY['active'::text, 'suspended'::text, 'revoked'::text])",
+		"licenses_suspended_at":    "(status = 'suspended') = (suspended_at IS NOT NULL)",
+		"licenses_type_valid":      "(type)::text = ANY (ARRAY['dev'::text, 'trial'::text, 'paid'::text, 'community'::text])",
 	}
 	PlansTable.ForeignKeys[0].RefTable = ProductsTable
 	PlansTable.Annotation = &entsql.Annotation{}

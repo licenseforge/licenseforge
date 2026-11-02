@@ -5,7 +5,10 @@ package ent
 import (
 	"time"
 
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -17,6 +20,163 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	activationMixin := schema.Activation{}.Mixin()
+	activationMixinFields0 := activationMixin[0].Fields()
+	_ = activationMixinFields0
+	activationMixinFields1 := activationMixin[1].Fields()
+	_ = activationMixinFields1
+	activationFields := schema.Activation{}.Fields()
+	_ = activationFields
+	// activationDescTenantID is the schema descriptor for tenant_id field.
+	activationDescTenantID := activationMixinFields0[0].Descriptor()
+	// activation.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	activation.TenantIDValidator = func() func(string) error {
+		validators := activationDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// activationDescCreatedAt is the schema descriptor for created_at field.
+	activationDescCreatedAt := activationMixinFields1[0].Descriptor()
+	// activation.DefaultCreatedAt holds the default value on creation for the created_at field.
+	activation.DefaultCreatedAt = activationDescCreatedAt.Default.(func() time.Time)
+	// activationDescUpdatedAt is the schema descriptor for updated_at field.
+	activationDescUpdatedAt := activationMixinFields1[1].Descriptor()
+	// activation.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	activation.DefaultUpdatedAt = activationDescUpdatedAt.Default.(func() time.Time)
+	// activation.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	activation.UpdateDefaultUpdatedAt = activationDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// activationDescLicenseID is the schema descriptor for license_id field.
+	activationDescLicenseID := activationFields[1].Descriptor()
+	// activation.LicenseIDValidator is a validator for the "license_id" field. It is called by the builders before save.
+	activation.LicenseIDValidator = activationDescLicenseID.Validators[0].(func(string) error)
+	// activationDescFingerprint is the schema descriptor for fingerprint field.
+	activationDescFingerprint := activationFields[2].Descriptor()
+	// activation.FingerprintValidator is a validator for the "fingerprint" field. It is called by the builders before save.
+	activation.FingerprintValidator = activationDescFingerprint.Validators[0].(func(string) error)
+	// activationDescHostname is the schema descriptor for hostname field.
+	activationDescHostname := activationFields[6].Descriptor()
+	// activation.HostnameValidator is a validator for the "hostname" field. It is called by the builders before save.
+	activation.HostnameValidator = activationDescHostname.Validators[0].(func(string) error)
+	// activationDescAppVersion is the schema descriptor for app_version field.
+	activationDescAppVersion := activationFields[7].Descriptor()
+	// activation.AppVersionValidator is a validator for the "app_version" field. It is called by the builders before save.
+	activation.AppVersionValidator = activationDescAppVersion.Validators[0].(func(string) error)
+	// activationDescSdkVersion is the schema descriptor for sdk_version field.
+	activationDescSdkVersion := activationFields[8].Descriptor()
+	// activation.SdkVersionValidator is a validator for the "sdk_version" field. It is called by the builders before save.
+	activation.SdkVersionValidator = activationDescSdkVersion.Validators[0].(func(string) error)
+	// activationDescID is the schema descriptor for id field.
+	activationDescID := activationFields[0].Descriptor()
+	// activation.DefaultID holds the default value on creation for the id field.
+	activation.DefaultID = activationDescID.Default.(func() string)
+	// activation.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	activation.IDValidator = func() func(string) error {
+		validators := activationDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	customerMixin := schema.Customer{}.Mixin()
+	customerMixinFields0 := customerMixin[0].Fields()
+	_ = customerMixinFields0
+	customerMixinFields1 := customerMixin[1].Fields()
+	_ = customerMixinFields1
+	customerFields := schema.Customer{}.Fields()
+	_ = customerFields
+	// customerDescTenantID is the schema descriptor for tenant_id field.
+	customerDescTenantID := customerMixinFields0[0].Descriptor()
+	// customer.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	customer.TenantIDValidator = func() func(string) error {
+		validators := customerDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// customerDescCreatedAt is the schema descriptor for created_at field.
+	customerDescCreatedAt := customerMixinFields1[0].Descriptor()
+	// customer.DefaultCreatedAt holds the default value on creation for the created_at field.
+	customer.DefaultCreatedAt = customerDescCreatedAt.Default.(func() time.Time)
+	// customerDescUpdatedAt is the schema descriptor for updated_at field.
+	customerDescUpdatedAt := customerMixinFields1[1].Descriptor()
+	// customer.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	customer.DefaultUpdatedAt = customerDescUpdatedAt.Default.(func() time.Time)
+	// customer.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	customer.UpdateDefaultUpdatedAt = customerDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// customerDescName is the schema descriptor for name field.
+	customerDescName := customerFields[1].Descriptor()
+	// customer.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	customer.NameValidator = func() func(string) error {
+		validators := customerDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// customerDescEmail is the schema descriptor for email field.
+	customerDescEmail := customerFields[2].Descriptor()
+	// customer.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	customer.EmailValidator = customerDescEmail.Validators[0].(func(string) error)
+	// customerDescExternalRefs is the schema descriptor for external_refs field.
+	customerDescExternalRefs := customerFields[3].Descriptor()
+	// customer.DefaultExternalRefs holds the default value on creation for the external_refs field.
+	customer.DefaultExternalRefs = customerDescExternalRefs.Default.(map[string]string)
+	// customerDescID is the schema descriptor for id field.
+	customerDescID := customerFields[0].Descriptor()
+	// customer.DefaultID holds the default value on creation for the id field.
+	customer.DefaultID = customerDescID.Default.(func() string)
+	// customer.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	customer.IDValidator = func() func(string) error {
+		validators := customerDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	featureMixin := schema.Feature{}.Mixin()
 	featureMixinFields0 := featureMixin[0].Fields()
 	_ = featureMixinFields0
@@ -137,6 +297,142 @@ func init() {
 	// feature.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	feature.IDValidator = func() func(string) error {
 		validators := featureDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	licenseMixin := schema.License{}.Mixin()
+	licenseMixinFields0 := licenseMixin[0].Fields()
+	_ = licenseMixinFields0
+	licenseMixinFields1 := licenseMixin[1].Fields()
+	_ = licenseMixinFields1
+	licenseFields := schema.License{}.Fields()
+	_ = licenseFields
+	// licenseDescTenantID is the schema descriptor for tenant_id field.
+	licenseDescTenantID := licenseMixinFields0[0].Descriptor()
+	// license.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	license.TenantIDValidator = func() func(string) error {
+		validators := licenseDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// licenseDescCreatedAt is the schema descriptor for created_at field.
+	licenseDescCreatedAt := licenseMixinFields1[0].Descriptor()
+	// license.DefaultCreatedAt holds the default value on creation for the created_at field.
+	license.DefaultCreatedAt = licenseDescCreatedAt.Default.(func() time.Time)
+	// licenseDescUpdatedAt is the schema descriptor for updated_at field.
+	licenseDescUpdatedAt := licenseMixinFields1[1].Descriptor()
+	// license.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	license.DefaultUpdatedAt = licenseDescUpdatedAt.Default.(func() time.Time)
+	// license.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	license.UpdateDefaultUpdatedAt = licenseDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// licenseDescProductID is the schema descriptor for product_id field.
+	licenseDescProductID := licenseFields[1].Descriptor()
+	// license.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	license.ProductIDValidator = licenseDescProductID.Validators[0].(func(string) error)
+	// licenseDescPlanID is the schema descriptor for plan_id field.
+	licenseDescPlanID := licenseFields[2].Descriptor()
+	// license.PlanIDValidator is a validator for the "plan_id" field. It is called by the builders before save.
+	license.PlanIDValidator = licenseDescPlanID.Validators[0].(func(string) error)
+	// licenseDescCustomerID is the schema descriptor for customer_id field.
+	licenseDescCustomerID := licenseFields[3].Descriptor()
+	// license.CustomerIDValidator is a validator for the "customer_id" field. It is called by the builders before save.
+	license.CustomerIDValidator = licenseDescCustomerID.Validators[0].(func(string) error)
+	// licenseDescKeyCiphertext is the schema descriptor for key_ciphertext field.
+	licenseDescKeyCiphertext := licenseFields[6].Descriptor()
+	// license.KeyCiphertextValidator is a validator for the "key_ciphertext" field. It is called by the builders before save.
+	license.KeyCiphertextValidator = licenseDescKeyCiphertext.Validators[0].(func(string) error)
+	// licenseDescKeyLookup is the schema descriptor for key_lookup field.
+	licenseDescKeyLookup := licenseFields[7].Descriptor()
+	// license.KeyLookupValidator is a validator for the "key_lookup" field. It is called by the builders before save.
+	license.KeyLookupValidator = licenseDescKeyLookup.Validators[0].(func(string) error)
+	// licenseDescKeyHint is the schema descriptor for key_hint field.
+	licenseDescKeyHint := licenseFields[8].Descriptor()
+	// license.KeyHintValidator is a validator for the "key_hint" field. It is called by the builders before save.
+	license.KeyHintValidator = licenseDescKeyHint.Validators[0].(func(string) error)
+	// licenseDescPlanSlug is the schema descriptor for plan_slug field.
+	licenseDescPlanSlug := licenseFields[9].Descriptor()
+	// license.PlanSlugValidator is a validator for the "plan_slug" field. It is called by the builders before save.
+	license.PlanSlugValidator = func() func(string) error {
+		validators := licenseDescPlanSlug.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(plan_slug string) error {
+			for _, fn := range fns {
+				if err := fn(plan_slug); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// licenseDescDurationMonths is the schema descriptor for duration_months field.
+	licenseDescDurationMonths := licenseFields[11].Descriptor()
+	// license.DurationMonthsValidator is a validator for the "duration_months" field. It is called by the builders before save.
+	license.DurationMonthsValidator = licenseDescDurationMonths.Validators[0].(func(int) error)
+	// licenseDescDurationSeconds is the schema descriptor for duration_seconds field.
+	licenseDescDurationSeconds := licenseFields[12].Descriptor()
+	// license.DurationSecondsValidator is a validator for the "duration_seconds" field. It is called by the builders before save.
+	license.DurationSecondsValidator = licenseDescDurationSeconds.Validators[0].(func(int64) error)
+	// licenseDescMaxActivations is the schema descriptor for max_activations field.
+	licenseDescMaxActivations := licenseFields[13].Descriptor()
+	// license.MaxActivationsValidator is a validator for the "max_activations" field. It is called by the builders before save.
+	license.MaxActivationsValidator = licenseDescMaxActivations.Validators[0].(func(int) error)
+	// licenseDescMaxRehosts is the schema descriptor for max_rehosts field.
+	licenseDescMaxRehosts := licenseFields[14].Descriptor()
+	// license.MaxRehostsValidator is a validator for the "max_rehosts" field. It is called by the builders before save.
+	license.MaxRehostsValidator = licenseDescMaxRehosts.Validators[0].(func(int) error)
+	// licenseDescLeaseSeconds is the schema descriptor for lease_seconds field.
+	licenseDescLeaseSeconds := licenseFields[16].Descriptor()
+	// license.LeaseSecondsValidator is a validator for the "lease_seconds" field. It is called by the builders before save.
+	license.LeaseSecondsValidator = licenseDescLeaseSeconds.Validators[0].(func(int64) error)
+	// licenseDescMaxOfflineSeconds is the schema descriptor for max_offline_seconds field.
+	licenseDescMaxOfflineSeconds := licenseFields[17].Descriptor()
+	// license.MaxOfflineSecondsValidator is a validator for the "max_offline_seconds" field. It is called by the builders before save.
+	license.MaxOfflineSecondsValidator = licenseDescMaxOfflineSeconds.Validators[0].(func(int64) error)
+	// licenseDescGraceSeconds is the schema descriptor for grace_seconds field.
+	licenseDescGraceSeconds := licenseFields[18].Descriptor()
+	// license.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
+	license.GraceSecondsValidator = licenseDescGraceSeconds.Validators[0].(func(int64) error)
+	// licenseDescRehostCount is the schema descriptor for rehost_count field.
+	licenseDescRehostCount := licenseFields[26].Descriptor()
+	// license.DefaultRehostCount holds the default value on creation for the rehost_count field.
+	license.DefaultRehostCount = licenseDescRehostCount.Default.(int)
+	// license.RehostCountValidator is a validator for the "rehost_count" field. It is called by the builders before save.
+	license.RehostCountValidator = licenseDescRehostCount.Validators[0].(func(int) error)
+	// licenseDescExternalRefs is the schema descriptor for external_refs field.
+	licenseDescExternalRefs := licenseFields[27].Descriptor()
+	// license.DefaultExternalRefs holds the default value on creation for the external_refs field.
+	license.DefaultExternalRefs = licenseDescExternalRefs.Default.(map[string]string)
+	// licenseDescID is the schema descriptor for id field.
+	licenseDescID := licenseFields[0].Descriptor()
+	// license.DefaultID holds the default value on creation for the id field.
+	license.DefaultID = licenseDescID.Default.(func() string)
+	// license.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	license.IDValidator = func() func(string) error {
+		validators := licenseDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

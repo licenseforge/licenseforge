@@ -12,7 +12,10 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -77,7 +80,10 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
+			activation.Table:  activation.ValidColumn,
+			customer.Table:    customer.ValidColumn,
 			feature.Table:     feature.ValidColumn,
+			license.Table:     license.ValidColumn,
 			plan.Table:        plan.ValidColumn,
 			planfeature.Table: planfeature.ValidColumn,
 			product.Table:     product.ValidColumn,

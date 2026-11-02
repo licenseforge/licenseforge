@@ -15,7 +15,10 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -29,8 +32,14 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
+	// Activation is the client for interacting with the Activation builders.
+	Activation *ActivationClient
+	// Customer is the client for interacting with the Customer builders.
+	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
 	Feature *FeatureClient
+	// License is the client for interacting with the License builders.
+	License *LicenseClient
 	// Plan is the client for interacting with the Plan builders.
 	Plan *PlanClient
 	// PlanFeature is the client for interacting with the PlanFeature builders.
@@ -50,7 +59,10 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
+	c.Activation = NewActivationClient(c.config)
+	c.Customer = NewCustomerClient(c.config)
 	c.Feature = NewFeatureClient(c.config)
+	c.License = NewLicenseClient(c.config)
 	c.Plan = NewPlanClient(c.config)
 	c.PlanFeature = NewPlanFeatureClient(c.config)
 	c.Product = NewProductClient(c.config)
@@ -147,7 +159,10 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	return &Tx{
 		ctx:         ctx,
 		config:      cfg,
+		Activation:  NewActivationClient(cfg),
+		Customer:    NewCustomerClient(cfg),
 		Feature:     NewFeatureClient(cfg),
+		License:     NewLicenseClient(cfg),
 		Plan:        NewPlanClient(cfg),
 		PlanFeature: NewPlanFeatureClient(cfg),
 		Product:     NewProductClient(cfg),
@@ -171,7 +186,10 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	return &Tx{
 		ctx:         ctx,
 		config:      cfg,
+		Activation:  NewActivationClient(cfg),
+		Customer:    NewCustomerClient(cfg),
 		Feature:     NewFeatureClient(cfg),
+		License:     NewLicenseClient(cfg),
 		Plan:        NewPlanClient(cfg),
 		PlanFeature: NewPlanFeatureClient(cfg),
 		Product:     NewProductClient(cfg),
@@ -182,7 +200,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		Feature.
+//		Activation.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -204,28 +222,36 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
-	c.Feature.Use(hooks...)
-	c.Plan.Use(hooks...)
-	c.PlanFeature.Use(hooks...)
-	c.Product.Use(hooks...)
-	c.Tenant.Use(hooks...)
+	for _, n := range []interface{ Use(...Hook) }{
+		c.Activation, c.Customer, c.Feature, c.License, c.Plan, c.PlanFeature,
+		c.Product, c.Tenant,
+	} {
+		n.Use(hooks...)
+	}
 }
 
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
-	c.Feature.Intercept(interceptors...)
-	c.Plan.Intercept(interceptors...)
-	c.PlanFeature.Intercept(interceptors...)
-	c.Product.Intercept(interceptors...)
-	c.Tenant.Intercept(interceptors...)
+	for _, n := range []interface{ Intercept(...Interceptor) }{
+		c.Activation, c.Customer, c.Feature, c.License, c.Plan, c.PlanFeature,
+		c.Product, c.Tenant,
+	} {
+		n.Intercept(interceptors...)
+	}
 }
 
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
+	case *ActivationMutation:
+		return c.Activation.mutate(ctx, m)
+	case *CustomerMutation:
+		return c.Customer.mutate(ctx, m)
 	case *FeatureMutation:
 		return c.Feature.mutate(ctx, m)
+	case *LicenseMutation:
+		return c.License.mutate(ctx, m)
 	case *PlanMutation:
 		return c.Plan.mutate(ctx, m)
 	case *PlanFeatureMutation:
@@ -236,6 +262,320 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Tenant.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
+	}
+}
+
+// ActivationClient is a client for the Activation schema.
+type ActivationClient struct {
+	config
+}
+
+// NewActivationClient returns a client for the Activation from the given config.
+func NewActivationClient(c config) *ActivationClient {
+	return &ActivationClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `activation.Hooks(f(g(h())))`.
+func (c *ActivationClient) Use(hooks ...Hook) {
+	c.hooks.Activation = append(c.hooks.Activation, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `activation.Intercept(f(g(h())))`.
+func (c *ActivationClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Activation = append(c.inters.Activation, interceptors...)
+}
+
+// Create returns a builder for creating a Activation entity.
+func (c *ActivationClient) Create() *ActivationCreate {
+	mutation := newActivationMutation(c.config, OpCreate)
+	return &ActivationCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Activation entities.
+func (c *ActivationClient) CreateBulk(builders ...*ActivationCreate) *ActivationCreateBulk {
+	return &ActivationCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ActivationClient) MapCreateBulk(slice any, setFunc func(*ActivationCreate, int)) *ActivationCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ActivationCreateBulk{err: fmt.Errorf("calling to ActivationClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ActivationCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ActivationCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Activation.
+func (c *ActivationClient) Update() *ActivationUpdate {
+	mutation := newActivationMutation(c.config, OpUpdate)
+	return &ActivationUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ActivationClient) UpdateOne(_m *Activation) *ActivationUpdateOne {
+	mutation := newActivationMutation(c.config, OpUpdateOne, withActivation(_m))
+	return &ActivationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ActivationClient) UpdateOneID(id string) *ActivationUpdateOne {
+	mutation := newActivationMutation(c.config, OpUpdateOne, withActivationID(id))
+	return &ActivationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Activation.
+func (c *ActivationClient) Delete() *ActivationDelete {
+	mutation := newActivationMutation(c.config, OpDelete)
+	return &ActivationDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ActivationClient) DeleteOne(_m *Activation) *ActivationDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ActivationClient) DeleteOneID(id string) *ActivationDeleteOne {
+	builder := c.Delete().Where(activation.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ActivationDeleteOne{builder}
+}
+
+// Query returns a query builder for Activation.
+func (c *ActivationClient) Query() *ActivationQuery {
+	return &ActivationQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeActivation},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Activation entity by its id.
+func (c *ActivationClient) Get(ctx context.Context, id string) (*Activation, error) {
+	return c.Query().Where(activation.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ActivationClient) GetX(ctx context.Context, id string) *Activation {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryLicense queries the license edge of a Activation.
+func (c *ActivationClient) QueryLicense(_m *Activation) *LicenseQuery {
+	query := (&LicenseClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(activation.Table, activation.FieldID, id),
+			sqlgraph.To(license.Table, license.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, activation.LicenseTable, activation.LicenseColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *ActivationClient) Hooks() []Hook {
+	return c.hooks.Activation
+}
+
+// Interceptors returns the client interceptors.
+func (c *ActivationClient) Interceptors() []Interceptor {
+	return c.inters.Activation
+}
+
+func (c *ActivationClient) mutate(ctx context.Context, m *ActivationMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ActivationCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ActivationUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ActivationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ActivationDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Activation mutation op: %q", m.Op())
+	}
+}
+
+// CustomerClient is a client for the Customer schema.
+type CustomerClient struct {
+	config
+}
+
+// NewCustomerClient returns a client for the Customer from the given config.
+func NewCustomerClient(c config) *CustomerClient {
+	return &CustomerClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `customer.Hooks(f(g(h())))`.
+func (c *CustomerClient) Use(hooks ...Hook) {
+	c.hooks.Customer = append(c.hooks.Customer, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `customer.Intercept(f(g(h())))`.
+func (c *CustomerClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Customer = append(c.inters.Customer, interceptors...)
+}
+
+// Create returns a builder for creating a Customer entity.
+func (c *CustomerClient) Create() *CustomerCreate {
+	mutation := newCustomerMutation(c.config, OpCreate)
+	return &CustomerCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Customer entities.
+func (c *CustomerClient) CreateBulk(builders ...*CustomerCreate) *CustomerCreateBulk {
+	return &CustomerCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *CustomerClient) MapCreateBulk(slice any, setFunc func(*CustomerCreate, int)) *CustomerCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &CustomerCreateBulk{err: fmt.Errorf("calling to CustomerClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*CustomerCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &CustomerCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Customer.
+func (c *CustomerClient) Update() *CustomerUpdate {
+	mutation := newCustomerMutation(c.config, OpUpdate)
+	return &CustomerUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *CustomerClient) UpdateOne(_m *Customer) *CustomerUpdateOne {
+	mutation := newCustomerMutation(c.config, OpUpdateOne, withCustomer(_m))
+	return &CustomerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *CustomerClient) UpdateOneID(id string) *CustomerUpdateOne {
+	mutation := newCustomerMutation(c.config, OpUpdateOne, withCustomerID(id))
+	return &CustomerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Customer.
+func (c *CustomerClient) Delete() *CustomerDelete {
+	mutation := newCustomerMutation(c.config, OpDelete)
+	return &CustomerDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *CustomerClient) DeleteOne(_m *Customer) *CustomerDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *CustomerClient) DeleteOneID(id string) *CustomerDeleteOne {
+	builder := c.Delete().Where(customer.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &CustomerDeleteOne{builder}
+}
+
+// Query returns a query builder for Customer.
+func (c *CustomerClient) Query() *CustomerQuery {
+	return &CustomerQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeCustomer},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Customer entity by its id.
+func (c *CustomerClient) Get(ctx context.Context, id string) (*Customer, error) {
+	return c.Query().Where(customer.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *CustomerClient) GetX(ctx context.Context, id string) *Customer {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a Customer.
+func (c *CustomerClient) QueryTenant(_m *Customer) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(customer.Table, customer.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, customer.TenantTable, customer.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryLicenses queries the licenses edge of a Customer.
+func (c *CustomerClient) QueryLicenses(_m *Customer) *LicenseQuery {
+	query := (&LicenseClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(customer.Table, customer.FieldID, id),
+			sqlgraph.To(license.Table, license.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, customer.LicensesTable, customer.LicensesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *CustomerClient) Hooks() []Hook {
+	return c.hooks.Customer
+}
+
+// Interceptors returns the client interceptors.
+func (c *CustomerClient) Interceptors() []Interceptor {
+	return c.inters.Customer
+}
+
+func (c *CustomerClient) mutate(ctx context.Context, m *CustomerMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&CustomerCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&CustomerUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&CustomerUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&CustomerDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Customer mutation op: %q", m.Op())
 	}
 }
 
@@ -404,6 +744,203 @@ func (c *FeatureClient) mutate(ctx context.Context, m *FeatureMutation) (Value, 
 	}
 }
 
+// LicenseClient is a client for the License schema.
+type LicenseClient struct {
+	config
+}
+
+// NewLicenseClient returns a client for the License from the given config.
+func NewLicenseClient(c config) *LicenseClient {
+	return &LicenseClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `license.Hooks(f(g(h())))`.
+func (c *LicenseClient) Use(hooks ...Hook) {
+	c.hooks.License = append(c.hooks.License, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `license.Intercept(f(g(h())))`.
+func (c *LicenseClient) Intercept(interceptors ...Interceptor) {
+	c.inters.License = append(c.inters.License, interceptors...)
+}
+
+// Create returns a builder for creating a License entity.
+func (c *LicenseClient) Create() *LicenseCreate {
+	mutation := newLicenseMutation(c.config, OpCreate)
+	return &LicenseCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of License entities.
+func (c *LicenseClient) CreateBulk(builders ...*LicenseCreate) *LicenseCreateBulk {
+	return &LicenseCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *LicenseClient) MapCreateBulk(slice any, setFunc func(*LicenseCreate, int)) *LicenseCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &LicenseCreateBulk{err: fmt.Errorf("calling to LicenseClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*LicenseCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &LicenseCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for License.
+func (c *LicenseClient) Update() *LicenseUpdate {
+	mutation := newLicenseMutation(c.config, OpUpdate)
+	return &LicenseUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *LicenseClient) UpdateOne(_m *License) *LicenseUpdateOne {
+	mutation := newLicenseMutation(c.config, OpUpdateOne, withLicense(_m))
+	return &LicenseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *LicenseClient) UpdateOneID(id string) *LicenseUpdateOne {
+	mutation := newLicenseMutation(c.config, OpUpdateOne, withLicenseID(id))
+	return &LicenseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for License.
+func (c *LicenseClient) Delete() *LicenseDelete {
+	mutation := newLicenseMutation(c.config, OpDelete)
+	return &LicenseDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *LicenseClient) DeleteOne(_m *License) *LicenseDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *LicenseClient) DeleteOneID(id string) *LicenseDeleteOne {
+	builder := c.Delete().Where(license.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &LicenseDeleteOne{builder}
+}
+
+// Query returns a query builder for License.
+func (c *LicenseClient) Query() *LicenseQuery {
+	return &LicenseQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeLicense},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a License entity by its id.
+func (c *LicenseClient) Get(ctx context.Context, id string) (*License, error) {
+	return c.Query().Where(license.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *LicenseClient) GetX(ctx context.Context, id string) *License {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryProduct queries the product edge of a License.
+func (c *LicenseClient) QueryProduct(_m *License) *ProductQuery {
+	query := (&ProductClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(license.Table, license.FieldID, id),
+			sqlgraph.To(product.Table, product.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, license.ProductTable, license.ProductColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryPlan queries the plan edge of a License.
+func (c *LicenseClient) QueryPlan(_m *License) *PlanQuery {
+	query := (&PlanClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(license.Table, license.FieldID, id),
+			sqlgraph.To(plan.Table, plan.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, license.PlanTable, license.PlanColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryCustomer queries the customer edge of a License.
+func (c *LicenseClient) QueryCustomer(_m *License) *CustomerQuery {
+	query := (&CustomerClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(license.Table, license.FieldID, id),
+			sqlgraph.To(customer.Table, customer.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, license.CustomerTable, license.CustomerColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryActivations queries the activations edge of a License.
+func (c *LicenseClient) QueryActivations(_m *License) *ActivationQuery {
+	query := (&ActivationClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(license.Table, license.FieldID, id),
+			sqlgraph.To(activation.Table, activation.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, license.ActivationsTable, license.ActivationsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *LicenseClient) Hooks() []Hook {
+	return c.hooks.License
+}
+
+// Interceptors returns the client interceptors.
+func (c *LicenseClient) Interceptors() []Interceptor {
+	return c.inters.License
+}
+
+func (c *LicenseClient) mutate(ctx context.Context, m *LicenseMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&LicenseCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&LicenseUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&LicenseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&LicenseDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown License mutation op: %q", m.Op())
+	}
+}
+
 // PlanClient is a client for the Plan schema.
 type PlanClient struct {
 	config
@@ -537,6 +1074,22 @@ func (c *PlanClient) QueryPlanFeatures(_m *Plan) *PlanFeatureQuery {
 			sqlgraph.From(plan.Table, plan.FieldID, id),
 			sqlgraph.To(planfeature.Table, planfeature.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, plan.PlanFeaturesTable, plan.PlanFeaturesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryLicenses queries the licenses edge of a Plan.
+func (c *PlanClient) QueryLicenses(_m *Plan) *LicenseQuery {
+	query := (&LicenseClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(plan.Table, plan.FieldID, id),
+			sqlgraph.To(license.Table, license.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, plan.LicensesTable, plan.LicensesColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -890,6 +1443,22 @@ func (c *ProductClient) QueryPlans(_m *Product) *PlanQuery {
 	return query
 }
 
+// QueryLicenses queries the licenses edge of a Product.
+func (c *ProductClient) QueryLicenses(_m *Product) *LicenseQuery {
+	query := (&LicenseClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(product.Table, product.FieldID, id),
+			sqlgraph.To(license.Table, license.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, product.LicensesTable, product.LicensesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *ProductClient) Hooks() []Hook {
 	return c.hooks.Product
@@ -1039,6 +1608,22 @@ func (c *TenantClient) QueryProducts(_m *Tenant) *ProductQuery {
 	return query
 }
 
+// QueryCustomers queries the customers edge of a Tenant.
+func (c *TenantClient) QueryCustomers(_m *Tenant) *CustomerQuery {
+	query := (&CustomerClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(customer.Table, customer.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.CustomersTable, tenant.CustomersColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *TenantClient) Hooks() []Hook {
 	return c.hooks.Tenant
@@ -1067,10 +1652,12 @@ func (c *TenantClient) mutate(ctx context.Context, m *TenantMutation) (Value, er
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Feature, Plan, PlanFeature, Product, Tenant []ent.Hook
+		Activation, Customer, Feature, License, Plan, PlanFeature, Product,
+		Tenant []ent.Hook
 	}
 	inters struct {
-		Feature, Plan, PlanFeature, Product, Tenant []ent.Interceptor
+		Activation, Customer, Feature, License, Plan, PlanFeature, Product,
+		Tenant []ent.Interceptor
 	}
 )
 
