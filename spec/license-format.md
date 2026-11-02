@@ -85,6 +85,12 @@ Run after signature verification, in this order; the first failure decides the r
 
 Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result).
 
+### Fingerprints
+Default sources and order are in [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md): `LICENSEFORGE_FINGERPRINT` override → Kubernetes `kube-system` namespace UID (`bind.type: cluster`) → OS machine ID (`machine`); plain containers without the override have no fingerprint.
+- `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8(product + ":" + raw_id)))`.
+- Test value: product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:44fd0d30659f018c9db00ba857ac97aa63d9b1e99471a6899c49796cfc1698c0`.
+- Linux `machine-id` must be 32 lowercase hex characters; empty or `uninitialized` is not an ID.
+
 ## SDK verify algorithm
 Steps run in this order; the first failing step decides the error class.
 1. Input larger than 64 KiB → `malformed`.

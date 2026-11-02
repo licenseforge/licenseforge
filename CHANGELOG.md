@@ -12,3 +12,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - `licensefile.ParseClaims`, `Claims.Check` and `Open`: parse and check lf1 claims (version, product, binding, clock skew, not-before, max offline, expiry with grace, updates_until) in the order defined by the spec.
 - Claim conformance vectors in `spec/vectors/lf1-claims.json`.
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).
+- Go SDK `fingerprint` package: default machine/cluster fingerprints (override env, Kubernetes kube-system UID, Linux machine-id, Windows MachineGuid, macOS IOPlatformUUID), hashed per product.
