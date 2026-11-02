@@ -1,0 +1,17 @@
+name: Merge gate
+# Fails while the PR has the do-not-merge label (review or fix rounds still
+# running). Required check, so the merge button stays blocked until the label
+# is removed.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+permissions: {}
+jobs:
+  merge-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse while labelled do-not-merge
+        if: contains(github.event.pull_request.labels.*.name, 'do-not-merge')
+        run: |
+          echo "This PR is labelled do-not-merge: review or fixes are still in progress."
+          exit 1
