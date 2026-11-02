@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
@@ -120,6 +121,21 @@ func (_c *TenantCreate) AddSigningKeys(v ...*SigningKey) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddSigningKeyIDs(ids...)
+}
+
+// AddAuditEventIDs adds the "audit_events" edge to the AuditEvent entity by IDs.
+func (_c *TenantCreate) AddAuditEventIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddAuditEventIDs(ids...)
+	return _c
+}
+
+// AddAuditEvents adds the "audit_events" edges to the AuditEvent entity.
+func (_c *TenantCreate) AddAuditEvents(v ...*AuditEvent) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAuditEventIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -292,6 +308,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AuditEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

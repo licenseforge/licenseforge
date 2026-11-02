@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -30,6 +31,7 @@ type TenantQuery struct {
 	withProducts    *ProductQuery
 	withCustomers   *CustomerQuery
 	withSigningKeys *SigningKeyQuery
+	withAuditEvents *AuditEventQuery
 	modifiers       []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -126,6 +128,28 @@ func (_q *TenantQuery) QuerySigningKeys() *SigningKeyQuery {
 			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
 			sqlgraph.To(signingkey.Table, signingkey.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, tenant.SigningKeysTable, tenant.SigningKeysColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryAuditEvents chains the current query on the "audit_events" edge.
+func (_q *TenantQuery) QueryAuditEvents() *AuditEventQuery {
+	query := (&AuditEventClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(auditevent.Table, auditevent.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.AuditEventsTable, tenant.AuditEventsColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -328,6 +352,7 @@ func (_q *TenantQuery) Clone() *TenantQuery {
 		withProducts:    _q.withProducts.Clone(),
 		withCustomers:   _q.withCustomers.Clone(),
 		withSigningKeys: _q.withSigningKeys.Clone(),
+		withAuditEvents: _q.withAuditEvents.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -364,6 +389,17 @@ func (_q *TenantQuery) WithSigningKeys(opts ...func(*SigningKeyQuery)) *TenantQu
 		opt(query)
 	}
 	_q.withSigningKeys = query
+	return _q
+}
+
+// WithAuditEvents tells the query-builder to eager-load the nodes that are connected to
+// the "audit_events" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithAuditEvents(opts ...func(*AuditEventQuery)) *TenantQuery {
+	query := (&AuditEventClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAuditEvents = query
 	return _q
 }
 
@@ -445,10 +481,11 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 	var (
 		nodes       = []*Tenant{}
 		_spec       = _q.querySpec()
-		loadedTypes = [3]bool{
+		loadedTypes = [4]bool{
 			_q.withProducts != nil,
 			_q.withCustomers != nil,
 			_q.withSigningKeys != nil,
+			_q.withAuditEvents != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -490,6 +527,13 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 		if err := _q.loadSigningKeys(ctx, query, nodes,
 			func(n *Tenant) { n.Edges.SigningKeys = []*SigningKey{} },
 			func(n *Tenant, e *SigningKey) { n.Edges.SigningKeys = append(n.Edges.SigningKeys, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAuditEvents; query != nil {
+		if err := _q.loadAuditEvents(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.AuditEvents = []*AuditEvent{} },
+			func(n *Tenant, e *AuditEvent) { n.Edges.AuditEvents = append(n.Edges.AuditEvents, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -571,6 +615,36 @@ func (_q *TenantQuery) loadSigningKeys(ctx context.Context, query *SigningKeyQue
 	}
 	query.Where(predicate.SigningKey(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(tenant.SigningKeysColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadAuditEvents(ctx context.Context, query *AuditEventQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *AuditEvent)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(auditevent.FieldTenantID)
+	}
+	query.Where(predicate.AuditEvent(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.AuditEventsColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

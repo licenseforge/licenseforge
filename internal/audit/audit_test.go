@@ -1,0 +1,245 @@
+package audit
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+
+	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/storetest"
+)
+
+var env storetest.Env
+
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, store.Migrate)) }
+
+func openDB(t *testing.T) *store.DB {
+	t.Helper()
+	d, err := store.Open(context.Background(), env.TenantURL, env.PlatformURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	return d
+}
+
+func sqlDB(t *testing.T, url string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func newTenant(t *testing.T, d *store.DB) string {
+	t.Helper()
+	var id string
+	if err := d.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		tn, err := tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(context.Background())
+		if err == nil {
+			id = tn.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+var ev = Event{
+	ActorType: auditevent.ActorTypeUser, ActorID: "usr_1", Action: "signing_key.promote",
+	ObjectType: "signing_key", ObjectID: "sk_1", Outcome: auditevent.OutcomeSuccess,
+	SourceIP: "::ffff:10.0.0.1", UserAgent: "lf-cli/0.1",
+	// Unsorted keys, a fraction, non-ASCII and HTML characters: the stored json
+	// text must be exactly the hashed text.
+	Details: map[string]any{"z": 1.5, "a": "é <b>", "nested": map[string]any{"k": []any{1, true}}},
+}
+
+func record(t *testing.T, d *store.DB, tenantID string, e Event) *ent.AuditEvent {
+	t.Helper()
+	var r *ent.AuditEvent
+	if err := d.WithTenant(context.Background(), tenantID, func(tx *ent.Tx) error {
+		var err error
+		r, err = Record(context.Background(), tx, tenantID, e)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func verify(d *store.DB, tenantID string) error {
+	return d.WithTenant(context.Background(), tenantID, func(tx *ent.Tx) error {
+		return Verify(context.Background(), tx, tenantID)
+	})
+}
+
+func TestChain(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	first := record(t, d, tn, ev)
+	second := record(t, d, tn, Event{ActorType: auditevent.ActorTypeSystem, Action: "tenant.create", Outcome: auditevent.OutcomeSuccess})
+	if first.Seq != 1 || !bytes.Equal(first.PrevHash, zeroHash) || second.Seq != 2 || !bytes.Equal(second.PrevHash, first.Hash) {
+		t.Fatalf("chain not linked: %+v %+v", first, second)
+	}
+	if *first.SourceIP != "10.0.0.1" {
+		t.Errorf("source IP stored as %q", *first.SourceIP)
+	}
+	if err := verify(d, tn); err != nil {
+		t.Fatalf("Verify after reading back from the database: %v", err)
+	}
+	for _, bad := range []Event{
+		{ActorType: auditevent.ActorTypeUser, Action: "x.y", Outcome: auditevent.OutcomeSuccess, SourceIP: "nope"},
+		{ActorType: auditevent.ActorTypeUser, Action: "x.y", Outcome: auditevent.OutcomeSuccess, SourceIP: "fe80::1%eth0"},
+		{ActorType: auditevent.ActorTypeUser, Action: "noverb", Outcome: auditevent.OutcomeSuccess},
+	} {
+		if err := d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+			_, err := Record(context.Background(), tx, tn, bad)
+			return err
+		}); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestConcurrentWritersDontFork(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for range 20 {
+		wg.Go(func() {
+			errs <- d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+				_, err := Record(context.Background(), tx, tn, ev)
+				return err
+			})
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := verify(d, tn); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRolledBackActionLeavesNoEntry(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	failed := errors.New("action failed")
+	err := d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+		if _, err := Record(context.Background(), tx, tn, ev); err != nil {
+			return err
+		}
+		return failed
+	})
+	if !errors.Is(err, failed) {
+		t.Fatal(err)
+	}
+	if r := record(t, d, tn, ev); r.Seq != 1 {
+		t.Fatalf("seq after rollback = %d, want 1", r.Seq)
+	}
+}
+
+func TestAppendOnlyAndIsolated(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	a, b := newTenant(t, d), newTenant(t, d)
+	r := record(t, d, a, ev)
+	for _, url := range []string{env.TenantURL, env.PlatformURL} {
+		db := sqlDB(t, url)
+		for _, q := range []string{
+			`UPDATE audit_events SET details = '{}' WHERE id = $1`,
+			`DELETE FROM audit_events WHERE id = $1`,
+		} {
+			if _, err := db.ExecContext(ctx, q, r.ID); err == nil || !strings.Contains(err.Error(), "permission denied") {
+				t.Errorf("%s: %v, want permission denied", q, err)
+			}
+		}
+	}
+	// Tenant b sees nothing of a's chain and can't append to it.
+	if err := d.WithTenant(ctx, b, func(tx *ent.Tx) error {
+		n, err := tx.AuditEvent.Query().Count(ctx)
+		if err == nil && n != 0 {
+			t.Errorf("tenant b sees %d of a's entries", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WithTenant(ctx, b, func(tx *ent.Tx) error {
+		_, err := Record(ctx, tx, a, ev)
+		return err
+	}); err == nil {
+		t.Fatal("tenant b appended to a's chain")
+	}
+}
+
+// Someone with owner access edits the table directly: Verify finds it.
+func TestVerifyDetectsTampering(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	owner := sqlDB(t, env.OwnerURL)
+	for name, tamper := range map[string]func(tn string, rs []*ent.AuditEvent) []string{
+		"field changed": func(tn string, rs []*ent.AuditEvent) []string {
+			return []string{`UPDATE audit_events SET outcome = 'failure' WHERE id = '` + rs[1].ID + `'`}
+		},
+		"details changed": func(tn string, rs []*ent.AuditEvent) []string {
+			return []string{`UPDATE audit_events SET details = '{"a": "x"}' WHERE id = '` + rs[1].ID + `'`}
+		},
+		"entry removed": func(tn string, rs []*ent.AuditEvent) []string {
+			return []string{`DELETE FROM audit_events WHERE id = '` + rs[1].ID + `'`}
+		},
+		"entry rehashed": func(tn string, rs []*ent.AuditEvent) []string {
+			// Changed and given a valid hash: the next entry no longer links.
+			e := *rs[1]
+			e.Action = "license.revoke"
+			return []string{`UPDATE audit_events SET action = 'license.revoke', hash = '\x` + hexs(Hash(&e)) + `' WHERE id = '` + rs[1].ID + `'`}
+		},
+		"entries swapped": func(tn string, rs []*ent.AuditEvent) []string {
+			w := ` WHERE tenant_id = '` + tn + `' AND seq = `
+			return []string{`UPDATE audit_events SET seq = 100` + w + `2`, `UPDATE audit_events SET seq = 2` + w + `3`, `UPDATE audit_events SET seq = 3` + w + `100`}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tn := newTenant(t, d)
+			var rs []*ent.AuditEvent
+			for range 3 {
+				rs = append(rs, record(t, d, tn, ev))
+			}
+			if err := verify(d, tn); err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range tamper(tn, rs) {
+				if _, err := owner.ExecContext(ctx, q); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := verify(d, tn); !errors.Is(err, ErrBroken) {
+				t.Fatalf("tampering not detected: %v", err)
+			}
+		})
+	}
+}
+
+func hexs(b []byte) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, 0, 2*len(b))
+	for _, c := range b {
+		out = append(out, digits[c>>4], digits[c&15])
+	}
+	return string(out)
+}

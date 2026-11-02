@@ -9,6 +9,9 @@ import (
 // Activation is the predicate function for activation builders.
 type Activation func(*sql.Selector)
 
+// AuditEvent is the predicate function for auditevent builders.
+type AuditEvent func(*sql.Selector)
+
 // Customer is the predicate function for customer builders.
 type Customer func(*sql.Selector)
 

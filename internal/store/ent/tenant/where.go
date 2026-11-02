@@ -364,6 +364,29 @@ func HasSigningKeysWith(preds ...predicate.SigningKey) predicate.Tenant {
 	})
 }
 
+// HasAuditEvents applies the HasEdge predicate on the "audit_events" edge.
+func HasAuditEvents() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, AuditEventsTable, AuditEventsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAuditEventsWith applies the HasEdge predicate on the "audit_events" edge with a given conditions (other predicates).
+func HasAuditEventsWith(preds ...predicate.AuditEvent) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newAuditEventsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Tenant) predicate.Tenant {
 	return predicate.Tenant(sql.AndPredicates(predicates...))

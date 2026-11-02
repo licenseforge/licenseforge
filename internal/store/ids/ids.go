@@ -28,3 +28,4 @@ func Customer() string    { return New("cus") }
 func License() string     { return New("lic") }
 func Activation() string  { return New("act") }
 func SigningKey() string  { return New("sk") }
+func AuditEvent() string  { return New("aud") }
