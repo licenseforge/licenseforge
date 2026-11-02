@@ -1050,6 +1050,26 @@ func MaxRehostsNotNil() predicate.License {
 	return predicate.License(sql.FieldNotNull(FieldMaxRehosts))
 }
 
+// BindTypeEQ applies the EQ predicate on the "bind_type" field.
+func BindTypeEQ(v BindType) predicate.License {
+	return predicate.License(sql.FieldEQ(FieldBindType, v))
+}
+
+// BindTypeNEQ applies the NEQ predicate on the "bind_type" field.
+func BindTypeNEQ(v BindType) predicate.License {
+	return predicate.License(sql.FieldNEQ(FieldBindType, v))
+}
+
+// BindTypeIn applies the In predicate on the "bind_type" field.
+func BindTypeIn(vs ...BindType) predicate.License {
+	return predicate.License(sql.FieldIn(FieldBindType, vs...))
+}
+
+// BindTypeNotIn applies the NotIn predicate on the "bind_type" field.
+func BindTypeNotIn(vs ...BindType) predicate.License {
+	return predicate.License(sql.FieldNotIn(FieldBindType, vs...))
+}
+
 // OfflineAllowedEQ applies the EQ predicate on the "offline_allowed" field.
 func OfflineAllowedEQ(v bool) predicate.License {
 	return predicate.License(sql.FieldEQ(FieldOfflineAllowed, v))

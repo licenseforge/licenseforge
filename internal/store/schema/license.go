@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"entgo.io/ent"
@@ -19,6 +20,19 @@ import (
 type LicenseEntitlements struct {
 	Features []string         `json:"features"`
 	Limits   map[string]int64 `json:"limits"`
+}
+
+// MarshalJSON writes nil features and limits as [] and {}, the shape the
+// database CHECK and the license format expect.
+func (e LicenseEntitlements) MarshalJSON() ([]byte, error) {
+	type plain LicenseEntitlements
+	if e.Features == nil {
+		e.Features = []string{}
+	}
+	if e.Limits == nil {
+		e.Limits = map[string]int64{}
+	}
+	return json.Marshal(plain(e))
 }
 
 // License is a right granted to a customer under a plan. It carries a
@@ -49,6 +63,7 @@ func (License) Fields() []ent.Field {
 		field.Int64("duration_seconds").Optional().Nillable().Range(1, maxSeconds),
 		field.Int("max_activations").Optional().Nillable().Range(1, 1_000_000),
 		field.Int("max_rehosts").Optional().Nillable().Range(0, 1_000_000),
+		field.Enum("bind_type").Values(bindPolicies...),
 		field.Bool("offline_allowed"),
 		field.Int64("lease_seconds").Range(1, maxSeconds),
 		field.Int64("max_offline_seconds").Optional().Nillable().Range(0, maxSeconds),
@@ -82,7 +97,7 @@ func (License) Annotations() []schema.Annotation {
 		"licenses_type_valid":      enumCheck("type", licenseTypes),
 		"licenses_status_valid":    enumCheck("status", statuses),
 		"licenses_expiry_valid":    enumCheck("expiry_basis", expiryBases),
-		"licenses_key_ciphertext":  `key_ciphertext ~ '^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]+$'`,
+		"licenses_key_ciphertext":  `key_ciphertext ~ '^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{60,}$'`, // nonce + tag + key: >= 60 chars
 		"licenses_key_lookup":      `key_lookup ~ '^[0-9a-f]{64}$'`,
 		"licenses_key_hint":        `key_hint ~ '^[A-Z2-7]{6}$'`,
 		"licenses_plan_slug":       `plan_slug ~ '` + slugPattern + `'`,
@@ -96,7 +111,19 @@ func (License) Annotations() []schema.Annotation {
 		"licenses_grace_range":     `grace_seconds >= 0 AND grace_seconds <= ` + maxS,
 		"licenses_rehosts_nonneg":  `rehost_count >= 0`,
 		"licenses_entitlements":    `jsonb_typeof(entitlements) = 'object' AND jsonb_typeof(entitlements -> 'features') = 'array' AND jsonb_typeof(entitlements -> 'limits') = 'object'`,
-		"licenses_refs_object":     `jsonb_typeof(external_refs) = 'object'`,
+		// Contents as the license format requires (spec: claim encoding rules):
+		// feature keys are strings in the key format, limits integers in -1..2^53-1.
+		"licenses_ent_features": `NOT jsonb_path_exists(entitlements, 'strict $."features"[*]?(@.type() != "string" || !(@ like_regex "` + keyPattern + `"))'::jsonpath)`,
+		"licenses_ent_limits":   `NOT jsonb_path_exists(entitlements, 'strict $."limits".*?(@.type() != "number" || @ < -1 || @ > ` + maxSafeInt + ` || @ != @.floor())'::jsonpath)`,
+		"licenses_refs_strings": stringMapCheck("external_refs"),
+		"licenses_bind_valid":   enumCheck("bind_type", bindPolicies),
+		// Expiry semantics.
+		"licenses_expiry_after_issue":    `expires_at IS NULL OR expires_at > issued_at`,
+		"licenses_activated_after_issue": `first_activated_at IS NULL OR first_activated_at >= issued_at`,
+		"licenses_perpetual_no_expiry":   `num_nonnulls(duration_months, duration_seconds) > 0 OR expires_at IS NULL`,
+		"licenses_unstarted_no_expiry":   `(expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NOT NULL OR expires_at IS NULL`,
+		"licenses_started_has_expiry":    `num_nonnulls(duration_months, duration_seconds) = 0 OR (expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NULL OR expires_at IS NOT NULL`,
+		"licenses_rehosts_within_limit":  `max_rehosts IS NULL OR rehost_count <= max_rehosts`,
 		// Status and its timestamps agree.
 		"licenses_suspended_at": `(status = 'suspended') = (suspended_at IS NOT NULL)`,
 		"licenses_revoked_at":   `(status = 'revoked') = (revoked_at IS NOT NULL)`,
@@ -105,8 +132,9 @@ func (License) Annotations() []schema.Annotation {
 
 func (License) Indexes() []ent.Index {
 	return []ent.Index{
-		index.Fields("key_lookup").Unique(), // activation finds the license by key hash
+		index.Fields("tenant_id", "key_lookup").Unique(), // per tenant: a global index would reveal keys across tenants
 		index.Fields("tenant_id", "id").Unique(),
+		index.Fields("tenant_id", "id", "bind_type").Unique(), // activations: binding must match the license
 		index.Fields("tenant_id", "customer_id"),
 	}
 }

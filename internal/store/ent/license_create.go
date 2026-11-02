@@ -191,6 +191,12 @@ func (_c *LicenseCreate) SetNillableMaxRehosts(v *int) *LicenseCreate {
 	return _c
 }
 
+// SetBindType sets the "bind_type" field.
+func (_c *LicenseCreate) SetBindType(v license.BindType) *LicenseCreate {
+	_c.mutation.SetBindType(v)
+	return _c
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_c *LicenseCreate) SetOfflineAllowed(v bool) *LicenseCreate {
 	_c.mutation.SetOfflineAllowed(v)
@@ -550,6 +556,14 @@ func (_c *LicenseCreate) check() error {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "License.max_rehosts": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.BindType(); !ok {
+		return &ValidationError{Name: "bind_type", err: errors.New(`ent: missing required field "License.bind_type"`)}
+	}
+	if v, ok := _c.mutation.BindType(); ok {
+		if err := license.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "License.bind_type": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.OfflineAllowed(); !ok {
 		return &ValidationError{Name: "offline_allowed", err: errors.New(`ent: missing required field "License.offline_allowed"`)}
 	}
@@ -695,6 +709,10 @@ func (_c *LicenseCreate) createSpec() (*License, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MaxRehosts(); ok {
 		_spec.SetField(license.FieldMaxRehosts, field.TypeInt, value)
 		_node.MaxRehosts = &value
+	}
+	if value, ok := _c.mutation.BindType(); ok {
+		_spec.SetField(license.FieldBindType, field.TypeEnum, value)
+		_node.BindType = value
 	}
 	if value, ok := _c.mutation.OfflineAllowed(); ok {
 		_spec.SetField(license.FieldOfflineAllowed, field.TypeBool, value)

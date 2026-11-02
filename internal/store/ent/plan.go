@@ -40,6 +40,8 @@ type Plan struct {
 	MaxActivations *int `json:"max_activations,omitempty"`
 	// nil = unlimited
 	MaxRehosts *int `json:"max_rehosts,omitempty"`
+	// none = site license, no activations
+	BindType plan.BindType `json:"bind_type,omitempty"`
 	// OfflineAllowed holds the value of the "offline_allowed" field.
 	OfflineAllowed bool `json:"offline_allowed,omitempty"`
 	// LeaseSeconds holds the value of the "lease_seconds" field.
@@ -107,7 +109,7 @@ func (*Plan) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case plan.FieldDurationMonths, plan.FieldDurationSeconds, plan.FieldMaxActivations, plan.FieldMaxRehosts, plan.FieldLeaseSeconds, plan.FieldMaxOfflineSeconds, plan.FieldGraceSeconds:
 			values[i] = new(sql.NullInt64)
-		case plan.FieldID, plan.FieldTenantID, plan.FieldProductID, plan.FieldSlug, plan.FieldName, plan.FieldExpiryBasis:
+		case plan.FieldID, plan.FieldTenantID, plan.FieldProductID, plan.FieldSlug, plan.FieldName, plan.FieldExpiryBasis, plan.FieldBindType:
 			values[i] = new(sql.NullString)
 		case plan.FieldCreatedAt, plan.FieldUpdatedAt, plan.FieldArchivedAt:
 			values[i] = new(sql.NullTime)
@@ -201,6 +203,12 @@ func (_m *Plan) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.MaxRehosts = new(int)
 				*_m.MaxRehosts = int(value.Int64)
+			}
+		case plan.FieldBindType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field bind_type", values[i])
+			} else if value.Valid {
+				_m.BindType = plan.BindType(value.String)
 			}
 		case plan.FieldOfflineAllowed:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -325,6 +333,9 @@ func (_m *Plan) String() string {
 		builder.WriteString("max_rehosts=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("bind_type=")
+	builder.WriteString(fmt.Sprintf("%v", _m.BindType))
 	builder.WriteString(", ")
 	builder.WriteString("offline_allowed=")
 	builder.WriteString(fmt.Sprintf("%v", _m.OfflineAllowed))

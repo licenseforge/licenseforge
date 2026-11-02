@@ -405,25 +405,25 @@ func init() {
 	// license.MaxRehostsValidator is a validator for the "max_rehosts" field. It is called by the builders before save.
 	license.MaxRehostsValidator = licenseDescMaxRehosts.Validators[0].(func(int) error)
 	// licenseDescLeaseSeconds is the schema descriptor for lease_seconds field.
-	licenseDescLeaseSeconds := licenseFields[16].Descriptor()
+	licenseDescLeaseSeconds := licenseFields[17].Descriptor()
 	// license.LeaseSecondsValidator is a validator for the "lease_seconds" field. It is called by the builders before save.
 	license.LeaseSecondsValidator = licenseDescLeaseSeconds.Validators[0].(func(int64) error)
 	// licenseDescMaxOfflineSeconds is the schema descriptor for max_offline_seconds field.
-	licenseDescMaxOfflineSeconds := licenseFields[17].Descriptor()
+	licenseDescMaxOfflineSeconds := licenseFields[18].Descriptor()
 	// license.MaxOfflineSecondsValidator is a validator for the "max_offline_seconds" field. It is called by the builders before save.
 	license.MaxOfflineSecondsValidator = licenseDescMaxOfflineSeconds.Validators[0].(func(int64) error)
 	// licenseDescGraceSeconds is the schema descriptor for grace_seconds field.
-	licenseDescGraceSeconds := licenseFields[18].Descriptor()
+	licenseDescGraceSeconds := licenseFields[19].Descriptor()
 	// license.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
 	license.GraceSecondsValidator = licenseDescGraceSeconds.Validators[0].(func(int64) error)
 	// licenseDescRehostCount is the schema descriptor for rehost_count field.
-	licenseDescRehostCount := licenseFields[26].Descriptor()
+	licenseDescRehostCount := licenseFields[27].Descriptor()
 	// license.DefaultRehostCount holds the default value on creation for the rehost_count field.
 	license.DefaultRehostCount = licenseDescRehostCount.Default.(int)
 	// license.RehostCountValidator is a validator for the "rehost_count" field. It is called by the builders before save.
 	license.RehostCountValidator = licenseDescRehostCount.Validators[0].(func(int) error)
 	// licenseDescExternalRefs is the schema descriptor for external_refs field.
-	licenseDescExternalRefs := licenseFields[27].Descriptor()
+	licenseDescExternalRefs := licenseFields[28].Descriptor()
 	// license.DefaultExternalRefs holds the default value on creation for the external_refs field.
 	license.DefaultExternalRefs = licenseDescExternalRefs.Default.(map[string]string)
 	// licenseDescID is the schema descriptor for id field.
@@ -540,21 +540,21 @@ func init() {
 	// plan.MaxRehostsValidator is a validator for the "max_rehosts" field. It is called by the builders before save.
 	plan.MaxRehostsValidator = planDescMaxRehosts.Validators[0].(func(int) error)
 	// planDescOfflineAllowed is the schema descriptor for offline_allowed field.
-	planDescOfflineAllowed := planFields[9].Descriptor()
+	planDescOfflineAllowed := planFields[10].Descriptor()
 	// plan.DefaultOfflineAllowed holds the default value on creation for the offline_allowed field.
 	plan.DefaultOfflineAllowed = planDescOfflineAllowed.Default.(bool)
 	// planDescLeaseSeconds is the schema descriptor for lease_seconds field.
-	planDescLeaseSeconds := planFields[10].Descriptor()
+	planDescLeaseSeconds := planFields[11].Descriptor()
 	// plan.DefaultLeaseSeconds holds the default value on creation for the lease_seconds field.
 	plan.DefaultLeaseSeconds = planDescLeaseSeconds.Default.(int64)
 	// plan.LeaseSecondsValidator is a validator for the "lease_seconds" field. It is called by the builders before save.
 	plan.LeaseSecondsValidator = planDescLeaseSeconds.Validators[0].(func(int64) error)
 	// planDescMaxOfflineSeconds is the schema descriptor for max_offline_seconds field.
-	planDescMaxOfflineSeconds := planFields[11].Descriptor()
+	planDescMaxOfflineSeconds := planFields[12].Descriptor()
 	// plan.MaxOfflineSecondsValidator is a validator for the "max_offline_seconds" field. It is called by the builders before save.
 	plan.MaxOfflineSecondsValidator = planDescMaxOfflineSeconds.Validators[0].(func(int64) error)
 	// planDescGraceSeconds is the schema descriptor for grace_seconds field.
-	planDescGraceSeconds := planFields[12].Descriptor()
+	planDescGraceSeconds := planFields[13].Descriptor()
 	// plan.DefaultGraceSeconds holds the default value on creation for the grace_seconds field.
 	plan.DefaultGraceSeconds = planDescGraceSeconds.Default.(int64)
 	// plan.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.

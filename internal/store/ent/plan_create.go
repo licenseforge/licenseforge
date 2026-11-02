@@ -145,6 +145,20 @@ func (_c *PlanCreate) SetNillableMaxRehosts(v *int) *PlanCreate {
 	return _c
 }
 
+// SetBindType sets the "bind_type" field.
+func (_c *PlanCreate) SetBindType(v plan.BindType) *PlanCreate {
+	_c.mutation.SetBindType(v)
+	return _c
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_c *PlanCreate) SetNillableBindType(v *plan.BindType) *PlanCreate {
+	if v != nil {
+		_c.SetBindType(*v)
+	}
+	return _c
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_c *PlanCreate) SetOfflineAllowed(v bool) *PlanCreate {
 	_c.mutation.SetOfflineAllowed(v)
@@ -311,6 +325,10 @@ func (_c *PlanCreate) defaults() {
 		v := plan.DefaultExpiryBasis
 		_c.mutation.SetExpiryBasis(v)
 	}
+	if _, ok := _c.mutation.BindType(); !ok {
+		v := plan.DefaultBindType
+		_c.mutation.SetBindType(v)
+	}
 	if _, ok := _c.mutation.OfflineAllowed(); !ok {
 		v := plan.DefaultOfflineAllowed
 		_c.mutation.SetOfflineAllowed(v)
@@ -395,6 +413,14 @@ func (_c *PlanCreate) check() error {
 	if v, ok := _c.mutation.MaxRehosts(); ok {
 		if err := plan.MaxRehostsValidator(v); err != nil {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.BindType(); !ok {
+		return &ValidationError{Name: "bind_type", err: errors.New(`ent: missing required field "Plan.bind_type"`)}
+	}
+	if v, ok := _c.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.OfflineAllowed(); !ok {
@@ -503,6 +529,10 @@ func (_c *PlanCreate) createSpec() (*Plan, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MaxRehosts(); ok {
 		_spec.SetField(plan.FieldMaxRehosts, field.TypeInt, value)
 		_node.MaxRehosts = &value
+	}
+	if value, ok := _c.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
+		_node.BindType = value
 	}
 	if value, ok := _c.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)

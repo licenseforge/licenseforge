@@ -257,6 +257,20 @@ func (_u *LicenseUpdate) ClearMaxRehosts() *LicenseUpdate {
 	return _u
 }
 
+// SetBindType sets the "bind_type" field.
+func (_u *LicenseUpdate) SetBindType(v license.BindType) *LicenseUpdate {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *LicenseUpdate) SetNillableBindType(v *license.BindType) *LicenseUpdate {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
+	return _u
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_u *LicenseUpdate) SetOfflineAllowed(v bool) *LicenseUpdate {
 	_u.mutation.SetOfflineAllowed(v)
@@ -631,6 +645,11 @@ func (_u *LicenseUpdate) check() error {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "License.max_rehosts": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := license.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "License.bind_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
 		if err := license.LeaseSecondsValidator(v); err != nil {
 			return &ValidationError{Name: "lease_seconds", err: fmt.Errorf(`ent: validator failed for field "License.lease_seconds": %w`, err)}
@@ -734,6 +753,9 @@ func (_u *LicenseUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(license.FieldMaxRehosts, field.TypeInt)
+	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(license.FieldBindType, field.TypeEnum, value)
 	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(license.FieldOfflineAllowed, field.TypeBool, value)
@@ -1118,6 +1140,20 @@ func (_u *LicenseUpdateOne) AddMaxRehosts(v int) *LicenseUpdateOne {
 // ClearMaxRehosts clears the value of the "max_rehosts" field.
 func (_u *LicenseUpdateOne) ClearMaxRehosts() *LicenseUpdateOne {
 	_u.mutation.ClearMaxRehosts()
+	return _u
+}
+
+// SetBindType sets the "bind_type" field.
+func (_u *LicenseUpdateOne) SetBindType(v license.BindType) *LicenseUpdateOne {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *LicenseUpdateOne) SetNillableBindType(v *license.BindType) *LicenseUpdateOne {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
 	return _u
 }
 
@@ -1508,6 +1544,11 @@ func (_u *LicenseUpdateOne) check() error {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "License.max_rehosts": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := license.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "License.bind_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
 		if err := license.LeaseSecondsValidator(v); err != nil {
 			return &ValidationError{Name: "lease_seconds", err: fmt.Errorf(`ent: validator failed for field "License.lease_seconds": %w`, err)}
@@ -1628,6 +1669,9 @@ func (_u *LicenseUpdateOne) sqlSave(ctx context.Context) (_node *License, err er
 	}
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(license.FieldMaxRehosts, field.TypeInt)
+	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(license.FieldBindType, field.TypeEnum, value)
 	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(license.FieldOfflineAllowed, field.TypeBool, value)

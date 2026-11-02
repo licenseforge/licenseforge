@@ -5,22 +5,31 @@
 -- Same-tenant keys (foreign key checks bypass row-level security).
 ALTER TABLE "licenses" ADD CONSTRAINT "licenses_product_same_tenant"
   FOREIGN KEY ("tenant_id", "product_id") REFERENCES "products" ("tenant_id", "id");
+-- Includes the plan slug (immutable on plans), so the snapshot's plan_slug,
+-- signed into licenses as the "plan" claim, always names the license's plan.
 ALTER TABLE "licenses" ADD CONSTRAINT "licenses_plan_same_tenant"
-  FOREIGN KEY ("tenant_id", "product_id", "plan_id") REFERENCES "plans" ("tenant_id", "product_id", "id");
+  FOREIGN KEY ("tenant_id", "product_id", "plan_id", "plan_slug") REFERENCES "plans" ("tenant_id", "product_id", "id", "slug");
 ALTER TABLE "licenses" ADD CONSTRAINT "licenses_customer_same_tenant"
   FOREIGN KEY ("tenant_id", "customer_id") REFERENCES "customers" ("tenant_id", "id");
+-- Includes the binding: an activation must bind what its license requires
+-- (machine or cluster; site licenses with bind_type none have no activations),
+-- and a license's bind_type can't change while it has activations.
 ALTER TABLE "activations" ADD CONSTRAINT "activations_license_same_tenant"
-  FOREIGN KEY ("tenant_id", "license_id") REFERENCES "licenses" ("tenant_id", "id");
+  FOREIGN KEY ("tenant_id", "license_id", "binding") REFERENCES "licenses" ("tenant_id", "id", "bind_type");
 
--- Privileges. Nothing here is deleted: customers are archived (GDPR erasure
--- anonymises name and email), licenses revoked, activations deactivated.
--- Ownership, product, customer, issue time and the activation's identity
--- never change.
+-- Privileges. Nothing here is deleted: customers are archived, licenses
+-- revoked, activations deactivated. GDPR erasure nulls or replaces the
+-- customer's name, email and external_refs, its licenses' external_refs and its
+-- activations' hostnames (all updatable). Ownership, product, customer, issue
+-- time and the activation's identity never change. Rules that need the old
+-- value (revocation is final, deactivation can't be undone, first activation
+-- is set once) are enforced by the licensing service and recorded in the
+-- audit log; CHECKs can't see the previous row and triggers aren't used.
 GRANT SELECT, INSERT ON "customers", "licenses", "activations" TO licenseforge_app, licenseforge_platform;
 GRANT UPDATE ("name", "email", "external_refs", "archived_at", "updated_at")
   ON "customers" TO licenseforge_app, licenseforge_platform;
 GRANT UPDATE ("plan_id", "type", "status", "key_ciphertext", "key_lookup", "key_hint",
-  "plan_slug", "expiry_basis", "duration_months", "duration_seconds", "max_activations", "max_rehosts",
+  "plan_slug", "bind_type", "expiry_basis", "duration_months", "duration_seconds", "max_activations", "max_rehosts",
   "offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds", "entitlements",
   "expires_at", "first_activated_at", "updates_until", "suspended_at", "revoked_at", "rehost_count",
   "external_refs", "updated_at")

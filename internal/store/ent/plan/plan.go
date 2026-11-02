@@ -37,6 +37,8 @@ const (
 	FieldMaxActivations = "max_activations"
 	// FieldMaxRehosts holds the string denoting the max_rehosts field in the database.
 	FieldMaxRehosts = "max_rehosts"
+	// FieldBindType holds the string denoting the bind_type field in the database.
+	FieldBindType = "bind_type"
 	// FieldOfflineAllowed holds the string denoting the offline_allowed field in the database.
 	FieldOfflineAllowed = "offline_allowed"
 	// FieldLeaseSeconds holds the string denoting the lease_seconds field in the database.
@@ -92,6 +94,7 @@ var Columns = []string{
 	FieldExpiryBasis,
 	FieldMaxActivations,
 	FieldMaxRehosts,
+	FieldBindType,
 	FieldOfflineAllowed,
 	FieldLeaseSeconds,
 	FieldMaxOfflineSeconds,
@@ -176,6 +179,33 @@ func ExpiryBasisValidator(eb ExpiryBasis) error {
 	}
 }
 
+// BindType defines the type for the "bind_type" enum field.
+type BindType string
+
+// BindTypeMachine is the default value of the BindType enum.
+const DefaultBindType = BindTypeMachine
+
+// BindType values.
+const (
+	BindTypeNone    BindType = "none"
+	BindTypeMachine BindType = "machine"
+	BindTypeCluster BindType = "cluster"
+)
+
+func (bt BindType) String() string {
+	return string(bt)
+}
+
+// BindTypeValidator is a validator for the "bind_type" field enum values. It is called by the builders before save.
+func BindTypeValidator(bt BindType) error {
+	switch bt {
+	case BindTypeNone, BindTypeMachine, BindTypeCluster:
+		return nil
+	default:
+		return fmt.Errorf("plan: invalid enum value for bind_type field: %q", bt)
+	}
+}
+
 // OrderOption defines the ordering options for the Plan queries.
 type OrderOption func(*sql.Selector)
 
@@ -237,6 +267,11 @@ func ByMaxActivations(opts ...sql.OrderTermOption) OrderOption {
 // ByMaxRehosts orders the results by the max_rehosts field.
 func ByMaxRehosts(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxRehosts, opts...).ToFunc()
+}
+
+// ByBindType orders the results by the bind_type field.
+func ByBindType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBindType, opts...).ToFunc()
 }
 
 // ByOfflineAllowed orders the results by the offline_allowed field.

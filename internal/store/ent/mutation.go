@@ -3086,6 +3086,7 @@ type LicenseMutation struct {
 	addmax_activations     *int
 	max_rehosts            *int
 	addmax_rehosts         *int
+	bind_type              *license.BindType
 	offline_allowed        *bool
 	lease_seconds          *int64
 	addlease_seconds       *int64
@@ -3970,6 +3971,42 @@ func (m *LicenseMutation) ResetMaxRehosts() {
 	delete(m.clearedFields, license.FieldMaxRehosts)
 }
 
+// SetBindType sets the "bind_type" field.
+func (m *LicenseMutation) SetBindType(lt license.BindType) {
+	m.bind_type = &lt
+}
+
+// BindType returns the value of the "bind_type" field in the mutation.
+func (m *LicenseMutation) BindType() (r license.BindType, exists bool) {
+	v := m.bind_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBindType returns the old "bind_type" field's value of the License entity.
+// If the License object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *LicenseMutation) OldBindType(ctx context.Context) (v license.BindType, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBindType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBindType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBindType: %w", err)
+	}
+	return oldValue.BindType, nil
+}
+
+// ResetBindType resets all changes to the "bind_type" field.
+func (m *LicenseMutation) ResetBindType() {
+	m.bind_type = nil
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (m *LicenseMutation) SetOfflineAllowed(b bool) {
 	m.offline_allowed = &b
@@ -4766,7 +4803,7 @@ func (m *LicenseMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *LicenseMutation) Fields() []string {
-	fields := make([]string, 0, 30)
+	fields := make([]string, 0, 31)
 	if m.tenant_id != nil {
 		fields = append(fields, license.FieldTenantID)
 	}
@@ -4817,6 +4854,9 @@ func (m *LicenseMutation) Fields() []string {
 	}
 	if m.max_rehosts != nil {
 		fields = append(fields, license.FieldMaxRehosts)
+	}
+	if m.bind_type != nil {
+		fields = append(fields, license.FieldBindType)
 	}
 	if m.offline_allowed != nil {
 		fields = append(fields, license.FieldOfflineAllowed)
@@ -4899,6 +4939,8 @@ func (m *LicenseMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxActivations()
 	case license.FieldMaxRehosts:
 		return m.MaxRehosts()
+	case license.FieldBindType:
+		return m.BindType()
 	case license.FieldOfflineAllowed:
 		return m.OfflineAllowed()
 	case license.FieldLeaseSeconds:
@@ -4968,6 +5010,8 @@ func (m *LicenseMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldMaxActivations(ctx)
 	case license.FieldMaxRehosts:
 		return m.OldMaxRehosts(ctx)
+	case license.FieldBindType:
+		return m.OldBindType(ctx)
 	case license.FieldOfflineAllowed:
 		return m.OldOfflineAllowed(ctx)
 	case license.FieldLeaseSeconds:
@@ -5121,6 +5165,13 @@ func (m *LicenseMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMaxRehosts(v)
+		return nil
+	case license.FieldBindType:
+		v, ok := value.(license.BindType)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBindType(v)
 		return nil
 	case license.FieldOfflineAllowed:
 		v, ok := value.(bool)
@@ -5475,6 +5526,9 @@ func (m *LicenseMutation) ResetField(name string) error {
 	case license.FieldMaxRehosts:
 		m.ResetMaxRehosts()
 		return nil
+	case license.FieldBindType:
+		m.ResetBindType()
+		return nil
 	case license.FieldOfflineAllowed:
 		m.ResetOfflineAllowed()
 		return nil
@@ -5676,6 +5730,7 @@ type PlanMutation struct {
 	addmax_activations     *int
 	max_rehosts            *int
 	addmax_rehosts         *int
+	bind_type              *plan.BindType
 	offline_allowed        *bool
 	lease_seconds          *int64
 	addlease_seconds       *int64
@@ -6334,6 +6389,42 @@ func (m *PlanMutation) ResetMaxRehosts() {
 	delete(m.clearedFields, plan.FieldMaxRehosts)
 }
 
+// SetBindType sets the "bind_type" field.
+func (m *PlanMutation) SetBindType(pt plan.BindType) {
+	m.bind_type = &pt
+}
+
+// BindType returns the value of the "bind_type" field in the mutation.
+func (m *PlanMutation) BindType() (r plan.BindType, exists bool) {
+	v := m.bind_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBindType returns the old "bind_type" field's value of the Plan entity.
+// If the Plan object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlanMutation) OldBindType(ctx context.Context) (v plan.BindType, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBindType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBindType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBindType: %w", err)
+	}
+	return oldValue.BindType, nil
+}
+
+// ResetBindType resets all changes to the "bind_type" field.
+func (m *PlanMutation) ResetBindType() {
+	m.bind_type = nil
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (m *PlanMutation) SetOfflineAllowed(b bool) {
 	m.offline_allowed = &b
@@ -6770,7 +6861,7 @@ func (m *PlanMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PlanMutation) Fields() []string {
-	fields := make([]string, 0, 16)
+	fields := make([]string, 0, 17)
 	if m.tenant_id != nil {
 		fields = append(fields, plan.FieldTenantID)
 	}
@@ -6803,6 +6894,9 @@ func (m *PlanMutation) Fields() []string {
 	}
 	if m.max_rehosts != nil {
 		fields = append(fields, plan.FieldMaxRehosts)
+	}
+	if m.bind_type != nil {
+		fields = append(fields, plan.FieldBindType)
 	}
 	if m.offline_allowed != nil {
 		fields = append(fields, plan.FieldOfflineAllowed)
@@ -6849,6 +6943,8 @@ func (m *PlanMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxActivations()
 	case plan.FieldMaxRehosts:
 		return m.MaxRehosts()
+	case plan.FieldBindType:
+		return m.BindType()
 	case plan.FieldOfflineAllowed:
 		return m.OfflineAllowed()
 	case plan.FieldLeaseSeconds:
@@ -6890,6 +6986,8 @@ func (m *PlanMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldMaxActivations(ctx)
 	case plan.FieldMaxRehosts:
 		return m.OldMaxRehosts(ctx)
+	case plan.FieldBindType:
+		return m.OldBindType(ctx)
 	case plan.FieldOfflineAllowed:
 		return m.OldOfflineAllowed(ctx)
 	case plan.FieldLeaseSeconds:
@@ -6985,6 +7083,13 @@ func (m *PlanMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMaxRehosts(v)
+		return nil
+	case plan.FieldBindType:
+		v, ok := value.(plan.BindType)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBindType(v)
 		return nil
 	case plan.FieldOfflineAllowed:
 		v, ok := value.(bool)
@@ -7228,6 +7333,9 @@ func (m *PlanMutation) ResetField(name string) error {
 		return nil
 	case plan.FieldMaxRehosts:
 		m.ResetMaxRehosts()
+		return nil
+	case plan.FieldBindType:
+		m.ResetBindType()
 		return nil
 	case plan.FieldOfflineAllowed:
 		m.ResetOfflineAllowed()

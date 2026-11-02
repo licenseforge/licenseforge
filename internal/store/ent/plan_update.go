@@ -172,6 +172,20 @@ func (_u *PlanUpdate) ClearMaxRehosts() *PlanUpdate {
 	return _u
 }
 
+// SetBindType sets the "bind_type" field.
+func (_u *PlanUpdate) SetBindType(v plan.BindType) *PlanUpdate {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *PlanUpdate) SetNillableBindType(v *plan.BindType) *PlanUpdate {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
+	return _u
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_u *PlanUpdate) SetOfflineAllowed(v bool) *PlanUpdate {
 	_u.mutation.SetOfflineAllowed(v)
@@ -420,6 +434,11 @@ func (_u *PlanUpdate) check() error {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
 		if err := plan.LeaseSecondsValidator(v); err != nil {
 			return &ValidationError{Name: "lease_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.lease_seconds": %w`, err)}
@@ -497,6 +516,9 @@ func (_u *PlanUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(plan.FieldMaxRehosts, field.TypeInt)
+	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
 	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)
@@ -780,6 +802,20 @@ func (_u *PlanUpdateOne) ClearMaxRehosts() *PlanUpdateOne {
 	return _u
 }
 
+// SetBindType sets the "bind_type" field.
+func (_u *PlanUpdateOne) SetBindType(v plan.BindType) *PlanUpdateOne {
+	_u.mutation.SetBindType(v)
+	return _u
+}
+
+// SetNillableBindType sets the "bind_type" field if the given value is not nil.
+func (_u *PlanUpdateOne) SetNillableBindType(v *plan.BindType) *PlanUpdateOne {
+	if v != nil {
+		_u.SetBindType(*v)
+	}
+	return _u
+}
+
 // SetOfflineAllowed sets the "offline_allowed" field.
 func (_u *PlanUpdateOne) SetOfflineAllowed(v bool) *PlanUpdateOne {
 	_u.mutation.SetOfflineAllowed(v)
@@ -1041,6 +1077,11 @@ func (_u *PlanUpdateOne) check() error {
 			return &ValidationError{Name: "max_rehosts", err: fmt.Errorf(`ent: validator failed for field "Plan.max_rehosts": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BindType(); ok {
+		if err := plan.BindTypeValidator(v); err != nil {
+			return &ValidationError{Name: "bind_type", err: fmt.Errorf(`ent: validator failed for field "Plan.bind_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.LeaseSeconds(); ok {
 		if err := plan.LeaseSecondsValidator(v); err != nil {
 			return &ValidationError{Name: "lease_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.lease_seconds": %w`, err)}
@@ -1135,6 +1176,9 @@ func (_u *PlanUpdateOne) sqlSave(ctx context.Context) (_node *Plan, err error) {
 	}
 	if _u.mutation.MaxRehostsCleared() {
 		_spec.ClearField(plan.FieldMaxRehosts, field.TypeInt)
+	}
+	if value, ok := _u.mutation.BindType(); ok {
+		_spec.SetField(plan.FieldBindType, field.TypeEnum, value)
 	}
 	if value, ok := _u.mutation.OfflineAllowed(); ok {
 		_spec.SetField(plan.FieldOfflineAllowed, field.TypeBool, value)

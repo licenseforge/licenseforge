@@ -43,10 +43,17 @@ var (
 	expiryBases  = []string{"from_issue", "from_first_activation"}
 	licenseTypes = []string{"dev", "trial", "paid", "community"}
 	statuses     = []string{"active", "suspended", "revoked"}
-	bindTypes    = []string{"machine", "cluster"}
+	bindTypes    = []string{"machine", "cluster"}         // what an activation binds to
+	bindPolicies = []string{"none", "machine", "cluster"} // what a plan/license requires; none = site license
 	fpSources    = []string{"override", "env", "kubernetes", "machine-id"}
 	modes        = []string{"online", "offline"}
 )
+
+// stringMapCheck: a JSON object whose values are all strings (external_refs),
+// so rows always decode into map[string]string.
+func stringMapCheck(col string) string {
+	return `jsonb_typeof(` + col + `) = 'object' AND NOT jsonb_path_exists(` + col + `, 'strict $.*?(@.type() != "string")'::jsonpath)`
+}
 
 // Column types enforced by the database too, not only by ent's validators.
 var (

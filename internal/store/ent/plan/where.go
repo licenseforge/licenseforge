@@ -700,6 +700,26 @@ func MaxRehostsNotNil() predicate.Plan {
 	return predicate.Plan(sql.FieldNotNull(FieldMaxRehosts))
 }
 
+// BindTypeEQ applies the EQ predicate on the "bind_type" field.
+func BindTypeEQ(v BindType) predicate.Plan {
+	return predicate.Plan(sql.FieldEQ(FieldBindType, v))
+}
+
+// BindTypeNEQ applies the NEQ predicate on the "bind_type" field.
+func BindTypeNEQ(v BindType) predicate.Plan {
+	return predicate.Plan(sql.FieldNEQ(FieldBindType, v))
+}
+
+// BindTypeIn applies the In predicate on the "bind_type" field.
+func BindTypeIn(vs ...BindType) predicate.Plan {
+	return predicate.Plan(sql.FieldIn(FieldBindType, vs...))
+}
+
+// BindTypeNotIn applies the NotIn predicate on the "bind_type" field.
+func BindTypeNotIn(vs ...BindType) predicate.Plan {
+	return predicate.Plan(sql.FieldNotIn(FieldBindType, vs...))
+}
+
 // OfflineAllowedEQ applies the EQ predicate on the "offline_allowed" field.
 func OfflineAllowedEQ(v bool) predicate.Plan {
 	return predicate.Plan(sql.FieldEQ(FieldOfflineAllowed, v))

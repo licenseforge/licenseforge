@@ -40,7 +40,7 @@ func (Customer) Annotations() []schema.Annotation {
 		"customers_id_format":      `id ~ '^cus_` + idChars + `$'`,
 		"customers_name_not_blank": `btrim(name) <> ''`,
 		"customers_email_format":   `email IS NULL OR email ~ '^[^@[:space:]]+@[^@[:space:]]+$'`,
-		"customers_refs_object":    `jsonb_typeof(external_refs) = 'object'`,
+		"customers_refs_strings":   stringMapCheck("external_refs"),
 	}}}
 }
 

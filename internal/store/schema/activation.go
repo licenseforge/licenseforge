@@ -49,6 +49,9 @@ func (Activation) Annotations() []schema.Annotation {
 		"activations_binding":     enumCheck("binding", bindTypes),
 		"activations_mode":        enumCheck("mode", modes),
 		"activations_seen_order":  `last_seen_at >= first_seen_at`,
+		"activations_deactivated": `deactivated_at IS NULL OR deactivated_at >= first_seen_at`,
+		// The SDK binds Kubernetes fingerprints to the cluster, all others to the machine.
+		"activations_source_binding": `((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)`,
 	}}}
 }
 
