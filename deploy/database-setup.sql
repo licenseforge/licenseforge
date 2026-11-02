@@ -6,9 +6,10 @@
 --   licenseforge_owner     runs migrations (`licenseforge migrate`); owns the schema
 --   licenseforge_api       serves tenant requests     (member of licenseforge_app)
 --   licenseforge_admin     platform-admin operations  (member of licenseforge_platform)
--- The server refuses to start if the api/admin logins can bypass row-level
--- security (superuser, BYPASSRLS, CREATEROLE, owning tables, or membership in
--- such roles or in the other group).
+-- The server refuses to start if the api/admin logins could bypass row-level
+-- security: privileged attributes, owning the database, schema or tables, being
+-- able to create temporary tables, or membership in any role other than their
+-- own group (so never GRANT them the owner, the other group or pg_* roles).
 
 -- Group roles referenced by migrations (cluster-wide, created once).
 CREATE ROLE licenseforge_app NOLOGIN;
@@ -23,4 +24,8 @@ CREATE DATABASE licenseforge OWNER licenseforge_owner;
 -- Only these logins may connect. Group grants are cluster-wide, so this is what
 -- keeps logins of another LicenseForge install on the same cluster out.
 REVOKE CONNECT ON DATABASE licenseforge FROM PUBLIC;
+-- No temporary tables: a temp table named like a real one would shadow it for
+-- later requests on the same pooled connection. The server refuses logins
+-- that still have TEMPORARY.
+REVOKE TEMPORARY ON DATABASE licenseforge FROM PUBLIC;
 GRANT CONNECT ON DATABASE licenseforge TO licenseforge_owner, licenseforge_api, licenseforge_admin;

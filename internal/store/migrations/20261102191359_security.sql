@@ -17,9 +17,15 @@
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO licenseforge_app, licenseforge_platform;
 
+-- Functions are not executable by PUBLIC: a SECURITY DEFINER function would
+-- run with owner rights and bypass row-level security.
+ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
 -- pg_catalog-qualified so a malicious search_path can't swap current_setting.
 CREATE FUNCTION app_tenant_id() RETURNS text LANGUAGE sql STABLE
   AS $$ SELECT NULLIF(pg_catalog.current_setting('app.tenant_id', true), '') $$;
+REVOKE EXECUTE ON FUNCTION app_tenant_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_tenant_id() TO licenseforge_app;
 
 -- tenants: a tenant may read its own row; only the platform writes.
 GRANT SELECT ON "tenants" TO licenseforge_app;

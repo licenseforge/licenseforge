@@ -70,11 +70,13 @@ func init() {
 	ProductsTable.Annotation = &entsql.Annotation{}
 	ProductsTable.Annotation.Checks = map[string]string{
 		"products_id_format":   "id ~ '^prd_[a-z2-7]{26}$'",
+		"products_name_set":    "name <> ''",
 		"products_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
 		"tenants_id_format":   "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_name_set":    "name <> ''",
 		"tenants_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 }

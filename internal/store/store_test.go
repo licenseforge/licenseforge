@@ -70,7 +70,18 @@ func userURL(user, db string, params ...string) string {
 	return u.String()
 }
 
-var cleanupStmts []string
+// cleanupStmts run after the tests, in order: the database first, then roles
+// (roles holding privileges on a live database can't be dropped).
+var (
+	cleanupMu    sync.Mutex
+	cleanupStmts []string
+)
+
+func addCleanup(stmts ...string) {
+	cleanupMu.Lock()
+	defer cleanupMu.Unlock()
+	cleanupStmts = append(cleanupStmts, stmts...)
+}
 
 func adminExec(admin *sql.DB, stmts ...string) error {
 	for _, s := range stmts {
@@ -92,18 +103,18 @@ func setup(admin *sql.DB) error {
 	s := suffix()
 	env.name = "lf_test_" + s
 	owner, api, adm := "lf_own_"+s, "lf_api_"+s, "lf_adm_"+s
-	cleanupStmts = []string{
+	addCleanup(
 		fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, env.name),
-		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, owner),
 		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, api),
 		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, adm),
-	}
+	)
 	if err := adminExec(admin,
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test'`, owner),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, api),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_platform`, adm),
 		fmt.Sprintf(`CREATE DATABASE %s OWNER %s`, env.name, owner),
 		fmt.Sprintf(`REVOKE CONNECT ON DATABASE %s FROM PUBLIC`, env.name),
+		fmt.Sprintf(`REVOKE TEMPORARY ON DATABASE %s FROM PUBLIC`, env.name),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s, %s, %s`, env.name, owner, api, adm),
 	); err != nil {
 		return err
@@ -115,8 +126,12 @@ func setup(admin *sql.DB) error {
 }
 
 func teardown(admin *sql.DB) {
+	// The owner role goes last: it owns the database dropped first.
+	addCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS lf_own_%s`, strings.TrimPrefix(env.name, "lf_test_")))
 	for _, s := range cleanupStmts {
-		_, _ = admin.Exec(s)
+		if _, err := admin.Exec(s); err != nil {
+			fmt.Fprintf(os.Stderr, "cleanup: %s: %v\n", s, err)
+		}
 	}
 }
 
@@ -137,30 +152,38 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 	}
 	defer func() { _ = admin.Close() }()
 	s := suffix()
+	ownerRole := "lf_own_" + strings.TrimPrefix(env.name, "lf_test_")
 	creator, byp, member := "lf_cr_"+s, "lf_byp_"+s, "lf_mem_"+s
-	t.Cleanup(func() {
-		for _, r := range []string{creator, member, byp} {
-			_, _ = admin.Exec(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
-		}
-	})
+	inOwner, inProgram, temp := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s
+	logins := []string{creator, member, inOwner, inProgram, temp}
+	for _, r := range append(logins, byp) {
+		addCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
+	}
 	if err := adminExec(admin,
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' CREATEROLE IN ROLE licenseforge_app`, creator),
 		fmt.Sprintf(`CREATE ROLE %s NOLOGIN BYPASSRLS`, byp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, %s`, member, byp),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s, %s`, env.name, creator, member),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, %s`, inOwner, ownerRole),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, pg_execute_server_program`, inProgram),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, temp),
+		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.name, temp),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.name, strings.Join(logins, ", ")),
 	); err != nil {
 		t.Fatal(err)
 	}
 	tenantUser := "lf_api_" + strings.TrimPrefix(env.name, "lf_test_")
 	for name, dsn := range map[string]string{
-		"superuser":              strings.Replace(adminURL, "/postgres?", "/"+env.name+"?", 1),
-		"schema owner":           env.ownerURL,
-		"platform login":         env.platformURL,
-		"createrole":             userURL(creator, env.name),
-		"member of bypassrls":    userURL(member, env.name),
-		"preset tenant":          userURL(tenantUser, env.name, "app.tenant_id", "tnt_x"),
-		"switched role":          userURL(tenantUser, env.name, "role", "licenseforge_app"),
-		"superuser switched too": strings.Replace(adminURL, "/postgres?", "/"+env.name+"?role="+tenantUser+"&", 1),
+		"superuser":                           strings.Replace(adminURL, "/postgres?", "/"+env.name+"?", 1),
+		"schema owner":                        env.ownerURL,
+		"platform login":                      env.platformURL,
+		"createrole":                          userURL(creator, env.name),
+		"member of bypassrls":                 userURL(member, env.name),
+		"member of owner role":                userURL(inOwner, env.name),
+		"member of pg_execute_server_program": userURL(inProgram, env.name),
+		"can create temp tables":              userURL(temp, env.name),
+		"preset tenant":                       userURL(tenantUser, env.name, "app.tenant_id", "tnt_x"),
+		"switched role":                       userURL(tenantUser, env.name, "role", "licenseforge_app"),
+		"superuser switched too":              strings.Replace(adminURL, "/postgres?", "/"+env.name+"?role="+tenantUser+"&", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Open(context.Background(), dsn, env.platformURL); !errors.Is(err, ErrUnsafeRole) {
@@ -332,6 +355,10 @@ func TestTenantIsolation(t *testing.T) {
 			_, err := tx.ExecContext(ctx, `SET LOCAL ROLE licenseforge_platform`)
 			return err
 		},
+		"shadow a table with a temp table": func(tx *ent.Tx) error {
+			_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE products (LIKE public.products)`)
+			return err
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := d.WithTenant(ctx, a.ID, op)
@@ -448,6 +475,54 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		}
 	}
 
+	// Functions: only app_tenant_id, exactly as written, not SECURITY DEFINER,
+	// not executable by PUBLIC. Triggers and rules run with owner rights and
+	// are refused until reviewed.
+	frows, err := owner.Query(`
+		SELECT p.proname, p.prosecdef, p.prosrc, COALESCE(array_to_string(p.proconfig, ','), ''),
+		       has_function_privilege('public', p.oid, 'EXECUTE')
+		FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for frows.Next() {
+		var name, src, config string
+		var secdef, publicExec bool
+		if err := frows.Scan(&name, &secdef, &src, &config, &publicExec); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case name != "app_tenant_id":
+			t.Errorf("function %s: only app_tenant_id is allowed in public; review any new function", name)
+		case secdef || config != "" || publicExec:
+			t.Errorf("app_tenant_id: security definer=%v config=%q executable by PUBLIC=%v", secdef, config, publicExec)
+		case strings.TrimSpace(src) != `SELECT NULLIF(pg_catalog.current_setting('app.tenant_id', true), '')`:
+			t.Errorf("app_tenant_id body changed: %q", src)
+		}
+	}
+	_ = frows.Close()
+	var triggers, rules int
+	if err := owner.QueryRow(`SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal`).Scan(&triggers); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(`SELECT count(*) FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class
+		JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND r.rulename <> '_RETURN'`).Scan(&rules); err != nil {
+		t.Fatal(err)
+	}
+	if triggers+rules != 0 {
+		t.Errorf("%d triggers and %d rules on public tables: they run with owner rights, review before allowing", triggers, rules)
+	}
+	for _, role := range []string{AppRole, PlatformRole} {
+		var any bool
+		if err := owner.QueryRow(`SELECT has_table_privilege($1, 'schema_migrations', 'SELECT,INSERT,UPDATE,DELETE')`, role).Scan(&any); err != nil {
+			t.Fatal(err)
+		}
+		if any {
+			t.Errorf("%s has privileges on schema_migrations", role)
+		}
+	}
+
 	tenantTables := 0
 	for _, r := range rels {
 		switch {
@@ -469,5 +544,30 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	}
 	if tenantTables == 0 {
 		t.Fatal("no tenant tables found")
+	}
+}
+
+func TestNoTransactionMigration(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("pgx", env.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	m := migration{version: "29990101000000_concurrent", checksum: "x",
+		body: noTxMarker + "\nCREATE INDEX CONCURRENTLY products_name_idx ON products (name);"}
+	if err := applyOne(ctx, conn, m); err != nil {
+		t.Fatalf("CREATE INDEX CONCURRENTLY with the marker: %v", err)
+	}
+	_, _ = conn.ExecContext(ctx, `DROP INDEX products_name_idx`)
+	_, _ = conn.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = $1`, m.version)
+	m.body = "CREATE INDEX CONCURRENTLY products_name_idx ON products (name);"
+	if err := applyOne(ctx, conn, m); err == nil {
+		t.Fatal("without the marker the statement must fail inside a transaction")
 	}
 }

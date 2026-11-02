@@ -27,6 +27,7 @@ func (Tenant) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
 		"tenants_id_format":   `id ~ '^tnt_` + idChars + `$'`,
 		"tenants_slug_format": `slug ~ '` + slugPattern + `'`,
+		"tenants_name_set":    `name <> ''`,
 	}}}
 }
 

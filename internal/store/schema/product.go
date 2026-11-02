@@ -39,6 +39,7 @@ func (Product) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
 		"products_id_format":   `id ~ '^prd_` + idChars + `$'`,
 		"products_slug_format": `slug ~ '` + slugPattern + `'`,
+		"products_name_set":    `name <> ''`,
 	}}}
 }
 

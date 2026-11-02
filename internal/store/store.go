@@ -46,11 +46,11 @@ type DB struct {
 // Open connects the tenant pool (a login in AppRole) and the platform pool (a
 // login in PlatformRole) and refuses logins that could bypass isolation.
 func Open(ctx context.Context, tenantDSN, platformDSN string) (*DB, error) {
-	tdb, err := openChecked(ctx, tenantDSN, AppRole, PlatformRole)
+	tdb, err := openChecked(ctx, tenantDSN, AppRole)
 	if err != nil {
 		return nil, fmt.Errorf("tenant pool: %w", err)
 	}
-	pdb, err := openChecked(ctx, platformDSN, PlatformRole, AppRole)
+	pdb, err := openChecked(ctx, platformDSN, PlatformRole)
 	if err != nil {
 		_ = tdb.Close()
 		return nil, fmt.Errorf("platform pool: %w", err)
@@ -66,57 +66,59 @@ func Open(ctx context.Context, tenantDSN, platformDSN string) (*DB, error) {
 // Close closes both pools.
 func (d *DB) Close() error { return errors.Join(d.tenantDB.Close(), d.platformDB.Close()) }
 
-func openChecked(ctx context.Context, dsn, want, forbidden string) (*sql.DB, error) {
+func openChecked(ctx context.Context, dsn, want string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRole(ctx, db, want, forbidden); err != nil {
+	if err := checkRole(ctx, db, want); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-// checkRole refuses logins that could bypass row-level security or escalate:
-// switched roles (SET ROLE via connection options), superuser, BYPASSRLS or
-// CREATEROLE, membership in a role with those attributes, membership in the
-// other pool's group, owning any relation, or a preset tenant setting.
-func checkRole(ctx context.Context, db *sql.DB, want, forbidden string) error {
+// checkRole refuses logins that could bypass row-level security or escalate.
+// Membership is an allow-list: the login may be a member of want and nothing
+// else, which also rules out the owner role, the other pool's group and
+// predefined roles such as pg_execute_server_program or pg_read_all_data.
+func checkRole(ctx context.Context, db *sql.DB, want string) error {
 	var (
-		switched, privileged, inPrivileged, inWant, inForbidden, owns bool
-		preset                                                        string
+		switched, privileged, wantPrivileged, inWant, otherMember, owns, canTemp bool
+		preset                                                                   string
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT session_user <> current_user,
-		       r.rolsuper OR r.rolbypassrls OR r.rolcreaterole,
-		       EXISTS (SELECT 1 FROM pg_roles x
-		               WHERE x.oid <> r.oid AND (x.rolsuper OR x.rolbypassrls OR x.rolcreaterole)
-		                 AND pg_has_role(r.oid, x.oid, 'MEMBER')),
+		       r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication,
+		       (SELECT g.rolsuper OR g.rolbypassrls OR g.rolcreaterole OR g.rolcreatedb OR g.rolreplication
+		          FROM pg_roles g WHERE g.rolname = $1),
 		       pg_has_role(r.oid, $1, 'MEMBER'),
-		       pg_has_role(r.oid, $2, 'MEMBER'),
-		       EXISTS (SELECT 1 FROM pg_class c WHERE c.relowner = r.oid
-		               AND c.relkind IN ('r','p','v','m','f')
-		               AND c.relnamespace NOT IN (SELECT oid FROM pg_namespace WHERE nspname IN ('pg_catalog','information_schema'))),
+		       EXISTS (SELECT 1 FROM pg_roles x
+		               WHERE x.oid <> r.oid AND x.rolname <> $1 AND pg_has_role(r.oid, x.oid, 'MEMBER')),
+		       EXISTS (SELECT 1 FROM pg_class c WHERE pg_has_role(r.oid, c.relowner, 'MEMBER')
+		               AND c.relnamespace NOT IN (SELECT oid FROM pg_namespace WHERE nspname IN ('pg_catalog','information_schema') OR nspname LIKE 'pg_toast%'))
+		         OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datname = current_database() AND pg_has_role(r.oid, d.datdba, 'MEMBER'))
+		         OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = 'public' AND pg_has_role(r.oid, n.nspowner, 'MEMBER')),
+		       has_database_privilege(r.oid, current_database(), 'TEMPORARY'),
 		       COALESCE(current_setting('app.tenant_id', true), '')
-		FROM pg_roles r WHERE r.rolname = session_user`, want, forbidden).
-		Scan(&switched, &privileged, &inPrivileged, &inWant, &inForbidden, &owns, &preset)
+		FROM pg_roles r WHERE r.rolname = session_user`, want).
+		Scan(&switched, &privileged, &wantPrivileged, &inWant, &otherMember, &owns, &canTemp, &preset)
 	if err != nil {
 		return fmt.Errorf("store: check role: %w", err)
 	}
 	switch {
 	case switched:
 		return fmt.Errorf("%w: connection switched role (SET ROLE in options)", ErrUnsafeRole)
-	case privileged:
-		return fmt.Errorf("%w: login is superuser, BYPASSRLS or CREATEROLE", ErrUnsafeRole)
-	case inPrivileged:
-		return fmt.Errorf("%w: login is a member of a superuser, BYPASSRLS or CREATEROLE role", ErrUnsafeRole)
+	case privileged || wantPrivileged:
+		return fmt.Errorf("%w: login or %s has SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION", ErrUnsafeRole, want)
 	case !inWant:
 		return fmt.Errorf("%w: login is not a member of %s", ErrUnsafeRole, want)
-	case inForbidden:
-		return fmt.Errorf("%w: login must not be a member of %s", ErrUnsafeRole, forbidden)
+	case otherMember:
+		return fmt.Errorf("%w: login must be a member of %s only (no owner, other group or predefined roles)", ErrUnsafeRole, want)
 	case owns:
-		return fmt.Errorf("%w: login owns tables; use a separate owner login for migrations", ErrUnsafeRole)
+		return fmt.Errorf("%w: login owns the database, schema or tables; use a separate owner login for migrations", ErrUnsafeRole)
+	case canTemp:
+		return fmt.Errorf("%w: login can create temporary tables, which shadow real tables on pooled connections; REVOKE TEMPORARY ON DATABASE ... FROM PUBLIC", ErrUnsafeRole)
 	case preset != "":
 		return fmt.Errorf("%w: app.tenant_id is preset for the session (connection options or ALTER ROLE ... SET)", ErrUnsafeRole)
 	}
@@ -266,7 +268,23 @@ func Migrate(ctx context.Context, ownerDSN string) (err error) {
 	return nil
 }
 
+// noTxMarker as a migration's first line runs it outside a transaction, for
+// statements that can't run in one (CREATE INDEX CONCURRENTLY). Such a file
+// should contain a single statement so a failure leaves nothing half-applied.
+const noTxMarker = "-- lf:no-transaction"
+
 func applyOne(ctx context.Context, conn *sql.Conn, m migration) (err error) {
+	if strings.HasPrefix(m.body, noTxMarker) {
+		if _, err := conn.ExecContext(ctx, `SET lock_timeout = '30s'`); err != nil {
+			return err
+		}
+		defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), `RESET lock_timeout`) }()
+		if _, err := conn.ExecContext(ctx, m.body); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, `INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)`, m.version, m.checksum)
+		return err
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
