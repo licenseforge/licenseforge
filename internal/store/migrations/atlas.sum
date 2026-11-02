@@ -1,4 +1,4 @@
-h1:/YpwTYRFKRapGOGFkNs9dcVBZHBd4bkp93/QAd+lvmQ=
+h1:D8t+26yxNTR7/YdLg5wc7772cW2RHHxV3aNRQCwqpZU=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -6,3 +6,5 @@ h1:/YpwTYRFKRapGOGFkNs9dcVBZHBd4bkp93/QAd+lvmQ=
 20261102214822_licenses.sql h1:woaI+3Qf0l5U0ras2/JeKGCPH2irLy9P5lMryfoHusM=
 20261102214859_licenses_security.sql h1:LFxH5CoNtvngZXpZSg+3su2zDCVKgkYWN5ZlxObM54k=
 20261102220613_license_invariants.sql h1:BHH/+5TOt8vJh6EddS5FGNngA0Qnf4JHLoQrqKHST1g=
+20261102221410_signing_keys.sql h1:pmbXHzmiFEWkAAlYl7y6ejqG2c/hm7LZbWyyNRj9RKQ=
+20261102221500_signing_keys_security.sql h1:JUCS+f9Usf3dao1xl78s5aPzAk5nyEyiWWDVP/l8/qg=

@@ -22,6 +22,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
+	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 
 	stdsql "database/sql"
@@ -46,6 +47,8 @@ type Client struct {
 	PlanFeature *PlanFeatureClient
 	// Product is the client for interacting with the Product builders.
 	Product *ProductClient
+	// SigningKey is the client for interacting with the SigningKey builders.
+	SigningKey *SigningKeyClient
 	// Tenant is the client for interacting with the Tenant builders.
 	Tenant *TenantClient
 }
@@ -66,6 +69,7 @@ func (c *Client) init() {
 	c.Plan = NewPlanClient(c.config)
 	c.PlanFeature = NewPlanFeatureClient(c.config)
 	c.Product = NewProductClient(c.config)
+	c.SigningKey = NewSigningKeyClient(c.config)
 	c.Tenant = NewTenantClient(c.config)
 }
 
@@ -166,6 +170,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Plan:        NewPlanClient(cfg),
 		PlanFeature: NewPlanFeatureClient(cfg),
 		Product:     NewProductClient(cfg),
+		SigningKey:  NewSigningKeyClient(cfg),
 		Tenant:      NewTenantClient(cfg),
 	}, nil
 }
@@ -193,6 +198,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Plan:        NewPlanClient(cfg),
 		PlanFeature: NewPlanFeatureClient(cfg),
 		Product:     NewProductClient(cfg),
+		SigningKey:  NewSigningKeyClient(cfg),
 		Tenant:      NewTenantClient(cfg),
 	}, nil
 }
@@ -224,7 +230,7 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.Activation, c.Customer, c.Feature, c.License, c.Plan, c.PlanFeature,
-		c.Product, c.Tenant,
+		c.Product, c.SigningKey, c.Tenant,
 	} {
 		n.Use(hooks...)
 	}
@@ -235,7 +241,7 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.Activation, c.Customer, c.Feature, c.License, c.Plan, c.PlanFeature,
-		c.Product, c.Tenant,
+		c.Product, c.SigningKey, c.Tenant,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -258,6 +264,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PlanFeature.mutate(ctx, m)
 	case *ProductMutation:
 		return c.Product.mutate(ctx, m)
+	case *SigningKeyMutation:
+		return c.SigningKey.mutate(ctx, m)
 	case *TenantMutation:
 		return c.Tenant.mutate(ctx, m)
 	default:
@@ -1484,6 +1492,155 @@ func (c *ProductClient) mutate(ctx context.Context, m *ProductMutation) (Value, 
 	}
 }
 
+// SigningKeyClient is a client for the SigningKey schema.
+type SigningKeyClient struct {
+	config
+}
+
+// NewSigningKeyClient returns a client for the SigningKey from the given config.
+func NewSigningKeyClient(c config) *SigningKeyClient {
+	return &SigningKeyClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `signingkey.Hooks(f(g(h())))`.
+func (c *SigningKeyClient) Use(hooks ...Hook) {
+	c.hooks.SigningKey = append(c.hooks.SigningKey, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `signingkey.Intercept(f(g(h())))`.
+func (c *SigningKeyClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SigningKey = append(c.inters.SigningKey, interceptors...)
+}
+
+// Create returns a builder for creating a SigningKey entity.
+func (c *SigningKeyClient) Create() *SigningKeyCreate {
+	mutation := newSigningKeyMutation(c.config, OpCreate)
+	return &SigningKeyCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SigningKey entities.
+func (c *SigningKeyClient) CreateBulk(builders ...*SigningKeyCreate) *SigningKeyCreateBulk {
+	return &SigningKeyCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SigningKeyClient) MapCreateBulk(slice any, setFunc func(*SigningKeyCreate, int)) *SigningKeyCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SigningKeyCreateBulk{err: fmt.Errorf("calling to SigningKeyClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SigningKeyCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SigningKeyCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SigningKey.
+func (c *SigningKeyClient) Update() *SigningKeyUpdate {
+	mutation := newSigningKeyMutation(c.config, OpUpdate)
+	return &SigningKeyUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SigningKeyClient) UpdateOne(_m *SigningKey) *SigningKeyUpdateOne {
+	mutation := newSigningKeyMutation(c.config, OpUpdateOne, withSigningKey(_m))
+	return &SigningKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SigningKeyClient) UpdateOneID(id string) *SigningKeyUpdateOne {
+	mutation := newSigningKeyMutation(c.config, OpUpdateOne, withSigningKeyID(id))
+	return &SigningKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SigningKey.
+func (c *SigningKeyClient) Delete() *SigningKeyDelete {
+	mutation := newSigningKeyMutation(c.config, OpDelete)
+	return &SigningKeyDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SigningKeyClient) DeleteOne(_m *SigningKey) *SigningKeyDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SigningKeyClient) DeleteOneID(id string) *SigningKeyDeleteOne {
+	builder := c.Delete().Where(signingkey.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SigningKeyDeleteOne{builder}
+}
+
+// Query returns a query builder for SigningKey.
+func (c *SigningKeyClient) Query() *SigningKeyQuery {
+	return &SigningKeyQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSigningKey},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SigningKey entity by its id.
+func (c *SigningKeyClient) Get(ctx context.Context, id string) (*SigningKey, error) {
+	return c.Query().Where(signingkey.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SigningKeyClient) GetX(ctx context.Context, id string) *SigningKey {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a SigningKey.
+func (c *SigningKeyClient) QueryTenant(_m *SigningKey) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(signingkey.Table, signingkey.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, signingkey.TenantTable, signingkey.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *SigningKeyClient) Hooks() []Hook {
+	return c.hooks.SigningKey
+}
+
+// Interceptors returns the client interceptors.
+func (c *SigningKeyClient) Interceptors() []Interceptor {
+	return c.inters.SigningKey
+}
+
+func (c *SigningKeyClient) mutate(ctx context.Context, m *SigningKeyMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SigningKeyCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SigningKeyUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SigningKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SigningKeyDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SigningKey mutation op: %q", m.Op())
+	}
+}
+
 // TenantClient is a client for the Tenant schema.
 type TenantClient struct {
 	config
@@ -1624,6 +1781,22 @@ func (c *TenantClient) QueryCustomers(_m *Tenant) *CustomerQuery {
 	return query
 }
 
+// QuerySigningKeys queries the signing_keys edge of a Tenant.
+func (c *TenantClient) QuerySigningKeys(_m *Tenant) *SigningKeyQuery {
+	query := (&SigningKeyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(signingkey.Table, signingkey.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.SigningKeysTable, tenant.SigningKeysColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *TenantClient) Hooks() []Hook {
 	return c.hooks.Tenant
@@ -1652,11 +1825,11 @@ func (c *TenantClient) mutate(ctx context.Context, m *TenantMutation) (Value, er
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Activation, Customer, Feature, License, Plan, PlanFeature, Product,
+		Activation, Customer, Feature, License, Plan, PlanFeature, Product, SigningKey,
 		Tenant []ent.Hook
 	}
 	inters struct {
-		Activation, Customer, Feature, License, Plan, PlanFeature, Product,
+		Activation, Customer, Feature, License, Plan, PlanFeature, Product, SigningKey,
 		Tenant []ent.Interceptor
 	}
 )

@@ -27,5 +27,8 @@ type PlanFeature func(*sql.Selector)
 // Product is the predicate function for product builders.
 type Product func(*sql.Selector)
 
+// SigningKey is the predicate function for signingkey builders.
+type SigningKey func(*sql.Selector)
+
 // Tenant is the predicate function for tenant builders.
 type Tenant func(*sql.Selector)

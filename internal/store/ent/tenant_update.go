@@ -14,6 +14,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
+	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
 
@@ -94,6 +95,21 @@ func (_u *TenantUpdate) AddCustomers(v ...*Customer) *TenantUpdate {
 	return _u.AddCustomerIDs(ids...)
 }
 
+// AddSigningKeyIDs adds the "signing_keys" edge to the SigningKey entity by IDs.
+func (_u *TenantUpdate) AddSigningKeyIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddSigningKeyIDs(ids...)
+	return _u
+}
+
+// AddSigningKeys adds the "signing_keys" edges to the SigningKey entity.
+func (_u *TenantUpdate) AddSigningKeys(v ...*SigningKey) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddSigningKeyIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -139,6 +155,27 @@ func (_u *TenantUpdate) RemoveCustomers(v ...*Customer) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveCustomerIDs(ids...)
+}
+
+// ClearSigningKeys clears all "signing_keys" edges to the SigningKey entity.
+func (_u *TenantUpdate) ClearSigningKeys() *TenantUpdate {
+	_u.mutation.ClearSigningKeys()
+	return _u
+}
+
+// RemoveSigningKeyIDs removes the "signing_keys" edge to SigningKey entities by IDs.
+func (_u *TenantUpdate) RemoveSigningKeyIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveSigningKeyIDs(ids...)
+	return _u
+}
+
+// RemoveSigningKeys removes "signing_keys" edges to SigningKey entities.
+func (_u *TenantUpdate) RemoveSigningKeys(v ...*SigningKey) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveSigningKeyIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -303,6 +340,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.SigningKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedSigningKeysIDs(); len(nodes) > 0 && !_u.mutation.SigningKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.SigningKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -387,6 +469,21 @@ func (_u *TenantUpdateOne) AddCustomers(v ...*Customer) *TenantUpdateOne {
 	return _u.AddCustomerIDs(ids...)
 }
 
+// AddSigningKeyIDs adds the "signing_keys" edge to the SigningKey entity by IDs.
+func (_u *TenantUpdateOne) AddSigningKeyIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddSigningKeyIDs(ids...)
+	return _u
+}
+
+// AddSigningKeys adds the "signing_keys" edges to the SigningKey entity.
+func (_u *TenantUpdateOne) AddSigningKeys(v ...*SigningKey) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddSigningKeyIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -432,6 +529,27 @@ func (_u *TenantUpdateOne) RemoveCustomers(v ...*Customer) *TenantUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveCustomerIDs(ids...)
+}
+
+// ClearSigningKeys clears all "signing_keys" edges to the SigningKey entity.
+func (_u *TenantUpdateOne) ClearSigningKeys() *TenantUpdateOne {
+	_u.mutation.ClearSigningKeys()
+	return _u
+}
+
+// RemoveSigningKeyIDs removes the "signing_keys" edge to SigningKey entities by IDs.
+func (_u *TenantUpdateOne) RemoveSigningKeyIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveSigningKeyIDs(ids...)
+	return _u
+}
+
+// RemoveSigningKeys removes "signing_keys" edges to SigningKey entities.
+func (_u *TenantUpdateOne) RemoveSigningKeys(v ...*SigningKey) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveSigningKeyIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -619,6 +737,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(customer.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.SigningKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedSigningKeysIDs(); len(nodes) > 0 && !_u.mutation.SigningKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.SigningKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.SigningKeysTable,
+			Columns: []string{tenant.SigningKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -27,3 +27,4 @@ func PlanFeature() string { return New("plf") }
 func Customer() string    { return New("cus") }
 func License() string     { return New("lic") }
 func Activation() string  { return New("act") }
+func SigningKey() string  { return New("sk") }

@@ -19,6 +19,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
+	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/schema"
 )
@@ -39,6 +40,7 @@ const (
 	TypePlan        = "Plan"
 	TypePlanFeature = "PlanFeature"
 	TypeProduct     = "Product"
+	TypeSigningKey  = "SigningKey"
 	TypeTenant      = "Tenant"
 )
 
@@ -9206,26 +9208,907 @@ func (m *ProductMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Product edge %s", name)
 }
 
+// SigningKeyMutation represents an operation that mutates the SigningKey nodes in the graph.
+type SigningKeyMutation struct {
+	config
+	op                     Op
+	typ                    string
+	id                     *string
+	created_at             *time.Time
+	updated_at             *time.Time
+	alg                    *signingkey.Alg
+	public_key             *[]byte
+	status                 *signingkey.Status
+	private_key_ciphertext *string
+	activated_at           *time.Time
+	retired_at             *time.Time
+	clearedFields          map[string]struct{}
+	tenant                 *string
+	clearedtenant          bool
+	done                   bool
+	oldValue               func(context.Context) (*SigningKey, error)
+	predicates             []predicate.SigningKey
+}
+
+var _ ent.Mutation = (*SigningKeyMutation)(nil)
+
+// signingkeyOption allows management of the mutation configuration using functional options.
+type signingkeyOption func(*SigningKeyMutation)
+
+// newSigningKeyMutation creates new mutation for the SigningKey entity.
+func newSigningKeyMutation(c config, op Op, opts ...signingkeyOption) *SigningKeyMutation {
+	m := &SigningKeyMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeSigningKey,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withSigningKeyID sets the ID field of the mutation.
+func withSigningKeyID(id string) signingkeyOption {
+	return func(m *SigningKeyMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *SigningKey
+		)
+		m.oldValue = func(ctx context.Context) (*SigningKey, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().SigningKey.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withSigningKey sets the old SigningKey of the mutation.
+func withSigningKey(node *SigningKey) signingkeyOption {
+	return func(m *SigningKeyMutation) {
+		m.oldValue = func(context.Context) (*SigningKey, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m SigningKeyMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m SigningKeyMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of SigningKey entities.
+func (m *SigningKeyMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *SigningKeyMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *SigningKeyMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().SigningKey.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetTenantID sets the "tenant_id" field.
+func (m *SigningKeyMutation) SetTenantID(s string) {
+	m.tenant = &s
+}
+
+// TenantID returns the value of the "tenant_id" field in the mutation.
+func (m *SigningKeyMutation) TenantID() (r string, exists bool) {
+	v := m.tenant
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTenantID returns the old "tenant_id" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldTenantID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTenantID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTenantID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTenantID: %w", err)
+	}
+	return oldValue.TenantID, nil
+}
+
+// ResetTenantID resets all changes to the "tenant_id" field.
+func (m *SigningKeyMutation) ResetTenantID() {
+	m.tenant = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *SigningKeyMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *SigningKeyMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *SigningKeyMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *SigningKeyMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *SigningKeyMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *SigningKeyMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetAlg sets the "alg" field.
+func (m *SigningKeyMutation) SetAlg(s signingkey.Alg) {
+	m.alg = &s
+}
+
+// Alg returns the value of the "alg" field in the mutation.
+func (m *SigningKeyMutation) Alg() (r signingkey.Alg, exists bool) {
+	v := m.alg
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAlg returns the old "alg" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldAlg(ctx context.Context) (v signingkey.Alg, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAlg is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAlg requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAlg: %w", err)
+	}
+	return oldValue.Alg, nil
+}
+
+// ResetAlg resets all changes to the "alg" field.
+func (m *SigningKeyMutation) ResetAlg() {
+	m.alg = nil
+}
+
+// SetPublicKey sets the "public_key" field.
+func (m *SigningKeyMutation) SetPublicKey(b []byte) {
+	m.public_key = &b
+}
+
+// PublicKey returns the value of the "public_key" field in the mutation.
+func (m *SigningKeyMutation) PublicKey() (r []byte, exists bool) {
+	v := m.public_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPublicKey returns the old "public_key" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldPublicKey(ctx context.Context) (v []byte, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPublicKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPublicKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPublicKey: %w", err)
+	}
+	return oldValue.PublicKey, nil
+}
+
+// ResetPublicKey resets all changes to the "public_key" field.
+func (m *SigningKeyMutation) ResetPublicKey() {
+	m.public_key = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *SigningKeyMutation) SetStatus(s signingkey.Status) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *SigningKeyMutation) Status() (r signingkey.Status, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldStatus(ctx context.Context) (v signingkey.Status, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *SigningKeyMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetPrivateKeyCiphertext sets the "private_key_ciphertext" field.
+func (m *SigningKeyMutation) SetPrivateKeyCiphertext(s string) {
+	m.private_key_ciphertext = &s
+}
+
+// PrivateKeyCiphertext returns the value of the "private_key_ciphertext" field in the mutation.
+func (m *SigningKeyMutation) PrivateKeyCiphertext() (r string, exists bool) {
+	v := m.private_key_ciphertext
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPrivateKeyCiphertext returns the old "private_key_ciphertext" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldPrivateKeyCiphertext(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPrivateKeyCiphertext is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPrivateKeyCiphertext requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPrivateKeyCiphertext: %w", err)
+	}
+	return oldValue.PrivateKeyCiphertext, nil
+}
+
+// ClearPrivateKeyCiphertext clears the value of the "private_key_ciphertext" field.
+func (m *SigningKeyMutation) ClearPrivateKeyCiphertext() {
+	m.private_key_ciphertext = nil
+	m.clearedFields[signingkey.FieldPrivateKeyCiphertext] = struct{}{}
+}
+
+// PrivateKeyCiphertextCleared returns if the "private_key_ciphertext" field was cleared in this mutation.
+func (m *SigningKeyMutation) PrivateKeyCiphertextCleared() bool {
+	_, ok := m.clearedFields[signingkey.FieldPrivateKeyCiphertext]
+	return ok
+}
+
+// ResetPrivateKeyCiphertext resets all changes to the "private_key_ciphertext" field.
+func (m *SigningKeyMutation) ResetPrivateKeyCiphertext() {
+	m.private_key_ciphertext = nil
+	delete(m.clearedFields, signingkey.FieldPrivateKeyCiphertext)
+}
+
+// SetActivatedAt sets the "activated_at" field.
+func (m *SigningKeyMutation) SetActivatedAt(t time.Time) {
+	m.activated_at = &t
+}
+
+// ActivatedAt returns the value of the "activated_at" field in the mutation.
+func (m *SigningKeyMutation) ActivatedAt() (r time.Time, exists bool) {
+	v := m.activated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldActivatedAt returns the old "activated_at" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldActivatedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldActivatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldActivatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldActivatedAt: %w", err)
+	}
+	return oldValue.ActivatedAt, nil
+}
+
+// ClearActivatedAt clears the value of the "activated_at" field.
+func (m *SigningKeyMutation) ClearActivatedAt() {
+	m.activated_at = nil
+	m.clearedFields[signingkey.FieldActivatedAt] = struct{}{}
+}
+
+// ActivatedAtCleared returns if the "activated_at" field was cleared in this mutation.
+func (m *SigningKeyMutation) ActivatedAtCleared() bool {
+	_, ok := m.clearedFields[signingkey.FieldActivatedAt]
+	return ok
+}
+
+// ResetActivatedAt resets all changes to the "activated_at" field.
+func (m *SigningKeyMutation) ResetActivatedAt() {
+	m.activated_at = nil
+	delete(m.clearedFields, signingkey.FieldActivatedAt)
+}
+
+// SetRetiredAt sets the "retired_at" field.
+func (m *SigningKeyMutation) SetRetiredAt(t time.Time) {
+	m.retired_at = &t
+}
+
+// RetiredAt returns the value of the "retired_at" field in the mutation.
+func (m *SigningKeyMutation) RetiredAt() (r time.Time, exists bool) {
+	v := m.retired_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRetiredAt returns the old "retired_at" field's value of the SigningKey entity.
+// If the SigningKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SigningKeyMutation) OldRetiredAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRetiredAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRetiredAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRetiredAt: %w", err)
+	}
+	return oldValue.RetiredAt, nil
+}
+
+// ClearRetiredAt clears the value of the "retired_at" field.
+func (m *SigningKeyMutation) ClearRetiredAt() {
+	m.retired_at = nil
+	m.clearedFields[signingkey.FieldRetiredAt] = struct{}{}
+}
+
+// RetiredAtCleared returns if the "retired_at" field was cleared in this mutation.
+func (m *SigningKeyMutation) RetiredAtCleared() bool {
+	_, ok := m.clearedFields[signingkey.FieldRetiredAt]
+	return ok
+}
+
+// ResetRetiredAt resets all changes to the "retired_at" field.
+func (m *SigningKeyMutation) ResetRetiredAt() {
+	m.retired_at = nil
+	delete(m.clearedFields, signingkey.FieldRetiredAt)
+}
+
+// ClearTenant clears the "tenant" edge to the Tenant entity.
+func (m *SigningKeyMutation) ClearTenant() {
+	m.clearedtenant = true
+	m.clearedFields[signingkey.FieldTenantID] = struct{}{}
+}
+
+// TenantCleared reports if the "tenant" edge to the Tenant entity was cleared.
+func (m *SigningKeyMutation) TenantCleared() bool {
+	return m.clearedtenant
+}
+
+// TenantIDs returns the "tenant" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// TenantID instead. It exists only for internal usage by the builders.
+func (m *SigningKeyMutation) TenantIDs() (ids []string) {
+	if id := m.tenant; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetTenant resets all changes to the "tenant" edge.
+func (m *SigningKeyMutation) ResetTenant() {
+	m.tenant = nil
+	m.clearedtenant = false
+}
+
+// Where appends a list predicates to the SigningKeyMutation builder.
+func (m *SigningKeyMutation) Where(ps ...predicate.SigningKey) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the SigningKeyMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *SigningKeyMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.SigningKey, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *SigningKeyMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *SigningKeyMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (SigningKey).
+func (m *SigningKeyMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *SigningKeyMutation) Fields() []string {
+	fields := make([]string, 0, 9)
+	if m.tenant != nil {
+		fields = append(fields, signingkey.FieldTenantID)
+	}
+	if m.created_at != nil {
+		fields = append(fields, signingkey.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, signingkey.FieldUpdatedAt)
+	}
+	if m.alg != nil {
+		fields = append(fields, signingkey.FieldAlg)
+	}
+	if m.public_key != nil {
+		fields = append(fields, signingkey.FieldPublicKey)
+	}
+	if m.status != nil {
+		fields = append(fields, signingkey.FieldStatus)
+	}
+	if m.private_key_ciphertext != nil {
+		fields = append(fields, signingkey.FieldPrivateKeyCiphertext)
+	}
+	if m.activated_at != nil {
+		fields = append(fields, signingkey.FieldActivatedAt)
+	}
+	if m.retired_at != nil {
+		fields = append(fields, signingkey.FieldRetiredAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *SigningKeyMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case signingkey.FieldTenantID:
+		return m.TenantID()
+	case signingkey.FieldCreatedAt:
+		return m.CreatedAt()
+	case signingkey.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case signingkey.FieldAlg:
+		return m.Alg()
+	case signingkey.FieldPublicKey:
+		return m.PublicKey()
+	case signingkey.FieldStatus:
+		return m.Status()
+	case signingkey.FieldPrivateKeyCiphertext:
+		return m.PrivateKeyCiphertext()
+	case signingkey.FieldActivatedAt:
+		return m.ActivatedAt()
+	case signingkey.FieldRetiredAt:
+		return m.RetiredAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *SigningKeyMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case signingkey.FieldTenantID:
+		return m.OldTenantID(ctx)
+	case signingkey.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case signingkey.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case signingkey.FieldAlg:
+		return m.OldAlg(ctx)
+	case signingkey.FieldPublicKey:
+		return m.OldPublicKey(ctx)
+	case signingkey.FieldStatus:
+		return m.OldStatus(ctx)
+	case signingkey.FieldPrivateKeyCiphertext:
+		return m.OldPrivateKeyCiphertext(ctx)
+	case signingkey.FieldActivatedAt:
+		return m.OldActivatedAt(ctx)
+	case signingkey.FieldRetiredAt:
+		return m.OldRetiredAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown SigningKey field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SigningKeyMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case signingkey.FieldTenantID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTenantID(v)
+		return nil
+	case signingkey.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case signingkey.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case signingkey.FieldAlg:
+		v, ok := value.(signingkey.Alg)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAlg(v)
+		return nil
+	case signingkey.FieldPublicKey:
+		v, ok := value.([]byte)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPublicKey(v)
+		return nil
+	case signingkey.FieldStatus:
+		v, ok := value.(signingkey.Status)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case signingkey.FieldPrivateKeyCiphertext:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPrivateKeyCiphertext(v)
+		return nil
+	case signingkey.FieldActivatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetActivatedAt(v)
+		return nil
+	case signingkey.FieldRetiredAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRetiredAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown SigningKey field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *SigningKeyMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *SigningKeyMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *SigningKeyMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown SigningKey numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *SigningKeyMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(signingkey.FieldPrivateKeyCiphertext) {
+		fields = append(fields, signingkey.FieldPrivateKeyCiphertext)
+	}
+	if m.FieldCleared(signingkey.FieldActivatedAt) {
+		fields = append(fields, signingkey.FieldActivatedAt)
+	}
+	if m.FieldCleared(signingkey.FieldRetiredAt) {
+		fields = append(fields, signingkey.FieldRetiredAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *SigningKeyMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *SigningKeyMutation) ClearField(name string) error {
+	switch name {
+	case signingkey.FieldPrivateKeyCiphertext:
+		m.ClearPrivateKeyCiphertext()
+		return nil
+	case signingkey.FieldActivatedAt:
+		m.ClearActivatedAt()
+		return nil
+	case signingkey.FieldRetiredAt:
+		m.ClearRetiredAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SigningKey nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *SigningKeyMutation) ResetField(name string) error {
+	switch name {
+	case signingkey.FieldTenantID:
+		m.ResetTenantID()
+		return nil
+	case signingkey.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case signingkey.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case signingkey.FieldAlg:
+		m.ResetAlg()
+		return nil
+	case signingkey.FieldPublicKey:
+		m.ResetPublicKey()
+		return nil
+	case signingkey.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case signingkey.FieldPrivateKeyCiphertext:
+		m.ResetPrivateKeyCiphertext()
+		return nil
+	case signingkey.FieldActivatedAt:
+		m.ResetActivatedAt()
+		return nil
+	case signingkey.FieldRetiredAt:
+		m.ResetRetiredAt()
+		return nil
+	}
+	return fmt.Errorf("unknown SigningKey field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *SigningKeyMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.tenant != nil {
+		edges = append(edges, signingkey.EdgeTenant)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *SigningKeyMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case signingkey.EdgeTenant:
+		if id := m.tenant; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *SigningKeyMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *SigningKeyMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *SigningKeyMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedtenant {
+		edges = append(edges, signingkey.EdgeTenant)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *SigningKeyMutation) EdgeCleared(name string) bool {
+	switch name {
+	case signingkey.EdgeTenant:
+		return m.clearedtenant
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *SigningKeyMutation) ClearEdge(name string) error {
+	switch name {
+	case signingkey.EdgeTenant:
+		m.ClearTenant()
+		return nil
+	}
+	return fmt.Errorf("unknown SigningKey unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *SigningKeyMutation) ResetEdge(name string) error {
+	switch name {
+	case signingkey.EdgeTenant:
+		m.ResetTenant()
+		return nil
+	}
+	return fmt.Errorf("unknown SigningKey edge %s", name)
+}
+
 // TenantMutation represents an operation that mutates the Tenant nodes in the graph.
 type TenantMutation struct {
 	config
-	op               Op
-	typ              string
-	id               *string
-	created_at       *time.Time
-	updated_at       *time.Time
-	slug             *string
-	name             *string
-	clearedFields    map[string]struct{}
-	products         map[string]struct{}
-	removedproducts  map[string]struct{}
-	clearedproducts  bool
-	customers        map[string]struct{}
-	removedcustomers map[string]struct{}
-	clearedcustomers bool
-	done             bool
-	oldValue         func(context.Context) (*Tenant, error)
-	predicates       []predicate.Tenant
+	op                  Op
+	typ                 string
+	id                  *string
+	created_at          *time.Time
+	updated_at          *time.Time
+	slug                *string
+	name                *string
+	clearedFields       map[string]struct{}
+	products            map[string]struct{}
+	removedproducts     map[string]struct{}
+	clearedproducts     bool
+	customers           map[string]struct{}
+	removedcustomers    map[string]struct{}
+	clearedcustomers    bool
+	signing_keys        map[string]struct{}
+	removedsigning_keys map[string]struct{}
+	clearedsigning_keys bool
+	done                bool
+	oldValue            func(context.Context) (*Tenant, error)
+	predicates          []predicate.Tenant
 }
 
 var _ ent.Mutation = (*TenantMutation)(nil)
@@ -9584,6 +10467,60 @@ func (m *TenantMutation) ResetCustomers() {
 	m.removedcustomers = nil
 }
 
+// AddSigningKeyIDs adds the "signing_keys" edge to the SigningKey entity by ids.
+func (m *TenantMutation) AddSigningKeyIDs(ids ...string) {
+	if m.signing_keys == nil {
+		m.signing_keys = make(map[string]struct{})
+	}
+	for i := range ids {
+		m.signing_keys[ids[i]] = struct{}{}
+	}
+}
+
+// ClearSigningKeys clears the "signing_keys" edge to the SigningKey entity.
+func (m *TenantMutation) ClearSigningKeys() {
+	m.clearedsigning_keys = true
+}
+
+// SigningKeysCleared reports if the "signing_keys" edge to the SigningKey entity was cleared.
+func (m *TenantMutation) SigningKeysCleared() bool {
+	return m.clearedsigning_keys
+}
+
+// RemoveSigningKeyIDs removes the "signing_keys" edge to the SigningKey entity by IDs.
+func (m *TenantMutation) RemoveSigningKeyIDs(ids ...string) {
+	if m.removedsigning_keys == nil {
+		m.removedsigning_keys = make(map[string]struct{})
+	}
+	for i := range ids {
+		delete(m.signing_keys, ids[i])
+		m.removedsigning_keys[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedSigningKeys returns the removed IDs of the "signing_keys" edge to the SigningKey entity.
+func (m *TenantMutation) RemovedSigningKeysIDs() (ids []string) {
+	for id := range m.removedsigning_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// SigningKeysIDs returns the "signing_keys" edge IDs in the mutation.
+func (m *TenantMutation) SigningKeysIDs() (ids []string) {
+	for id := range m.signing_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetSigningKeys resets all changes to the "signing_keys" edge.
+func (m *TenantMutation) ResetSigningKeys() {
+	m.signing_keys = nil
+	m.clearedsigning_keys = false
+	m.removedsigning_keys = nil
+}
+
 // Where appends a list predicates to the TenantMutation builder.
 func (m *TenantMutation) Where(ps ...predicate.Tenant) {
 	m.predicates = append(m.predicates, ps...)
@@ -9768,12 +10705,15 @@ func (m *TenantMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *TenantMutation) AddedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.products != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
 	if m.customers != nil {
 		edges = append(edges, tenant.EdgeCustomers)
+	}
+	if m.signing_keys != nil {
+		edges = append(edges, tenant.EdgeSigningKeys)
 	}
 	return edges
 }
@@ -9794,18 +10734,27 @@ func (m *TenantMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeSigningKeys:
+		ids := make([]ent.Value, 0, len(m.signing_keys))
+		for id := range m.signing_keys {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *TenantMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.removedproducts != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
 	if m.removedcustomers != nil {
 		edges = append(edges, tenant.EdgeCustomers)
+	}
+	if m.removedsigning_keys != nil {
+		edges = append(edges, tenant.EdgeSigningKeys)
 	}
 	return edges
 }
@@ -9826,18 +10775,27 @@ func (m *TenantMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeSigningKeys:
+		ids := make([]ent.Value, 0, len(m.removedsigning_keys))
+		for id := range m.removedsigning_keys {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *TenantMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.clearedproducts {
 		edges = append(edges, tenant.EdgeProducts)
 	}
 	if m.clearedcustomers {
 		edges = append(edges, tenant.EdgeCustomers)
+	}
+	if m.clearedsigning_keys {
+		edges = append(edges, tenant.EdgeSigningKeys)
 	}
 	return edges
 }
@@ -9850,6 +10808,8 @@ func (m *TenantMutation) EdgeCleared(name string) bool {
 		return m.clearedproducts
 	case tenant.EdgeCustomers:
 		return m.clearedcustomers
+	case tenant.EdgeSigningKeys:
+		return m.clearedsigning_keys
 	}
 	return false
 }
@@ -9871,6 +10831,9 @@ func (m *TenantMutation) ResetEdge(name string) error {
 		return nil
 	case tenant.EdgeCustomers:
 		m.ResetCustomers()
+		return nil
+	case tenant.EdgeSigningKeys:
+		m.ResetSigningKeys()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant edge %s", name)
