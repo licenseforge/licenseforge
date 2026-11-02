@@ -9,7 +9,7 @@ We need online activation, revocation, and air-gapped operation. Maintaining two
 A single artifact: a **signed license file** ([License File Format](../../spec/license-format.md)).
 - Online activation returns a license file with a short `exp` (lease) bound to the machine. The SDK refreshes it before expiry. **Revocation = server refuses to refresh.**
 - Air-gapped returns the same format with a long `exp` ([ADR-0006 Air-gapped licensing](0006-air-gapped-licensing.md)).
-- Signature: **Ed25519**, per-tenant keys, `kid` for rotation. Signed over raw payload bytes; JSON payload.
+- Signature: **Ed25519**, per-tenant keys, `kid` for rotation. Signed over the ASCII string `lf1.<kid>.<base64url(payload)>` (so no JSON canonicalization); JSON payload.
 
 ## User experience: online = just a key
 For online activation the end user only ever handles a **license key** (e.g. `LF-XXXX-XXXX-XXXX`). The signed lease is an SDK implementation detail, never shown or copied by anyone:
