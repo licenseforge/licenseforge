@@ -46,7 +46,7 @@ func linuxMachineID(fs linuxFS) (string, error) {
 		}
 		return parseMachineID(string(b))
 	}
-	var lastErr error = ErrNoFingerprint
+	lastErr := ErrNoFingerprint
 	for _, p := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
 		b, err := fs.readFile(p)
 		if err != nil {

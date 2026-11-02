@@ -84,7 +84,7 @@ func getNamespaceUID(ctx context.Context, client *http.Client, baseURL, token st
 		}
 		return "", err // network error or timeout: transient
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusOK:
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:

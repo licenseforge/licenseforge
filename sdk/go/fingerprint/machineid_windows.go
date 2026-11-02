@@ -15,7 +15,7 @@ func osMachineID() (string, error) {
 	if err := syscall.RegOpenKeyEx(syscall.HKEY_LOCAL_MACHINE, path, 0, syscall.KEY_READ|keyWOW6464Key, &h); err != nil {
 		return "", err
 	}
-	defer syscall.RegCloseKey(h)
+	defer func() { _ = syscall.RegCloseKey(h) }()
 	var typ uint32
 	var buf [128]uint16
 	n := uint32(len(buf) * 2)

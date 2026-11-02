@@ -24,6 +24,7 @@ vet-cross:
 
 lint: vet
 	for m in $(MODULES); do (cd $$m && golangci-lint run) || exit 1; done
+	for os in windows darwin; do (cd sdk/go && GOOS=$$os golangci-lint run ./...) || exit 1; done
 
 fmt:
 	gofmt -w .
