@@ -398,7 +398,7 @@ func (m *FeatureMutation) Description() (r string, exists bool) {
 // OldDescription returns the old "description" field's value of the Feature entity.
 // If the Feature object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *FeatureMutation) OldDescription(ctx context.Context) (v string, err error) {
+func (m *FeatureMutation) OldDescription(ctx context.Context) (v *string, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldDescription is only allowed on UpdateOne operations")
 	}
@@ -483,7 +483,7 @@ func (m *FeatureMutation) Unit() (r string, exists bool) {
 // OldUnit returns the old "unit" field's value of the Feature entity.
 // If the Feature object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *FeatureMutation) OldUnit(ctx context.Context) (v string, err error) {
+func (m *FeatureMutation) OldUnit(ctx context.Context) (v *string, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldUnit is only allowed on UpdateOne operations")
 	}
@@ -1063,6 +1063,8 @@ type PlanMutation struct {
 	updated_at             *time.Time
 	slug                   *string
 	name                   *string
+	duration_months        *int
+	addduration_months     *int
 	duration_seconds       *int64
 	addduration_seconds    *int64
 	expiry_basis           *plan.ExpiryBasis
@@ -1407,6 +1409,76 @@ func (m *PlanMutation) OldName(ctx context.Context) (v string, err error) {
 // ResetName resets all changes to the "name" field.
 func (m *PlanMutation) ResetName() {
 	m.name = nil
+}
+
+// SetDurationMonths sets the "duration_months" field.
+func (m *PlanMutation) SetDurationMonths(i int) {
+	m.duration_months = &i
+	m.addduration_months = nil
+}
+
+// DurationMonths returns the value of the "duration_months" field in the mutation.
+func (m *PlanMutation) DurationMonths() (r int, exists bool) {
+	v := m.duration_months
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDurationMonths returns the old "duration_months" field's value of the Plan entity.
+// If the Plan object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlanMutation) OldDurationMonths(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDurationMonths is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDurationMonths requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDurationMonths: %w", err)
+	}
+	return oldValue.DurationMonths, nil
+}
+
+// AddDurationMonths adds i to the "duration_months" field.
+func (m *PlanMutation) AddDurationMonths(i int) {
+	if m.addduration_months != nil {
+		*m.addduration_months += i
+	} else {
+		m.addduration_months = &i
+	}
+}
+
+// AddedDurationMonths returns the value that was added to the "duration_months" field in this mutation.
+func (m *PlanMutation) AddedDurationMonths() (r int, exists bool) {
+	v := m.addduration_months
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearDurationMonths clears the value of the "duration_months" field.
+func (m *PlanMutation) ClearDurationMonths() {
+	m.duration_months = nil
+	m.addduration_months = nil
+	m.clearedFields[plan.FieldDurationMonths] = struct{}{}
+}
+
+// DurationMonthsCleared returns if the "duration_months" field was cleared in this mutation.
+func (m *PlanMutation) DurationMonthsCleared() bool {
+	_, ok := m.clearedFields[plan.FieldDurationMonths]
+	return ok
+}
+
+// ResetDurationMonths resets all changes to the "duration_months" field.
+func (m *PlanMutation) ResetDurationMonths() {
+	m.duration_months = nil
+	m.addduration_months = nil
+	delete(m.clearedFields, plan.FieldDurationMonths)
 }
 
 // SetDurationSeconds sets the "duration_seconds" field.
@@ -2037,7 +2109,7 @@ func (m *PlanMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PlanMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 16)
 	if m.tenant_id != nil {
 		fields = append(fields, plan.FieldTenantID)
 	}
@@ -2055,6 +2127,9 @@ func (m *PlanMutation) Fields() []string {
 	}
 	if m.name != nil {
 		fields = append(fields, plan.FieldName)
+	}
+	if m.duration_months != nil {
+		fields = append(fields, plan.FieldDurationMonths)
 	}
 	if m.duration_seconds != nil {
 		fields = append(fields, plan.FieldDurationSeconds)
@@ -2103,6 +2178,8 @@ func (m *PlanMutation) Field(name string) (ent.Value, bool) {
 		return m.Slug()
 	case plan.FieldName:
 		return m.Name()
+	case plan.FieldDurationMonths:
+		return m.DurationMonths()
 	case plan.FieldDurationSeconds:
 		return m.DurationSeconds()
 	case plan.FieldExpiryBasis:
@@ -2142,6 +2219,8 @@ func (m *PlanMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldSlug(ctx)
 	case plan.FieldName:
 		return m.OldName(ctx)
+	case plan.FieldDurationMonths:
+		return m.OldDurationMonths(ctx)
 	case plan.FieldDurationSeconds:
 		return m.OldDurationSeconds(ctx)
 	case plan.FieldExpiryBasis:
@@ -2210,6 +2289,13 @@ func (m *PlanMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetName(v)
+		return nil
+	case plan.FieldDurationMonths:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDurationMonths(v)
 		return nil
 	case plan.FieldDurationSeconds:
 		v, ok := value.(int64)
@@ -2282,6 +2368,9 @@ func (m *PlanMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *PlanMutation) AddedFields() []string {
 	var fields []string
+	if m.addduration_months != nil {
+		fields = append(fields, plan.FieldDurationMonths)
+	}
 	if m.addduration_seconds != nil {
 		fields = append(fields, plan.FieldDurationSeconds)
 	}
@@ -2308,6 +2397,8 @@ func (m *PlanMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *PlanMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case plan.FieldDurationMonths:
+		return m.AddedDurationMonths()
 	case plan.FieldDurationSeconds:
 		return m.AddedDurationSeconds()
 	case plan.FieldMaxActivations:
@@ -2329,6 +2420,13 @@ func (m *PlanMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *PlanMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case plan.FieldDurationMonths:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDurationMonths(v)
+		return nil
 	case plan.FieldDurationSeconds:
 		v, ok := value.(int64)
 		if !ok {
@@ -2379,6 +2477,9 @@ func (m *PlanMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *PlanMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(plan.FieldDurationMonths) {
+		fields = append(fields, plan.FieldDurationMonths)
+	}
 	if m.FieldCleared(plan.FieldDurationSeconds) {
 		fields = append(fields, plan.FieldDurationSeconds)
 	}
@@ -2408,6 +2509,9 @@ func (m *PlanMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *PlanMutation) ClearField(name string) error {
 	switch name {
+	case plan.FieldDurationMonths:
+		m.ClearDurationMonths()
+		return nil
 	case plan.FieldDurationSeconds:
 		m.ClearDurationSeconds()
 		return nil
@@ -2448,6 +2552,9 @@ func (m *PlanMutation) ResetField(name string) error {
 		return nil
 	case plan.FieldName:
 		m.ResetName()
+		return nil
+	case plan.FieldDurationMonths:
+		m.ResetDurationMonths()
 		return nil
 	case plan.FieldDurationSeconds:
 		m.ResetDurationSeconds()
@@ -2592,6 +2699,7 @@ type PlanFeatureMutation struct {
 	created_at     *time.Time
 	updated_at     *time.Time
 	product_id     *string
+	feature_type   *planfeature.FeatureType
 	limit_value    *int64
 	addlimit_value *int64
 	clearedFields  map[string]struct{}
@@ -2924,6 +3032,42 @@ func (m *PlanFeatureMutation) ResetFeatureID() {
 	m.feature = nil
 }
 
+// SetFeatureType sets the "feature_type" field.
+func (m *PlanFeatureMutation) SetFeatureType(pt planfeature.FeatureType) {
+	m.feature_type = &pt
+}
+
+// FeatureType returns the value of the "feature_type" field in the mutation.
+func (m *PlanFeatureMutation) FeatureType() (r planfeature.FeatureType, exists bool) {
+	v := m.feature_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeatureType returns the old "feature_type" field's value of the PlanFeature entity.
+// If the PlanFeature object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlanFeatureMutation) OldFeatureType(ctx context.Context) (v planfeature.FeatureType, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeatureType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeatureType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeatureType: %w", err)
+	}
+	return oldValue.FeatureType, nil
+}
+
+// ResetFeatureType resets all changes to the "feature_type" field.
+func (m *PlanFeatureMutation) ResetFeatureType() {
+	m.feature_type = nil
+}
+
 // SetLimitValue sets the "limit_value" field.
 func (m *PlanFeatureMutation) SetLimitValue(i int64) {
 	m.limit_value = &i
@@ -3082,7 +3226,7 @@ func (m *PlanFeatureMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PlanFeatureMutation) Fields() []string {
-	fields := make([]string, 0, 7)
+	fields := make([]string, 0, 8)
 	if m.tenant_id != nil {
 		fields = append(fields, planfeature.FieldTenantID)
 	}
@@ -3100,6 +3244,9 @@ func (m *PlanFeatureMutation) Fields() []string {
 	}
 	if m.feature != nil {
 		fields = append(fields, planfeature.FieldFeatureID)
+	}
+	if m.feature_type != nil {
+		fields = append(fields, planfeature.FieldFeatureType)
 	}
 	if m.limit_value != nil {
 		fields = append(fields, planfeature.FieldLimitValue)
@@ -3124,6 +3271,8 @@ func (m *PlanFeatureMutation) Field(name string) (ent.Value, bool) {
 		return m.PlanID()
 	case planfeature.FieldFeatureID:
 		return m.FeatureID()
+	case planfeature.FieldFeatureType:
+		return m.FeatureType()
 	case planfeature.FieldLimitValue:
 		return m.LimitValue()
 	}
@@ -3147,6 +3296,8 @@ func (m *PlanFeatureMutation) OldField(ctx context.Context, name string) (ent.Va
 		return m.OldPlanID(ctx)
 	case planfeature.FieldFeatureID:
 		return m.OldFeatureID(ctx)
+	case planfeature.FieldFeatureType:
+		return m.OldFeatureType(ctx)
 	case planfeature.FieldLimitValue:
 		return m.OldLimitValue(ctx)
 	}
@@ -3199,6 +3350,13 @@ func (m *PlanFeatureMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetFeatureID(v)
+		return nil
+	case planfeature.FieldFeatureType:
+		v, ok := value.(planfeature.FeatureType)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeatureType(v)
 		return nil
 	case planfeature.FieldLimitValue:
 		v, ok := value.(int64)
@@ -3297,6 +3455,9 @@ func (m *PlanFeatureMutation) ResetField(name string) error {
 		return nil
 	case planfeature.FieldFeatureID:
 		m.ResetFeatureID()
+		return nil
+	case planfeature.FieldFeatureType:
+		m.ResetFeatureType()
 		return nil
 	case planfeature.FieldLimitValue:
 		m.ResetLimitValue()

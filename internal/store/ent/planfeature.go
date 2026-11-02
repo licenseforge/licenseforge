@@ -31,6 +31,8 @@ type PlanFeature struct {
 	PlanID string `json:"plan_id,omitempty"`
 	// FeatureID holds the value of the "feature_id" field.
 	FeatureID string `json:"feature_id,omitempty"`
+	// FeatureType holds the value of the "feature_type" field.
+	FeatureType planfeature.FeatureType `json:"feature_type,omitempty"`
 	// LimitValue holds the value of the "limit_value" field.
 	LimitValue *int64 `json:"limit_value,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -79,7 +81,7 @@ func (*PlanFeature) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case planfeature.FieldLimitValue:
 			values[i] = new(sql.NullInt64)
-		case planfeature.FieldID, planfeature.FieldTenantID, planfeature.FieldProductID, planfeature.FieldPlanID, planfeature.FieldFeatureID:
+		case planfeature.FieldID, planfeature.FieldTenantID, planfeature.FieldProductID, planfeature.FieldPlanID, planfeature.FieldFeatureID, planfeature.FieldFeatureType:
 			values[i] = new(sql.NullString)
 		case planfeature.FieldCreatedAt, planfeature.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -139,6 +141,12 @@ func (_m *PlanFeature) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field feature_id", values[i])
 			} else if value.Valid {
 				_m.FeatureID = value.String
+			}
+		case planfeature.FieldFeatureType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field feature_type", values[i])
+			} else if value.Valid {
+				_m.FeatureType = planfeature.FeatureType(value.String)
 			}
 		case planfeature.FieldLimitValue:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -210,6 +218,9 @@ func (_m *PlanFeature) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("feature_id=")
 	builder.WriteString(_m.FeatureID)
+	builder.WriteString(", ")
+	builder.WriteString("feature_type=")
+	builder.WriteString(fmt.Sprintf("%v", _m.FeatureType))
 	builder.WriteString(", ")
 	if v := _m.LimitValue; v != nil {
 		builder.WriteString("limit_value=")

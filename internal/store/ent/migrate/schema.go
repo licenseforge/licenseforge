@@ -53,9 +53,9 @@ var (
 				Columns: []*schema.Column{FeaturesColumns[1], FeaturesColumns[0]},
 			},
 			{
-				Name:    "feature_product_id_id",
+				Name:    "feature_product_id_id_type",
 				Unique:  true,
-				Columns: []*schema.Column{FeaturesColumns[10], FeaturesColumns[0]},
+				Columns: []*schema.Column{FeaturesColumns[10], FeaturesColumns[0], FeaturesColumns[7]},
 			},
 		},
 	}
@@ -67,6 +67,7 @@ var (
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "slug", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "duration_months", Type: field.TypeInt, Nullable: true},
 		{Name: "duration_seconds", Type: field.TypeInt64, Nullable: true},
 		{Name: "expiry_basis", Type: field.TypeEnum, Enums: []string{"from_issue", "from_first_activation"}, Default: "from_issue"},
 		{Name: "max_activations", Type: field.TypeInt, Nullable: true},
@@ -86,7 +87,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "plans_products_plans",
-				Columns:    []*schema.Column{PlansColumns[15]},
+				Columns:    []*schema.Column{PlansColumns[16]},
 				RefColumns: []*schema.Column{ProductsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -100,7 +101,7 @@ var (
 			{
 				Name:    "plan_product_id_slug",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[15], PlansColumns[4]},
+				Columns: []*schema.Column{PlansColumns[16], PlansColumns[4]},
 			},
 			{
 				Name:    "plan_tenant_id_id",
@@ -110,7 +111,7 @@ var (
 			{
 				Name:    "plan_product_id_id",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[15], PlansColumns[0]},
+				Columns: []*schema.Column{PlansColumns[16], PlansColumns[0]},
 			},
 		},
 	}
@@ -121,6 +122,7 @@ var (
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "product_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "feature_type", Type: field.TypeEnum, Enums: []string{"boolean", "limit"}},
 		{Name: "limit_value", Type: field.TypeInt64, Nullable: true},
 		{Name: "feature_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "plan_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -133,13 +135,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "plan_features_features_plan_features",
-				Columns:    []*schema.Column{PlanFeaturesColumns[6]},
+				Columns:    []*schema.Column{PlanFeaturesColumns[7]},
 				RefColumns: []*schema.Column{FeaturesColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "plan_features_plans_plan_features",
-				Columns:    []*schema.Column{PlanFeaturesColumns[7]},
+				Columns:    []*schema.Column{PlanFeaturesColumns[8]},
 				RefColumns: []*schema.Column{PlansColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -153,7 +155,7 @@ var (
 			{
 				Name:    "planfeature_plan_id_feature_id",
 				Unique:  true,
-				Columns: []*schema.Column{PlanFeaturesColumns[7], PlanFeaturesColumns[6]},
+				Columns: []*schema.Column{PlanFeaturesColumns[8], PlanFeaturesColumns[7]},
 			},
 		},
 	}
@@ -225,23 +227,27 @@ func init() {
 	FeaturesTable.ForeignKeys[0].RefTable = ProductsTable
 	FeaturesTable.Annotation = &entsql.Annotation{}
 	FeaturesTable.Annotation.Checks = map[string]string{
-		"features_id_format":  "id ~ '^ftr_[a-z2-7]{26}$'",
-		"features_key_format": "key ~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'",
-		"features_name_set":   "name <> ''",
-		"features_type_valid": "type IN ('boolean', 'limit')",
+		"features_desc_set":       "description IS NULL OR btrim(description) <> ''",
+		"features_id_format":      "id ~ '^ftr_[a-z2-7]{26}$'",
+		"features_key_format":     "key ~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'",
+		"features_name_not_blank": "btrim(name) <> ''",
+		"features_type_valid":     "(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
+		"features_unit_set":       "unit IS NULL OR btrim(unit) <> ''",
 	}
 	PlansTable.ForeignKeys[0].RefTable = ProductsTable
 	PlansTable.Annotation = &entsql.Annotation{}
 	PlansTable.Annotation.Checks = map[string]string{
-		"plans_activations_pos": "max_activations IS NULL OR max_activations > 0",
-		"plans_duration_range":  "duration_seconds IS NULL OR (duration_seconds > 0 AND duration_seconds <= 3153600000)",
-		"plans_expiry_valid":    "expiry_basis IN ('from_issue', 'from_first_activation')",
+		"plans_activations_rng": "max_activations IS NULL OR (max_activations >= 1 AND max_activations <= 1000000)",
+		"plans_duration_months": "duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)",
+		"plans_duration_secs":   "duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= 3153600000)",
+		"plans_expiry_valid":    "(expiry_basis)::text = ANY (ARRAY['from_issue'::text, 'from_first_activation'::text])",
 		"plans_grace_range":     "grace_seconds >= 0 AND grace_seconds <= 3153600000",
 		"plans_id_format":       "id ~ '^pln_[a-z2-7]{26}$'",
-		"plans_lease_range":     "lease_seconds > 0 AND lease_seconds <= 3153600000",
+		"plans_lease_range":     "lease_seconds >= 1 AND lease_seconds <= 3153600000",
 		"plans_max_offline_rng": "max_offline_seconds IS NULL OR (max_offline_seconds >= 0 AND max_offline_seconds <= 3153600000)",
-		"plans_name_set":        "name <> ''",
-		"plans_rehosts_nonneg":  "max_rehosts IS NULL OR max_rehosts >= 0",
+		"plans_name_not_blank":  "btrim(name) <> ''",
+		"plans_one_duration":    "num_nonnulls(duration_months, duration_seconds) <= 1",
+		"plans_rehosts_rng":     "max_rehosts IS NULL OR (max_rehosts >= 0 AND max_rehosts <= 1000000)",
 		"plans_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 	PlanFeaturesTable.ForeignKeys[0].RefTable = FeaturesTable
@@ -249,19 +255,21 @@ func init() {
 	PlanFeaturesTable.Annotation = &entsql.Annotation{}
 	PlanFeaturesTable.Annotation.Checks = map[string]string{
 		"plan_features_id_format":   "id ~ '^plf_[a-z2-7]{26}$'",
+		"plan_features_limit_match": "(feature_type = 'limit') = (limit_value IS NOT NULL)",
 		"plan_features_limit_range": "limit_value IS NULL OR (limit_value >= -1 AND limit_value <= 9007199254740991)",
+		"plan_features_type_valid":  "(feature_type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
 	}
 	ProductsTable.ForeignKeys[0].RefTable = TenantsTable
 	ProductsTable.Annotation = &entsql.Annotation{}
 	ProductsTable.Annotation.Checks = map[string]string{
-		"products_id_format":   "id ~ '^prd_[a-z2-7]{26}$'",
-		"products_name_set":    "name <> ''",
-		"products_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"products_id_format":      "id ~ '^prd_[a-z2-7]{26}$'",
+		"products_name_not_blank": "btrim(name) <> ''",
+		"products_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
-		"tenants_id_format":   "id ~ '^tnt_[a-z2-7]{26}$'",
-		"tenants_name_set":    "name <> ''",
-		"tenants_slug_format": "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"tenants_id_format":      "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_name_not_blank": "btrim(name) <> ''",
+		"tenants_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 }

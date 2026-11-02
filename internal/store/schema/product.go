@@ -25,7 +25,7 @@ func (Product) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.Product),
 		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(slugRE).SchemaType(slugType),
-		field.String("name").NotEmpty().MaxLen(200).SchemaType(nameType),
+		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 	}
 }
 
@@ -39,9 +39,9 @@ func (Product) Edges() []ent.Edge {
 
 func (Product) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
-		"products_id_format":   `id ~ '^prd_` + idChars + `$'`,
-		"products_slug_format": `slug ~ '` + slugPattern + `'`,
-		"products_name_set":    `name <> ''`,
+		"products_id_format":      `id ~ '^prd_` + idChars + `$'`,
+		"products_slug_format":    `slug ~ '` + slugPattern + `'`,
+		"products_name_not_blank": `btrim(name) <> ''`,
 	}}}
 }
 

@@ -44,12 +44,14 @@ erDiagram
 LicenseForge answers **"is this customer entitled to feature X?"**. It does not do percentage rollouts, A/B tests, user targeting or kill switches; that is LaunchDarkly / Unleash / flagd territory. The OpenFeature provider lets vendors combine both: a flag platform for rollout, LicenseForge for entitlement. ([ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md))
 
 ## Implementation note (2026-11-02)
-Tables `features`, `plans`, `plan_features` (`internal/store/schema`):
-- Feature `key`: immutable snake_case (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`), unique per product **including archived features** (archive, never delete). Type `boolean` or `limit`.
-- Plan terms in whole seconds: `duration_seconds` (null = perpetual), `expiry_basis`, `max_activations` / `max_rehosts` (null = unlimited), `offline_allowed`, `lease_seconds`, `max_offline_seconds`, `grace_seconds`; all ≤ 36,500 days like the license format.
-- `plan_features.limit_value`: −1 … 2^53−1 (−1 = unlimited), as in the license spec.
-- All formats and ranges are `CHECK` constraints in PostgreSQL, not only ent validators.
-- **Same-tenant, same-product keys**: foreign key checks bypass row-level security, so composite keys `(tenant_id, product_id)` and, for plan features, `(product_id, plan_id)` / `(product_id, feature_id)` stop references to another tenant's or another product's rows, even from the platform pool.
+Tables `features`, `plans`, `plan_features` (`internal/store/schema`), revised after review:
+- Feature `key`: immutable snake_case, unique per product including archived features. **Keys, feature types, plan and product slugs, and ownership columns are immutable in the database** (column-level `UPDATE` grants), and features, plans and products are **archived, never deleted** (no `DELETE` grant), because licenses carry keys and slugs: a renamed or recreated one would silently change what old licenses grant.
+- Plan term: **calendar months** (`duration_months`, for monthly/yearly billing) **or** whole seconds (`duration_seconds`, trials and fixed periods), at most one; neither = perpetual. Other durations (`lease`, `max_offline`, `grace`) in seconds, ≤ 36,500 days like the license format. `max_activations` / `max_rehosts` ≤ 1,000,000 (null = unlimited).
+- `plan_features` carries `feature_type`, checked against the feature through a composite key, with `CHECK ((feature_type = 'limit') = (limit_value IS NOT NULL))`: a boolean feature can't carry a limit and a limit feature always has one (−1 … 2^53−1, −1 = unlimited). A feature in use can't change type.
+- All formats and ranges are `CHECK` constraints written in PostgreSQL's normalized form; ent validators enforce the same ranges, so users get validation errors rather than database errors. Names can't be blank.
+- **Same-tenant, same-product keys**: foreign key checks bypass row-level security, so composite keys stop references to another tenant's or another product's rows, even from the platform pool.
+- Guards: a test compares a database built from the ent schema with the migrated one (columns, indexes, CHECK expressions, keys), and a structural test requires every cross-table foreign key to be covered by a `*_same_tenant` key.
+- Known, accepted: a foreign-key error can reveal whether another tenant's random ID exists; the API maps both errors to one response.
 
 ## Consequences
 - Admin UI can show a feature × plan matrix with checkboxes and number fields.

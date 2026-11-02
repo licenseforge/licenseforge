@@ -27,10 +27,10 @@ func (Feature) Fields() []ent.Field {
 		prefixedID(ids.Feature),
 		field.String("product_id").Immutable().NotEmpty().SchemaType(idType),
 		field.String("key").Immutable().NotEmpty().MaxLen(63).Match(keyRE).SchemaType(slugType),
-		field.String("name").NotEmpty().MaxLen(200).SchemaType(nameType),
-		field.String("description").Optional().MaxLen(2000).SchemaType(map[string]string{"postgres": "varchar(2000)"}),
+		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
+		field.String("description").Optional().Nillable().MaxLen(2000).Validate(notBlank).SchemaType(map[string]string{"postgres": "varchar(2000)"}),
 		field.Enum("type").Values("boolean", "limit").Immutable(),
-		field.String("unit").Optional().MaxLen(40).SchemaType(map[string]string{"postgres": "varchar(40)"}),
+		field.String("unit").Optional().Nillable().MaxLen(40).Validate(notBlank).SchemaType(map[string]string{"postgres": "varchar(40)"}),
 		field.Time("archived_at").Optional().Nillable(),
 	}
 }
@@ -44,10 +44,12 @@ func (Feature) Edges() []ent.Edge {
 
 func (Feature) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
-		"features_id_format":  `id ~ '^ftr_` + idChars + `$'`,
-		"features_key_format": `key ~ '` + keyPattern + `'`,
-		"features_name_set":   `name <> ''`,
-		"features_type_valid": `type IN ('boolean', 'limit')`,
+		"features_id_format":      `id ~ '^ftr_` + idChars + `$'`,
+		"features_key_format":     `key ~ '` + keyPattern + `'`,
+		"features_name_not_blank": `btrim(name) <> ''`,
+		"features_type_valid":     `(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])`,
+		"features_desc_set":       `description IS NULL OR btrim(description) <> ''`,
+		"features_unit_set":       `unit IS NULL OR btrim(unit) <> ''`,
 	}}}
 }
 
@@ -55,6 +57,6 @@ func (Feature) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("product_id", "key").Unique(), // keys are never reused, archived or not
 		index.Fields("tenant_id", "id").Unique(),
-		index.Fields("product_id", "id").Unique(), // target of plan_features' same-product key
+		index.Fields("product_id", "id", "type").Unique(), // target of plan_features' same-product-and-type key
 	}
 }

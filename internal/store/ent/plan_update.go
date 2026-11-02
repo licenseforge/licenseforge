@@ -35,20 +35,6 @@ func (_u *PlanUpdate) SetUpdatedAt(v time.Time) *PlanUpdate {
 	return _u
 }
 
-// SetSlug sets the "slug" field.
-func (_u *PlanUpdate) SetSlug(v string) *PlanUpdate {
-	_u.mutation.SetSlug(v)
-	return _u
-}
-
-// SetNillableSlug sets the "slug" field if the given value is not nil.
-func (_u *PlanUpdate) SetNillableSlug(v *string) *PlanUpdate {
-	if v != nil {
-		_u.SetSlug(*v)
-	}
-	return _u
-}
-
 // SetName sets the "name" field.
 func (_u *PlanUpdate) SetName(v string) *PlanUpdate {
 	_u.mutation.SetName(v)
@@ -60,6 +46,33 @@ func (_u *PlanUpdate) SetNillableName(v *string) *PlanUpdate {
 	if v != nil {
 		_u.SetName(*v)
 	}
+	return _u
+}
+
+// SetDurationMonths sets the "duration_months" field.
+func (_u *PlanUpdate) SetDurationMonths(v int) *PlanUpdate {
+	_u.mutation.ResetDurationMonths()
+	_u.mutation.SetDurationMonths(v)
+	return _u
+}
+
+// SetNillableDurationMonths sets the "duration_months" field if the given value is not nil.
+func (_u *PlanUpdate) SetNillableDurationMonths(v *int) *PlanUpdate {
+	if v != nil {
+		_u.SetDurationMonths(*v)
+	}
+	return _u
+}
+
+// AddDurationMonths adds value to the "duration_months" field.
+func (_u *PlanUpdate) AddDurationMonths(v int) *PlanUpdate {
+	_u.mutation.AddDurationMonths(v)
+	return _u
+}
+
+// ClearDurationMonths clears the value of the "duration_months" field.
+func (_u *PlanUpdate) ClearDurationMonths() *PlanUpdate {
+	_u.mutation.ClearDurationMonths()
 	return _u
 }
 
@@ -340,14 +353,14 @@ func (_u *PlanUpdate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *PlanUpdate) check() error {
-	if v, ok := _u.mutation.Slug(); ok {
-		if err := plan.SlugValidator(v); err != nil {
-			return &ValidationError{Name: "slug", err: fmt.Errorf(`ent: validator failed for field "Plan.slug": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := plan.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Plan.name": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.DurationMonths(); ok {
+		if err := plan.DurationMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "duration_months", err: fmt.Errorf(`ent: validator failed for field "Plan.duration_months": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.DurationSeconds(); ok {
@@ -406,11 +419,17 @@ func (_u *PlanUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(plan.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.Slug(); ok {
-		_spec.SetField(plan.FieldSlug, field.TypeString, value)
-	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(plan.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.DurationMonths(); ok {
+		_spec.SetField(plan.FieldDurationMonths, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedDurationMonths(); ok {
+		_spec.AddField(plan.FieldDurationMonths, field.TypeInt, value)
+	}
+	if _u.mutation.DurationMonthsCleared() {
+		_spec.ClearField(plan.FieldDurationMonths, field.TypeInt)
 	}
 	if value, ok := _u.mutation.DurationSeconds(); ok {
 		_spec.SetField(plan.FieldDurationSeconds, field.TypeInt64, value)
@@ -543,20 +562,6 @@ func (_u *PlanUpdateOne) SetUpdatedAt(v time.Time) *PlanUpdateOne {
 	return _u
 }
 
-// SetSlug sets the "slug" field.
-func (_u *PlanUpdateOne) SetSlug(v string) *PlanUpdateOne {
-	_u.mutation.SetSlug(v)
-	return _u
-}
-
-// SetNillableSlug sets the "slug" field if the given value is not nil.
-func (_u *PlanUpdateOne) SetNillableSlug(v *string) *PlanUpdateOne {
-	if v != nil {
-		_u.SetSlug(*v)
-	}
-	return _u
-}
-
 // SetName sets the "name" field.
 func (_u *PlanUpdateOne) SetName(v string) *PlanUpdateOne {
 	_u.mutation.SetName(v)
@@ -568,6 +573,33 @@ func (_u *PlanUpdateOne) SetNillableName(v *string) *PlanUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
 	}
+	return _u
+}
+
+// SetDurationMonths sets the "duration_months" field.
+func (_u *PlanUpdateOne) SetDurationMonths(v int) *PlanUpdateOne {
+	_u.mutation.ResetDurationMonths()
+	_u.mutation.SetDurationMonths(v)
+	return _u
+}
+
+// SetNillableDurationMonths sets the "duration_months" field if the given value is not nil.
+func (_u *PlanUpdateOne) SetNillableDurationMonths(v *int) *PlanUpdateOne {
+	if v != nil {
+		_u.SetDurationMonths(*v)
+	}
+	return _u
+}
+
+// AddDurationMonths adds value to the "duration_months" field.
+func (_u *PlanUpdateOne) AddDurationMonths(v int) *PlanUpdateOne {
+	_u.mutation.AddDurationMonths(v)
+	return _u
+}
+
+// ClearDurationMonths clears the value of the "duration_months" field.
+func (_u *PlanUpdateOne) ClearDurationMonths() *PlanUpdateOne {
+	_u.mutation.ClearDurationMonths()
 	return _u
 }
 
@@ -861,14 +893,14 @@ func (_u *PlanUpdateOne) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *PlanUpdateOne) check() error {
-	if v, ok := _u.mutation.Slug(); ok {
-		if err := plan.SlugValidator(v); err != nil {
-			return &ValidationError{Name: "slug", err: fmt.Errorf(`ent: validator failed for field "Plan.slug": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := plan.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Plan.name": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.DurationMonths(); ok {
+		if err := plan.DurationMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "duration_months", err: fmt.Errorf(`ent: validator failed for field "Plan.duration_months": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.DurationSeconds(); ok {
@@ -944,11 +976,17 @@ func (_u *PlanUpdateOne) sqlSave(ctx context.Context) (_node *Plan, err error) {
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(plan.FieldUpdatedAt, field.TypeTime, value)
 	}
-	if value, ok := _u.mutation.Slug(); ok {
-		_spec.SetField(plan.FieldSlug, field.TypeString, value)
-	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(plan.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.DurationMonths(); ok {
+		_spec.SetField(plan.FieldDurationMonths, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedDurationMonths(); ok {
+		_spec.AddField(plan.FieldDurationMonths, field.TypeInt, value)
+	}
+	if _u.mutation.DurationMonthsCleared() {
+		_spec.ClearField(plan.FieldDurationMonths, field.TypeInt)
 	}
 	if value, ok := _u.mutation.DurationSeconds(); ok {
 		_spec.SetField(plan.FieldDurationSeconds, field.TypeInt64, value)

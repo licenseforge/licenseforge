@@ -74,6 +74,12 @@ func (_c *PlanFeatureCreate) SetFeatureID(v string) *PlanFeatureCreate {
 	return _c
 }
 
+// SetFeatureType sets the "feature_type" field.
+func (_c *PlanFeatureCreate) SetFeatureType(v planfeature.FeatureType) *PlanFeatureCreate {
+	_c.mutation.SetFeatureType(v)
+	return _c
+}
+
 // SetLimitValue sets the "limit_value" field.
 func (_c *PlanFeatureCreate) SetLimitValue(v int64) *PlanFeatureCreate {
 	_c.mutation.SetLimitValue(v)
@@ -201,6 +207,14 @@ func (_c *PlanFeatureCreate) check() error {
 			return &ValidationError{Name: "feature_id", err: fmt.Errorf(`ent: validator failed for field "PlanFeature.feature_id": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.FeatureType(); !ok {
+		return &ValidationError{Name: "feature_type", err: errors.New(`ent: missing required field "PlanFeature.feature_type"`)}
+	}
+	if v, ok := _c.mutation.FeatureType(); ok {
+		if err := planfeature.FeatureTypeValidator(v); err != nil {
+			return &ValidationError{Name: "feature_type", err: fmt.Errorf(`ent: validator failed for field "PlanFeature.feature_type": %w`, err)}
+		}
+	}
 	if v, ok := _c.mutation.LimitValue(); ok {
 		if err := planfeature.LimitValueValidator(v); err != nil {
 			return &ValidationError{Name: "limit_value", err: fmt.Errorf(`ent: validator failed for field "PlanFeature.limit_value": %w`, err)}
@@ -267,6 +281,10 @@ func (_c *PlanFeatureCreate) createSpec() (*PlanFeature, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ProductID(); ok {
 		_spec.SetField(planfeature.FieldProductID, field.TypeString, value)
 		_node.ProductID = value
+	}
+	if value, ok := _c.mutation.FeatureType(); ok {
+		_spec.SetField(planfeature.FieldFeatureType, field.TypeEnum, value)
+		_node.FeatureType = value
 	}
 	if value, ok := _c.mutation.LimitValue(); ok {
 		_spec.SetField(planfeature.FieldLimitValue, field.TypeInt64, value)

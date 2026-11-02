@@ -27,6 +27,8 @@ const (
 	FieldSlug = "slug"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldDurationMonths holds the string denoting the duration_months field in the database.
+	FieldDurationMonths = "duration_months"
 	// FieldDurationSeconds holds the string denoting the duration_seconds field in the database.
 	FieldDurationSeconds = "duration_seconds"
 	// FieldExpiryBasis holds the string denoting the expiry_basis field in the database.
@@ -76,6 +78,7 @@ var Columns = []string{
 	FieldProductID,
 	FieldSlug,
 	FieldName,
+	FieldDurationMonths,
 	FieldDurationSeconds,
 	FieldExpiryBasis,
 	FieldMaxActivations,
@@ -112,6 +115,8 @@ var (
 	SlugValidator func(string) error
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DurationMonthsValidator is a validator for the "duration_months" field. It is called by the builders before save.
+	DurationMonthsValidator func(int) error
 	// DurationSecondsValidator is a validator for the "duration_seconds" field. It is called by the builders before save.
 	DurationSecondsValidator func(int64) error
 	// MaxActivationsValidator is a validator for the "max_activations" field. It is called by the builders before save.
@@ -198,6 +203,11 @@ func BySlug(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByDurationMonths orders the results by the duration_months field.
+func ByDurationMonths(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDurationMonths, opts...).ToFunc()
 }
 
 // ByDurationSeconds orders the results by the duration_seconds field.

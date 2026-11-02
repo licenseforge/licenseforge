@@ -31,11 +31,11 @@ type Feature struct {
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
 	// Description holds the value of the "description" field.
-	Description string `json:"description,omitempty"`
+	Description *string `json:"description,omitempty"`
 	// Type holds the value of the "type" field.
 	Type feature.Type `json:"type,omitempty"`
 	// Unit holds the value of the "unit" field.
-	Unit string `json:"unit,omitempty"`
+	Unit *string `json:"unit,omitempty"`
 	// ArchivedAt holds the value of the "archived_at" field.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -145,7 +145,8 @@ func (_m *Feature) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field description", values[i])
 			} else if value.Valid {
-				_m.Description = value.String
+				_m.Description = new(string)
+				*_m.Description = value.String
 			}
 		case feature.FieldType:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -157,7 +158,8 @@ func (_m *Feature) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field unit", values[i])
 			} else if value.Valid {
-				_m.Unit = value.String
+				_m.Unit = new(string)
+				*_m.Unit = value.String
 			}
 		case feature.FieldArchivedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -230,14 +232,18 @@ func (_m *Feature) String() string {
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
 	builder.WriteString(", ")
-	builder.WriteString("description=")
-	builder.WriteString(_m.Description)
+	if v := _m.Description; v != nil {
+		builder.WriteString("description=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	builder.WriteString("type=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Type))
 	builder.WriteString(", ")
-	builder.WriteString("unit=")
-	builder.WriteString(_m.Unit)
+	if v := _m.Unit; v != nil {
+		builder.WriteString("unit=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	if v := _m.ArchivedAt; v != nil {
 		builder.WriteString("archived_at=")

@@ -74,6 +74,20 @@ func (_c *PlanCreate) SetName(v string) *PlanCreate {
 	return _c
 }
 
+// SetDurationMonths sets the "duration_months" field.
+func (_c *PlanCreate) SetDurationMonths(v int) *PlanCreate {
+	_c.mutation.SetDurationMonths(v)
+	return _c
+}
+
+// SetNillableDurationMonths sets the "duration_months" field if the given value is not nil.
+func (_c *PlanCreate) SetNillableDurationMonths(v *int) *PlanCreate {
+	if v != nil {
+		_c.SetDurationMonths(*v)
+	}
+	return _c
+}
+
 // SetDurationSeconds sets the "duration_seconds" field.
 func (_c *PlanCreate) SetDurationSeconds(v int64) *PlanCreate {
 	_c.mutation.SetDurationSeconds(v)
@@ -339,6 +353,11 @@ func (_c *PlanCreate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Plan.name": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.DurationMonths(); ok {
+		if err := plan.DurationMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "duration_months", err: fmt.Errorf(`ent: validator failed for field "Plan.duration_months": %w`, err)}
+		}
+	}
 	if v, ok := _c.mutation.DurationSeconds(); ok {
 		if err := plan.DurationSecondsValidator(v); err != nil {
 			return &ValidationError{Name: "duration_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.duration_seconds": %w`, err)}
@@ -448,6 +467,10 @@ func (_c *PlanCreate) createSpec() (*Plan, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(plan.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.DurationMonths(); ok {
+		_spec.SetField(plan.FieldDurationMonths, field.TypeInt, value)
+		_node.DurationMonths = &value
 	}
 	if value, ok := _c.mutation.DurationSeconds(); ok {
 		_spec.SetField(plan.FieldDurationSeconds, field.TypeInt64, value)

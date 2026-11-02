@@ -95,6 +95,11 @@ func Name(v string) predicate.Plan {
 	return predicate.Plan(sql.FieldEQ(FieldName, v))
 }
 
+// DurationMonths applies equality check predicate on the "duration_months" field. It's identical to DurationMonthsEQ.
+func DurationMonths(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldEQ(FieldDurationMonths, v))
+}
+
 // DurationSeconds applies equality check predicate on the "duration_seconds" field. It's identical to DurationSecondsEQ.
 func DurationSeconds(v int64) predicate.Plan {
 	return predicate.Plan(sql.FieldEQ(FieldDurationSeconds, v))
@@ -473,6 +478,56 @@ func NameEqualFold(v string) predicate.Plan {
 // NameContainsFold applies the ContainsFold predicate on the "name" field.
 func NameContainsFold(v string) predicate.Plan {
 	return predicate.Plan(sql.FieldContainsFold(FieldName, v))
+}
+
+// DurationMonthsEQ applies the EQ predicate on the "duration_months" field.
+func DurationMonthsEQ(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldEQ(FieldDurationMonths, v))
+}
+
+// DurationMonthsNEQ applies the NEQ predicate on the "duration_months" field.
+func DurationMonthsNEQ(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldNEQ(FieldDurationMonths, v))
+}
+
+// DurationMonthsIn applies the In predicate on the "duration_months" field.
+func DurationMonthsIn(vs ...int) predicate.Plan {
+	return predicate.Plan(sql.FieldIn(FieldDurationMonths, vs...))
+}
+
+// DurationMonthsNotIn applies the NotIn predicate on the "duration_months" field.
+func DurationMonthsNotIn(vs ...int) predicate.Plan {
+	return predicate.Plan(sql.FieldNotIn(FieldDurationMonths, vs...))
+}
+
+// DurationMonthsGT applies the GT predicate on the "duration_months" field.
+func DurationMonthsGT(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldGT(FieldDurationMonths, v))
+}
+
+// DurationMonthsGTE applies the GTE predicate on the "duration_months" field.
+func DurationMonthsGTE(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldGTE(FieldDurationMonths, v))
+}
+
+// DurationMonthsLT applies the LT predicate on the "duration_months" field.
+func DurationMonthsLT(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldLT(FieldDurationMonths, v))
+}
+
+// DurationMonthsLTE applies the LTE predicate on the "duration_months" field.
+func DurationMonthsLTE(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldLTE(FieldDurationMonths, v))
+}
+
+// DurationMonthsIsNil applies the IsNil predicate on the "duration_months" field.
+func DurationMonthsIsNil() predicate.Plan {
+	return predicate.Plan(sql.FieldIsNull(FieldDurationMonths))
+}
+
+// DurationMonthsNotNil applies the NotNil predicate on the "duration_months" field.
+func DurationMonthsNotNil() predicate.Plan {
+	return predicate.Plan(sql.FieldNotNull(FieldDurationMonths))
 }
 
 // DurationSecondsEQ applies the EQ predicate on the "duration_seconds" field.

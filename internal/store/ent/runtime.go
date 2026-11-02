@@ -83,6 +83,7 @@ func init() {
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
+			validators[2].(func(string) error),
 		}
 		return func(name string) error {
 			for _, fn := range fns {
@@ -96,11 +97,39 @@ func init() {
 	// featureDescDescription is the schema descriptor for description field.
 	featureDescDescription := featureFields[4].Descriptor()
 	// feature.DescriptionValidator is a validator for the "description" field. It is called by the builders before save.
-	feature.DescriptionValidator = featureDescDescription.Validators[0].(func(string) error)
+	feature.DescriptionValidator = func() func(string) error {
+		validators := featureDescDescription.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(description string) error {
+			for _, fn := range fns {
+				if err := fn(description); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	// featureDescUnit is the schema descriptor for unit field.
 	featureDescUnit := featureFields[6].Descriptor()
 	// feature.UnitValidator is a validator for the "unit" field. It is called by the builders before save.
-	feature.UnitValidator = featureDescUnit.Validators[0].(func(string) error)
+	feature.UnitValidator = func() func(string) error {
+		validators := featureDescUnit.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(unit string) error {
+			for _, fn := range fns {
+				if err := fn(unit); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	// featureDescID is the schema descriptor for id field.
 	featureDescID := featureFields[0].Descriptor()
 	// feature.DefaultID holds the default value on creation for the id field.
@@ -187,6 +216,7 @@ func init() {
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
+			validators[2].(func(string) error),
 		}
 		return func(name string) error {
 			for _, fn := range fns {
@@ -197,34 +227,38 @@ func init() {
 			return nil
 		}
 	}()
+	// planDescDurationMonths is the schema descriptor for duration_months field.
+	planDescDurationMonths := planFields[4].Descriptor()
+	// plan.DurationMonthsValidator is a validator for the "duration_months" field. It is called by the builders before save.
+	plan.DurationMonthsValidator = planDescDurationMonths.Validators[0].(func(int) error)
 	// planDescDurationSeconds is the schema descriptor for duration_seconds field.
-	planDescDurationSeconds := planFields[4].Descriptor()
+	planDescDurationSeconds := planFields[5].Descriptor()
 	// plan.DurationSecondsValidator is a validator for the "duration_seconds" field. It is called by the builders before save.
 	plan.DurationSecondsValidator = planDescDurationSeconds.Validators[0].(func(int64) error)
 	// planDescMaxActivations is the schema descriptor for max_activations field.
-	planDescMaxActivations := planFields[6].Descriptor()
+	planDescMaxActivations := planFields[7].Descriptor()
 	// plan.MaxActivationsValidator is a validator for the "max_activations" field. It is called by the builders before save.
 	plan.MaxActivationsValidator = planDescMaxActivations.Validators[0].(func(int) error)
 	// planDescMaxRehosts is the schema descriptor for max_rehosts field.
-	planDescMaxRehosts := planFields[7].Descriptor()
+	planDescMaxRehosts := planFields[8].Descriptor()
 	// plan.MaxRehostsValidator is a validator for the "max_rehosts" field. It is called by the builders before save.
 	plan.MaxRehostsValidator = planDescMaxRehosts.Validators[0].(func(int) error)
 	// planDescOfflineAllowed is the schema descriptor for offline_allowed field.
-	planDescOfflineAllowed := planFields[8].Descriptor()
+	planDescOfflineAllowed := planFields[9].Descriptor()
 	// plan.DefaultOfflineAllowed holds the default value on creation for the offline_allowed field.
 	plan.DefaultOfflineAllowed = planDescOfflineAllowed.Default.(bool)
 	// planDescLeaseSeconds is the schema descriptor for lease_seconds field.
-	planDescLeaseSeconds := planFields[9].Descriptor()
+	planDescLeaseSeconds := planFields[10].Descriptor()
 	// plan.DefaultLeaseSeconds holds the default value on creation for the lease_seconds field.
 	plan.DefaultLeaseSeconds = planDescLeaseSeconds.Default.(int64)
 	// plan.LeaseSecondsValidator is a validator for the "lease_seconds" field. It is called by the builders before save.
 	plan.LeaseSecondsValidator = planDescLeaseSeconds.Validators[0].(func(int64) error)
 	// planDescMaxOfflineSeconds is the schema descriptor for max_offline_seconds field.
-	planDescMaxOfflineSeconds := planFields[10].Descriptor()
+	planDescMaxOfflineSeconds := planFields[11].Descriptor()
 	// plan.MaxOfflineSecondsValidator is a validator for the "max_offline_seconds" field. It is called by the builders before save.
 	plan.MaxOfflineSecondsValidator = planDescMaxOfflineSeconds.Validators[0].(func(int64) error)
 	// planDescGraceSeconds is the schema descriptor for grace_seconds field.
-	planDescGraceSeconds := planFields[11].Descriptor()
+	planDescGraceSeconds := planFields[12].Descriptor()
 	// plan.DefaultGraceSeconds holds the default value on creation for the grace_seconds field.
 	plan.DefaultGraceSeconds = planDescGraceSeconds.Default.(int64)
 	// plan.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
@@ -297,7 +331,7 @@ func init() {
 	// planfeature.FeatureIDValidator is a validator for the "feature_id" field. It is called by the builders before save.
 	planfeature.FeatureIDValidator = planfeatureDescFeatureID.Validators[0].(func(string) error)
 	// planfeatureDescLimitValue is the schema descriptor for limit_value field.
-	planfeatureDescLimitValue := planfeatureFields[4].Descriptor()
+	planfeatureDescLimitValue := planfeatureFields[5].Descriptor()
 	// planfeature.LimitValueValidator is a validator for the "limit_value" field. It is called by the builders before save.
 	planfeature.LimitValueValidator = func() func(int64) error {
 		validators := planfeatureDescLimitValue.Validators
@@ -396,6 +430,7 @@ func init() {
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
+			validators[2].(func(string) error),
 		}
 		return func(name string) error {
 			for _, fn := range fns {
@@ -468,6 +503,7 @@ func init() {
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
+			validators[2].(func(string) error),
 		}
 		return func(name string) error {
 			for _, fn := range fns {

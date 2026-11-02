@@ -440,6 +440,26 @@ func FeatureIDContainsFold(v string) predicate.PlanFeature {
 	return predicate.PlanFeature(sql.FieldContainsFold(FieldFeatureID, v))
 }
 
+// FeatureTypeEQ applies the EQ predicate on the "feature_type" field.
+func FeatureTypeEQ(v FeatureType) predicate.PlanFeature {
+	return predicate.PlanFeature(sql.FieldEQ(FieldFeatureType, v))
+}
+
+// FeatureTypeNEQ applies the NEQ predicate on the "feature_type" field.
+func FeatureTypeNEQ(v FeatureType) predicate.PlanFeature {
+	return predicate.PlanFeature(sql.FieldNEQ(FieldFeatureType, v))
+}
+
+// FeatureTypeIn applies the In predicate on the "feature_type" field.
+func FeatureTypeIn(vs ...FeatureType) predicate.PlanFeature {
+	return predicate.PlanFeature(sql.FieldIn(FieldFeatureType, vs...))
+}
+
+// FeatureTypeNotIn applies the NotIn predicate on the "feature_type" field.
+func FeatureTypeNotIn(vs ...FeatureType) predicate.PlanFeature {
+	return predicate.PlanFeature(sql.FieldNotIn(FieldFeatureType, vs...))
+}
+
 // LimitValueEQ applies the EQ predicate on the "limit_value" field.
 func LimitValueEQ(v int64) predicate.PlanFeature {
 	return predicate.PlanFeature(sql.FieldEQ(FieldLimitValue, v))

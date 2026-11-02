@@ -3,6 +3,7 @@
 package planfeature
 
 import (
+	"fmt"
 	"time"
 
 	"entgo.io/ent/dialect/sql"
@@ -26,6 +27,8 @@ const (
 	FieldPlanID = "plan_id"
 	// FieldFeatureID holds the string denoting the feature_id field in the database.
 	FieldFeatureID = "feature_id"
+	// FieldFeatureType holds the string denoting the feature_type field in the database.
+	FieldFeatureType = "feature_type"
 	// FieldLimitValue holds the string denoting the limit_value field in the database.
 	FieldLimitValue = "limit_value"
 	// EdgePlan holds the string denoting the plan edge name in mutations.
@@ -59,6 +62,7 @@ var Columns = []string{
 	FieldProductID,
 	FieldPlanID,
 	FieldFeatureID,
+	FieldFeatureType,
 	FieldLimitValue,
 }
 
@@ -94,6 +98,29 @@ var (
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
 	IDValidator func(string) error
 )
+
+// FeatureType defines the type for the "feature_type" enum field.
+type FeatureType string
+
+// FeatureType values.
+const (
+	FeatureTypeBoolean FeatureType = "boolean"
+	FeatureTypeLimit   FeatureType = "limit"
+)
+
+func (ft FeatureType) String() string {
+	return string(ft)
+}
+
+// FeatureTypeValidator is a validator for the "feature_type" field enum values. It is called by the builders before save.
+func FeatureTypeValidator(ft FeatureType) error {
+	switch ft {
+	case FeatureTypeBoolean, FeatureTypeLimit:
+		return nil
+	default:
+		return fmt.Errorf("planfeature: invalid enum value for feature_type field: %q", ft)
+	}
+}
 
 // OrderOption defines the ordering options for the PlanFeature queries.
 type OrderOption func(*sql.Selector)
@@ -131,6 +158,11 @@ func ByPlanID(opts ...sql.OrderTermOption) OrderOption {
 // ByFeatureID orders the results by the feature_id field.
 func ByFeatureID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFeatureID, opts...).ToFunc()
+}
+
+// ByFeatureType orders the results by the feature_type field.
+func ByFeatureType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFeatureType, opts...).ToFunc()
 }
 
 // ByLimitValue orders the results by the limit_value field.

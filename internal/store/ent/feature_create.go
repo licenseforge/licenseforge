@@ -328,7 +328,7 @@ func (_c *FeatureCreate) createSpec() (*Feature, *sqlgraph.CreateSpec) {
 	}
 	if value, ok := _c.mutation.Description(); ok {
 		_spec.SetField(feature.FieldDescription, field.TypeString, value)
-		_node.Description = value
+		_node.Description = &value
 	}
 	if value, ok := _c.mutation.GetType(); ok {
 		_spec.SetField(feature.FieldType, field.TypeEnum, value)
@@ -336,7 +336,7 @@ func (_c *FeatureCreate) createSpec() (*Feature, *sqlgraph.CreateSpec) {
 	}
 	if value, ok := _c.mutation.Unit(); ok {
 		_spec.SetField(feature.FieldUnit, field.TypeString, value)
-		_node.Unit = value
+		_node.Unit = &value
 	}
 	if value, ok := _c.mutation.ArchivedAt(); ok {
 		_spec.SetField(feature.FieldArchivedAt, field.TypeTime, value)

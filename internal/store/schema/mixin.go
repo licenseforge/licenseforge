@@ -3,6 +3,8 @@
 package schema
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"entgo.io/ent"
@@ -11,6 +13,18 @@ import (
 	"entgo.io/ent/schema/index"
 	"entgo.io/ent/schema/mixin"
 )
+
+// notBlank rejects empty and whitespace-only strings, like the btrim CHECKs.
+func notBlank(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return errors.New("must not be blank")
+	}
+	return nil
+}
+
+// CHECK expressions must be written in PostgreSQL's normalized form (e.g.
+// "(x)::text = ANY (ARRAY['a'::text])" rather than "x IN ('a')"), so the
+// migration and the ent schema render identically (TestMigrationsMatchEntSchema).
 
 // Column types enforced by the database too, not only by ent's validators.
 var (
@@ -24,6 +38,7 @@ const (
 	slugPattern = `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` // lowercase words joined by single dashes
 	keyPattern  = `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` // feature keys: snake_case, e.g. max_users
 	maxSafeInt  = "9007199254740991"              // 2^53-1, JSON-safe (spec: limits)
+	maxSeconds  = 3153600000                      // 36,500 days, the license format's duration limit
 	idChars     = `[a-z2-7]{26}`
 )
 

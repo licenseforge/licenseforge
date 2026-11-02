@@ -30,7 +30,9 @@ type Plan struct {
 	Slug string `json:"slug,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
-	// nil = perpetual
+	// DurationMonths holds the value of the "duration_months" field.
+	DurationMonths *int `json:"duration_months,omitempty"`
+	// DurationSeconds holds the value of the "duration_seconds" field.
 	DurationSeconds *int64 `json:"duration_seconds,omitempty"`
 	// ExpiryBasis holds the value of the "expiry_basis" field.
 	ExpiryBasis plan.ExpiryBasis `json:"expiry_basis,omitempty"`
@@ -92,7 +94,7 @@ func (*Plan) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case plan.FieldOfflineAllowed:
 			values[i] = new(sql.NullBool)
-		case plan.FieldDurationSeconds, plan.FieldMaxActivations, plan.FieldMaxRehosts, plan.FieldLeaseSeconds, plan.FieldMaxOfflineSeconds, plan.FieldGraceSeconds:
+		case plan.FieldDurationMonths, plan.FieldDurationSeconds, plan.FieldMaxActivations, plan.FieldMaxRehosts, plan.FieldLeaseSeconds, plan.FieldMaxOfflineSeconds, plan.FieldGraceSeconds:
 			values[i] = new(sql.NullInt64)
 		case plan.FieldID, plan.FieldTenantID, plan.FieldProductID, plan.FieldSlug, plan.FieldName, plan.FieldExpiryBasis:
 			values[i] = new(sql.NullString)
@@ -154,6 +156,13 @@ func (_m *Plan) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field name", values[i])
 			} else if value.Valid {
 				_m.Name = value.String
+			}
+		case plan.FieldDurationMonths:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field duration_months", values[i])
+			} else if value.Valid {
+				_m.DurationMonths = new(int)
+				*_m.DurationMonths = int(value.Int64)
 			}
 		case plan.FieldDurationSeconds:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -277,6 +286,11 @@ func (_m *Plan) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
+	builder.WriteString(", ")
+	if v := _m.DurationMonths; v != nil {
+		builder.WriteString("duration_months=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	if v := _m.DurationSeconds; v != nil {
 		builder.WriteString("duration_seconds=")
