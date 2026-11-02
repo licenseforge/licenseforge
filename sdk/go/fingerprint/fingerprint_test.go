@@ -1,8 +1,15 @@
 package fingerprint
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,7 +20,7 @@ import (
 func fakeEnv(vars map[string]string) env {
 	return env{
 		getenv:    func(k string) string { return vars[k] },
-		k8s:       func() (string, error) { return "kube-uid-1", nil },
+		k8s:       func(context.Context) (string, error) { return "kube-uid-1", nil },
 		machineID: func() (string, error) { return "0123456789abcdef0123456789abcdef", nil },
 	}
 }
@@ -36,7 +43,7 @@ func TestComputeSourceOrder(t *testing.T) {
 		{"env trims ASCII whitespace only", Options{AllowEnvOverride: true}, map[string]string{EnvOverride: " x\t"}, SourceEnv, " x", "machine"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := compute("acme-db", tc.opts, fakeEnv(tc.vars))
+			r, err := compute(context.Background(), "acme-db", tc.opts, fakeEnv(tc.vars))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -49,19 +56,19 @@ func TestComputeSourceOrder(t *testing.T) {
 
 func TestComputeErrors(t *testing.T) {
 	e := fakeEnv(map[string]string{"KUBERNETES_SERVICE_HOST": "10.0.0.1"})
-	e.k8s = func() (string, error) { return "", errors.New("forbidden") }
-	if _, err := compute("acme-db", Options{}, e); err == nil {
+	e.k8s = func(context.Context) (string, error) { return "", errors.New("forbidden") }
+	if _, err := compute(context.Background(), "acme-db", Options{}, e); err == nil {
 		t.Error("kubernetes failure must be an error, not a fallback to the node machine-id")
 	}
 	e = fakeEnv(nil)
 	e.machineID = func() (string, error) { return "", ErrNoFingerprint }
-	if _, err := compute("acme-db", Options{}, e); !errors.Is(err, ErrNoFingerprint) {
+	if _, err := compute(context.Background(), "acme-db", Options{}, e); !errors.Is(err, ErrNoFingerprint) {
 		t.Errorf("got %v, want ErrNoFingerprint", err)
 	}
-	if _, err := compute("acme-db", Options{Override: func() (string, error) { return " ", nil }}, fakeEnv(nil)); err == nil {
+	if _, err := compute(context.Background(), "acme-db", Options{Override: func() (string, error) { return " ", nil }}, fakeEnv(nil)); err == nil {
 		t.Error("empty override must be an error")
 	}
-	if _, err := compute("", Options{}, fakeEnv(nil)); err == nil {
+	if _, err := compute(context.Background(), "", Options{}, fakeEnv(nil)); err == nil {
 		t.Error("empty product must be an error")
 	}
 }
@@ -97,22 +104,54 @@ func TestNamespaceUID(t *testing.T) {
 	reset := func(fail int32) { calls.Store(0); failFirst = fail }
 
 	reset(0)
-	if uid, err := namespaceUID(srv.URL, "tok", ca, backoff); err != nil || uid != "5f0c-uid" {
+	if uid, err := namespaceUID(context.Background(), srv.URL, "tok", ca, backoff); err != nil || uid != "5f0c-uid" {
 		t.Fatalf("ok: %q, %v", uid, err)
 	}
 	reset(2)
-	if uid, err := namespaceUID(srv.URL, "tok", ca, backoff); err != nil || uid != "5f0c-uid" || calls.Load() != 3 {
+	if uid, err := namespaceUID(context.Background(), srv.URL, "tok", ca, backoff); err != nil || uid != "5f0c-uid" || calls.Load() != 3 {
 		t.Fatalf("retry: %q, %v after %d calls", uid, err, calls.Load())
 	}
 	reset(5)
-	if _, err := namespaceUID(srv.URL, "tok", ca, backoff); !errors.Is(err, ErrTransient) || calls.Load() != 3 {
+	if _, err := namespaceUID(context.Background(), srv.URL, "tok", ca, backoff); !errors.Is(err, ErrTransient) || calls.Load() != 3 {
 		t.Fatalf("persistent 503: %v after %d calls, want ErrTransient after 3", err, calls.Load())
 	}
 	reset(0)
-	if _, err := namespaceUID(srv.URL, "wrong", ca, backoff); err == nil || errors.Is(err, ErrTransient) || calls.Load() != 1 {
+	if _, err := namespaceUID(context.Background(), srv.URL, "wrong", ca, backoff); err == nil || errors.Is(err, ErrTransient) || calls.Load() != 1 {
 		t.Fatalf("403 must fail at once and not be transient: %v after %d calls", err, calls.Load())
 	}
-	if _, err := namespaceUID(srv.URL, "tok", []byte("not a cert"), backoff); err == nil {
+	if _, err := namespaceUID(context.Background(), srv.URL, "tok", []byte("not a cert"), backoff); err == nil {
 		t.Fatal("bad CA must fail")
 	}
+	// A CA that doesn't match the server is a permanent error, not retried.
+	otherCA := selfSignedCA(t)
+	reset(0)
+	if _, err := namespaceUID(context.Background(), srv.URL, "tok", otherCA, backoff); err == nil || errors.Is(err, ErrTransient) || calls.Load() != 0 {
+		t.Fatalf("wrong CA: %v after %d calls, want a permanent error", err, calls.Load())
+	}
+	// Cancellation stops the retries.
+	reset(5)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := namespaceUID(ctx, srv.URL, "tok", ca, []time.Duration{time.Hour}); !errors.Is(err, ErrTransient) {
+		t.Fatalf("canceled: %v", err)
+	}
+}
+
+// selfSignedCA returns an unrelated CA certificate (httptest servers all share one).
+func selfSignedCA(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "other-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }

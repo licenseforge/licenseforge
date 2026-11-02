@@ -18,6 +18,7 @@
 package fingerprint
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -71,21 +72,22 @@ func Hash(productID, rawID string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// Compute returns the default fingerprint for productID on this machine.
-func Compute(productID string, opts Options) (Result, error) {
-	return compute(productID, opts, env{getenv: os.Getenv, k8s: kubeSystemUID, machineID: osMachineID})
+// Compute returns the default fingerprint for productID on this machine. ctx
+// bounds the Kubernetes lookup (up to ~17s with retries).
+func Compute(ctx context.Context, productID string, opts Options) (Result, error) {
+	return compute(ctx, productID, opts, env{getenv: os.Getenv, k8s: kubeSystemUID, machineID: osMachineID})
 }
 
 type env struct {
 	getenv    func(string) string
-	k8s       func() (string, error)
+	k8s       func(context.Context) (string, error)
 	machineID func() (string, error)
 }
 
 // trimASCII removes only SP, HT, CR and LF, so every SDK trims identically.
 func trimASCII(s string) string { return strings.Trim(s, " \t\r\n") }
 
-func compute(productID string, opts Options, e env) (Result, error) {
+func compute(ctx context.Context, productID string, opts Options, e env) (Result, error) {
 	if productID == "" {
 		return Result{}, errors.New("fingerprint: empty product ID")
 	}
@@ -105,7 +107,7 @@ func compute(productID string, opts Options, e env) (Result, error) {
 		}
 	}
 	if e.getenv("KUBERNETES_SERVICE_HOST") != "" {
-		uid, err := e.k8s()
+		uid, err := e.k8s(ctx)
 		if err != nil {
 			return Result{}, fmt.Errorf("fingerprint: kubernetes: %w", err)
 		}

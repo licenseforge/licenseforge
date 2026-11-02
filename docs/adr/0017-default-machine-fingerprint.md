@@ -22,8 +22,8 @@ SDKs and the agent pick the first available source:
 
 ## Amendment (2026-11-02, from implementation review; pending maintainer confirmation)
 - `LICENSEFORGE_FINGERPRINT` is honoured **only when the vendor enables it** in the SDK (off by default). Anyone who can set an env var could otherwise reuse one binding on every machine without root. Vendors supporting plain Docker enable it, or customers mount the host `/etc/machine-id`.
-- Linux: tmpfs machine-ids (regenerated each boot) are refused; in containers only a bind-mounted host machine-id is trusted; more container markers (`/run/systemd/container`, `container=` in PID 1's environment).
-- Kubernetes lookups retry transient failures and report them as transient, separate from RBAC/permission errors.
+- Linux: machine-ids on tmpfs/ramfs (regenerated each boot) are refused; in application containers (Docker, Podman, OCI, unknown types) only a bind-mounted host machine-id is trusted; system containers (LXC/LXD/Incus, nspawn) use their own machine-id like VMs.
+- Kubernetes lookups retry transient failures and report them as transient, separate from RBAC/permission and certificate errors; `Compute` takes a context.
 - Exact per-source normalisation is in [License File Format](../../spec/license-format.md) (Fingerprints).
 - Open: hash input uses the product ID only. On a multi-tenant hosted server two tenants could use the same product slug, giving identical fingerprints for the same machine across vendors. Decide whether the hash input becomes tenant-qualified.
 
