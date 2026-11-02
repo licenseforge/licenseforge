@@ -43,7 +43,7 @@ type Event struct {
 	ObjectType string
 	ObjectID   string
 	Outcome    auditevent.Outcome
-	SourceIP   string
+	SourceIP   string // from a trusted source only: the connection, or a forwarded header set by a trusted proxy; an invalid value fails Record
 	UserAgent  string
 	Details    map[string]any
 }
@@ -86,18 +86,21 @@ func Record(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.Aud
 		e.SourceIP = ip.Unmap().String()
 	}
 	e.UserAgent = cleanText(e.UserAgent, maxUserAgent)
-	rows, err := tx.QueryContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))::text,
-		current_setting('transaction_isolation'), clock_timestamp()`, tenantID)
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenantID); err != nil {
+		return nil, err
+	}
+	// A separate statement, so the clock is read after the lock is held.
+	rows, err := tx.QueryContext(ctx, `SELECT current_setting('transaction_isolation'), clock_timestamp()`)
 	if err != nil {
 		return nil, err
 	}
-	var lock, isolation string
+	var isolation string
 	var now time.Time
 	if !rows.Next() {
 		_ = rows.Close()
 		return nil, errors.Join(errors.New("audit: lock query returned no row"), rows.Err())
 	}
-	err = rows.Scan(&lock, &isolation, &now)
+	err = rows.Scan(&isolation, &now)
 	if cerr := rows.Close(); err == nil {
 		err = cerr
 	}
