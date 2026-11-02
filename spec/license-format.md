@@ -76,6 +76,7 @@ Every rule here is *fail closed*: a violation makes the license `malformed`. SDK
 - Optional: `tenant`, `plan` (strings); `customer` (object: `id`, `name` strings); `nbf`, `exp` (absent = perpetual, offline licenses only), `refresh_after`, `updates_until`; `grace` (absent = 0); `max_offline` (absent = no limit); `bind`; `entitlements` (object: `features` array of strings, `limits` object of integers).
 - **`bind`** (object): `type` absent or `bind` absent → `none`. `type` must be one of `none`, `machine`, `cluster`; any other value, including `""` → `malformed`. `machine`/`cluster` require a non-empty `fp`; `none` must not have `fp`.
 - **Limits**: integers in −1 … 2^53−1 (JSON-safe), `-1` = unlimited; other negatives → `malformed`.
+- **Entitlement lookups** (SDK API, [ADR-0015 Feature catalog per product](../docs/adr/0015-feature-catalog-per-product.md)): `hasFeature(key)` is an exact, case-sensitive match in `features`; `limit(key)` returns the value, or `0` when absent; `allows(key, n)` is true when the limit is `-1` or `n ≤ limit`. Unknown keys are never an error.
 
 > [!note] For implementers
 > A plain `JSON.parse` (JS) or default Jackson/Gson (Java) is **not** enough: they accept duplicate keys, turn `1.0` into `1`, keep lone surrogates or have different depth limits. Use a parser that exposes raw tokens (e.g. Jackson streaming with `STRICT_DUPLICATE_DETECTION`, or a small tokenizer in TS) and decode with BOM stripping disabled (`TextDecoder` with `ignoreBOM: true`).

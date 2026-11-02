@@ -11,5 +11,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - `lf1` conformance vectors in `spec/vectors/lf1.json`.
 - `licensefile.ParseClaims`, `Claims.Check` and `Open`: parse and check lf1 claims (version, product, binding, clock skew, not-before, max offline, expiry with grace, updates_until) in the order defined by the spec.
 - Claim conformance vectors in `spec/vectors/lf1-claims.json` (93 cases).
+- `Entitlements.HasFeature`, `Limit` and `Allows` (ADR-0015): unknown keys grant nothing and are never an error.
 - Go SDK `clock` package: clock rollback protection (ADR-0018) with an HMAC-authenticated high-water mark, 24h default tolerance, `Reset` after online refresh, and an atomic `FileStore`.
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).

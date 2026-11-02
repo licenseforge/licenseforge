@@ -53,10 +53,37 @@ type Binding struct {
 	Fingerprint string
 }
 
-// Entitlements are the features and numeric limits granted by the license.
+// Entitlements are the features and numeric limits granted by the license
+// (ADR-0015). Unknown keys are never an error: HasFeature returns false and
+// Limit returns 0, so apps can check features that older licenses don't have.
 type Entitlements struct {
 	Features []string
-	Limits   map[string]int64 // -1 = unlimited
+	Limits   map[string]int64 // Unlimited (-1) or a non-negative limit
+}
+
+// Unlimited is the limit value meaning "no limit".
+const Unlimited int64 = -1
+
+// HasFeature reports whether the license grants the boolean feature key.
+func (e Entitlements) HasFeature(key string) bool {
+	for _, f := range e.Features {
+		if f == key {
+			return true
+		}
+	}
+	return false
+}
+
+// Limit returns the numeric limit for key: Unlimited (-1), a non-negative
+// value, or 0 if the license doesn't set it.
+func (e Entitlements) Limit(key string) int64 {
+	return e.Limits[key]
+}
+
+// Allows reports whether using n units of the limit key is within the license.
+func (e Entitlements) Allows(key string, n int64) bool {
+	l := e.Limit(key)
+	return l == Unlimited || n <= l
 }
 
 // Claims is the parsed lf1 payload. Optional fields are nil when absent.
