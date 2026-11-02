@@ -27,3 +27,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0021](0021-certification-readiness.md) | Certification readiness | accepted |
 | [ADR-0022](0022-crm-and-business-tool-integrations.md) | CRM and business tool integrations | accepted |
 | [ADR-0023](0023-repository-structure.md) | Repository structure | accepted |
+| [ADR-0024](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md) | HIPAA, NIST and FedRAMP readiness from day 1 | accepted |

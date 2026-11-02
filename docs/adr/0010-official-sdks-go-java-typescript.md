@@ -24,7 +24,8 @@ Each SDK has the same surface: `verify(file)`, `activate(key)`, `refresh()`, `de
 - Java 15+ minimum; Java 8/11 users need BouncyCastle (document, don't support officially).
 - Gaps: other languages are covered first by the in-cluster agent's local API and an OpenFeature provider ([ADR-0012 In-cluster license agent](0012-in-cluster-license-agent.md), v0.3). A C-ABI core with .NET and Python bindings is Later. Community SDKs can certify against the test vectors.
 
-> [!note] Amended 2026-11-02
+> [!NOTE]
+> **Amended 2026-11-02**
 > After Licensing competitor feature gaps: no new native SDKs before v0.4; the agent closes the server-side language gap.
 
 ## Alternatives considered

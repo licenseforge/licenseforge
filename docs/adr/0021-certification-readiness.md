@@ -2,6 +2,9 @@
 
 *Status: accepted · Date: 2026-11-02*
 
+> [!NOTE]
+> **Extended by [ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md) (2026-11-02): FedRAMP, HIPAA and NIST readiness move to day 1.**
+
 ## Context
 To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regulated products, we will be asked for certifications. None are needed for v0.1, but architecture choices made now must not block them. Reviewed against ADR-0004, 0005, 0006, 0009 on 2026-11-02.
 
@@ -13,7 +16,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 | **GDPR** (+ DPA with each vendor) | Hosted cloud; EU vendors | From first EU customer | No, after data minimisation below |
 | **EU Cyber Resilience Act (CRA)** | Our SDKs/agent embedded in vendors' products; vendors will pass obligations to us | Reporting obligations from Sep 2026, full application Dec 2027 | No. Needs SBOM, vulnerability handling, security updates |
 | **FIPS 140-3** (validated crypto) | US federal, defence, regulated buyers | On demand, per deal | No. Ed25519 is approved (FIPS 186-5); FIPS builds via Go's FIPS 140-3 module; ECDSA P-256 fallback by new key type |
-| **FedRAMP / StateRAMP** | Hosted for US government | Much later, only if pursued | No. Dedicated-instance deployments + FIPS images cover the architecture side |
+| **FedRAMP / StateRAMP** | Hosted for US government | Product readiness from v0.1 ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md)); authorization with the hosted offering | No. Dedicated-instance deployments + FIPS images cover the architecture side |
 | **CNSA 2.0 / post-quantum** | Defence/national security buyers | 2030+ timelines | No. ML-DSA (FIPS 204) can be added as a key type without a format change |
 | **PCI DSS** | Card payments | Never | Avoided by delegating billing ([ADR-0007 Billing and campaigns delegated to payment providers](0007-billing-and-campaigns-delegated-to-payment-providers.md)) |
 | **OpenSSF Best Practices badge / Scorecard, SLSA** | Open-source trust, procurement | v0.1 onwards | No |
@@ -22,7 +25,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 **Crypto**
 - Only Go stdlib crypto (FIPS-capable module). No hand-rolled primitives.
 - Algorithm bound to `kid`, never read from the license file; `kid` outside payload ([License File Format](../../spec/license-format.md)).
-- `Signer` interface from day one so KMS/Vault Transit/HSM drop in for FIPS Level 2/3 key custody (Architecture Overview).
+- `Signer` interface from day one so KMS/Vault Transit/HSM drop in for FIPS Level 2/3 key custody.
 - FIPS image variant built with `GOFIPS140`.
 
 **Audit and access** (SOC 2 / ISO 27001 core evidence)
@@ -51,8 +54,8 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 - CMVP-validated status: depend on the Go module's certificate; don't validate our own module.
 
 ## Open verification items
-- [ ] Confirm current CMVP certificate status of the Go Cryptographic Module.
-- [ ] Confirm Ed25519 availability in the FIPS providers used by Java (e.g. BouncyCastle FIPS) and Node (OpenSSL 3 FIPS provider). If missing, FIPS customers get ECDSA P-256 keys.
+- [x] Go Cryptographic Module v1.0.0: CMVP #5247 active, EdDSA approved ([CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)).
+- [ ] Confirm Ed25519 in Bouncy Castle FIPS (Java); OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved. If missing, FIPS customers get ECDSA P-256 keys.
 - [ ] Confirm CRA obligations for open-source projects vs. commercial distributors (we are both).
 
 ## Consequences
