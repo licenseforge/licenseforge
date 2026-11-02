@@ -1,12 +1,15 @@
 package licensefile
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"time"
+	"unicode/utf8"
 )
 
 // Claim check results that are not usable licenses. Each maps to a spec result class.
@@ -19,9 +22,12 @@ var (
 	ErrOfflineExceeded    = errors.New("licensefile: offline period exceeded")
 	ErrExpired            = errors.New("licensefile: expired")
 	ErrUpdatesExpired     = errors.New("licensefile: build not covered by updates_until")
+	// ErrInvalidOptions is a caller error in CheckOptions, not a verdict about the license.
+	ErrInvalidOptions = errors.New("licensefile: invalid check options")
 )
 
-// Status of a license that passed all claim checks.
+// Status of a license that passed all claim checks. New values may be added in
+// future versions; only a non-nil error means the license is unusable.
 type Status string
 
 const (
@@ -32,21 +38,29 @@ const (
 // DefaultClockTolerance is how far in the future iat may be (ADR-0018).
 const DefaultClockTolerance = 24 * time.Hour
 
+// BindingType says what a license is bound to.
+type BindingType string
+
+const (
+	BindNone    BindingType = "none"
+	BindMachine BindingType = "machine"
+	BindCluster BindingType = "cluster"
+)
+
 // Binding ties a license to a machine or cluster.
 type Binding struct {
-	Type        string // "none", "machine" or "cluster"
+	Type        BindingType
 	Fingerprint string
 }
 
 // Entitlements are the features and numeric limits granted by the license.
 type Entitlements struct {
-	Features []string         `json:"features"`
-	Limits   map[string]int64 `json:"limits"`
+	Features []string
+	Limits   map[string]int64 // -1 = unlimited
 }
 
-// Claims is the parsed lf1 payload. Optional times and durations are zero when absent.
+// Claims is the parsed lf1 payload. Optional fields are nil when absent.
 type Claims struct {
-	Version      int
 	LicenseID    string
 	Tenant       string
 	Product      string
@@ -54,164 +68,478 @@ type Claims struct {
 	CustomerID   string
 	CustomerName string
 	IssuedAt     time.Time
-	NotBefore    time.Time
-	Expires      time.Time // zero = perpetual
-	RefreshAfter time.Time
-	UpdatesUntil time.Time
-	Grace        time.Duration
-	MaxOffline   time.Duration // zero = not limited
+	NotBefore    *time.Time
+	Expires      *time.Time // nil = perpetual
+	RefreshAfter *time.Time
+	UpdatesUntil *time.Time
+	Grace        time.Duration  // absent = 0
+	MaxOffline   *time.Duration // nil = not limited; zero is a real limit
 	Binding      Binding
 	Entitlements Entitlements
 }
 
-type rawClaims struct {
-	V        *int    `json:"v"`
-	LID      *string `json:"lid"`
-	Tenant   string  `json:"tenant"`
-	Product  *string `json:"product"`
-	Plan     string  `json:"plan"`
-	Customer struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"customer"`
-	IAT          *string `json:"iat"`
-	NBF          *string `json:"nbf"`
-	EXP          *string `json:"exp"`
-	RefreshAfter *string `json:"refresh_after"`
-	UpdatesUntil *string `json:"updates_until"`
-	Grace        *string `json:"grace"`
-	MaxOffline   *string `json:"max_offline"`
-	Bind         struct {
-		Type string `json:"type"`
-		FP   string `json:"fp"`
-	} `json:"bind"`
-	Entitlements Entitlements `json:"entitlements"`
-}
+const (
+	maxDurationSeconds = 36500 * 24 * 60 * 60 // 100 years
+	maxSafeInteger     = 1<<53 - 1
+)
+
+var (
+	intTokenRE = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
+	timeRE     = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
+	durationRE = regexp.MustCompile(`^P(?:([0-9]{1,6})D)?(?:T(?:([0-9]{1,6})H)?(?:([0-9]{1,6})M)?(?:([0-9]{1,6})S)?)?$`)
+)
 
 const timeLayout = "2006-01-02T15:04:05Z"
 
-// ParseClaims decodes a verified payload. Call it only on the payload returned by Verify.
+func malformed(format string, a ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{ErrMalformed}, a...)...)
+}
+
+// ParseClaims decodes a verified payload under the spec's strict encoding rules.
+// Call it only on the payload returned by Verify.
 func ParseClaims(payload []byte) (*Claims, error) {
-	var r rawClaims
-	if err := json.Unmarshal(payload, &r); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	if err := wellFormed(payload); err != nil {
+		return nil, err
 	}
-	// Version first: a future version may have different required fields.
-	if r.V == nil {
-		return nil, fmt.Errorf("%w: missing v", ErrMalformed)
+	m, err := object(payload, true)
+	if err != nil {
+		return nil, err
 	}
-	if *r.V != 1 {
+
+	// Version first: a future version may change any other field.
+	vRaw, ok := m["v"]
+	if !ok {
+		return nil, malformed("missing v")
+	}
+	vTok, err := intToken(vRaw, "v")
+	if err != nil {
+		return nil, err
+	}
+	if vTok != "1" {
 		return nil, ErrUnsupportedVersion
 	}
-	if r.LID == nil || *r.LID == "" || r.Product == nil || *r.Product == "" || r.IAT == nil {
-		return nil, fmt.Errorf("%w: missing required claim", ErrMalformed)
+
+	c := &Claims{}
+	if c.LicenseID, err = reqString(m, "lid"); err != nil {
+		return nil, err
 	}
-	c := &Claims{
-		Version: *r.V, LicenseID: *r.LID, Tenant: r.Tenant, Product: *r.Product, Plan: r.Plan,
-		CustomerID: r.Customer.ID, CustomerName: r.Customer.Name, Entitlements: r.Entitlements,
-		Binding: Binding{Type: r.Bind.Type, Fingerprint: r.Bind.FP},
+	if c.Product, err = reqString(m, "product"); err != nil {
+		return nil, err
 	}
-	var err error
+	if c.Tenant, _, err = optString(m, "tenant"); err != nil {
+		return nil, err
+	}
+	if c.Plan, _, err = optString(m, "plan"); err != nil {
+		return nil, err
+	}
+	if cust, ok, err := optObject(m, "customer"); err != nil {
+		return nil, err
+	} else if ok {
+		if c.CustomerID, _, err = optString(cust, "id"); err != nil {
+			return nil, err
+		}
+		if c.CustomerName, _, err = optString(cust, "name"); err != nil {
+			return nil, err
+		}
+	}
+
+	iat, err := optTime(m, "iat")
+	if err != nil {
+		return nil, err
+	}
+	if iat == nil {
+		return nil, malformed("missing iat")
+	}
+	c.IssuedAt = *iat
 	for _, f := range []struct {
-		raw *string
-		dst *time.Time
-	}{{r.IAT, &c.IssuedAt}, {r.NBF, &c.NotBefore}, {r.EXP, &c.Expires}, {r.RefreshAfter, &c.RefreshAfter}, {r.UpdatesUntil, &c.UpdatesUntil}} {
-		if f.raw != nil {
-			if *f.dst, err = parseTime(*f.raw); err != nil {
-				return nil, err
-			}
+		key string
+		dst **time.Time
+	}{{"nbf", &c.NotBefore}, {"exp", &c.Expires}, {"refresh_after", &c.RefreshAfter}, {"updates_until", &c.UpdatesUntil}} {
+		if *f.dst, err = optTime(m, f.key); err != nil {
+			return nil, err
 		}
 	}
-	for _, f := range []struct {
-		raw *string
-		dst *time.Duration
-	}{{r.Grace, &c.Grace}, {r.MaxOffline, &c.MaxOffline}} {
-		if f.raw != nil {
-			if *f.dst, err = parseDuration(*f.raw); err != nil {
-				return nil, err
-			}
-		}
+	grace, err := optDuration(m, "grace")
+	if err != nil {
+		return nil, err
 	}
-	switch c.Binding.Type {
-	case "":
-		c.Binding.Type = "none"
-	case "none":
-	case "machine", "cluster":
-		if c.Binding.Fingerprint == "" {
-			return nil, fmt.Errorf("%w: %s binding without fingerprint", ErrMalformed, c.Binding.Type)
-		}
-	default:
-		return nil, fmt.Errorf("%w: unknown binding type %q", ErrMalformed, c.Binding.Type)
+	if grace != nil {
+		c.Grace = *grace
+	}
+	if c.MaxOffline, err = optDuration(m, "max_offline"); err != nil {
+		return nil, err
+	}
+	if c.Binding, err = parseBinding(m); err != nil {
+		return nil, err
+	}
+	if c.Entitlements, err = parseEntitlements(m); err != nil {
+		return nil, err
 	}
 	return c, nil
+}
+
+func parseBinding(m map[string]json.RawMessage) (Binding, error) {
+	b, ok, err := optObject(m, "bind")
+	if err != nil || !ok {
+		return Binding{Type: BindNone}, err
+	}
+	typ, hasType, err := optString(b, "type")
+	if err != nil {
+		return Binding{}, err
+	}
+	fp, hasFP, err := optString(b, "fp")
+	if err != nil {
+		return Binding{}, err
+	}
+	if !hasType {
+		typ = string(BindNone)
+	}
+	switch BindingType(typ) {
+	case BindNone:
+		if hasFP {
+			return Binding{}, malformed("bind type none must not have fp")
+		}
+	case BindMachine, BindCluster:
+		if fp == "" {
+			return Binding{}, malformed("%s binding without fp", typ)
+		}
+	default:
+		return Binding{}, malformed("unknown binding type %q", typ)
+	}
+	return Binding{Type: BindingType(typ), Fingerprint: fp}, nil
+}
+
+func parseEntitlements(m map[string]json.RawMessage) (Entitlements, error) {
+	var e Entitlements
+	ent, ok, err := optObject(m, "entitlements")
+	if err != nil || !ok {
+		return e, err
+	}
+	if raw, ok := ent["features"]; ok {
+		if bytes.Equal(raw, []byte("null")) || len(raw) == 0 || raw[0] != '[' {
+			return e, malformed("features must be an array")
+		}
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return e, malformed("features: %v", err)
+		}
+		for _, it := range items {
+			s, err := stringValue(it, "features[]")
+			if err != nil {
+				return e, err
+			}
+			e.Features = append(e.Features, s)
+		}
+	}
+	limits, ok, err := optObject(ent, "limits")
+	if err != nil {
+		return e, err
+	}
+	if ok {
+		e.Limits = make(map[string]int64, len(limits))
+		for k, raw := range limits {
+			tok, err := intToken(raw, "limits."+k)
+			if err != nil {
+				return e, err
+			}
+			n, err := strconv.ParseInt(tok, 10, 64)
+			if err != nil || n < -1 || n > maxSafeInteger {
+				return e, malformed("limit %q out of range", k)
+			}
+			e.Limits[k] = n
+		}
+	}
+	return e, nil
+}
+
+// maxDepth is the deepest object/array nesting a payload may have (spec).
+const maxDepth = 32
+
+// wellFormed applies the spec's JSON well-formedness rules, checked before v:
+// valid UTF-8 (no BOM), exactly one top-level object, no duplicate keys in any
+// object (known or unknown), nesting depth <= maxDepth, no unpaired surrogate
+// escapes.
+func wellFormed(payload []byte) error {
+	if !utf8.Valid(payload) {
+		return malformed("payload is not valid UTF-8")
+	}
+	if err := checkSurrogates(payload); err != nil {
+		return err
+	}
+	type frame struct {
+		obj     bool
+		keys    map[string]bool
+		wantKey bool
+	}
+	var stack []*frame
+	valueDone := func() {
+		if n := len(stack); n > 0 && stack[n-1].obj {
+			stack[n-1].wantKey = true
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
+	for first := true; first || len(stack) > 0; first = false {
+		tok, err := dec.Token()
+		if err != nil {
+			return malformed("%v", err)
+		}
+		if first && tok != json.Delim('{') {
+			return malformed("expected a JSON object")
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{', '[':
+				if len(stack) > 0 && stack[len(stack)-1].obj {
+					stack[len(stack)-1].wantKey = false
+				}
+				stack = append(stack, &frame{obj: t == '{', keys: map[string]bool{}, wantKey: t == '{'})
+				if len(stack) > maxDepth {
+					return malformed("nesting deeper than %d", maxDepth)
+				}
+			default: // '}' or ']'
+				stack = stack[:len(stack)-1]
+				valueDone()
+			}
+		case string:
+			if top := stack[len(stack)-1]; top.obj && top.wantKey {
+				if top.keys[t] {
+					return malformed("duplicate key %q", t)
+				}
+				top.keys[t] = true
+				top.wantKey = false
+				continue
+			}
+			valueDone()
+		default:
+			valueDone()
+		}
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return malformed("trailing data after payload object")
+	}
+	return nil
+}
+
+// checkSurrogates rejects \uD800-\uDFFF escapes that don't form a valid pair
+// (Go would silently replace them; JS and Java keep them).
+func checkSurrogates(b []byte) error {
+	hex4 := func(i int) (int, bool) {
+		if i+6 > len(b) || b[i] != '\\' || b[i+1] != 'u' {
+			return 0, false
+		}
+		v, err := strconv.ParseUint(string(b[i+2:i+6]), 16, 16)
+		return int(v), err == nil
+	}
+	inString := false
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == '"':
+			inString = !inString
+		case inString && b[i] == '\\':
+			if v, ok := hex4(i); ok {
+				switch {
+				case v >= 0xD800 && v <= 0xDBFF:
+					if lo, ok := hex4(i + 6); !ok || lo < 0xDC00 || lo > 0xDFFF {
+						return malformed("unpaired surrogate escape")
+					}
+					i += 11
+				case v >= 0xDC00 && v <= 0xDFFF:
+					return malformed("unpaired surrogate escape")
+				default:
+					i += 5
+				}
+			} else {
+				i++ // skip the escaped character
+			}
+		}
+	}
+	return nil
+}
+
+// object decodes a JSON object with exact-case keys, rejecting duplicate keys.
+// top requires nothing but whitespace after the object.
+func object(raw []byte, top bool) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, malformed("expected a JSON object")
+	}
+	m := map[string]json.RawMessage{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, malformed("%v", err)
+		}
+		key, _ := tok.(string) // object keys are always strings
+		if _, dup := m[key]; dup {
+			return nil, malformed("duplicate key %q", key)
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, malformed("%v", err)
+		}
+		m[key] = v
+	}
+	if _, err := dec.Token(); err != nil { // closing '}'
+		return nil, malformed("%v", err)
+	}
+	if top {
+		if _, err := dec.Token(); err != io.EOF {
+			return nil, malformed("trailing data after payload object")
+		}
+	}
+	return m, nil
+}
+
+func isNull(raw json.RawMessage) bool { return bytes.Equal(raw, []byte("null")) }
+
+func stringValue(raw json.RawMessage, key string) (string, error) {
+	if len(raw) == 0 || raw[0] != '"' {
+		return "", malformed("%s must be a string", key)
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", malformed("%s: %v", key, err)
+	}
+	return s, nil
+}
+
+func optString(m map[string]json.RawMessage, key string) (string, bool, error) {
+	raw, ok := m[key]
+	if !ok {
+		return "", false, nil
+	}
+	s, err := stringValue(raw, key)
+	return s, true, err
+}
+
+func reqString(m map[string]json.RawMessage, key string) (string, error) {
+	s, ok, err := optString(m, key)
+	if err == nil && (!ok || s == "") {
+		err = malformed("missing or empty %s", key)
+	}
+	return s, err
+}
+
+func optObject(m map[string]json.RawMessage, key string) (map[string]json.RawMessage, bool, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, false, nil
+	}
+	if isNull(raw) {
+		return nil, false, malformed("%s is null", key)
+	}
+	obj, err := object(raw, false)
+	return obj, true, err
+}
+
+func intToken(raw json.RawMessage, key string) (string, error) {
+	tok := string(raw)
+	if !intTokenRE.MatchString(tok) {
+		return "", malformed("%s must be an integer", key)
+	}
+	return tok, nil
+}
+
+func optTime(m map[string]json.RawMessage, key string) (*time.Time, error) {
+	s, ok, err := optString(m, key)
+	if err != nil || !ok {
+		return nil, err
+	}
+	t, err := parseTime(s)
+	return &t, err
+}
+
+func optDuration(m map[string]json.RawMessage, key string) (*time.Duration, error) {
+	s, ok, err := optString(m, key)
+	if err != nil || !ok {
+		return nil, err
+	}
+	d, err := parseDuration(s)
+	return &d, err
+}
+
+// parseTime accepts exactly YYYY-MM-DDTHH:MM:SSZ with a real date, year 1970-9999.
+func parseTime(s string) (time.Time, error) {
+	if !timeRE.MatchString(s) {
+		return time.Time{}, malformed("timestamp %q", s)
+	}
+	t, err := time.Parse(timeLayout, s)
+	if err != nil || t.Format(timeLayout) != s || t.Year() < 1970 {
+		return time.Time{}, malformed("timestamp %q", s)
+	}
+	return t, nil
+}
+
+// parseDuration accepts P[nD][T[nH][nM][nS]], at most 100 years in total.
+func parseDuration(s string) (time.Duration, error) {
+	m := durationRE.FindStringSubmatch(s)
+	if m == nil || s == "P" || s[len(s)-1] == 'T' {
+		return 0, malformed("duration %q", s)
+	}
+	var secs int64 // each part <= 999999, so the sum fits easily in int64 seconds
+	for i, unit := range []int64{86400, 3600, 60, 1} {
+		if m[i+1] != "" {
+			n, _ := strconv.ParseInt(m[i+1], 10, 64)
+			secs += n * unit
+		}
+	}
+	if secs > maxDurationSeconds {
+		return 0, malformed("duration %q exceeds 36500 days", s)
+	}
+	return time.Duration(secs) * time.Second, nil
 }
 
 // CheckOptions are the local facts a license is checked against.
 type CheckOptions struct {
 	Now            time.Time
 	Product        string
-	Fingerprint    string        // local machine or cluster fingerprint
-	BuildDate      time.Time     // zero = don't check updates_until
-	ClockTolerance time.Duration // zero = DefaultClockTolerance
+	Fingerprint    string         // local machine or cluster fingerprint
+	BuildDate      time.Time      // zero = unknown, updates_until not checked
+	ClockTolerance *time.Duration // nil = DefaultClockTolerance; 0 = strict; negative is invalid
 }
 
 // Check applies the spec's claim checks in order. It returns StatusValid or
 // StatusGrace for a usable license, or one of the Err* claim errors.
 func (c *Claims) Check(o CheckOptions) (Status, error) {
-	tol := o.ClockTolerance
-	if tol == 0 {
-		tol = DefaultClockTolerance
+	tol := DefaultClockTolerance
+	if o.Now.IsZero() {
+		return "", fmt.Errorf("%w: Now is not set", ErrInvalidOptions)
+	}
+	if o.ClockTolerance != nil {
+		if *o.ClockTolerance < 0 {
+			return "", fmt.Errorf("%w: negative clock tolerance", ErrInvalidOptions)
+		}
+		tol = *o.ClockTolerance
 	}
 	switch {
 	case c.Product != o.Product:
 		return "", ErrWrongProduct
-	case c.Binding.Type != "none" && c.Binding.Fingerprint != o.Fingerprint:
+	case c.Binding.Type != BindNone && (c.Binding.Fingerprint == "" || c.Binding.Fingerprint != o.Fingerprint):
 		return "", ErrBindingMismatch
 	case c.IssuedAt.After(o.Now.Add(tol)):
 		return "", ErrClockSkew
-	case !c.NotBefore.IsZero() && o.Now.Before(c.NotBefore):
+	case c.NotBefore != nil && o.Now.Before(*c.NotBefore):
 		return "", ErrNotYetValid
-	case c.MaxOffline > 0 && o.Now.After(c.IssuedAt.Add(c.MaxOffline)):
+	case c.MaxOffline != nil && o.Now.After(c.IssuedAt.Add(*c.MaxOffline)):
 		return "", ErrOfflineExceeded
-	case !c.Expires.IsZero() && o.Now.After(c.Expires.Add(c.Grace)):
+	case c.Expires != nil && o.Now.After(c.Expires.Add(c.Grace)):
 		return "", ErrExpired
-	case !c.UpdatesUntil.IsZero() && !o.BuildDate.IsZero() && o.BuildDate.After(c.UpdatesUntil):
+	case c.UpdatesUntil != nil && !o.BuildDate.IsZero() && o.BuildDate.After(*c.UpdatesUntil):
 		return "", ErrUpdatesExpired
-	case !c.Expires.IsZero() && o.Now.After(c.Expires):
+	case c.Expires != nil && o.Now.After(*c.Expires):
 		return StatusGrace, nil
 	}
 	return StatusValid, nil
 }
 
-func parseTime(s string) (time.Time, error) {
-	t, err := time.Parse(timeLayout, s)
-	if err != nil || t.Format(timeLayout) != s {
-		return time.Time{}, fmt.Errorf("%w: timestamp %q", ErrMalformed, s)
-	}
-	return t, nil
-}
-
-var durationRE = regexp.MustCompile(`^P(?:(\d{1,6})D)?(?:T(?:(\d{1,6})H)?(?:(\d{1,6})M)?(?:(\d{1,6})S)?)?$`)
-
-// parseDuration accepts the spec's ISO 8601 subset P[nD][T[nH][nM][nS]].
-func parseDuration(s string) (time.Duration, error) {
-	m := durationRE.FindStringSubmatch(s)
-	if m == nil || s == "P" || s[len(s)-1] == 'T' {
-		return 0, fmt.Errorf("%w: duration %q", ErrMalformed, s)
-	}
-	var d time.Duration
-	for i, unit := range []time.Duration{24 * time.Hour, time.Hour, time.Minute, time.Second} {
-		if m[i+1] != "" {
-			n, _ := strconv.Atoi(m[i+1]) // at most 6 digits, cannot overflow
-			d += time.Duration(n) * unit
-		}
-	}
-	return d, nil
-}
-
 // Open verifies a license's signature, parses its claims and checks them.
-// It is the usual entry point for applications. On a claim failure the parsed
-// claims are still returned, so callers can show details (e.g. expiry date).
+// It is the usual entry point for applications. Claims are returned whenever
+// the payload parsed, including when Check failed (e.g. to show the expiry
+// date); they are nil on signature or parse errors. Treat the license as
+// unusable whenever err is non-nil.
 func Open(license string, keys KeySet, o CheckOptions) (*Claims, Status, error) {
 	payload, _, err := Verify(license, keys)
 	if err != nil {
