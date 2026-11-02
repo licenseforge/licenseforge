@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -21,37 +20,64 @@ const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 func kubeSystemUID() (string, error) {
 	token, err := os.ReadFile(saDir + "/token")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no service account token (is automountServiceAccountToken disabled?): %w", err)
 	}
 	ca, err := os.ReadFile(saDir + "/ca.crt")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no service account CA: %w", err)
 	}
-	host := net.JoinHostPort(os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT"))
-	return namespaceUID("https://"+host, strings.TrimSpace(string(token)), ca)
+	port := os.Getenv("KUBERNETES_SERVICE_PORT")
+	if port == "" {
+		port = "443"
+	}
+	host := net.JoinHostPort(os.Getenv("KUBERNETES_SERVICE_HOST"), port)
+	return namespaceUID("https://"+host, trimASCII(string(token)), ca, []time.Duration{500 * time.Millisecond, 2 * time.Second})
 }
 
-func namespaceUID(baseURL, token string, caPEM []byte) (string, error) {
+// errPermanent marks responses that retrying won't fix (auth, RBAC, missing namespace).
+var errPermanent = errors.New("permanent")
+
+// namespaceUID fetches the UID, retrying transient failures after each backoff.
+func namespaceUID(baseURL, token string, caPEM []byte, backoff []time.Duration) (string, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return "", errors.New("invalid service account CA")
 	}
-	client := &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Timeout: 5 * time.Second, Transport: tr}
+
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		uid, err := getNamespaceUID(client, baseURL, token)
+		if err == nil || errors.Is(err, errPermanent) {
+			return uid, err
+		}
+		lastErr = err
+		if attempt >= len(backoff) {
+			return "", fmt.Errorf("%w: %v", ErrTransient, lastErr)
+		}
+		time.Sleep(backoff[attempt])
 	}
+}
+
+func getNamespaceUID(client *http.Client, baseURL, token string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/namespaces/kube-system", nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", errPermanent, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", err // network error or timeout: transient
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GET namespace kube-system: %s (needs RBAC get on namespaces/kube-system)", resp.Status)
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		return "", fmt.Errorf("GET namespace kube-system: %s", resp.Status)
+	default:
+		return "", fmt.Errorf("%w: GET namespace kube-system: %s (needs RBAC get on namespaces/kube-system)", errPermanent, resp.Status)
 	}
 	var ns struct {
 		Metadata struct {
@@ -59,10 +85,10 @@ func namespaceUID(baseURL, token string, caPEM []byte) (string, error) {
 		} `json:"metadata"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&ns); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: decode namespace: %v", errPermanent, err)
 	}
 	if ns.Metadata.UID == "" {
-		return "", errors.New("kube-system namespace has no uid")
+		return "", fmt.Errorf("%w: kube-system namespace has no uid", errPermanent)
 	}
 	return ns.Metadata.UID, nil
 }

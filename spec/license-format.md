@@ -95,10 +95,24 @@ Run after signature verification, in this order; the first failure decides the r
 Claim vectors: `spec/vectors/lf1-claims.json` (payload, inputs, expected result).
 
 ### Fingerprints
-Default sources and order are in [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md): `LICENSEFORGE_FINGERPRINT` override → Kubernetes `kube-system` namespace UID (`bind.type: cluster`) → OS machine ID (`machine`); plain containers without the override have no fingerprint.
+Design: [ADR-0017 Default machine fingerprint](../docs/adr/0017-default-machine-fingerprint.md).
 - `bind.fp` = `"sha256:" + lowercase_hex(SHA-256(UTF-8(product + ":" + raw_id)))`.
 - Test value: product `acme-db`, raw ID `0123456789abcdef0123456789abcdef` → `sha256:44fd0d30659f018c9db00ba857ac97aa63d9b1e99471a6899c49796cfc1698c0`.
-- Linux `machine-id` must be 32 lowercase hex characters; empty or `uninitialized` is not an ID.
+- "Trim" below means removing only SP, HT, CR, LF at both ends (not Unicode spaces). No case changes anywhere.
+
+| Order | Source | Raw ID | `bind.type` |
+|---|---|---|---|
+| 1 | Vendor-supplied override function (SDK option) | returned value, trimmed; empty → error | `machine` |
+| 2 | `LICENSEFORGE_FINGERPRINT` env var, **only if the vendor enables it** (off by default) | value, trimmed; empty → skipped | `machine` |
+| 3 | Kubernetes (when `KUBERNETES_SERVICE_HOST` is set): `GET /api/v1/namespaces/kube-system` with the pod service account | `metadata.uid` as returned. Failure is an error (no fallback); 429/5xx/network errors are retried, then reported as transient | `cluster` |
+| 4a | Linux | `/etc/machine-id`, else `/var/lib/dbus/machine-id`; trimmed; must be 32 lowercase hex chars | `machine` |
+| 4b | Windows | `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` (64-bit registry view), REG_SZ, as stored | `machine` |
+| 4c | macOS | `IOPlatformUUID` from `ioreg -rd1 -c IOPlatformExpertDevice`, as printed (uppercase) | `machine` |
+
+Linux stability rules (no fingerprint rather than a wrong one):
+- `/etc/machine-id` mounted from **tmpfs** (per `/proc/self/mountinfo`) is regenerated every boot → no fingerprint.
+- **Container** markers: `/.dockerenv`, `/run/.containerenv`, `/run/systemd/container`, or `container=` in `/proc/1/environ`. In a container only a non-tmpfs **bind-mounted** `/etc/machine-id` (the host's) is used; an image's own machine-id is shared by every container → no fingerprint.
+- Windows containers are not detected: their MachineGuid comes from the image. Vendors shipping Windows containers should supply an override.
 
 ## SDK verify algorithm
 Steps run in this order; the first failing step decides the error class.
