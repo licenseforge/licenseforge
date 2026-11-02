@@ -24,9 +24,17 @@ CREATE ROLE licenseforge_owner LOGIN PASSWORD 'change-me-owner';
 CREATE ROLE licenseforge_api   LOGIN PASSWORD 'change-me-api'   IN ROLE licenseforge_app;
 CREATE ROLE licenseforge_admin LOGIN PASSWORD 'change-me-admin' IN ROLE licenseforge_platform;
 
--- PostgreSQL 16+: a non-superuser admin must be able to SET ROLE to the owner
--- to create a database owned by it.
-GRANT licenseforge_owner TO CURRENT_USER WITH SET TRUE;
+-- A non-superuser admin must be able to SET ROLE to the owner to create a
+-- database owned by it. PostgreSQL 16+ needs WITH SET TRUE; 15 has no SET
+-- option (membership allows SET ROLE).
+DO $$
+BEGIN
+  IF current_setting('server_version_num')::int >= 160000 THEN
+    EXECUTE 'GRANT licenseforge_owner TO CURRENT_USER WITH SET TRUE';
+  ELSE
+    EXECUTE 'GRANT licenseforge_owner TO CURRENT_USER';
+  END IF;
+END $$;
 CREATE DATABASE licenseforge OWNER licenseforge_owner;
 
 -- Only these logins may connect. Group grants are cluster-wide, so this is what
