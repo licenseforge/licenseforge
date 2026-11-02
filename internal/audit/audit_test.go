@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -79,9 +80,18 @@ func record(t *testing.T, d *store.DB, tenantID string, e Event) *ent.AuditEvent
 }
 
 func verify(d *store.DB, tenantID string) error {
-	return d.WithTenant(context.Background(), tenantID, func(tx *ent.Tx) error {
-		return Verify(context.Background(), tx, tenantID)
+	_, err := verifyHead(d, tenantID)
+	return err
+}
+
+func verifyHead(d *store.DB, tenantID string) (Head, error) {
+	var h Head
+	err := d.WithTenant(context.Background(), tenantID, func(tx *ent.Tx) error {
+		var err error
+		h, err = Verify(context.Background(), tx, tenantID)
+		return err
 	})
+	return h, err
 }
 
 func TestChain(t *testing.T) {
@@ -201,6 +211,9 @@ func TestVerifyDetectsTampering(t *testing.T) {
 		"details changed": func(tn string, rs []*ent.AuditEvent) []string {
 			return []string{`UPDATE audit_events SET details = '{"a": "x"}' WHERE id = '` + rs[1].ID + `'`}
 		},
+		"first entry removed": func(tn string, rs []*ent.AuditEvent) []string {
+			return []string{`DELETE FROM audit_events WHERE id = '` + rs[0].ID + `'`}
+		},
 		"entry removed": func(tn string, rs []*ent.AuditEvent) []string {
 			return []string{`DELETE FROM audit_events WHERE id = '` + rs[1].ID + `'`}
 		},
@@ -258,6 +271,7 @@ func TestHashCoversEveryFieldUnambiguously(t *testing.T) {
 		t.Fatal("field boundary not encoded")
 	}
 	for name, change := range map[string]func(e *ent.AuditEvent){
+		"id":     func(e *ent.AuditEvent) { e.ID = "aud_2" },
 		"tenant": func(e *ent.AuditEvent) { e.TenantID = "tnt_2" }, "seq": func(e *ent.AuditEvent) { e.Seq = 2 },
 		"time":    func(e *ent.AuditEvent) { e.OccurredAt = e.OccurredAt.Add(time.Microsecond) },
 		"actor":   func(e *ent.AuditEvent) { e.ActorType = auditevent.ActorTypeToken },
@@ -288,14 +302,27 @@ func TestAuditConstraintsInDatabase(t *testing.T) {
 			SELECT 'aud_bbbbbbbbbbbbbbbbbbbbbbbbbb', tenant_id, 2, occurred_at, actor_type, actor_id, action, object_type, object_id, outcome, source_ip, user_agent, details, prev_hash, hash
 			FROM audit_events WHERE id = $1; UPDATE audit_events SET ` + set + ` WHERE id = 'aud_bbbbbbbbbbbbbbbbbbbbbbbbbb'`
 	}
+	want := map[string]string{
+		"action without verb": "audit_events_action_format", "empty actor": "audit_events_no_empty",
+		"empty user agent": "audit_events_no_empty", "empty object id": "audit_events_no_empty",
+		"empty source ip": "audit_events_no_empty", "object type not key": "audit_events_object_type",
+		"details not object": "audit_events_details", "short hash": "audit_events_hash_len",
+		"first entry has prev": "audit_events_first_prev", "bad id": "audit_events_id_format",
+		"unknown outcome": "audit_events_outcome_valid", "unknown actor": "audit_events_actor_valid",
+		"seq zero": "audit_events_seq_positive",
+	}
 	for name, set := range map[string]string{
+		"empty object id":      `object_id = ''`,
+		"empty source ip":      `source_ip = ''`,
+		"unknown actor":        `actor_type = 'robot'`,
+		"seq zero":             `seq = 0`,
 		"action without verb":  `action = 'promote'`,
 		"empty actor":          `actor_id = ''`,
 		"empty user agent":     `user_agent = ''`,
 		"object type not key":  `object_type = 'Signing Key'`,
 		"details not object":   `details = '[]'`,
 		"short hash":           `hash = '\x00'`,
-		"first entry has prev": `seq = 1, tenant_id = tenant_id, prev_hash = hash`,
+		"first entry has prev": `seq = 1, prev_hash = hash`,
 		"bad id":               `id = 'aud_X'`,
 		"unknown outcome":      `outcome = 'maybe'`,
 	} {
@@ -309,9 +336,63 @@ func TestAuditConstraintsInDatabase(t *testing.T) {
 			if _, err := tx.ExecContext(ctx, stmts[0], r.ID); err != nil {
 				t.Fatalf("valid copy refused: %v", err)
 			}
-			if _, err := tx.ExecContext(ctx, stmts[1]); err == nil {
-				t.Fatalf("%s accepted", name)
+			if name == "first entry has prev" { // free seq 1
+				if _, err := tx.ExecContext(ctx, `DELETE FROM audit_events WHERE id = $1`, r.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, stmts[1]); err == nil || !strings.Contains(err.Error(), want[name]) {
+				t.Fatalf("%s: %v, want violation of %s", name, err, want[name])
 			}
 		})
+	}
+}
+
+// Removing the last entries leaves a valid chain; only the head shows it, to
+// be compared with an exported head.
+func TestTruncationChangesHead(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	record(t, d, tn, ev)
+	last := record(t, d, tn, ev)
+	before, err := verifyHead(d, tn)
+	if err != nil || before.Seq != 2 || !bytes.Equal(before.Hash, last.Hash) {
+		t.Fatalf("head = %+v, %v", before, err)
+	}
+	if _, err := sqlDB(t, env.OwnerURL).Exec(`DELETE FROM audit_events WHERE id = $1`, last.ID); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := verifyHead(d, tn); err != nil || after.Seq != 1 {
+		t.Fatalf("after truncation head = %+v, %v", after, err)
+	}
+}
+
+// A hostile User-Agent (too long, NUL, invalid UTF-8) can't make Record fail.
+func TestHostileUserAgentIsStored(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	e := ev
+	e.UserAgent = strings.Repeat("é", 300) + "\x00\xff"
+	r := record(t, d, tn, e)
+	if ua := *r.UserAgent; len(ua) > maxUserAgent || !utf8.ValidString(ua) || strings.Contains(ua, "\x00") {
+		t.Fatalf("stored user agent: %d bytes, valid=%v", len(ua), utf8.ValidString(ua))
+	}
+	if err := verify(d, tn); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecordRefusesStaleSnapshot(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	err := d.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(context.Background(), `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
+			return err
+		}
+		_, err := Record(context.Background(), tx, tn, ev)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "READ COMMITTED") {
+		t.Fatalf("Record in REPEATABLE READ: %v", err)
 	}
 }
