@@ -165,6 +165,38 @@ func TestCatalogConstraintsInDatabase(t *testing.T) {
 	}
 }
 
+// Row-level security (not only missing privileges) stops cross-tenant
+// deletes: plan_features is the one catalog table tenants may delete from.
+func TestCrossTenantDeleteAffectsNothing(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	a, b := newCatalog(t, d), newCatalog(t, d)
+	if err := d.WithTenant(ctx, b.tenant.ID, func(tx *ent.Tx) error {
+		return tx.PlanFeature.Create().SetTenantID(b.tenant.ID).SetProductID(b.product.ID).SetPlanID(b.plan.ID).
+			SetFeatureID(b.feature.ID).SetFeatureType(planfeature.FeatureTypeLimit).SetLimitValue(5).Exec(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WithTenant(ctx, a.tenant.ID, func(tx *ent.Tx) error {
+		n, err := tx.PlanFeature.Delete().Where(planfeature.PlanID(b.plan.ID)).Exec(ctx)
+		if err == nil && n != 0 {
+			t.Errorf("tenant A deleted %d of B's plan features", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WithTenant(ctx, b.tenant.ID, func(tx *ent.Tx) error {
+		n, err := tx.PlanFeature.Query().Count(ctx)
+		if n != 1 {
+			t.Errorf("B has %d plan features after A's delete, want 1", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Keys, slugs, types and ownership never change and catalog rows are never
 // deleted (licenses carry keys and slugs), enforced by column-level grants.
 func TestCatalogImmutableInDatabase(t *testing.T) {

@@ -53,9 +53,9 @@ var (
 				Columns: []*schema.Column{FeaturesColumns[1], FeaturesColumns[0]},
 			},
 			{
-				Name:    "feature_product_id_id_type",
+				Name:    "feature_tenant_id_product_id_id_type",
 				Unique:  true,
-				Columns: []*schema.Column{FeaturesColumns[10], FeaturesColumns[0], FeaturesColumns[7]},
+				Columns: []*schema.Column{FeaturesColumns[1], FeaturesColumns[10], FeaturesColumns[0], FeaturesColumns[7]},
 			},
 		},
 	}
@@ -109,9 +109,9 @@ var (
 				Columns: []*schema.Column{PlansColumns[1], PlansColumns[0]},
 			},
 			{
-				Name:    "plan_product_id_id",
+				Name:    "plan_tenant_id_product_id_id",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[16], PlansColumns[0]},
+				Columns: []*schema.Column{PlansColumns[1], PlansColumns[16], PlansColumns[0]},
 			},
 		},
 	}

@@ -32,7 +32,7 @@ func (Plan) Fields() []ent.Field {
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 		field.Int("duration_months").Optional().Nillable().Range(1, 1200),
 		field.Int64("duration_seconds").Optional().Nillable().Range(1, maxSeconds),
-		field.Enum("expiry_basis").Values("from_issue", "from_first_activation").Default("from_issue"),
+		field.Enum("expiry_basis").Values(expiryBases...).Default("from_issue"),
 		field.Int("max_activations").Optional().Nillable().Range(1, 1_000_000).Comment("nil = unlimited"),
 		field.Int("max_rehosts").Optional().Nillable().Range(0, 1_000_000).Comment("nil = unlimited"),
 		field.Bool("offline_allowed").Default(false),
@@ -56,7 +56,7 @@ func (Plan) Annotations() []schema.Annotation {
 		"plans_id_format":       `id ~ '^pln_` + idChars + `$'`,
 		"plans_slug_format":     `slug ~ '` + slugPattern + `'`,
 		"plans_name_not_blank":  `btrim(name) <> ''`,
-		"plans_expiry_valid":    `(expiry_basis)::text = ANY (ARRAY['from_issue'::text, 'from_first_activation'::text])`,
+		"plans_expiry_valid":    enumCheck("expiry_basis", expiryBases),
 		"plans_duration_secs":   `duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= ` + maxS + `)`,
 		"plans_duration_months": `duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)`,
 		"plans_one_duration":    `num_nonnulls(duration_months, duration_seconds) <= 1`,
@@ -72,6 +72,6 @@ func (Plan) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("product_id", "slug").Unique(),
 		index.Fields("tenant_id", "id").Unique(),
-		index.Fields("product_id", "id").Unique(), // target of plan_features' same-product key
+		index.Fields("tenant_id", "product_id", "id").Unique(), // target of plan_features' same-tenant key
 	}
 }

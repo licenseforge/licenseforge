@@ -12,12 +12,14 @@ ALTER TABLE "plans" ADD CONSTRAINT "plans_product_same_tenant"
   FOREIGN KEY ("tenant_id", "product_id") REFERENCES "products" ("tenant_id", "id");
 ALTER TABLE "plan_features" ADD CONSTRAINT "plan_features_product_same_tenant"
   FOREIGN KEY ("tenant_id", "product_id") REFERENCES "products" ("tenant_id", "id");
+-- Each covering key includes tenant_id on both sides (enforced by
+-- TestCrossTableReferencesAreSameTenant), not only a chain through product_id.
 ALTER TABLE "plan_features" ADD CONSTRAINT "plan_features_plan_same_tenant"
-  FOREIGN KEY ("product_id", "plan_id") REFERENCES "plans" ("product_id", "id");
+  FOREIGN KEY ("tenant_id", "product_id", "plan_id") REFERENCES "plans" ("tenant_id", "product_id", "id");
 -- Includes the type, so limit_value can't disagree with the feature (CHECK
 -- plan_features_limit_match) and a feature in use can't change type.
 ALTER TABLE "plan_features" ADD CONSTRAINT "plan_features_feature_same_tenant"
-  FOREIGN KEY ("product_id", "feature_id", "feature_type") REFERENCES "features" ("product_id", "id", "type");
+  FOREIGN KEY ("tenant_id", "product_id", "feature_id", "feature_type") REFERENCES "features" ("tenant_id", "product_id", "id", "type");
 
 -- Privileges. Keys, slugs, types and ownership columns are immutable and
 -- features, plans and products are archived, never deleted: licenses carry

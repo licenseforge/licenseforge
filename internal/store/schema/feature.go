@@ -29,7 +29,7 @@ func (Feature) Fields() []ent.Field {
 		field.String("key").Immutable().NotEmpty().MaxLen(63).Match(keyRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 		field.String("description").Optional().Nillable().MaxLen(2000).Validate(notBlank).SchemaType(map[string]string{"postgres": "varchar(2000)"}),
-		field.Enum("type").Values("boolean", "limit").Immutable(),
+		field.Enum("type").Values(featureTypes...).Immutable(),
 		field.String("unit").Optional().Nillable().MaxLen(40).Validate(notBlank).SchemaType(map[string]string{"postgres": "varchar(40)"}),
 		field.Time("archived_at").Optional().Nillable(),
 	}
@@ -47,7 +47,7 @@ func (Feature) Annotations() []schema.Annotation {
 		"features_id_format":      `id ~ '^ftr_` + idChars + `$'`,
 		"features_key_format":     `key ~ '` + keyPattern + `'`,
 		"features_name_not_blank": `btrim(name) <> ''`,
-		"features_type_valid":     `(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])`,
+		"features_type_valid":     enumCheck("type", featureTypes),
 		"features_desc_set":       `description IS NULL OR btrim(description) <> ''`,
 		"features_unit_set":       `unit IS NULL OR btrim(unit) <> ''`,
 	}}}
@@ -57,6 +57,6 @@ func (Feature) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("product_id", "key").Unique(), // keys are never reused, archived or not
 		index.Fields("tenant_id", "id").Unique(),
-		index.Fields("product_id", "id", "type").Unique(), // target of plan_features' same-product-and-type key
+		index.Fields("tenant_id", "product_id", "id", "type").Unique(), // target of plan_features' same-tenant key
 	}
 }

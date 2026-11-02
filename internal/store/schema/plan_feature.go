@@ -26,7 +26,7 @@ func (PlanFeature) Fields() []ent.Field {
 		field.String("product_id").Immutable().NotEmpty().SchemaType(idType),
 		field.String("plan_id").Immutable().NotEmpty().SchemaType(idType),
 		field.String("feature_id").Immutable().NotEmpty().SchemaType(idType),
-		field.Enum("feature_type").Values("boolean", "limit").Immutable(),
+		field.Enum("feature_type").Values(featureTypes...).Immutable(),
 		field.Int64("limit_value").Optional().Nillable().Min(-1).Max(1<<53 - 1),
 	}
 }
@@ -42,7 +42,7 @@ func (PlanFeature) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
 		"plan_features_id_format":   `id ~ '^plf_` + idChars + `$'`,
 		"plan_features_limit_range": `limit_value IS NULL OR (limit_value >= -1 AND limit_value <= ` + maxSafeInt + `)`,
-		"plan_features_type_valid":  `(feature_type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])`,
+		"plan_features_type_valid":  enumCheck("feature_type", featureTypes),
 		"plan_features_limit_match": `(feature_type = 'limit') = (limit_value IS NOT NULL)`,
 	}}}
 }

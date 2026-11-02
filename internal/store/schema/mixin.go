@@ -26,6 +26,23 @@ func notBlank(s string) error {
 // "(x)::text = ANY (ARRAY['a'::text])" rather than "x IN ('a')"), so the
 // migration and the ent schema render identically (TestMigrationsMatchEntSchema).
 
+// enumCheck renders "col must be one of values" in PostgreSQL's normalized
+// form, from the same slice that feeds field.Enum().Values(), so the two can't
+// disagree.
+func enumCheck(col string, values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = "'" + v + "'::text"
+	}
+	return "(" + col + ")::text = ANY (ARRAY[" + strings.Join(quoted, ", ") + "])"
+}
+
+// Enum values, shared by ent fields and CHECK constraints.
+var (
+	featureTypes = []string{"boolean", "limit"}
+	expiryBases  = []string{"from_issue", "from_first_activation"}
+)
+
 // Column types enforced by the database too, not only by ent's validators.
 var (
 	idType   = map[string]string{dialect.Postgres: "varchar(40)"}
