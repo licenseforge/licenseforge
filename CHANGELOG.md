@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Architecture Decision Records 0001–0024 (0024: HIPAA, NIST and FedRAMP readiness) and the `lf1` license file format draft.
 - Minimal server with `/healthz` and `/readyz`.
 - Server data layer foundation (`internal/store`): ent with PostgreSQL, prefixed IDs, versioned migrations with a built-in runner (checksums, per-file transactions, advisory lock), a three-login role model (owner, tenant pool, platform pool) with forced row-level security and release-blocking isolation tests, and `deploy/database-setup.sql`; tenants and products tables.
+- `internal/secrets` (ADR-0025): keyring of master keys from `LICENSEFORGE_MASTER_KEYS` (generate one with `openssl rand -base64 32`), AES-256-GCM encryption bound to its row, HMAC lookup hashes that survive key rotation.
+- `internal/licensekey`: license keys `LF-` + 128 random bits in grouped base32, normalised input with one canonical spelling.
 - Catalog tables (ADR-0015): features, plans (calendar-month or second terms) and plan features; keys, slugs and types immutable and rows archived, never deleted, enforced by column-level grants; database-enforced formats and ranges; same-tenant/same-product/type composite keys; schema-vs-migration and same-tenant structural guard tests.
 - Go SDK module `licenseforge.io/licenseforge/sdk/go` with `licensefile`: sign and verify `lf1` licenses (Ed25519, key ID in the envelope, algorithm bound to the trusted key).
 - `lf1` conformance vectors in `spec/vectors/lf1.json`.
