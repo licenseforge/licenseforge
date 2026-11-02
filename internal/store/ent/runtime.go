@@ -5,6 +5,9 @@ package ent
 import (
 	"time"
 
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
+	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/schema"
@@ -14,6 +17,323 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	featureMixin := schema.Feature{}.Mixin()
+	featureMixinFields0 := featureMixin[0].Fields()
+	_ = featureMixinFields0
+	featureMixinFields1 := featureMixin[1].Fields()
+	_ = featureMixinFields1
+	featureFields := schema.Feature{}.Fields()
+	_ = featureFields
+	// featureDescTenantID is the schema descriptor for tenant_id field.
+	featureDescTenantID := featureMixinFields0[0].Descriptor()
+	// feature.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	feature.TenantIDValidator = func() func(string) error {
+		validators := featureDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// featureDescCreatedAt is the schema descriptor for created_at field.
+	featureDescCreatedAt := featureMixinFields1[0].Descriptor()
+	// feature.DefaultCreatedAt holds the default value on creation for the created_at field.
+	feature.DefaultCreatedAt = featureDescCreatedAt.Default.(func() time.Time)
+	// featureDescUpdatedAt is the schema descriptor for updated_at field.
+	featureDescUpdatedAt := featureMixinFields1[1].Descriptor()
+	// feature.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	feature.DefaultUpdatedAt = featureDescUpdatedAt.Default.(func() time.Time)
+	// feature.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	feature.UpdateDefaultUpdatedAt = featureDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// featureDescProductID is the schema descriptor for product_id field.
+	featureDescProductID := featureFields[1].Descriptor()
+	// feature.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	feature.ProductIDValidator = featureDescProductID.Validators[0].(func(string) error)
+	// featureDescKey is the schema descriptor for key field.
+	featureDescKey := featureFields[2].Descriptor()
+	// feature.KeyValidator is a validator for the "key" field. It is called by the builders before save.
+	feature.KeyValidator = func() func(string) error {
+		validators := featureDescKey.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(key string) error {
+			for _, fn := range fns {
+				if err := fn(key); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// featureDescName is the schema descriptor for name field.
+	featureDescName := featureFields[3].Descriptor()
+	// feature.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	feature.NameValidator = func() func(string) error {
+		validators := featureDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// featureDescDescription is the schema descriptor for description field.
+	featureDescDescription := featureFields[4].Descriptor()
+	// feature.DescriptionValidator is a validator for the "description" field. It is called by the builders before save.
+	feature.DescriptionValidator = featureDescDescription.Validators[0].(func(string) error)
+	// featureDescUnit is the schema descriptor for unit field.
+	featureDescUnit := featureFields[6].Descriptor()
+	// feature.UnitValidator is a validator for the "unit" field. It is called by the builders before save.
+	feature.UnitValidator = featureDescUnit.Validators[0].(func(string) error)
+	// featureDescID is the schema descriptor for id field.
+	featureDescID := featureFields[0].Descriptor()
+	// feature.DefaultID holds the default value on creation for the id field.
+	feature.DefaultID = featureDescID.Default.(func() string)
+	// feature.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	feature.IDValidator = func() func(string) error {
+		validators := featureDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	planMixin := schema.Plan{}.Mixin()
+	planMixinFields0 := planMixin[0].Fields()
+	_ = planMixinFields0
+	planMixinFields1 := planMixin[1].Fields()
+	_ = planMixinFields1
+	planFields := schema.Plan{}.Fields()
+	_ = planFields
+	// planDescTenantID is the schema descriptor for tenant_id field.
+	planDescTenantID := planMixinFields0[0].Descriptor()
+	// plan.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	plan.TenantIDValidator = func() func(string) error {
+		validators := planDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// planDescCreatedAt is the schema descriptor for created_at field.
+	planDescCreatedAt := planMixinFields1[0].Descriptor()
+	// plan.DefaultCreatedAt holds the default value on creation for the created_at field.
+	plan.DefaultCreatedAt = planDescCreatedAt.Default.(func() time.Time)
+	// planDescUpdatedAt is the schema descriptor for updated_at field.
+	planDescUpdatedAt := planMixinFields1[1].Descriptor()
+	// plan.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	plan.DefaultUpdatedAt = planDescUpdatedAt.Default.(func() time.Time)
+	// plan.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	plan.UpdateDefaultUpdatedAt = planDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// planDescProductID is the schema descriptor for product_id field.
+	planDescProductID := planFields[1].Descriptor()
+	// plan.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	plan.ProductIDValidator = planDescProductID.Validators[0].(func(string) error)
+	// planDescSlug is the schema descriptor for slug field.
+	planDescSlug := planFields[2].Descriptor()
+	// plan.SlugValidator is a validator for the "slug" field. It is called by the builders before save.
+	plan.SlugValidator = func() func(string) error {
+		validators := planDescSlug.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(slug string) error {
+			for _, fn := range fns {
+				if err := fn(slug); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// planDescName is the schema descriptor for name field.
+	planDescName := planFields[3].Descriptor()
+	// plan.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	plan.NameValidator = func() func(string) error {
+		validators := planDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// planDescDurationSeconds is the schema descriptor for duration_seconds field.
+	planDescDurationSeconds := planFields[4].Descriptor()
+	// plan.DurationSecondsValidator is a validator for the "duration_seconds" field. It is called by the builders before save.
+	plan.DurationSecondsValidator = planDescDurationSeconds.Validators[0].(func(int64) error)
+	// planDescMaxActivations is the schema descriptor for max_activations field.
+	planDescMaxActivations := planFields[6].Descriptor()
+	// plan.MaxActivationsValidator is a validator for the "max_activations" field. It is called by the builders before save.
+	plan.MaxActivationsValidator = planDescMaxActivations.Validators[0].(func(int) error)
+	// planDescMaxRehosts is the schema descriptor for max_rehosts field.
+	planDescMaxRehosts := planFields[7].Descriptor()
+	// plan.MaxRehostsValidator is a validator for the "max_rehosts" field. It is called by the builders before save.
+	plan.MaxRehostsValidator = planDescMaxRehosts.Validators[0].(func(int) error)
+	// planDescOfflineAllowed is the schema descriptor for offline_allowed field.
+	planDescOfflineAllowed := planFields[8].Descriptor()
+	// plan.DefaultOfflineAllowed holds the default value on creation for the offline_allowed field.
+	plan.DefaultOfflineAllowed = planDescOfflineAllowed.Default.(bool)
+	// planDescLeaseSeconds is the schema descriptor for lease_seconds field.
+	planDescLeaseSeconds := planFields[9].Descriptor()
+	// plan.DefaultLeaseSeconds holds the default value on creation for the lease_seconds field.
+	plan.DefaultLeaseSeconds = planDescLeaseSeconds.Default.(int64)
+	// plan.LeaseSecondsValidator is a validator for the "lease_seconds" field. It is called by the builders before save.
+	plan.LeaseSecondsValidator = planDescLeaseSeconds.Validators[0].(func(int64) error)
+	// planDescMaxOfflineSeconds is the schema descriptor for max_offline_seconds field.
+	planDescMaxOfflineSeconds := planFields[10].Descriptor()
+	// plan.MaxOfflineSecondsValidator is a validator for the "max_offline_seconds" field. It is called by the builders before save.
+	plan.MaxOfflineSecondsValidator = planDescMaxOfflineSeconds.Validators[0].(func(int64) error)
+	// planDescGraceSeconds is the schema descriptor for grace_seconds field.
+	planDescGraceSeconds := planFields[11].Descriptor()
+	// plan.DefaultGraceSeconds holds the default value on creation for the grace_seconds field.
+	plan.DefaultGraceSeconds = planDescGraceSeconds.Default.(int64)
+	// plan.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
+	plan.GraceSecondsValidator = planDescGraceSeconds.Validators[0].(func(int64) error)
+	// planDescID is the schema descriptor for id field.
+	planDescID := planFields[0].Descriptor()
+	// plan.DefaultID holds the default value on creation for the id field.
+	plan.DefaultID = planDescID.Default.(func() string)
+	// plan.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	plan.IDValidator = func() func(string) error {
+		validators := planDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	planfeatureMixin := schema.PlanFeature{}.Mixin()
+	planfeatureMixinFields0 := planfeatureMixin[0].Fields()
+	_ = planfeatureMixinFields0
+	planfeatureMixinFields1 := planfeatureMixin[1].Fields()
+	_ = planfeatureMixinFields1
+	planfeatureFields := schema.PlanFeature{}.Fields()
+	_ = planfeatureFields
+	// planfeatureDescTenantID is the schema descriptor for tenant_id field.
+	planfeatureDescTenantID := planfeatureMixinFields0[0].Descriptor()
+	// planfeature.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	planfeature.TenantIDValidator = func() func(string) error {
+		validators := planfeatureDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// planfeatureDescCreatedAt is the schema descriptor for created_at field.
+	planfeatureDescCreatedAt := planfeatureMixinFields1[0].Descriptor()
+	// planfeature.DefaultCreatedAt holds the default value on creation for the created_at field.
+	planfeature.DefaultCreatedAt = planfeatureDescCreatedAt.Default.(func() time.Time)
+	// planfeatureDescUpdatedAt is the schema descriptor for updated_at field.
+	planfeatureDescUpdatedAt := planfeatureMixinFields1[1].Descriptor()
+	// planfeature.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	planfeature.DefaultUpdatedAt = planfeatureDescUpdatedAt.Default.(func() time.Time)
+	// planfeature.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	planfeature.UpdateDefaultUpdatedAt = planfeatureDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// planfeatureDescProductID is the schema descriptor for product_id field.
+	planfeatureDescProductID := planfeatureFields[1].Descriptor()
+	// planfeature.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	planfeature.ProductIDValidator = planfeatureDescProductID.Validators[0].(func(string) error)
+	// planfeatureDescPlanID is the schema descriptor for plan_id field.
+	planfeatureDescPlanID := planfeatureFields[2].Descriptor()
+	// planfeature.PlanIDValidator is a validator for the "plan_id" field. It is called by the builders before save.
+	planfeature.PlanIDValidator = planfeatureDescPlanID.Validators[0].(func(string) error)
+	// planfeatureDescFeatureID is the schema descriptor for feature_id field.
+	planfeatureDescFeatureID := planfeatureFields[3].Descriptor()
+	// planfeature.FeatureIDValidator is a validator for the "feature_id" field. It is called by the builders before save.
+	planfeature.FeatureIDValidator = planfeatureDescFeatureID.Validators[0].(func(string) error)
+	// planfeatureDescLimitValue is the schema descriptor for limit_value field.
+	planfeatureDescLimitValue := planfeatureFields[4].Descriptor()
+	// planfeature.LimitValueValidator is a validator for the "limit_value" field. It is called by the builders before save.
+	planfeature.LimitValueValidator = func() func(int64) error {
+		validators := planfeatureDescLimitValue.Validators
+		fns := [...]func(int64) error{
+			validators[0].(func(int64) error),
+			validators[1].(func(int64) error),
+		}
+		return func(limit_value int64) error {
+			for _, fn := range fns {
+				if err := fn(limit_value); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// planfeatureDescID is the schema descriptor for id field.
+	planfeatureDescID := planfeatureFields[0].Descriptor()
+	// planfeature.DefaultID holds the default value on creation for the id field.
+	planfeature.DefaultID = planfeatureDescID.Default.(func() string)
+	// planfeature.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	planfeature.IDValidator = func() func(string) error {
+		validators := planfeatureDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	productMixin := schema.Product{}.Mixin()
 	productMixinFields0 := productMixin[0].Fields()
 	_ = productMixinFields0

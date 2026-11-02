@@ -22,6 +22,8 @@ var (
 // Slug and ID rules, shared by ent validators and database CHECK constraints.
 const (
 	slugPattern = `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` // lowercase words joined by single dashes
+	keyPattern  = `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` // feature keys: snake_case, e.g. max_users
+	maxSafeInt  = "9007199254740991"              // 2^53-1, JSON-safe (spec: limits)
 	idChars     = `[a-z2-7]{26}`
 )
 

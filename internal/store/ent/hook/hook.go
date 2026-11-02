@@ -9,6 +9,42 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
 
+// The FeatureFunc type is an adapter to allow the use of ordinary
+// function as Feature mutator.
+type FeatureFunc func(context.Context, *ent.FeatureMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f FeatureFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.FeatureMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.FeatureMutation", m)
+}
+
+// The PlanFunc type is an adapter to allow the use of ordinary
+// function as Plan mutator.
+type PlanFunc func(context.Context, *ent.PlanMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PlanFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PlanMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PlanMutation", m)
+}
+
+// The PlanFeatureFunc type is an adapter to allow the use of ordinary
+// function as PlanFeature mutator.
+type PlanFeatureFunc func(context.Context, *ent.PlanFeatureMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PlanFeatureFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PlanFeatureMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PlanFeatureMutation", m)
+}
+
 // The ProductFunc type is an adapter to allow the use of ordinary
 // function as Product mutator.
 type ProductFunc func(context.Context, *ent.ProductMutation) (ent.Value, error)

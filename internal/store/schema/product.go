@@ -32,6 +32,8 @@ func (Product) Fields() []ent.Field {
 func (Product) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("tenant", Tenant.Type).Ref("products").Field("tenant_id").Unique().Required().Immutable(),
+		edge.To("features", Feature.Type),
+		edge.To("plans", Plan.Type),
 	}
 }
 
@@ -44,5 +46,8 @@ func (Product) Annotations() []schema.Annotation {
 }
 
 func (Product) Indexes() []ent.Index {
-	return []ent.Index{index.Fields("tenant_id", "slug").Unique()}
+	return []ent.Index{
+		index.Fields("tenant_id", "slug").Unique(),
+		index.Fields("tenant_id", "id").Unique(), // target of same-tenant foreign keys
+	}
 }

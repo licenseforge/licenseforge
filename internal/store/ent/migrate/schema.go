@@ -9,6 +9,154 @@ import (
 )
 
 var (
+	// FeaturesColumns holds the columns for the "features" table.
+	FeaturesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "key", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "description", Type: field.TypeString, Nullable: true, Size: 2000, SchemaType: map[string]string{"postgres": "varchar(2000)"}},
+		{Name: "type", Type: field.TypeEnum, Enums: []string{"boolean", "limit"}},
+		{Name: "unit", Type: field.TypeString, Nullable: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
+		{Name: "product_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// FeaturesTable holds the schema information for the "features" table.
+	FeaturesTable = &schema.Table{
+		Name:       "features",
+		Columns:    FeaturesColumns,
+		PrimaryKey: []*schema.Column{FeaturesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "features_products_features",
+				Columns:    []*schema.Column{FeaturesColumns[10]},
+				RefColumns: []*schema.Column{ProductsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "feature_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{FeaturesColumns[1]},
+			},
+			{
+				Name:    "feature_product_id_key",
+				Unique:  true,
+				Columns: []*schema.Column{FeaturesColumns[10], FeaturesColumns[4]},
+			},
+			{
+				Name:    "feature_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{FeaturesColumns[1], FeaturesColumns[0]},
+			},
+			{
+				Name:    "feature_product_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{FeaturesColumns[10], FeaturesColumns[0]},
+			},
+		},
+	}
+	// PlansColumns holds the columns for the "plans" table.
+	PlansColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "slug", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "duration_seconds", Type: field.TypeInt64, Nullable: true},
+		{Name: "expiry_basis", Type: field.TypeEnum, Enums: []string{"from_issue", "from_first_activation"}, Default: "from_issue"},
+		{Name: "max_activations", Type: field.TypeInt, Nullable: true},
+		{Name: "max_rehosts", Type: field.TypeInt, Nullable: true},
+		{Name: "offline_allowed", Type: field.TypeBool, Default: false},
+		{Name: "lease_seconds", Type: field.TypeInt64, Default: 604800},
+		{Name: "max_offline_seconds", Type: field.TypeInt64, Nullable: true},
+		{Name: "grace_seconds", Type: field.TypeInt64, Default: 0},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
+		{Name: "product_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// PlansTable holds the schema information for the "plans" table.
+	PlansTable = &schema.Table{
+		Name:       "plans",
+		Columns:    PlansColumns,
+		PrimaryKey: []*schema.Column{PlansColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "plans_products_plans",
+				Columns:    []*schema.Column{PlansColumns[15]},
+				RefColumns: []*schema.Column{ProductsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "plan_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{PlansColumns[1]},
+			},
+			{
+				Name:    "plan_product_id_slug",
+				Unique:  true,
+				Columns: []*schema.Column{PlansColumns[15], PlansColumns[4]},
+			},
+			{
+				Name:    "plan_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{PlansColumns[1], PlansColumns[0]},
+			},
+			{
+				Name:    "plan_product_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{PlansColumns[15], PlansColumns[0]},
+			},
+		},
+	}
+	// PlanFeaturesColumns holds the columns for the "plan_features" table.
+	PlanFeaturesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "product_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "limit_value", Type: field.TypeInt64, Nullable: true},
+		{Name: "feature_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "plan_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// PlanFeaturesTable holds the schema information for the "plan_features" table.
+	PlanFeaturesTable = &schema.Table{
+		Name:       "plan_features",
+		Columns:    PlanFeaturesColumns,
+		PrimaryKey: []*schema.Column{PlanFeaturesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "plan_features_features_plan_features",
+				Columns:    []*schema.Column{PlanFeaturesColumns[6]},
+				RefColumns: []*schema.Column{FeaturesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "plan_features_plans_plan_features",
+				Columns:    []*schema.Column{PlanFeaturesColumns[7]},
+				RefColumns: []*schema.Column{PlansColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "planfeature_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{PlanFeaturesColumns[1]},
+			},
+			{
+				Name:    "planfeature_plan_id_feature_id",
+				Unique:  true,
+				Columns: []*schema.Column{PlanFeaturesColumns[7], PlanFeaturesColumns[6]},
+			},
+		},
+	}
 	// ProductsColumns holds the columns for the "products" table.
 	ProductsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -42,6 +190,11 @@ var (
 				Unique:  true,
 				Columns: []*schema.Column{ProductsColumns[5], ProductsColumns[3]},
 			},
+			{
+				Name:    "product_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{ProductsColumns[5], ProductsColumns[0]},
+			},
 		},
 	}
 	// TenantsColumns holds the columns for the "tenants" table.
@@ -60,12 +213,44 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		FeaturesTable,
+		PlansTable,
+		PlanFeaturesTable,
 		ProductsTable,
 		TenantsTable,
 	}
 )
 
 func init() {
+	FeaturesTable.ForeignKeys[0].RefTable = ProductsTable
+	FeaturesTable.Annotation = &entsql.Annotation{}
+	FeaturesTable.Annotation.Checks = map[string]string{
+		"features_id_format":  "id ~ '^ftr_[a-z2-7]{26}$'",
+		"features_key_format": "key ~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'",
+		"features_name_set":   "name <> ''",
+		"features_type_valid": "type IN ('boolean', 'limit')",
+	}
+	PlansTable.ForeignKeys[0].RefTable = ProductsTable
+	PlansTable.Annotation = &entsql.Annotation{}
+	PlansTable.Annotation.Checks = map[string]string{
+		"plans_activations_pos": "max_activations IS NULL OR max_activations > 0",
+		"plans_duration_range":  "duration_seconds IS NULL OR (duration_seconds > 0 AND duration_seconds <= 3153600000)",
+		"plans_expiry_valid":    "expiry_basis IN ('from_issue', 'from_first_activation')",
+		"plans_grace_range":     "grace_seconds >= 0 AND grace_seconds <= 3153600000",
+		"plans_id_format":       "id ~ '^pln_[a-z2-7]{26}$'",
+		"plans_lease_range":     "lease_seconds > 0 AND lease_seconds <= 3153600000",
+		"plans_max_offline_rng": "max_offline_seconds IS NULL OR (max_offline_seconds >= 0 AND max_offline_seconds <= 3153600000)",
+		"plans_name_set":        "name <> ''",
+		"plans_rehosts_nonneg":  "max_rehosts IS NULL OR max_rehosts >= 0",
+		"plans_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
+	PlanFeaturesTable.ForeignKeys[0].RefTable = FeaturesTable
+	PlanFeaturesTable.ForeignKeys[1].RefTable = PlansTable
+	PlanFeaturesTable.Annotation = &entsql.Annotation{}
+	PlanFeaturesTable.Annotation.Checks = map[string]string{
+		"plan_features_id_format":   "id ~ '^plf_[a-z2-7]{26}$'",
+		"plan_features_limit_range": "limit_value IS NULL OR (limit_value >= -1 AND limit_value <= 9007199254740991)",
+	}
 	ProductsTable.ForeignKeys[0].RefTable = TenantsTable
 	ProductsTable.Annotation = &entsql.Annotation{}
 	ProductsTable.Annotation.Checks = map[string]string{

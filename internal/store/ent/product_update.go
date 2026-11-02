@@ -11,6 +11,8 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 )
@@ -48,9 +50,81 @@ func (_u *ProductUpdate) SetNillableName(v *string) *ProductUpdate {
 	return _u
 }
 
+// AddFeatureIDs adds the "features" edge to the Feature entity by IDs.
+func (_u *ProductUpdate) AddFeatureIDs(ids ...string) *ProductUpdate {
+	_u.mutation.AddFeatureIDs(ids...)
+	return _u
+}
+
+// AddFeatures adds the "features" edges to the Feature entity.
+func (_u *ProductUpdate) AddFeatures(v ...*Feature) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddFeatureIDs(ids...)
+}
+
+// AddPlanIDs adds the "plans" edge to the Plan entity by IDs.
+func (_u *ProductUpdate) AddPlanIDs(ids ...string) *ProductUpdate {
+	_u.mutation.AddPlanIDs(ids...)
+	return _u
+}
+
+// AddPlans adds the "plans" edges to the Plan entity.
+func (_u *ProductUpdate) AddPlans(v ...*Plan) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddPlanIDs(ids...)
+}
+
 // Mutation returns the ProductMutation object of the builder.
 func (_u *ProductUpdate) Mutation() *ProductMutation {
 	return _u.mutation
+}
+
+// ClearFeatures clears all "features" edges to the Feature entity.
+func (_u *ProductUpdate) ClearFeatures() *ProductUpdate {
+	_u.mutation.ClearFeatures()
+	return _u
+}
+
+// RemoveFeatureIDs removes the "features" edge to Feature entities by IDs.
+func (_u *ProductUpdate) RemoveFeatureIDs(ids ...string) *ProductUpdate {
+	_u.mutation.RemoveFeatureIDs(ids...)
+	return _u
+}
+
+// RemoveFeatures removes "features" edges to Feature entities.
+func (_u *ProductUpdate) RemoveFeatures(v ...*Feature) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveFeatureIDs(ids...)
+}
+
+// ClearPlans clears all "plans" edges to the Plan entity.
+func (_u *ProductUpdate) ClearPlans() *ProductUpdate {
+	_u.mutation.ClearPlans()
+	return _u
+}
+
+// RemovePlanIDs removes the "plans" edge to Plan entities by IDs.
+func (_u *ProductUpdate) RemovePlanIDs(ids ...string) *ProductUpdate {
+	_u.mutation.RemovePlanIDs(ids...)
+	return _u
+}
+
+// RemovePlans removes "plans" edges to Plan entities.
+func (_u *ProductUpdate) RemovePlans(v ...*Plan) *ProductUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemovePlanIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -120,6 +194,96 @@ func (_u *ProductUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(product.FieldName, field.TypeString, value)
 	}
+	if _u.mutation.FeaturesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedFeaturesIDs(); len(nodes) > 0 && !_u.mutation.FeaturesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.FeaturesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.PlansCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedPlansIDs(); len(nodes) > 0 && !_u.mutation.PlansCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.PlansIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{product.Label}
@@ -160,9 +324,81 @@ func (_u *ProductUpdateOne) SetNillableName(v *string) *ProductUpdateOne {
 	return _u
 }
 
+// AddFeatureIDs adds the "features" edge to the Feature entity by IDs.
+func (_u *ProductUpdateOne) AddFeatureIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.AddFeatureIDs(ids...)
+	return _u
+}
+
+// AddFeatures adds the "features" edges to the Feature entity.
+func (_u *ProductUpdateOne) AddFeatures(v ...*Feature) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddFeatureIDs(ids...)
+}
+
+// AddPlanIDs adds the "plans" edge to the Plan entity by IDs.
+func (_u *ProductUpdateOne) AddPlanIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.AddPlanIDs(ids...)
+	return _u
+}
+
+// AddPlans adds the "plans" edges to the Plan entity.
+func (_u *ProductUpdateOne) AddPlans(v ...*Plan) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddPlanIDs(ids...)
+}
+
 // Mutation returns the ProductMutation object of the builder.
 func (_u *ProductUpdateOne) Mutation() *ProductMutation {
 	return _u.mutation
+}
+
+// ClearFeatures clears all "features" edges to the Feature entity.
+func (_u *ProductUpdateOne) ClearFeatures() *ProductUpdateOne {
+	_u.mutation.ClearFeatures()
+	return _u
+}
+
+// RemoveFeatureIDs removes the "features" edge to Feature entities by IDs.
+func (_u *ProductUpdateOne) RemoveFeatureIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.RemoveFeatureIDs(ids...)
+	return _u
+}
+
+// RemoveFeatures removes "features" edges to Feature entities.
+func (_u *ProductUpdateOne) RemoveFeatures(v ...*Feature) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveFeatureIDs(ids...)
+}
+
+// ClearPlans clears all "plans" edges to the Plan entity.
+func (_u *ProductUpdateOne) ClearPlans() *ProductUpdateOne {
+	_u.mutation.ClearPlans()
+	return _u
+}
+
+// RemovePlanIDs removes the "plans" edge to Plan entities by IDs.
+func (_u *ProductUpdateOne) RemovePlanIDs(ids ...string) *ProductUpdateOne {
+	_u.mutation.RemovePlanIDs(ids...)
+	return _u
+}
+
+// RemovePlans removes "plans" edges to Plan entities.
+func (_u *ProductUpdateOne) RemovePlans(v ...*Plan) *ProductUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemovePlanIDs(ids...)
 }
 
 // Where appends a list predicates to the ProductUpdate builder.
@@ -261,6 +497,96 @@ func (_u *ProductUpdateOne) sqlSave(ctx context.Context) (_node *Product, err er
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(product.FieldName, field.TypeString, value)
+	}
+	if _u.mutation.FeaturesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedFeaturesIDs(); len(nodes) > 0 && !_u.mutation.FeaturesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.FeaturesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.PlansCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedPlansIDs(); len(nodes) > 0 && !_u.mutation.PlansCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.PlansIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	_node = &Product{config: _u.config}
 	_spec.Assign = _node.assignValues

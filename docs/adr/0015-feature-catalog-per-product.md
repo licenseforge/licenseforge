@@ -43,6 +43,14 @@ erDiagram
 ## Scope: license-driven flags, not a feature-flag platform
 LicenseForge answers **"is this customer entitled to feature X?"**. It does not do percentage rollouts, A/B tests, user targeting or kill switches; that is LaunchDarkly / Unleash / flagd territory. The OpenFeature provider lets vendors combine both: a flag platform for rollout, LicenseForge for entitlement. ([ADR-0014 Product scope and won't-do list](0014-product-scope-and-won-t-do-list.md))
 
+## Implementation note (2026-11-02)
+Tables `features`, `plans`, `plan_features` (`internal/store/schema`):
+- Feature `key`: immutable snake_case (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`), unique per product **including archived features** (archive, never delete). Type `boolean` or `limit`.
+- Plan terms in whole seconds: `duration_seconds` (null = perpetual), `expiry_basis`, `max_activations` / `max_rehosts` (null = unlimited), `offline_allowed`, `lease_seconds`, `max_offline_seconds`, `grace_seconds`; all ≤ 36,500 days like the license format.
+- `plan_features.limit_value`: −1 … 2^53−1 (−1 = unlimited), as in the license spec.
+- All formats and ranges are `CHECK` constraints in PostgreSQL, not only ent validators.
+- **Same-tenant, same-product keys**: foreign key checks bypass row-level security, so composite keys `(tenant_id, product_id)` and, for plan features, `(product_id, plan_id)` / `(product_id, feature_id)` stop references to another tenant's or another product's rows, even from the platform pool.
+
 ## Consequences
 - Admin UI can show a feature × plan matrix with checkboxes and number fields.
 - Typos are caught at plan creation, not in customers' apps.

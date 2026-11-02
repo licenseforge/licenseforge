@@ -10,6 +10,8 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
@@ -84,6 +86,36 @@ func (_c *ProductCreate) SetNillableID(v *string) *ProductCreate {
 // SetTenant sets the "tenant" edge to the Tenant entity.
 func (_c *ProductCreate) SetTenant(v *Tenant) *ProductCreate {
 	return _c.SetTenantID(v.ID)
+}
+
+// AddFeatureIDs adds the "features" edge to the Feature entity by IDs.
+func (_c *ProductCreate) AddFeatureIDs(ids ...string) *ProductCreate {
+	_c.mutation.AddFeatureIDs(ids...)
+	return _c
+}
+
+// AddFeatures adds the "features" edges to the Feature entity.
+func (_c *ProductCreate) AddFeatures(v ...*Feature) *ProductCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddFeatureIDs(ids...)
+}
+
+// AddPlanIDs adds the "plans" edge to the Plan entity by IDs.
+func (_c *ProductCreate) AddPlanIDs(ids ...string) *ProductCreate {
+	_c.mutation.AddPlanIDs(ids...)
+	return _c
+}
+
+// AddPlans adds the "plans" edges to the Plan entity.
+func (_c *ProductCreate) AddPlans(v ...*Plan) *ProductCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddPlanIDs(ids...)
 }
 
 // Mutation returns the ProductMutation object of the builder.
@@ -241,6 +273,38 @@ func (_c *ProductCreate) createSpec() (*Product, *sqlgraph.CreateSpec) {
 			edge.Target.Nodes = append(edge.Target.Nodes, k)
 		}
 		_node.TenantID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.FeaturesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.FeaturesTable,
+			Columns: []string{product.FeaturesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(feature.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.PlansIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   product.PlansTable,
+			Columns: []string{product.PlansColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(plan.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
 		_spec.Edges = append(_spec.Edges, edge)
 	}
 	return _node, _spec
