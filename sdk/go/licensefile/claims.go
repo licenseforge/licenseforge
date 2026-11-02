@@ -75,13 +75,19 @@ func (e Entitlements) HasFeature(key string) bool {
 }
 
 // Limit returns the numeric limit for key: Unlimited (-1), a non-negative
-// value, or 0 if the license doesn't set it.
+// value, or 0 if the license doesn't set it. Prefer Allows for enforcement;
+// comparing against Limit by hand must handle Unlimited explicitly.
 func (e Entitlements) Limit(key string) int64 {
 	return e.Limits[key]
 }
 
-// Allows reports whether using n units of the limit key is within the license.
+// Allows reports whether a resulting total of n is within the limit key. Pass
+// the total after the action, e.g. Allows("max_users", len(users)+1) before
+// adding a user. An absent limit behaves as 0; a negative n is never allowed.
 func (e Entitlements) Allows(key string, n int64) bool {
+	if n < 0 {
+		return false
+	}
 	l := e.Limit(key)
 	return l == Unlimited || n <= l
 }
