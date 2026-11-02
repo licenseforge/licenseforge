@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -202,8 +203,16 @@ func ParseClaims(payload []byte) (*Claims, error) {
 	if c.MaxOffline, err = optDuration(m, "max_offline"); err != nil {
 		return nil, err
 	}
+	if strings.ContainsRune(c.Tenant+c.Product, 0) {
+		return nil, malformed("tenant and product must not contain NUL")
+	}
 	if c.Binding, err = parseBinding(m); err != nil {
 		return nil, err
+	}
+	// The fingerprint a bound license is compared with is derived from the
+	// tenant and product (fingerprint.Hash), so a bound license needs both.
+	if c.Binding.Type != BindNone && c.Tenant == "" {
+		return nil, malformed("%s binding without tenant", c.Binding.Type)
 	}
 	if c.Entitlements, err = parseEntitlements(m); err != nil {
 		return nil, err

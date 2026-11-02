@@ -20,12 +20,13 @@ SDKs and the agent pick the first available source:
 - **Vendor override**: SDK option to supply their own fingerprint function or value (e.g. a hardware serial, a cloud instance ID, a TPM-backed ID).
 - Fingerprint source is recorded in the activation (`fp_source`), so support can see why a machine changed.
 
-## Amendment (2026-11-02, from implementation review; pending maintainer confirmation)
+## Amendment (2026-11-02, from implementation review; accepted)
 - `LICENSEFORGE_FINGERPRINT` is honoured **only when the vendor enables it** in the SDK (off by default). Anyone who can set an env var could otherwise reuse one binding on every machine without root. Vendors supporting plain Docker enable it, or customers mount the host `/etc/machine-id`.
 - Linux: machine-ids on tmpfs/ramfs (regenerated each boot) are refused; in application containers (Docker, Podman, OCI, unknown types) only a bind-mounted host machine-id is trusted; system containers (LXC/LXD/Incus, nspawn) use their own machine-id like VMs.
 - Kubernetes lookups retry transient failures and report them as transient, separate from RBAC/permission and certificate errors; `Compute` takes a context.
 - Exact per-source normalisation is in [License File Format](../../spec/license-format.md) (Fingerprints).
-- Open: hash input uses the product ID only. On a multi-tenant hosted server two tenants could use the same product slug, giving identical fingerprints for the same machine across vendors. Decide whether the hash input becomes tenant-qualified.
+- **Hash input is tenant-qualified**: `SHA-256("lf-fp-v1" NUL tenant NUL product NUL raw)`. On a multi-tenant hosted server two vendors with the same product slug would otherwise get identical fingerprints for the same machine; enterprise privacy reviews (GDPR, SOC 2) will ask about cross-vendor correlation. The SDK already needs the tenant ID to reach the activation API, so this costs vendors nothing; self-hosted installs use their single tenant.
+- **Rationale for the env-override default (off)**: our customers are vendors, who need control over binding; Kubernetes works with zero config, Docker works by mounting the host machine-id, and vendors who need the override enable it with one option.
 
 ## Consequences
 - Zero config on Kubernetes, Linux, Windows, macOS.

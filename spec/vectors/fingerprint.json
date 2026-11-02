@@ -1,0 +1,82 @@
+{
+  "format": "lf-fp-v1",
+  "note": "Fingerprint derivation vectors (spec/license-format.md, Fingerprints). Every SDK must produce exactly these values and reject the cases without a fingerprint.",
+  "conventions": [
+    "fingerprint = \"sha256:\" + lowercase hex of SHA-256 over the UTF-8 bytes of \"lf-fp-v1\", tenant, product and raw_id joined by single 0x00 bytes; no trailing separator, no Unicode normalisation.",
+    "Standard UTF-8 (not Java modified UTF-8). Cases without a fingerprint must be rejected (empty tenant, product or raw ID, or NUL inside tenant/product)."
+  ],
+  "cases": [
+    {
+      "name": "basic",
+      "tenant": "tnt_acme",
+      "product": "acme-db",
+      "raw_id": "0123456789abcdef0123456789abcdef",
+      "fingerprint": "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"
+    },
+    {
+      "name": "other_tenant_same_machine",
+      "tenant": "tnt_other",
+      "product": "acme-db",
+      "raw_id": "0123456789abcdef0123456789abcdef",
+      "fingerprint": "sha256:bdbc1dd185151ce81bcc5359d73cc66832a572aa85554decb7f94ecfcfb01cb3"
+    },
+    {
+      "name": "kubernetes_uid",
+      "tenant": "tnt_acme",
+      "product": "acme-db",
+      "raw_id": "5f0c2d8e-1b2a-4c3d-9e8f-0a1b2c3d4e5f",
+      "fingerprint": "sha256:4bd3446a871d51adbfb11b898c2e870e36aa9e402c0cd01df63ddf54dc6c7ac9"
+    },
+    {
+      "name": "non_ascii_ids",
+      "tenant": "tnt_café",
+      "product": "数据库",
+      "raw_id": "ÜNÏCÖDÉ-ID",
+      "fingerprint": "sha256:cb9f4f14076761e800c831441d163341441c943f36748608dfa6aa3054d86d0c"
+    },
+    {
+      "name": "nfd_is_not_normalised",
+      "tenant": "tnt_café",
+      "product": "数据库",
+      "raw_id": "ÜNÏCÖDÉ-ID",
+      "fingerprint": "sha256:65683e7cd200d55b5fcecbce9573a73a171f55984dbc7330e61731c1c6252b8e"
+    },
+    {
+      "name": "nul_inside_raw_id_allowed",
+      "tenant": "tnt_acme",
+      "product": "acme-db",
+      "raw_id": "a\u0000b",
+      "fingerprint": "sha256:0bc1a196369a021cf3355115f361005ff1cd70ab0be758f4b83dd89f36c6ad18"
+    },
+    {
+      "name": "reject_empty_tenant",
+      "tenant": "",
+      "product": "acme-db",
+      "raw_id": "x"
+    },
+    {
+      "name": "reject_empty_product",
+      "tenant": "tnt_acme",
+      "product": "",
+      "raw_id": "x"
+    },
+    {
+      "name": "reject_empty_raw_id",
+      "tenant": "tnt_acme",
+      "product": "acme-db",
+      "raw_id": ""
+    },
+    {
+      "name": "reject_nul_in_tenant",
+      "tenant": "tnt\u0000acme",
+      "product": "db",
+      "raw_id": "x"
+    },
+    {
+      "name": "reject_nul_in_product",
+      "tenant": "tnt",
+      "product": "acme\u0000db",
+      "raw_id": "x"
+    }
+  ]
+}
