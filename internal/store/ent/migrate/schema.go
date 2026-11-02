@@ -446,7 +446,7 @@ func init() {
 		"licenses_duration_months":        "duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)",
 		"licenses_duration_secs":          "duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= 3153600000)",
 		"licenses_ent_features":           "NOT jsonb_path_exists(entitlements, 'strict $.\"features\"[*]?(@.type() != \"string\" || !(@ like_regex \"^[a-z][a-z0-9]*(_[a-z0-9]+)*$\"))'::jsonpath)",
-		"licenses_ent_limit_ints":         "NOT jsonb_path_exists(entitlements, 'strict $.\"limits\".*?(@.string() like_regex \"[.eE]\")'::jsonpath)",
+		"licenses_ent_limit_ints":         "(jsonb_path_query_array(entitlements, 'strict $.\"limits\".*'::jsonpath))::text !~ '\\.'::text",
 		"licenses_ent_limit_keys":         "NOT jsonb_path_exists(entitlements, 'strict $.\"limits\".keyvalue()?(!(@.\"key\" like_regex \"^[a-z][a-z0-9]*(_[a-z0-9]+)*$\"))'::jsonpath)",
 		"licenses_ent_limits":             "NOT jsonb_path_exists(entitlements, 'strict $.\"limits\".*?(@.type() != \"number\" || @ < -1 || @ > 9007199254740991 || @ != @.floor())'::jsonpath)",
 		"licenses_entitlements":           "jsonb_typeof(entitlements) = 'object' AND jsonb_typeof(entitlements -> 'features') = 'array' AND jsonb_typeof(entitlements -> 'limits') = 'object'",

@@ -130,9 +130,11 @@ func (License) Annotations() []schema.Annotation {
 		// and an activation limit means nothing for them.
 		"licenses_site_starts_at_issue":   `(bind_type)::text <> 'none'::text OR (expiry_basis)::text <> 'from_first_activation'::text`,
 		"licenses_site_no_activation_max": `(bind_type)::text <> 'none'::text OR max_activations IS NULL`,
-		// Limits are integers written without a fraction or exponent (1.0 is malformed in the spec
-		// and doesn't decode into int64), and limit names are feature keys.
-		"licenses_ent_limit_ints": `NOT jsonb_path_exists(entitlements, 'strict $."limits".*?(@.string() like_regex "[.eE]")'::jsonpath)`,
+		// Limits are stored without a fractional part (1.0 is malformed in the spec and doesn't
+		// decode into int64; jsonb normalizes exponents, so 1e2 is stored as 100), and limit
+		// names are feature keys. jsonb's text output never uses an exponent, so checking the
+		// values' text for "." works on PostgreSQL 15+ (jsonpath .string() is 17+).
+		"licenses_ent_limit_ints": `(jsonb_path_query_array(entitlements, 'strict $."limits".*'::jsonpath))::text !~ '\.'::text`,
 		"licenses_ent_limit_keys": `NOT jsonb_path_exists(entitlements, 'strict $."limits".keyvalue()?(!(@."key" like_regex "` + keyPattern + `"))'::jsonpath)`,
 		// Status and its timestamps agree.
 		"licenses_suspended_at": `(status = 'suspended') = (suspended_at IS NOT NULL)`,

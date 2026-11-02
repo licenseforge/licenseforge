@@ -295,6 +295,10 @@ func TestLicenseConstraintsInDatabase(t *testing.T) {
 			}
 		})
 	}
+	// jsonb stores 1e2 as 100: a valid integer limit, even though the input had an exponent.
+	if _, err := d.platformDB.ExecContext(ctx, `UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 1e2, "m": -1}}' WHERE id = $1`, l.license.ID); err != nil {
+		t.Errorf("valid limits refused: %v", err)
+	}
 }
 
 func TestOneActiveActivationPerMachine(t *testing.T) {
