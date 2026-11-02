@@ -5,6 +5,27 @@ on:
 permissions:
   contents: read
 jobs:
+  # ADR-0009 supports PostgreSQL 15+; the main job runs 17. Migrations and RLS
+  # tests must also pass on the oldest supported version.
+  store-pg15:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15@sha256:40e8c839f86c404f9bd1c456bb83f11b205f2cd95d753b34c2d074e89ecee786
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      LICENSEFORGE_TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - run: go test -count=1 ./internal/store/...
   go:
     runs-on: ubuntu-latest
     services:
