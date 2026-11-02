@@ -831,6 +831,116 @@
         "fingerprint": "sha256:abc"
       },
       "expect": "malformed"
+    },
+    {
+      "name": "malformed_duplicate_key_in_unknown_field",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"future\":{\"a\":1,\"a\":2}}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_duplicate_key_in_unknown_nested_field",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"customer\":{\"id\":\"c\",\"extra\":{\"a\":1,\"a\":2}}}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_duplicate_wins_over_version",
+      "payload": "{\"v\":2,\"x\":1,\"x\":2}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_nested_duplicate_wins_over_version",
+      "payload": "{\"v\":2,\"bind\":{\"a\":1,\"a\":1}}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "unsupported_version_skips_field_rules",
+      "payload": "{\"v\":2,\"bind\":{\"type\":\"dongle\"}}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "unsupported_version"
+    },
+    {
+      "name": "malformed_bom_in_payload",
+      "payload": "﻿{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\"}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_lone_high_surrogate",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"plan\":\"\\ud800\"}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "malformed_lone_low_surrogate",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"plan\":\"\\udc00x\"}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "valid_surrogate_pair",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"plan\":\"\\ud83d\\ude00\"}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "valid"
+    },
+    {
+      "name": "valid_depth_32",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "valid"
+    },
+    {
+      "name": "malformed_depth_33",
+      "payload": "{\"v\":1,\"lid\":\"l\",\"product\":\"acme-db\",\"iat\":\"2026-11-01T00:00:00Z\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "options": {
+        "now": "2026-11-15T00:00:00Z",
+        "product": "acme-db",
+        "fingerprint": "sha256:abc"
+      },
+      "expect": "malformed"
     }
   ]
 }

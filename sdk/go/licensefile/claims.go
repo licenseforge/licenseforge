@@ -98,8 +98,8 @@ func malformed(format string, a ...any) error {
 // ParseClaims decodes a verified payload under the spec's strict encoding rules.
 // Call it only on the payload returned by Verify.
 func ParseClaims(payload []byte) (*Claims, error) {
-	if !utf8.Valid(payload) {
-		return nil, malformed("payload is not valid UTF-8")
+	if err := wellFormed(payload); err != nil {
+		return nil, err
 	}
 	m, err := object(payload, true)
 	if err != nil {
@@ -252,6 +252,112 @@ func parseEntitlements(m map[string]json.RawMessage) (Entitlements, error) {
 	return e, nil
 }
 
+// maxDepth is the deepest object/array nesting a payload may have (spec).
+const maxDepth = 32
+
+// wellFormed applies the spec's JSON well-formedness rules, checked before v:
+// valid UTF-8 (no BOM), exactly one top-level object, no duplicate keys in any
+// object (known or unknown), nesting depth <= maxDepth, no unpaired surrogate
+// escapes.
+func wellFormed(payload []byte) error {
+	if !utf8.Valid(payload) {
+		return malformed("payload is not valid UTF-8")
+	}
+	if err := checkSurrogates(payload); err != nil {
+		return err
+	}
+	type frame struct {
+		obj     bool
+		keys    map[string]bool
+		wantKey bool
+	}
+	var stack []*frame
+	valueDone := func() {
+		if n := len(stack); n > 0 && stack[n-1].obj {
+			stack[n-1].wantKey = true
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
+	for first := true; first || len(stack) > 0; first = false {
+		tok, err := dec.Token()
+		if err != nil {
+			return malformed("%v", err)
+		}
+		if first && tok != json.Delim('{') {
+			return malformed("expected a JSON object")
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{', '[':
+				if len(stack) > 0 && stack[len(stack)-1].obj {
+					stack[len(stack)-1].wantKey = false
+				}
+				stack = append(stack, &frame{obj: t == '{', keys: map[string]bool{}, wantKey: t == '{'})
+				if len(stack) > maxDepth {
+					return malformed("nesting deeper than %d", maxDepth)
+				}
+			default: // '}' or ']'
+				stack = stack[:len(stack)-1]
+				valueDone()
+			}
+		case string:
+			if top := stack[len(stack)-1]; top.obj && top.wantKey {
+				if top.keys[t] {
+					return malformed("duplicate key %q", t)
+				}
+				top.keys[t] = true
+				top.wantKey = false
+				continue
+			}
+			valueDone()
+		default:
+			valueDone()
+		}
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return malformed("trailing data after payload object")
+	}
+	return nil
+}
+
+// checkSurrogates rejects \uD800-\uDFFF escapes that don't form a valid pair
+// (Go would silently replace them; JS and Java keep them).
+func checkSurrogates(b []byte) error {
+	hex4 := func(i int) (int, bool) {
+		if i+6 > len(b) || b[i] != '\\' || b[i+1] != 'u' {
+			return 0, false
+		}
+		v, err := strconv.ParseUint(string(b[i+2:i+6]), 16, 16)
+		return int(v), err == nil
+	}
+	inString := false
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == '"':
+			inString = !inString
+		case inString && b[i] == '\\':
+			if v, ok := hex4(i); ok {
+				switch {
+				case v >= 0xD800 && v <= 0xDBFF:
+					if lo, ok := hex4(i + 6); !ok || lo < 0xDC00 || lo > 0xDFFF {
+						return malformed("unpaired surrogate escape")
+					}
+					i += 11
+				case v >= 0xDC00 && v <= 0xDFFF:
+					return malformed("unpaired surrogate escape")
+				default:
+					i += 5
+				}
+			} else {
+				i++ // skip the escaped character
+			}
+		}
+	}
+	return nil
+}
+
 // object decodes a JSON object with exact-case keys, rejecting duplicate keys.
 // top requires nothing but whitespace after the object.
 func object(raw []byte, top bool) (map[string]json.RawMessage, error) {
@@ -399,6 +505,9 @@ type CheckOptions struct {
 // StatusGrace for a usable license, or one of the Err* claim errors.
 func (c *Claims) Check(o CheckOptions) (Status, error) {
 	tol := DefaultClockTolerance
+	if o.Now.IsZero() {
+		return "", fmt.Errorf("%w: Now is not set", ErrInvalidOptions)
+	}
 	if o.ClockTolerance != nil {
 		if *o.ClockTolerance < 0 {
 			return "", fmt.Errorf("%w: negative clock tolerance", ErrInvalidOptions)
@@ -427,10 +536,10 @@ func (c *Claims) Check(o CheckOptions) (Status, error) {
 }
 
 // Open verifies a license's signature, parses its claims and checks them.
-// It is the usual entry point for applications. Claims are returned when the
-// license parsed but failed a claim check (e.g. to show the expiry date); they
-// are nil on signature or parse errors. Treat the license as unusable whenever
-// err is non-nil.
+// It is the usual entry point for applications. Claims are returned whenever
+// the payload parsed, including when Check failed (e.g. to show the expiry
+// date); they are nil on signature or parse errors. Treat the license as
+// unusable whenever err is non-nil.
 func Open(license string, keys KeySet, o CheckOptions) (*Claims, Status, error) {
 	payload, _, err := Verify(license, keys)
 	if err != nil {

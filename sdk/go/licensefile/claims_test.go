@@ -171,6 +171,18 @@ func buildClaimVectors(t *testing.T) claimVectorFile {
 			c("malformed_time_lowercase_t", p(map[string]any{"exp": "2026-12-01t00:00:00Z"}), opts(mid), "malformed"),
 			c("malformed_time_extended_year", p(map[string]any{"exp": "+002026-12-01T00:00:00Z"}), opts(mid), "malformed"),
 			c("malformed_time_before_1970", p(map[string]any{"exp": "1969-12-31T23:59:59Z"}), opts(mid), "malformed"),
+			// Well-formedness is checked for the whole payload, before v.
+			c("malformed_duplicate_key_in_unknown_field", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","future":{"a":1,"a":2}}`, opts(mid), "malformed"),
+			c("malformed_duplicate_key_in_unknown_nested_field", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","customer":{"id":"c","extra":{"a":1,"a":2}}}`, opts(mid), "malformed"),
+			c("malformed_duplicate_wins_over_version", `{"v":2,"x":1,"x":2}`, opts(mid), "malformed"),
+			c("malformed_nested_duplicate_wins_over_version", `{"v":2,"bind":{"a":1,"a":1}}`, opts(mid), "malformed"),
+			c("unsupported_version_skips_field_rules", `{"v":2,"bind":{"type":"dongle"}}`, opts(mid), "unsupported_version"),
+			c("malformed_bom_in_payload", "\uFEFF"+`{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z"}`, opts(mid), "malformed"),
+			c("malformed_lone_high_surrogate", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","plan":"\ud800"}`, opts(mid), "malformed"),
+			c("malformed_lone_low_surrogate", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","plan":"\udc00x"}`, opts(mid), "malformed"),
+			c("valid_surrogate_pair", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","plan":"\ud83d\ude00"}`, opts(mid), "valid"),
+			c("valid_depth_32", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","x":`+strings.Repeat("[", 31)+strings.Repeat("]", 31)+`}`, opts(mid), "valid"),
+			c("malformed_depth_33", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","x":`+strings.Repeat("[", 32)+strings.Repeat("]", 32)+`}`, opts(mid), "malformed"),
 		},
 	}
 }
@@ -280,5 +292,19 @@ func TestOpen(t *testing.T) {
 	}
 	if _, _, err := Open(strings.Replace(lic, "lf1.k.", "lf1.x.", 1), keys, CheckOptions{Now: now}); !errors.Is(err, ErrUnknownKey) {
 		t.Fatalf("unknown key: got %v", err)
+	}
+}
+
+func TestCheckRequiresNow(t *testing.T) {
+	c, err := ParseClaims([]byte(payload(t, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Check(CheckOptions{Product: "acme-db", Fingerprint: "sha256:abc"}); !errors.Is(err, ErrInvalidOptions) {
+		t.Fatalf("zero Now: got %v, want ErrInvalidOptions", err)
+	}
+	neg := -time.Second
+	if _, err := c.Check(CheckOptions{Now: time.Now(), Product: "acme-db", Fingerprint: "sha256:abc", ClockTolerance: &neg}); !errors.Is(err, ErrInvalidOptions) {
+		t.Fatalf("negative tolerance: got %v, want ErrInvalidOptions", err)
 	}
 }
