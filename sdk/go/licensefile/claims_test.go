@@ -76,7 +76,8 @@ func buildClaimVectors(t *testing.T) claimVectorFile {
 		Note:   "Claim-check vectors for lf1 (spec/license-format.md, Claim checks). Payloads are already signature-verified; only claim parsing and checks are tested.",
 		Conventions: []string{
 			"payload is the exact JSON text of the verified payload.",
-			"options.now, options.build_date use the spec timestamp format; options.clock_tolerance uses the spec duration format and defaults to P1D when absent.",
+			"options.now, options.build_date use the spec timestamp format; options.clock_tolerance uses the spec duration format; absent means the 24h default, PT0S means strict.",
+			"Some payloads are not produced by a map serializer (duplicate or case-variant keys, number forms); they are written as raw JSON text on purpose.",
 			"expect is valid, grace, or the class of the first failing claim check.",
 		},
 		Cases: []claimCase{
@@ -124,6 +125,52 @@ func buildClaimVectors(t *testing.T) claimVectorFile {
 			c("malformed_duration_negative", p(map[string]any{"grace": "-P1D"}), opts(mid), "malformed"),
 			c("malformed_bind_unknown_type", p(map[string]any{"bind": map[string]any{"type": "dongle", "fp": "x"}}), opts(mid), "malformed"),
 			c("malformed_bind_machine_without_fp", p(map[string]any{"bind": map[string]any{"type": "machine"}}), opts(mid), "malformed"),
+			// Presence vs zero values.
+			c("offline_exceeded_zero_max_offline", p(map[string]any{"max_offline": "PT0S"}), opts(mid), "offline_exceeded"),
+			c("valid_zero_max_offline_at_iat", p(map[string]any{"max_offline": "P0D", "iat": mid}), opts(mid), "valid"),
+			c("expired_epoch_exp", p(map[string]any{"exp": "1970-01-01T00:00:00Z", "grace": nil}), opts(mid), "expired"),
+			c("clock_skew_strict_tolerance", p(map[string]any{"iat": "2026-11-15T00:00:01Z"}), opts(mid, func(o *claimOptions) { o.ClockTolerance = "PT0S" }), "clock_skew"),
+			c("valid_strict_tolerance_at_now", p(map[string]any{"iat": mid}), opts(mid, func(o *claimOptions) { o.ClockTolerance = "PT0S" }), "valid"),
+			// Duration range.
+			c("grace_max_duration", p(map[string]any{"grace": "P36500D"}), opts("2100-01-01T00:00:00Z"), "grace"),
+			c("malformed_duration_over_max", p(map[string]any{"grace": "P36500DT1S"}), opts(mid), "malformed"),
+			c("malformed_duration_six_digit_days_over_max", p(map[string]any{"grace": "P999999D"}), opts(mid), "malformed"),
+			c("malformed_duration_seven_digits", p(map[string]any{"grace": "PT1000000S"}), opts(mid), "malformed"),
+			c("malformed_duration_lowercase", p(map[string]any{"grace": "p1d"}), opts(mid), "malformed"),
+			// Null and types.
+			c("malformed_exp_null", p(map[string]any{"exp": json.RawMessage("null")}), opts(mid), "malformed"),
+			c("malformed_v_null", p(map[string]any{"v": json.RawMessage("null")}), opts(mid), "malformed"),
+			c("malformed_bind_null", p(map[string]any{"bind": json.RawMessage("null")}), opts(mid), "malformed"),
+			c("malformed_plan_number", p(map[string]any{"plan": 7}), opts(mid), "malformed"),
+			c("malformed_empty_lid", p(map[string]any{"lid": ""}), opts(mid), "malformed"),
+			c("malformed_empty_product", p(map[string]any{"product": ""}), opts(mid), "malformed"),
+			c("malformed_features_not_array", p(map[string]any{"entitlements": map[string]any{"features": "sso"}}), opts(mid), "malformed"),
+			// Integer forms and version precedence.
+			c("malformed_v_float", `{"v":1.0,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z"}`, opts(mid), "malformed"),
+			c("malformed_v_exponent", `{"v":1e0,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z"}`, opts(mid), "malformed"),
+			c("unsupported_version_huge", `{"v":99999999999999999999}`, opts(mid), "unsupported_version"),
+			c("unsupported_version_with_changed_fields", `{"v":2,"bind":"x","iat":5}`, opts(mid), "unsupported_version"),
+			// Keys: exact case, no duplicates.
+			c("case_variant_key_ignored", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","EXP":"2026-11-02T00:00:00Z"}`, opts(mid), "valid"),
+			c("malformed_duplicate_key", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","exp":"2027-01-01T00:00:00Z","exp":"2026-11-02T00:00:00Z"}`, opts(mid), "malformed"),
+			c("malformed_duplicate_nested_key", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z","bind":{"type":"machine","fp":"sha256:abc","fp":"sha256:xyz"}}`, opts(mid), "malformed"),
+			c("malformed_trailing_data", `{"v":1,"lid":"l","product":"acme-db","iat":"2026-11-01T00:00:00Z"} {}`, opts(mid), "malformed"),
+			// Binding edge cases.
+			c("malformed_bind_empty_type", p(map[string]any{"bind": map[string]any{"type": "", "fp": "sha256:abc"}}), opts(mid), "malformed"),
+			c("malformed_bind_fp_without_type", p(map[string]any{"bind": map[string]any{"fp": "sha256:abc"}}), opts(mid), "malformed"),
+			c("binding_mismatch_empty_local_fingerprint", p(nil), opts(mid, func(o *claimOptions) { o.Fingerprint = "" }), "binding_mismatch"),
+			// Limits.
+			c("valid_limit_max_safe_integer", p(map[string]any{"entitlements": map[string]any{"limits": map[string]any{"users": json.RawMessage("9007199254740991")}}}), opts(mid), "valid"),
+			c("malformed_limit_over_safe_integer", p(map[string]any{"entitlements": map[string]any{"limits": map[string]any{"users": json.RawMessage("9007199254740992")}}}), opts(mid), "malformed"),
+			c("malformed_limit_negative", p(map[string]any{"entitlements": map[string]any{"limits": map[string]any{"users": -5}}}), opts(mid), "malformed"),
+			c("malformed_limit_float", p(map[string]any{"entitlements": map[string]any{"limits": map[string]any{"users": json.RawMessage("1.0")}}}), opts(mid), "malformed"),
+			// Timestamp edge cases.
+			c("malformed_time_hour_24", p(map[string]any{"exp": "2026-12-01T24:00:00Z"}), opts(mid), "malformed"),
+			c("malformed_time_leap_second", p(map[string]any{"exp": "2026-12-31T23:59:60Z"}), opts(mid), "malformed"),
+			c("malformed_time_lowercase_z", p(map[string]any{"exp": "2026-12-01T00:00:00z"}), opts(mid), "malformed"),
+			c("malformed_time_lowercase_t", p(map[string]any{"exp": "2026-12-01t00:00:00Z"}), opts(mid), "malformed"),
+			c("malformed_time_extended_year", p(map[string]any{"exp": "+002026-12-01T00:00:00Z"}), opts(mid), "malformed"),
+			c("malformed_time_before_1970", p(map[string]any{"exp": "1969-12-31T23:59:59Z"}), opts(mid), "malformed"),
 		},
 	}
 }
@@ -186,9 +233,11 @@ func TestClaimVectors(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			o := CheckOptions{Now: mustTime(c.Options.Now), Product: c.Options.Product, Fingerprint: c.Options.Fingerprint, BuildDate: mustTime(c.Options.BuildDate)}
 			if c.Options.ClockTolerance != "" {
-				if o.ClockTolerance, err = parseDuration(c.Options.ClockTolerance); err != nil {
+				tol, err := parseDuration(c.Options.ClockTolerance)
+				if err != nil {
 					t.Fatal(err)
 				}
+				o.ClockTolerance = &tol
 			}
 			var st Status
 			claims, err := ParseClaims([]byte(c.Payload))
@@ -209,7 +258,7 @@ func TestParseClaimsFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.CustomerID != "cus_1" || c.Binding.Type != "none" || !strings.Contains(strings.Join(c.Entitlements.Features, ","), "sso") ||
-		c.Entitlements.Limits["users"] != 50 || c.Entitlements.Limits["nodes"] != -1 || !c.Expires.IsZero() {
+		c.Entitlements.Limits["users"] != 50 || c.Entitlements.Limits["nodes"] != -1 || c.Expires != nil || c.MaxOffline != nil {
 		t.Fatalf("unexpected claims: %+v", c)
 	}
 }

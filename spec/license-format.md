@@ -63,22 +63,27 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 | `customer` | ID only by default; vendor may opt in to include a display name. Keeps personal data out of files copied to customer machines (GDPR data minimisation). |
 
 ### Claim encoding rules
-- Payload is a UTF-8 JSON object. Unknown fields are ignored (forward compatibility). The issuer never emits duplicate keys.
-- **Required**: `v` (integer, must be `1`), `lid`, `product`, `iat`. Missing or wrongly typed required fields → `malformed`.
-- **Timestamps** (`iat`, `nbf`, `exp`, `refresh_after`, `updates_until`): exactly `YYYY-MM-DDTHH:MM:SSZ` (RFC 3339, UTC, no fractions, no offsets).
-- **Durations** (`grace`, `max_offline`): ISO 8601 subset `P[nD][T[nH][nM][nS]]` with non-negative integers (max 6 digits each) and at least one component. No years/months/weeks (their length is ambiguous).
-- `exp` absent = no expiry (perpetual; offline licenses only). `nbf`, `grace` (default 0), `max_offline`, `updates_until` optional.
-- `bind.type`: `none` (or absent), `machine`, `cluster`. `machine`/`cluster` require `bind.fp`, compared exactly with the local fingerprint. Unknown type → `malformed` (fail closed).
-- Numeric limits are integers in the JSON-safe range (−1 … 2^53−1); `-1` = unlimited.
+Every rule here is *fail closed*: a violation makes the license `malformed`. SDKs must not be more lenient than this (e.g. JS `Date` or Java `Instant` defaults are too lenient).
+- **JSON**: the payload is valid UTF-8 containing exactly one JSON object. Object keys are **case-sensitive**; **duplicate keys** in any object → `malformed`. Unknown keys are ignored.
+- **`null`** for any defined field → `malformed` (absent and null are different).
+- **Types**: every defined field must have its defined type (string, object, array, integer). Wrong type → `malformed`.
+- **Integers** (`v`, limits): the JSON number token must match `-?(0|[1-9][0-9]*)` (no fraction, no exponent, so `1.0` and `1e0` are malformed).
+- **`v`** is read first: missing or not an integer → `malformed`; any integer other than `1` (even a huge one) → `unsupported_version`, regardless of other fields (a future version may change them).
+- **Required** (v1): `lid` and `product` (non-empty strings), `iat`.
+- **Timestamps** (`iat`, `nbf`, `exp`, `refresh_after`, `updates_until`): exactly `YYYY-MM-DDTHH:MM:SSZ`, uppercase `T` and `Z`, year 1970–9999, a real calendar date, hour 00–23, minute and second 00–59 (no leap second `:60`, no `24:00:00`).
+- **Durations** (`grace`, `max_offline`): `P[nD][T[nH][nM][nS]]`, uppercase, each `n` 1–6 decimal digits, at least one component, no years/months/weeks, total ≤ 36,500 days. A **zero duration is set**: `max_offline: "PT0S"` means "only usable at `iat`" (needs an online refresh before any later use).
+- Optional: `tenant`, `plan` (strings); `customer` (object: `id`, `name` strings); `nbf`, `exp` (absent = perpetual, offline licenses only), `refresh_after`, `updates_until`; `grace` (absent = 0); `max_offline` (absent = no limit); `bind`; `entitlements` (object: `features` array of strings, `limits` object of integers).
+- **`bind`** (object): `type` absent or `bind` absent → `none`. `type` must be one of `none`, `machine`, `cluster`; any other value, including `""` → `malformed`. `machine`/`cluster` require a non-empty `fp`; `none` must not have `fp`.
+- **Limits**: integers in −1 … 2^53−1 (JSON-safe), `-1` = unlimited; other negatives → `malformed`.
 
 ### Claim checks
-Run after signature verification, in this order; the first failure decides the result. Inputs: `now`, expected `product`, local `fingerprint`, optional app `build_date`, `clock_tolerance` (default 24h, [ADR-0018 Clock tampering protection](../docs/adr/0018-clock-tampering-protection.md)).
-1. Payload not a JSON object, or `v` missing / not an integer → `malformed`; `v ≠ 1` → `unsupported_version` (checked before other fields, which a future version may change); any other rule above violated → `malformed`.
+Run after signature verification, in this order; the first failure decides the result. Inputs: `now`, expected `product`, local `fingerprint`, optional app `build_date`, optional `clock_tolerance` (≥ 0; absent = 24h default, [ADR-0018 Clock tampering protection](../docs/adr/0018-clock-tampering-protection.md); `0` is allowed and means strict).
+1. Apply the encoding rules above: `malformed` or `unsupported_version`.
 2. `product` ≠ expected → `wrong_product`.
 3. Binding doesn't match → `binding_mismatch`.
 4. `iat` > `now` + `clock_tolerance` → `clock_skew`.
 5. `nbf` set and `now` < `nbf` → `not_yet_valid`.
-6. `max_offline` set and `now` > `iat` + `max_offline` → `offline_exceeded`.
+6. `max_offline` set (including zero) and `now` > `iat` + `max_offline` → `offline_exceeded`.
 7. `exp` set and `now` > `exp` + `grace` → `expired`. If `now` > `exp` the license is in **grace** (usable, warn); grace is not a failure, so checks continue.
 8. `updates_until` and `build_date` set and `build_date` > `updates_until` → `updates_expired`.
 9. Otherwise → **`grace`** if step 7 found it in grace, else **`valid`**. Comparisons are strict: `now` equal to `exp` is still valid.
