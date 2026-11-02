@@ -1,17 +1,30 @@
 name: Merge gate
 # Fails while the PR has the do-not-merge label (review or fix rounds still
 # running). Required check, so the merge button stays blocked until the label
-# is removed.
+# is removed. Labels are read live from the API, not from the event payload,
+# so a re-run of an old "labeled" run can't turn the check red again.
 on:
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
-permissions: {}
+  merge_group:
+permissions:
+  pull-requests: read
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   merge-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Refuse while labelled do-not-merge
-        if: contains(github.event.pull_request.labels.*.name, 'do-not-merge')
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          echo "This PR is labelled do-not-merge: review or fixes are still in progress."
-          exit 1
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
+          if printf '%s\n' "$labels" | grep -qx do-not-merge; then
+            echo "This PR is labelled do-not-merge: review or fixes are still in progress."
+            exit 1
+          fi
