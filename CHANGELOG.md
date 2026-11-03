@@ -3,9 +3,6 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
-### Changed
-- PostgreSQL 17 or newer is required (ADR-0009); the server and `licenseforge migrate` refuse older versions.
-
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0024 (0024: HIPAA, NIST and FedRAMP readiness) and the `lf1` license file format draft.
@@ -25,3 +22,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Go SDK `clock` package: clock rollback protection (ADR-0018): HMAC-authenticated high-water mark, `Now`/`Observe`/`Reset`, 24h default tolerance (0 = strict), rollback check that always runs (also on read-only storage), and a `FileStore` with OS file locks that is atomic and safe across processes.
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).
 - Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per tenant and product.
+
+### Changed
+- PostgreSQL 17 or newer is required (ADR-0009); `store.Open` and `store.Migrate` refuse older versions.

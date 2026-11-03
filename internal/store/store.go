@@ -31,7 +31,7 @@ const (
 )
 
 // minPostgres is the oldest supported server (server_version_num, ADR-0009).
-const minPostgres = 170000
+var minPostgres = 170000 // var so tests can raise it
 
 // migrationLock is the pg_advisory_lock key serializing migrations, so
 // replicas starting at the same time apply them once.
