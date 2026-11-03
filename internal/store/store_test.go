@@ -530,3 +530,25 @@ func TestNoTransactionMigration(t *testing.T) {
 		t.Fatal("migration recorded as applied despite an invalid index")
 	}
 }
+
+func TestCheckVersion(t *testing.T) {
+	if checkVersion(160009) == nil {
+		t.Error("PostgreSQL 16 accepted")
+	}
+	if err := checkVersion(170000); err != nil {
+		t.Error(err)
+	}
+	// Both entry points check: pretend the test server is too old.
+	defer func(v int) { minPostgres = v }(minPostgres)
+	minPostgres = 990000
+	ctx := context.Background()
+	if err := Migrate(ctx, env.ownerURL); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("Migrate: %v", err)
+	}
+	if d, err := Open(ctx, env.tenantURL, env.platformURL); err == nil || !strings.Contains(err.Error(), "not supported") {
+		if d != nil {
+			_ = d.Close()
+		}
+		t.Errorf("Open: %v", err)
+	}
+}
