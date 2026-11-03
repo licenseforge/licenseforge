@@ -30,9 +30,8 @@ const (
 	PlatformRole = "licenseforge_platform"
 )
 
-// minPostgres is the oldest supported server (server_version_num). Before 15,
-// the public schema let every role create objects by default.
-const minPostgres = 150000
+// minPostgres is the oldest supported server (server_version_num, ADR-0009).
+var minPostgres = 170000 // var so tests can raise it
 
 // migrationLock is the pg_advisory_lock key serializing migrations, so
 // replicas starting at the same time apply them once.
@@ -137,9 +136,10 @@ func checkRole(ctx context.Context, db *sql.DB, want string) error {
 	if err != nil {
 		return fmt.Errorf("store: check role: %w", err)
 	}
+	if err := checkVersion(version); err != nil {
+		return err
+	}
 	switch {
-	case version < minPostgres:
-		return fmt.Errorf("store: PostgreSQL %d.x is not supported; 15 or newer is required", version/10000)
 	case switched:
 		return fmt.Errorf("%w: connection switched role (SET ROLE in options)", ErrUnsafeRole)
 	case privileged || wantPrivileged:
@@ -156,6 +156,13 @@ func checkRole(ctx context.Context, db *sql.DB, want string) error {
 		return fmt.Errorf("%w: login can create temporary tables, which shadow real tables on pooled connections; REVOKE TEMPORARY ON DATABASE ... FROM PUBLIC", ErrUnsafeRole)
 	case preset != "":
 		return fmt.Errorf("%w: app.tenant_id is preset for the session (connection options or ALTER ROLE ... SET)", ErrUnsafeRole)
+	}
+	return nil
+}
+
+func checkVersion(v int) error {
+	if v < minPostgres {
+		return fmt.Errorf("store: PostgreSQL %d is not supported; %d or newer is required", v/10000, minPostgres/10000)
 	}
 	return nil
 }
@@ -245,6 +252,13 @@ func Migrate(ctx context.Context, ownerDSN string) (err error) {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
+	var version int
+	if err := conn.QueryRowContext(ctx, `SELECT current_setting('server_version_num')::int`).Scan(&version); err != nil {
+		return err
+	}
+	if err := checkVersion(version); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLock); err != nil {
 		return err
 	}

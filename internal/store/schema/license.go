@@ -133,7 +133,7 @@ func (License) Annotations() []schema.Annotation {
 		// Limits are stored without a fractional part (1.0 is malformed in the spec and doesn't
 		// decode into int64; jsonb normalizes exponents, so 1e2 is stored as 100), and limit
 		// names are feature keys. jsonb's text output never uses an exponent, so checking the
-		// values' text for "." works on PostgreSQL 15+ (jsonpath .string() is 17+).
+		// values' text for "." finds fractions.
 		"licenses_ent_limit_ints": `(jsonb_path_query_array(entitlements, 'strict $."limits".*'::jsonpath))::text !~ '\.'::text`,
 		"licenses_ent_limit_keys": `NOT jsonb_path_exists(entitlements, 'strict $."limits".keyvalue()?(!(@."key" like_regex "` + keyPattern + `"))'::jsonpath)`,
 		// Status and its timestamps agree.

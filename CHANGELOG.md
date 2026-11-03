@@ -24,3 +24,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Go SDK `clock` package: clock rollback protection (ADR-0018): HMAC-authenticated high-water mark, `Now`/`Observe`/`Reset`, 24h default tolerance (0 = strict), rollback check that always runs (also on read-only storage), and a `FileStore` with OS file locks that is atomic and safe across processes.
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).
 - Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per tenant and product.
+
+### Changed
+- PostgreSQL 17 or newer is required (ADR-0009); `store.Open` and `store.Migrate` refuse older versions.
