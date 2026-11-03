@@ -1,9 +1,6 @@
 # ADR-0026 Signing key lifecycle
 
-*Status: proposed · Date: 2026-11-02*
-
-> [!WARNING]
-> **Proposed (drafted overnight 2026-11-02, implemented in the signing-keys PR). Needs maintainer acceptance before merge.**
+*Status: accepted · Date: 2026-11-02*
 
 ## Context
 Each tenant signs its licenses and leases with its own Ed25519 keys ([ADR-0004 Signed license files with Ed25519](0004-signed-license-files-with-ed25519.md), [ADR-0009 Multi-tenancy](0009-multi-tenancy.md)). Vendors embed the trusted public keys (`kid`, `alg`, key) in their builds ([License File Format](../../spec/license-format.md)). So a new key is only useful once vendor builds trust it: if the server switched to a new key at once, every deployed build would reject the next lease refresh, an outage for all of the vendor's customers. Architecture Overview fixes the custody model for v0.1 (private keys AES-GCM-encrypted with the master keyring, behind a `Signer` interface); the lifecycle wasn't decided.
@@ -21,7 +18,7 @@ Each tenant signs its licenses and leases with its own Ed25519 keys ([ADR-0004 S
 - **Compromise**: same steps without waiting; old builds then fail closed on refresh, which is the safe failure. Offline files signed with the old key stay valid in builds that still trust it: documented, not fixable server-side.
 - **Private key** = the 32-byte Ed25519 seed, encrypted with the keyring ([ADR-0025 License key storage and encryption at rest](0025-license-key-storage-and-encryption-at-rest.md)) bound to purpose `signing_key`, tenant and kid, so a ciphertext copied to another row or tenant doesn't decrypt.
 - **`Signer`**: `Sign(ctx, tenant, kid, msg)` and `Public(ctx, tenant, kid)`. Sign refuses keys that aren't `active` and messages that aren't `lf1.<kid>.…` for that kid (no general signing oracle, domain-separated from anything else). Callers read the active kid first, build the message, then sign. Sign holds a share lock on the key while signing, so a concurrent promote waits and a retired key never signs after its retirement commits; if a rotation committed first, Sign fails and the caller retries. KMS/HSM signers (v0.4) implement the same interface.
-- No DELETE on signing keys; key operations (create, promote, discard) are audit-logged ([ADR-0021 Certification readiness](0021-certification-readiness.md); wired when the audit log lands, ADR-0027).
+- No DELETE on signing keys; key operations (create, promote, discard) are audit-logged ([ADR-0021 Certification readiness](0021-certification-readiness.md); not wired yet: it needs authn to provide actors, [ADR-0027 Audit log](0027-audit-log.md)).
 
 ## Consequences
 - Rotation needs vendor cooperation (ship builds that trust the pending key). That is inherent to embedded trust anchors; the pending state makes it a planned step, not an outage.
