@@ -30,3 +30,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0024](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md) | HIPAA, NIST and FedRAMP readiness from day 1 | accepted |
 | [ADR-0025](0025-license-key-storage-and-encryption-at-rest.md) | License key storage and encryption at rest | accepted |
 | [ADR-0026](0026-signing-key-lifecycle.md) | Signing key lifecycle | proposed |
+| [ADR-0027](0027-audit-log.md) | Audit log | proposed |

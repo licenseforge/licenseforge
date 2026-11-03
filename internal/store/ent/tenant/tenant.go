@@ -28,6 +28,8 @@ const (
 	EdgeCustomers = "customers"
 	// EdgeSigningKeys holds the string denoting the signing_keys edge name in mutations.
 	EdgeSigningKeys = "signing_keys"
+	// EdgeAuditEvents holds the string denoting the audit_events edge name in mutations.
+	EdgeAuditEvents = "audit_events"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -51,6 +53,13 @@ const (
 	SigningKeysInverseTable = "signing_keys"
 	// SigningKeysColumn is the table column denoting the signing_keys relation/edge.
 	SigningKeysColumn = "tenant_id"
+	// AuditEventsTable is the table that holds the audit_events relation/edge.
+	AuditEventsTable = "audit_events"
+	// AuditEventsInverseTable is the table name for the AuditEvent entity.
+	// It exists in this package in order to avoid circular dependency with the "auditevent" package.
+	AuditEventsInverseTable = "audit_events"
+	// AuditEventsColumn is the table column denoting the audit_events relation/edge.
+	AuditEventsColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -158,6 +167,20 @@ func BySigningKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newSigningKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByAuditEventsCount orders the results by audit_events count.
+func ByAuditEventsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAuditEventsStep(), opts...)
+	}
+}
+
+// ByAuditEvents orders the results by audit_events terms.
+func ByAuditEvents(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAuditEventsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -177,5 +200,12 @@ func newSigningKeysStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(SigningKeysInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, SigningKeysTable, SigningKeysColumn),
+	)
+}
+func newAuditEventsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AuditEventsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, AuditEventsTable, AuditEventsColumn),
 	)
 }

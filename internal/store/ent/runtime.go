@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
@@ -83,6 +84,95 @@ func init() {
 	// activation.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	activation.IDValidator = func() func(string) error {
 		validators := activationDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	auditeventMixin := schema.AuditEvent{}.Mixin()
+	auditeventMixinFields0 := auditeventMixin[0].Fields()
+	_ = auditeventMixinFields0
+	auditeventFields := schema.AuditEvent{}.Fields()
+	_ = auditeventFields
+	// auditeventDescTenantID is the schema descriptor for tenant_id field.
+	auditeventDescTenantID := auditeventMixinFields0[0].Descriptor()
+	// auditevent.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	auditevent.TenantIDValidator = func() func(string) error {
+		validators := auditeventDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// auditeventDescSeq is the schema descriptor for seq field.
+	auditeventDescSeq := auditeventFields[1].Descriptor()
+	// auditevent.SeqValidator is a validator for the "seq" field. It is called by the builders before save.
+	auditevent.SeqValidator = auditeventDescSeq.Validators[0].(func(int64) error)
+	// auditeventDescActorID is the schema descriptor for actor_id field.
+	auditeventDescActorID := auditeventFields[4].Descriptor()
+	// auditevent.ActorIDValidator is a validator for the "actor_id" field. It is called by the builders before save.
+	auditevent.ActorIDValidator = auditeventDescActorID.Validators[0].(func(string) error)
+	// auditeventDescAction is the schema descriptor for action field.
+	auditeventDescAction := auditeventFields[5].Descriptor()
+	// auditevent.ActionValidator is a validator for the "action" field. It is called by the builders before save.
+	auditevent.ActionValidator = func() func(string) error {
+		validators := auditeventDescAction.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(action string) error {
+			for _, fn := range fns {
+				if err := fn(action); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// auditeventDescObjectType is the schema descriptor for object_type field.
+	auditeventDescObjectType := auditeventFields[6].Descriptor()
+	// auditevent.ObjectTypeValidator is a validator for the "object_type" field. It is called by the builders before save.
+	auditevent.ObjectTypeValidator = auditeventDescObjectType.Validators[0].(func(string) error)
+	// auditeventDescObjectID is the schema descriptor for object_id field.
+	auditeventDescObjectID := auditeventFields[7].Descriptor()
+	// auditevent.ObjectIDValidator is a validator for the "object_id" field. It is called by the builders before save.
+	auditevent.ObjectIDValidator = auditeventDescObjectID.Validators[0].(func(string) error)
+	// auditeventDescSourceIP is the schema descriptor for source_ip field.
+	auditeventDescSourceIP := auditeventFields[9].Descriptor()
+	// auditevent.SourceIPValidator is a validator for the "source_ip" field. It is called by the builders before save.
+	auditevent.SourceIPValidator = auditeventDescSourceIP.Validators[0].(func(string) error)
+	// auditeventDescUserAgent is the schema descriptor for user_agent field.
+	auditeventDescUserAgent := auditeventFields[10].Descriptor()
+	// auditevent.UserAgentValidator is a validator for the "user_agent" field. It is called by the builders before save.
+	auditevent.UserAgentValidator = auditeventDescUserAgent.Validators[0].(func(string) error)
+	// auditeventDescDetails is the schema descriptor for details field.
+	auditeventDescDetails := auditeventFields[11].Descriptor()
+	// auditevent.DefaultDetails holds the default value on creation for the details field.
+	auditevent.DefaultDetails = auditeventDescDetails.Default.(string)
+	// auditeventDescID is the schema descriptor for id field.
+	auditeventDescID := auditeventFields[0].Descriptor()
+	// auditevent.DefaultID holds the default value on creation for the id field.
+	auditevent.DefaultID = auditeventDescID.Default.(func() string)
+	// auditevent.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	auditevent.IDValidator = func() func(string) error {
+		validators := auditeventDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

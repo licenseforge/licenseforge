@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -110,6 +111,21 @@ func (_u *TenantUpdate) AddSigningKeys(v ...*SigningKey) *TenantUpdate {
 	return _u.AddSigningKeyIDs(ids...)
 }
 
+// AddAuditEventIDs adds the "audit_events" edge to the AuditEvent entity by IDs.
+func (_u *TenantUpdate) AddAuditEventIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddAuditEventIDs(ids...)
+	return _u
+}
+
+// AddAuditEvents adds the "audit_events" edges to the AuditEvent entity.
+func (_u *TenantUpdate) AddAuditEvents(v ...*AuditEvent) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditEventIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -176,6 +192,27 @@ func (_u *TenantUpdate) RemoveSigningKeys(v ...*SigningKey) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveSigningKeyIDs(ids...)
+}
+
+// ClearAuditEvents clears all "audit_events" edges to the AuditEvent entity.
+func (_u *TenantUpdate) ClearAuditEvents() *TenantUpdate {
+	_u.mutation.ClearAuditEvents()
+	return _u
+}
+
+// RemoveAuditEventIDs removes the "audit_events" edge to AuditEvent entities by IDs.
+func (_u *TenantUpdate) RemoveAuditEventIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveAuditEventIDs(ids...)
+	return _u
+}
+
+// RemoveAuditEvents removes "audit_events" edges to AuditEvent entities.
+func (_u *TenantUpdate) RemoveAuditEvents(v ...*AuditEvent) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditEventIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -385,6 +422,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AuditEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditEventsIDs(); len(nodes) > 0 && !_u.mutation.AuditEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -484,6 +566,21 @@ func (_u *TenantUpdateOne) AddSigningKeys(v ...*SigningKey) *TenantUpdateOne {
 	return _u.AddSigningKeyIDs(ids...)
 }
 
+// AddAuditEventIDs adds the "audit_events" edge to the AuditEvent entity by IDs.
+func (_u *TenantUpdateOne) AddAuditEventIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddAuditEventIDs(ids...)
+	return _u
+}
+
+// AddAuditEvents adds the "audit_events" edges to the AuditEvent entity.
+func (_u *TenantUpdateOne) AddAuditEvents(v ...*AuditEvent) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditEventIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -550,6 +647,27 @@ func (_u *TenantUpdateOne) RemoveSigningKeys(v ...*SigningKey) *TenantUpdateOne 
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveSigningKeyIDs(ids...)
+}
+
+// ClearAuditEvents clears all "audit_events" edges to the AuditEvent entity.
+func (_u *TenantUpdateOne) ClearAuditEvents() *TenantUpdateOne {
+	_u.mutation.ClearAuditEvents()
+	return _u
+}
+
+// RemoveAuditEventIDs removes the "audit_events" edge to AuditEvent entities by IDs.
+func (_u *TenantUpdateOne) RemoveAuditEventIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveAuditEventIDs(ids...)
+	return _u
+}
+
+// RemoveAuditEvents removes "audit_events" edges to AuditEvent entities.
+func (_u *TenantUpdateOne) RemoveAuditEvents(v ...*AuditEvent) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditEventIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -782,6 +900,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(signingkey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AuditEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditEventsIDs(); len(nodes) > 0 && !_u.mutation.AuditEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditEventsTable,
+			Columns: []string{tenant.AuditEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

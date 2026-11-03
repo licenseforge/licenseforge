@@ -56,6 +56,50 @@ var (
 			},
 		},
 	}
+	// AuditEventsColumns holds the columns for the "audit_events" table.
+	AuditEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64},
+		{Name: "occurred_at", Type: field.TypeTime},
+		{Name: "actor_type", Type: field.TypeEnum, Enums: []string{"user", "token", "platform", "system"}},
+		{Name: "actor_id", Type: field.TypeString, Nullable: true, Size: 100, SchemaType: map[string]string{"postgres": "varchar(100)"}},
+		{Name: "action", Type: field.TypeString, Size: 100, SchemaType: map[string]string{"postgres": "varchar(100)"}},
+		{Name: "object_type", Type: field.TypeString, Nullable: true, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
+		{Name: "object_id", Type: field.TypeString, Nullable: true, Size: 100, SchemaType: map[string]string{"postgres": "varchar(100)"}},
+		{Name: "outcome", Type: field.TypeEnum, Enums: []string{"success", "failure", "denied"}},
+		{Name: "source_ip", Type: field.TypeString, Nullable: true, Size: 45, SchemaType: map[string]string{"postgres": "varchar(45)"}},
+		{Name: "user_agent", Type: field.TypeString, Nullable: true, Size: 512, SchemaType: map[string]string{"postgres": "varchar(512)"}},
+		{Name: "details", Type: field.TypeString, Default: "{}", SchemaType: map[string]string{"postgres": "json"}},
+		{Name: "prev_hash", Type: field.TypeBytes},
+		{Name: "hash", Type: field.TypeBytes},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// AuditEventsTable holds the schema information for the "audit_events" table.
+	AuditEventsTable = &schema.Table{
+		Name:       "audit_events",
+		Columns:    AuditEventsColumns,
+		PrimaryKey: []*schema.Column{AuditEventsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "audit_events_tenants_audit_events",
+				Columns:    []*schema.Column{AuditEventsColumns[14]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "auditevent_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{AuditEventsColumns[14]},
+			},
+			{
+				Name:    "auditevent_tenant_id_seq",
+				Unique:  true,
+				Columns: []*schema.Column{AuditEventsColumns[14], AuditEventsColumns[1]},
+			},
+		},
+	}
 	// CustomersColumns holds the columns for the "customers" table.
 	CustomersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -441,6 +485,7 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		ActivationsTable,
+		AuditEventsTable,
 		CustomersTable,
 		FeaturesTable,
 		LicensesTable,
@@ -464,6 +509,20 @@ func init() {
 		"activations_seen_order":     "last_seen_at >= first_seen_at",
 		"activations_source":         "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
 		"activations_source_binding": "((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)",
+	}
+	AuditEventsTable.ForeignKeys[0].RefTable = TenantsTable
+	AuditEventsTable.Annotation = &entsql.Annotation{}
+	AuditEventsTable.Annotation.Checks = map[string]string{
+		"audit_events_action_format": "action ~ '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$'",
+		"audit_events_actor_valid":   "(actor_type)::text = ANY (ARRAY['user'::text, 'token'::text, 'platform'::text, 'system'::text])",
+		"audit_events_details":       "json_typeof(details) = 'object'",
+		"audit_events_first_prev":    "seq <> 1 OR prev_hash = '\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea",
+		"audit_events_hash_len":      "length(prev_hash) = 32 AND length(hash) = 32",
+		"audit_events_id_format":     "id ~ '^aud_[a-z2-7]{26}$'",
+		"audit_events_no_empty":      "actor_id <> '' AND object_id <> '' AND source_ip <> '' AND user_agent <> ''",
+		"audit_events_object_type":   "object_type IS NULL OR object_type ~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'",
+		"audit_events_outcome_valid": "(outcome)::text = ANY (ARRAY['success'::text, 'failure'::text, 'denied'::text])",
+		"audit_events_seq_positive":  "seq > 0",
 	}
 	CustomersTable.ForeignKeys[0].RefTable = TenantsTable
 	CustomersTable.Annotation = &entsql.Annotation{}

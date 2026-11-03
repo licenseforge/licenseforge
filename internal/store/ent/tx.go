@@ -16,6 +16,8 @@ type Tx struct {
 	config
 	// Activation is the client for interacting with the Activation builders.
 	Activation *ActivationClient
+	// AuditEvent is the client for interacting with the AuditEvent builders.
+	AuditEvent *AuditEventClient
 	// Customer is the client for interacting with the Customer builders.
 	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
@@ -164,6 +166,7 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.Activation = NewActivationClient(tx.config)
+	tx.AuditEvent = NewAuditEventClient(tx.config)
 	tx.Customer = NewCustomerClient(tx.config)
 	tx.Feature = NewFeatureClient(tx.config)
 	tx.License = NewLicenseClient(tx.config)
