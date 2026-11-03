@@ -1,4 +1,4 @@
--- One-time PostgreSQL setup for LicenseForge (ADR-0009). Requires PostgreSQL 17+. Run as an admin
+-- One-time PostgreSQL setup for LicenseForge (ADR-0009). Requires PostgreSQL 17+ (ADR-0028). Run as an admin
 -- (superuser, or rds_superuser / cloudsqlsuperuser on managed Postgres), the
 -- same admin for every statement. Replace the passwords, or use your cloud's
 -- IAM authentication.

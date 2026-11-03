@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
-- Architecture Decision Records 0001–0027 and the `lf1` license file format draft.
+- Architecture Decision Records 0001–0028 and the `lf1` license file format draft.
 - Minimal server with `/healthz` and `/readyz`.
 - `Merge gate` check: fails while a PR has the `do-not-merge` label.
 - Server data layer foundation (`internal/store`): ent with PostgreSQL, prefixed IDs, versioned migrations with a built-in runner (checksums, per-file transactions, advisory lock), a three-login role model (owner, tenant pool, platform pool) with forced row-level security and release-blocking isolation tests, and `deploy/database-setup.sql`; tenants and products tables.
@@ -26,4 +26,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per tenant and product.
 
 ### Changed
-- PostgreSQL 17 or newer is required (ADR-0009); `store.Open` and `store.Migrate` refuse older versions.
+- PostgreSQL 17 or newer is required (ADR-0028); `store.Open` and `store.Migrate` refuse older versions.
