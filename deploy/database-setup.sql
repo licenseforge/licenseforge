@@ -1,4 +1,4 @@
--- One-time PostgreSQL setup for LicenseForge (ADR-0009). Requires PostgreSQL 15+. Run as an admin
+-- One-time PostgreSQL setup for LicenseForge (ADR-0009). Requires PostgreSQL 17+. Run as an admin
 -- (superuser, or rds_superuser / cloudsqlsuperuser on managed Postgres), the
 -- same admin for every statement. Replace the passwords, or use your cloud's
 -- IAM authentication.
@@ -24,7 +24,7 @@ CREATE ROLE licenseforge_owner LOGIN PASSWORD 'change-me-owner';
 CREATE ROLE licenseforge_api   LOGIN PASSWORD 'change-me-api'   IN ROLE licenseforge_app;
 CREATE ROLE licenseforge_admin LOGIN PASSWORD 'change-me-admin' IN ROLE licenseforge_platform;
 
--- PostgreSQL 16+: a non-superuser admin must be able to SET ROLE to the owner
+-- A non-superuser admin must be able to SET ROLE to the owner
 -- to create a database owned by it.
 GRANT licenseforge_owner TO CURRENT_USER WITH SET TRUE;
 CREATE DATABASE licenseforge OWNER licenseforge_owner;

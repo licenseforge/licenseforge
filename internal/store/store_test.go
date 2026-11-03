@@ -643,3 +643,12 @@ func TestNoTransactionMigration(t *testing.T) {
 		t.Fatal("migration recorded as applied despite an invalid index")
 	}
 }
+
+func TestCheckVersion(t *testing.T) {
+	if checkVersion(160009) == nil {
+		t.Error("PostgreSQL 16 accepted")
+	}
+	if err := checkVersion(170000); err != nil {
+		t.Error(err)
+	}
+}
