@@ -26,6 +26,8 @@ const (
 	EdgeProducts = "products"
 	// EdgeCustomers holds the string denoting the customers edge name in mutations.
 	EdgeCustomers = "customers"
+	// EdgeSigningKeys holds the string denoting the signing_keys edge name in mutations.
+	EdgeSigningKeys = "signing_keys"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -42,6 +44,13 @@ const (
 	CustomersInverseTable = "customers"
 	// CustomersColumn is the table column denoting the customers relation/edge.
 	CustomersColumn = "tenant_id"
+	// SigningKeysTable is the table that holds the signing_keys relation/edge.
+	SigningKeysTable = "signing_keys"
+	// SigningKeysInverseTable is the table name for the SigningKey entity.
+	// It exists in this package in order to avoid circular dependency with the "signingkey" package.
+	SigningKeysInverseTable = "signing_keys"
+	// SigningKeysColumn is the table column denoting the signing_keys relation/edge.
+	SigningKeysColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -135,6 +144,20 @@ func ByCustomers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newCustomersStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// BySigningKeysCount orders the results by signing_keys count.
+func BySigningKeysCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newSigningKeysStep(), opts...)
+	}
+}
+
+// BySigningKeys orders the results by signing_keys terms.
+func BySigningKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newSigningKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -147,5 +170,12 @@ func newCustomersStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(CustomersInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, CustomersTable, CustomersColumn),
+	)
+}
+func newSigningKeysStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(SigningKeysInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, SigningKeysTable, SigningKeysColumn),
 	)
 }

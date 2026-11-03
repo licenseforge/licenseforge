@@ -12,6 +12,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
+	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/schema"
 )
@@ -744,6 +745,65 @@ func init() {
 	// product.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	product.IDValidator = func() func(string) error {
 		validators := productDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	signingkeyMixin := schema.SigningKey{}.Mixin()
+	signingkeyMixinFields0 := signingkeyMixin[0].Fields()
+	_ = signingkeyMixinFields0
+	signingkeyMixinFields1 := signingkeyMixin[1].Fields()
+	_ = signingkeyMixinFields1
+	signingkeyFields := schema.SigningKey{}.Fields()
+	_ = signingkeyFields
+	// signingkeyDescTenantID is the schema descriptor for tenant_id field.
+	signingkeyDescTenantID := signingkeyMixinFields0[0].Descriptor()
+	// signingkey.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	signingkey.TenantIDValidator = func() func(string) error {
+		validators := signingkeyDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// signingkeyDescCreatedAt is the schema descriptor for created_at field.
+	signingkeyDescCreatedAt := signingkeyMixinFields1[0].Descriptor()
+	// signingkey.DefaultCreatedAt holds the default value on creation for the created_at field.
+	signingkey.DefaultCreatedAt = signingkeyDescCreatedAt.Default.(func() time.Time)
+	// signingkeyDescUpdatedAt is the schema descriptor for updated_at field.
+	signingkeyDescUpdatedAt := signingkeyMixinFields1[1].Descriptor()
+	// signingkey.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	signingkey.DefaultUpdatedAt = signingkeyDescUpdatedAt.Default.(func() time.Time)
+	// signingkey.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	signingkey.UpdateDefaultUpdatedAt = signingkeyDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// signingkeyDescPublicKey is the schema descriptor for public_key field.
+	signingkeyDescPublicKey := signingkeyFields[2].Descriptor()
+	// signingkey.PublicKeyValidator is a validator for the "public_key" field. It is called by the builders before save.
+	signingkey.PublicKeyValidator = signingkeyDescPublicKey.Validators[0].(func([]byte) error)
+	// signingkeyDescID is the schema descriptor for id field.
+	signingkeyDescID := signingkeyFields[0].Descriptor()
+	// signingkey.DefaultID holds the default value on creation for the id field.
+	signingkey.DefaultID = signingkeyDescID.Default.(func() string)
+	// signingkey.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	signingkey.IDValidator = func() func(string) error {
+		validators := signingkeyDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

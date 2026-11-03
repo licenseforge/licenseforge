@@ -28,6 +28,8 @@ type Tx struct {
 	PlanFeature *PlanFeatureClient
 	// Product is the client for interacting with the Product builders.
 	Product *ProductClient
+	// SigningKey is the client for interacting with the SigningKey builders.
+	SigningKey *SigningKeyClient
 	// Tenant is the client for interacting with the Tenant builders.
 	Tenant *TenantClient
 
@@ -168,6 +170,7 @@ func (tx *Tx) init() {
 	tx.Plan = NewPlanClient(tx.config)
 	tx.PlanFeature = NewPlanFeatureClient(tx.config)
 	tx.Product = NewProductClient(tx.config)
+	tx.SigningKey = NewSigningKeyClient(tx.config)
 	tx.Tenant = NewTenantClient(tx.config)
 }
 

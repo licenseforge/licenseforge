@@ -14,130 +14,17 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
-	"licenseforge.io/licenseforge/internal/store/ids"
+	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
-// Tests need PostgreSQL: LICENSEFORGE_TEST_DATABASE_URL is a superuser URL
-// (`make dev-db` prints one). Each run recreates the production role layout
-// from deploy/database-setup.sql with fresh names, because superusers bypass
-// row-level security and would make the isolation tests meaningless. In CI a
-// missing URL is a failure.
-var (
-	adminURL string
-	env      testEnv
-)
+// Tests need PostgreSQL; see package storetest.
+var env storetest.Env
 
-type testEnv struct{ name, ownerURL, tenantURL, platformURL string }
-
-func TestMain(m *testing.M) {
-	adminURL = os.Getenv("LICENSEFORGE_TEST_DATABASE_URL")
-	if adminURL == "" {
-		if os.Getenv("CI") != "" {
-			fmt.Fprintln(os.Stderr, "LICENSEFORGE_TEST_DATABASE_URL must be set in CI: tenant isolation tests are release blockers (ADR-0009)")
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, "skipping store tests: LICENSEFORGE_TEST_DATABASE_URL not set (run `make dev-db`)")
-		os.Exit(0)
-	}
-	admin, err := sql.Open("pgx", adminURL)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	code := 1
-	if err := setup(admin); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	} else {
-		code = m.Run()
-	}
-	teardown(admin)
-	_ = admin.Close()
-	os.Exit(code)
-}
-
-func suffix() string { return strings.TrimPrefix(ids.New("x"), "x_")[:10] }
-
-// userURL returns adminURL with another login and database.
-func userURL(user, db string, params ...string) string {
-	u, _ := url.Parse(adminURL)
-	u.User = url.UserPassword(user, "test")
-	u.Path = "/" + db
-	q := u.Query()
-	for i := 0; i+1 < len(params); i += 2 {
-		q.Set(params[i], params[i+1])
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-// cleanupStmts run after the tests, in order: the database first, then roles
-// (roles holding privileges on a live database can't be dropped).
-var (
-	cleanupMu    sync.Mutex
-	cleanupStmts []string
-)
-
-func addCleanup(stmts ...string) {
-	cleanupMu.Lock()
-	defer cleanupMu.Unlock()
-	cleanupStmts = append(cleanupStmts, stmts...)
-}
-
-func adminExec(admin *sql.DB, stmts ...string) error {
-	for _, s := range stmts {
-		if _, err := admin.Exec(s); err != nil {
-			return fmt.Errorf("%s: %w", s, err)
-		}
-	}
-	return nil
-}
-
-func setup(admin *sql.DB) error {
-	// Group roles are cluster-wide and shared by concurrent test runs.
-	if err := adminExec(admin, `DO $$ BEGIN
-		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_app') THEN CREATE ROLE licenseforge_app NOLOGIN; END IF;
-		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_platform') THEN CREATE ROLE licenseforge_platform NOLOGIN; END IF;
-	END $$`); err != nil {
-		return err
-	}
-	s := suffix()
-	env.name = "lf_test_" + s
-	owner, api, adm := "lf_own_"+s, "lf_api_"+s, "lf_adm_"+s
-	addCleanup(
-		fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, env.name),
-		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, api),
-		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, adm),
-	)
-	if err := adminExec(admin,
-		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test'`, owner),
-		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, api),
-		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_platform`, adm),
-		fmt.Sprintf(`CREATE DATABASE %s OWNER %s`, env.name, owner),
-		fmt.Sprintf(`REVOKE CONNECT ON DATABASE %s FROM PUBLIC`, env.name),
-		fmt.Sprintf(`REVOKE TEMPORARY ON DATABASE %s FROM PUBLIC`, env.name),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s, %s, %s`, env.name, owner, api, adm),
-	); err != nil {
-		return err
-	}
-	env.ownerURL = userURL(owner, env.name)
-	env.tenantURL = userURL(api, env.name)
-	env.platformURL = userURL(adm, env.name)
-	return Migrate(context.Background(), env.ownerURL)
-}
-
-func teardown(admin *sql.DB) {
-	// The owner role goes last: it owns the database dropped first.
-	addCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS lf_own_%s`, strings.TrimPrefix(env.name, "lf_test_")))
-	for _, s := range cleanupStmts {
-		if _, err := admin.Exec(s); err != nil {
-			fmt.Fprintf(os.Stderr, "cleanup: %s: %v\n", s, err)
-		}
-	}
-}
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, Migrate)) }
 
 func openDB(t *testing.T) *DB {
 	t.Helper()
-	d, err := Open(context.Background(), env.tenantURL, env.platformURL)
+	d, err := Open(context.Background(), env.TenantURL, env.PlatformURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,55 +33,55 @@ func openDB(t *testing.T) *DB {
 }
 
 func TestOpenRefusesUnsafeRoles(t *testing.T) {
-	admin, err := sql.Open("pgx", adminURL)
+	admin, err := sql.Open("pgx", env.AdminURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = admin.Close() }()
-	s := suffix()
-	ownerRole := "lf_own_" + strings.TrimPrefix(env.name, "lf_test_")
+	s := storetest.Suffix()
+	ownerRole := "lf_own_" + strings.TrimPrefix(env.Name, "lf_test_")
 	creator, byp, member := "lf_cr_"+s, "lf_byp_"+s, "lf_mem_"+s
 	inOwner, inProgram, temp, creates := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s
 	logins := []string{creator, member, inOwner, inProgram, temp, creates}
 	for _, r := range append(logins, byp) {
-		addCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
+		storetest.AddCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
 	}
-	if err := adminExec(admin,
+	if err := storetest.AdminExec(admin,
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' CREATEROLE IN ROLE licenseforge_app`, creator),
 		fmt.Sprintf(`CREATE ROLE %s NOLOGIN BYPASSRLS`, byp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, %s`, member, byp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, %s`, inOwner, ownerRole),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, pg_execute_server_program`, inProgram),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, temp),
-		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.name, temp),
+		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.Name, temp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, creates),
-		fmt.Sprintf(`GRANT CREATE ON DATABASE %s TO %s`, env.name, creates),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.name, strings.Join(logins, ", ")),
+		fmt.Sprintf(`GRANT CREATE ON DATABASE %s TO %s`, env.Name, creates),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.Name, strings.Join(logins, ", ")),
 	); err != nil {
 		t.Fatal(err)
 	}
-	tenantUser := "lf_api_" + strings.TrimPrefix(env.name, "lf_test_")
+	tenantUser := "lf_api_" + strings.TrimPrefix(env.Name, "lf_test_")
 	for name, dsn := range map[string]string{
-		"superuser":                           strings.Replace(adminURL, "/postgres?", "/"+env.name+"?", 1),
-		"schema owner":                        env.ownerURL,
-		"platform login":                      env.platformURL,
-		"createrole":                          userURL(creator, env.name),
-		"member of bypassrls":                 userURL(member, env.name),
-		"member of owner role":                userURL(inOwner, env.name),
-		"member of pg_execute_server_program": userURL(inProgram, env.name),
-		"can create temp tables":              userURL(temp, env.name),
-		"can create schemas":                  userURL(creates, env.name),
-		"preset tenant":                       userURL(tenantUser, env.name, "app.tenant_id", "tnt_x"),
-		"switched role":                       userURL(tenantUser, env.name, "role", "licenseforge_app"),
-		"superuser switched too":              strings.Replace(adminURL, "/postgres?", "/"+env.name+"?role="+tenantUser+"&", 1),
+		"superuser":                           strings.Replace(env.AdminURL, "/postgres?", "/"+env.Name+"?", 1),
+		"schema owner":                        env.OwnerURL,
+		"platform login":                      env.PlatformURL,
+		"createrole":                          storetest.UserURL(env.AdminURL, creator, env.Name),
+		"member of bypassrls":                 storetest.UserURL(env.AdminURL, member, env.Name),
+		"member of owner role":                storetest.UserURL(env.AdminURL, inOwner, env.Name),
+		"member of pg_execute_server_program": storetest.UserURL(env.AdminURL, inProgram, env.Name),
+		"can create temp tables":              storetest.UserURL(env.AdminURL, temp, env.Name),
+		"can create schemas":                  storetest.UserURL(env.AdminURL, creates, env.Name),
+		"preset tenant":                       storetest.UserURL(env.AdminURL, tenantUser, env.Name, "app.tenant_id", "tnt_x"),
+		"switched role":                       storetest.UserURL(env.AdminURL, tenantUser, env.Name, "role", "licenseforge_app"),
+		"superuser switched too":              strings.Replace(env.AdminURL, "/postgres?", "/"+env.Name+"?role="+tenantUser+"&", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Open(context.Background(), dsn, env.platformURL); !errors.Is(err, ErrUnsafeRole) {
+			if _, err := Open(context.Background(), dsn, env.PlatformURL); !errors.Is(err, ErrUnsafeRole) {
 				t.Fatalf("got %v, want ErrUnsafeRole", err)
 			}
 		})
 	}
-	if _, err := Open(context.Background(), env.tenantURL, env.tenantURL); !errors.Is(err, ErrUnsafeRole) {
+	if _, err := Open(context.Background(), env.TenantURL, env.TenantURL); !errors.Is(err, ErrUnsafeRole) {
 		t.Fatalf("tenant login as platform pool: got %v, want ErrUnsafeRole", err)
 	}
 }
@@ -206,7 +93,7 @@ func TestMigrate(t *testing.T) {
 		errs := make(chan error, 5)
 		for range 5 {
 			wg.Add(1)
-			go func() { defer wg.Done(); errs <- Migrate(ctx, env.ownerURL) }()
+			go func() { defer wg.Done(); errs <- Migrate(ctx, env.OwnerURL) }()
 		}
 		wg.Wait()
 		close(errs)
@@ -216,7 +103,7 @@ func TestMigrate(t *testing.T) {
 			}
 		}
 	})
-	owner, err := sql.Open("pgx", env.ownerURL)
+	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +129,7 @@ func TestMigrate(t *testing.T) {
 				ms, _ := embedded()
 				_, _ = owner.Exec(`UPDATE schema_migrations SET checksum = $1 WHERE version = $2`, ms[0].checksum, ms[0].version)
 			}()
-			if err := Migrate(ctx, env.ownerURL); err == nil {
+			if err := Migrate(ctx, env.OwnerURL); err == nil {
 				t.Fatal("Migrate must refuse")
 			}
 		})
@@ -259,7 +146,7 @@ func TestOwnerSeesAllRowsForDataMigrations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	owner, err := sql.Open("pgx", env.ownerURL)
+	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +165,7 @@ func createTenants(t *testing.T, d *DB, n int) []*ent.Tenant {
 	var out []*ent.Tenant
 	err := d.WithPlatform(context.Background(), func(tx *ent.Tx) error {
 		for range n {
-			tn, err := tx.Tenant.Create().SetSlug("t-" + suffix()).SetName("T").Save(context.Background())
+			tn, err := tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(context.Background())
 			if err != nil {
 				return err
 			}
@@ -437,7 +324,7 @@ func TestTenantScopeDoesNotLeak(t *testing.T) {
 // policies; views, materialized views, partitioned and foreign tables are
 // refused until reviewed (they can bypass or not inherit RLS).
 func TestEveryRelationHasCanonicalRLS(t *testing.T) {
-	owner, err := sql.Open("pgx", env.ownerURL)
+	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +338,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"tenant_read":  "SELECT licenseforge_app ((id)::text = app_tenant_id())",
 		"platform_all": "ALL licenseforge_platform true true",
 	}
-	ou, _ := url.Parse(env.ownerURL)
+	ou, _ := url.Parse(env.OwnerURL)
 	ownerRole := ou.User.Username()
 
 	rows, err := owner.Query(`
@@ -598,7 +485,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 
 func TestNoTransactionMigration(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("pgx", env.ownerURL)
+	db, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +512,7 @@ func TestNoTransactionMigration(t *testing.T) {
 	}
 	defer func() { _, _ = conn.ExecContext(ctx, `DROP INDEX IF EXISTS products_bad_idx`) }()
 	// Simulating the failed build needs superuser (pg_index is a catalog).
-	su, err := sql.Open("pgx", strings.Replace(adminURL, "/postgres?", "/"+env.name+"?", 1))
+	su, err := sql.Open("pgx", strings.Replace(env.AdminURL, "/postgres?", "/"+env.Name+"?", 1))
 	if err != nil {
 		t.Fatal(err)
 	}

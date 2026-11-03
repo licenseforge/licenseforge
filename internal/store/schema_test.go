@@ -11,6 +11,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
 // describe returns a normalized description of the public schema: columns,
@@ -54,17 +55,17 @@ func describe(t *testing.T, db *sql.DB) (core []string, sameTenant []string) {
 // columns or indexes, or other drift the migration diff doesn't report fail.
 func TestMigrationsMatchEntSchema(t *testing.T) {
 	ctx := context.Background()
-	admin, err := sql.Open("pgx", adminURL)
+	admin, err := sql.Open("pgx", env.AdminURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = admin.Close() }()
-	ref := "lf_test_ref_" + suffix()
-	addCleanup(fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, ref))
+	ref := "lf_test_ref_" + storetest.Suffix()
+	storetest.AddCleanup(fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, ref))
 	if _, err := admin.Exec(`CREATE DATABASE ` + ref); err != nil {
 		t.Fatal(err)
 	}
-	refDB, err := sql.Open("pgx", strings.Replace(adminURL, "/postgres?", "/"+ref+"?", 1))
+	refDB, err := sql.Open("pgx", strings.Replace(env.AdminURL, "/postgres?", "/"+ref+"?", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestMigrationsMatchEntSchema(t *testing.T) {
 	if err := ent.NewClient(ent.Driver(entsql.OpenDB("postgres", refDB))).Schema.Create(ctx); err != nil {
 		t.Fatal(err)
 	}
-	migrated, err := sql.Open("pgx", env.ownerURL)
+	migrated, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestMigrationsMatchEntSchema(t *testing.T) {
 // tenant_id. This also catches keys silently dropped with a column, or names
 // truncated past 63 characters.
 func TestCrossTableReferencesAreSameTenant(t *testing.T) {
-	owner, err := sql.Open("pgx", env.ownerURL)
+	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}

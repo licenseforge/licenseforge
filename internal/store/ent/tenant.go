@@ -37,9 +37,11 @@ type TenantEdges struct {
 	Products []*Product `json:"products,omitempty"`
 	// Customers holds the value of the customers edge.
 	Customers []*Customer `json:"customers,omitempty"`
+	// SigningKeys holds the value of the signing_keys edge.
+	SigningKeys []*SigningKey `json:"signing_keys,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [2]bool
+	loadedTypes [3]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -58,6 +60,15 @@ func (e TenantEdges) CustomersOrErr() ([]*Customer, error) {
 		return e.Customers, nil
 	}
 	return nil, &NotLoadedError{edge: "customers"}
+}
+
+// SigningKeysOrErr returns the SigningKeys value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) SigningKeysOrErr() ([]*SigningKey, error) {
+	if e.loadedTypes[2] {
+		return e.SigningKeys, nil
+	}
+	return nil, &NotLoadedError{edge: "signing_keys"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -135,6 +146,11 @@ func (_m *Tenant) QueryProducts() *ProductQuery {
 // QueryCustomers queries the "customers" edge of the Tenant entity.
 func (_m *Tenant) QueryCustomers() *CustomerQuery {
 	return NewTenantClient(_m.config).QueryCustomers(_m)
+}
+
+// QuerySigningKeys queries the "signing_keys" edge of the Tenant entity.
+func (_m *Tenant) QuerySigningKeys() *SigningKeyQuery {
+	return NewTenantClient(_m.config).QuerySigningKeys(_m)
 }
 
 // Update returns a builder for updating this Tenant.

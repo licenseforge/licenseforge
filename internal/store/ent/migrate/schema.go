@@ -377,6 +377,53 @@ var (
 			},
 		},
 	}
+	// SigningKeysColumns holds the columns for the "signing_keys" table.
+	SigningKeysColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "alg", Type: field.TypeEnum, Enums: []string{"ed25519"}},
+		{Name: "public_key", Type: field.TypeBytes},
+		{Name: "status", Type: field.TypeEnum, Enums: []string{"pending", "active", "retired"}},
+		{Name: "private_key_ciphertext", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "activated_at", Type: field.TypeTime, Nullable: true},
+		{Name: "retired_at", Type: field.TypeTime, Nullable: true},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// SigningKeysTable holds the schema information for the "signing_keys" table.
+	SigningKeysTable = &schema.Table{
+		Name:       "signing_keys",
+		Columns:    SigningKeysColumns,
+		PrimaryKey: []*schema.Column{SigningKeysColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "signing_keys_tenants_signing_keys",
+				Columns:    []*schema.Column{SigningKeysColumns[9]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "signingkey_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{SigningKeysColumns[9]},
+			},
+			{
+				Name:    "signingkey_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{SigningKeysColumns[9], SigningKeysColumns[0]},
+			},
+			{
+				Name:    "signingkey_tenant_id_status",
+				Unique:  true,
+				Columns: []*schema.Column{SigningKeysColumns[9], SigningKeysColumns[5]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "(status)::text = ANY (ARRAY['active'::text, 'pending'::text])",
+				},
+			},
+		},
+	}
 	// TenantsColumns holds the columns for the "tenants" table.
 	TenantsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -400,6 +447,7 @@ var (
 		PlansTable,
 		PlanFeaturesTable,
 		ProductsTable,
+		SigningKeysTable,
 		TenantsTable,
 	}
 )
@@ -510,6 +558,18 @@ func init() {
 		"products_id_format":      "id ~ '^prd_[a-z2-7]{26}$'",
 		"products_name_not_blank": "btrim(name) <> ''",
 		"products_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
+	SigningKeysTable.ForeignKeys[0].RefTable = TenantsTable
+	SigningKeysTable.Annotation = &entsql.Annotation{}
+	SigningKeysTable.Annotation.Checks = map[string]string{
+		"signing_keys_activated_at":      "((status)::text <> 'pending'::text OR activated_at IS NULL) AND ((status)::text <> 'active'::text OR activated_at IS NOT NULL)",
+		"signing_keys_alg_valid":         "(alg)::text = ANY (ARRAY['ed25519'::text])",
+		"signing_keys_ciphertext":        "private_key_ciphertext IS NULL OR private_key_ciphertext ~ '^v1\\.[a-z0-9-]{1,32}\\.[A-Za-z0-9_-]{80}$'",
+		"signing_keys_ed25519_len":       "(alg)::text <> 'ed25519'::text OR length(public_key) = 32",
+		"signing_keys_id_format":         "id ~ '^sk_[a-z2-7]{26}$'",
+		"signing_keys_retired_at":        "((status)::text = 'retired'::text) = (retired_at IS NOT NULL)",
+		"signing_keys_retired_destroyed": "((status)::text = 'retired'::text) = (private_key_ciphertext IS NULL)",
+		"signing_keys_status_valid":      "(status)::text = ANY (ARRAY['pending'::text, 'active'::text, 'retired'::text])",
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
