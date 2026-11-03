@@ -1,9 +1,6 @@
 # ADR-0026 Signing key lifecycle
 
-*Status: proposed · Date: 2026-11-02*
-
-> [!WARNING]
-> **Proposed (drafted overnight 2026-11-02, implemented in the signing-keys PR). Needs maintainer acceptance before merge.**
+*Status: accepted · Date: 2026-11-02*
 
 ## Context
 Each tenant signs its licenses and leases with its own Ed25519 keys ([ADR-0004 Signed license files with Ed25519](0004-signed-license-files-with-ed25519.md), [ADR-0009 Multi-tenancy](0009-multi-tenancy.md)). Vendors embed the trusted public keys (`kid`, `alg`, key) in their builds ([License File Format](../../spec/license-format.md)). So a new key is only useful once vendor builds trust it: if the server switched to a new key at once, every deployed build would reject the next lease refresh, an outage for all of the vendor's customers. Architecture Overview fixes the custody model for v0.1 (private keys AES-GCM-encrypted with the master keyring, behind a `Signer` interface); the lifecycle wasn't decided.

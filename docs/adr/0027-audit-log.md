@@ -1,9 +1,6 @@
 # ADR-0027 Audit log
 
-*Status: proposed · Date: 2026-11-02*
-
-> [!WARNING]
-> **Proposed (drafted overnight 2026-11-02). Needs maintainer acceptance before the implementation merges.**
+*Status: accepted · Date: 2026-11-02*
 
 ## Context
 [ADR-0021 Certification readiness](0021-certification-readiness.md) and [ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md) require an append-only, hash-chained audit log: who, what, when, where, outcome, tenant and object (AU-2, AU-3, AU-8, AU-9), with configurable retention (AU-11) and SIEM export (AU-6). They don't say how the chain is scoped, serialized or hashed.
@@ -21,11 +18,11 @@
 - **Retention**: per-tenant setting. Deletion removes only a prefix of the chain, and only through the retention job (a later PR, with its own role). Default: keep everything.
 - **Tamper evidence against the database owner**: an attacker with owner access could rewrite the whole chain. **SIEM export of each entry's hash** (syslog / OTel, later PR) anchors the chain outside the database. Documented as the residual risk until then: an unkeyed hash chain gives AU-9(3) cryptographic protection only once it has that external anchor.
 
-## Open questions (for acceptance)
-- [ ] **Events without a tenant** (failed logins for unknown accounts, platform-admin login, platform settings): a separate platform chain (`tenant_id` NULL or a reserved platform tenant)? Proposed: a platform chain, same format.
-- [ ] **GDPR erasure vs hash chain**: actor ID, IP and user agent are personal data, and the hash makes erasing them break the chain. Proposed: keep them, with retention as the erasure path, and document it as a legal-basis (legitimate interest / legal obligation) retention; alternative is a separate erasable table with a hashed commitment in the chain.
-- [ ] **Database-enforced linking**: any code with INSERT can append a badly linked row, after which the chain fails to verify forever (no UPDATE/DELETE to repair). A BEFORE INSERT trigger enforcing `seq = head+1`, `prev_hash = head.hash` and `occurred_at = clock_timestamp()` would prevent it, but the project avoids triggers so far.
-- [ ] **Tenant offboarding**: the tenant FK blocks deleting a tenant with audit entries until export + retention exist.
+## Resolved at acceptance (2026-11-03)
+- **Events without a tenant** (failed logins for unknown accounts, platform-admin login, platform settings) go to a **platform chain** in the same format, under a reserved platform tenant row. The tenant FK and canonical RLS apply unchanged; only the platform role reads it.
+- **GDPR erasure vs hash chain**: actor ID, source IP and user agent stay in the chain; **retention is the erasure path**. Legal basis: legal obligation / legitimate interest in security logging (GDPR Art. 17(3)), documented in the DPA. A separate erasable table with a hashed commitment is deferred until a customer needs it.
+- **Database-enforced linking**: **no trigger** for now. `Record` is the only writer and the isolation test keeps refusing triggers. A badly linked row is repaired by a documented owner-role procedure. Revisit when a second writer (import, replication) exists.
+- **Tenant offboarding**: hard deletion stays blocked by the tenant FK. Offboarding means suspending/archiving the tenant; deletion comes with the export and retention job.
 
 ## Consequences
 - Writes that are audited serialize per tenant. That's fine for admin actions; high-volume events (every activation or validation) stay in metrics and logs, not the audit chain, unless a tenant opts in later.
