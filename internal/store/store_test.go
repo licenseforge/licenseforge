@@ -542,10 +542,10 @@ func TestCheckVersion(t *testing.T) {
 	defer func(v int) { minPostgres = v }(minPostgres)
 	minPostgres = 990000
 	ctx := context.Background()
-	if err := Migrate(ctx, env.ownerURL); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if err := Migrate(ctx, env.OwnerURL); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Errorf("Migrate: %v", err)
 	}
-	if d, err := Open(ctx, env.tenantURL, env.platformURL); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if d, err := Open(ctx, env.TenantURL, env.PlatformURL); err == nil || !strings.Contains(err.Error(), "not supported") {
 		if d != nil {
 			_ = d.Close()
 		}
