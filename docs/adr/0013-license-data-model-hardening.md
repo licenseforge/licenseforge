@@ -27,6 +27,10 @@ Tables `customers`, `licenses`, `activations` (`internal/store/schema`), revised
 - **Activations**: hashed fingerprint and source, binding, mode, app/SDK version, first/last/deactivated times in order; Kubernetes fingerprints bind the cluster, all others the machine; an activation must bind what its license requires (site licenses have none); one active activation per fingerprint per license.
 - **Never deleted**; column grants keep tenant, product, customer, issue time and activation identity immutable.
 - **GDPR erasure** (data subject request): null or replace the customer's name, email and `external_refs`, its licenses' `external_refs` and its activations' `hostname`. `external_refs` values must be strings.
+- **Term and site rules**: a `from_issue` term license always has `expires_at`; site licenses (`bind_type: none`) start at issue (never `from_first_activation`) and have no activation limit (plans and licenses).
+- **Binding change = new license**: the activation key includes the binding and activations are never deleted, so a license's `bind_type` can't change once it has had any activation. Upgrades to a plan with another binding are refused by the service; the customer gets a new license.
+- **Upgrades reset `rehost_count`** when the new plan's `max_rehosts` is lower (the CHECK keeps the count within the limit).
+- **Limits** are integers without a fraction (`1.0` is refused; `1e2` is stored as `100`, which is valid), and limit names are feature keys.
 - **Service-enforced, recorded in the audit log** (CHECKs can't see the previous row and triggers aren't used): revocation is final, deactivation can't be undone, first activation is set once, the activation limit (row lock on the license). A test pins that the database does not enforce these, so a change is deliberate.
 
 ## Consequences
