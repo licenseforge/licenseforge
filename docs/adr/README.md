@@ -31,3 +31,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0025](0025-license-key-storage-and-encryption-at-rest.md) | License key storage and encryption at rest | accepted |
 | [ADR-0026](0026-signing-key-lifecycle.md) | Signing key lifecycle | accepted |
 | [ADR-0027](0027-audit-log.md) | Audit log | accepted |
+| [ADR-0028](0028-postgresql-17-minimum.md) | PostgreSQL 17 minimum | accepted |
