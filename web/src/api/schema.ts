@@ -53,6 +53,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tenant's members, newest first.
+         * @description Needs member:read on every product; a product-scoped caller sees none.
+         */
+        get: operations["listMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/members/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a member, by default revoking the API tokens they created (ADR-0029).
+         * @description Their access ends at once. The last owner can't be removed (409).
+         */
+        delete: operations["removeMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a member's role or product scope (JSON Merge Patch).
+         * @description Dashboard sessions with member:write on every product. The caller may
+         *     only give or take away a role it holds itself; the last owner can't
+         *     be demoted (409). A demotion or narrower scope also revokes the
+         *     member's tokens the new grant wouldn't allow (ADR-0035), unless
+         *     revoke_tokens=false.
+         */
+        patch: operations["updateMember"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -99,6 +154,37 @@ export interface components {
             last_used_at: string | null;
             /** Format: date-time */
             revoked_at: string | null;
+        };
+        /** @enum {string} */
+        MemberRole: "owner" | "admin" | "manager" | "support" | "viewer";
+        Member: {
+            /** @example mem_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            user_id: string;
+            /** @description Verified email */
+            email: string | null;
+            name: string | null;
+            role: components["schemas"]["MemberRole"];
+            all_products: boolean;
+            product_ids: string[];
+            /** Format: date-time */
+            created_at: string;
+        };
+        MemberUpdated: components["schemas"]["Member"] & {
+            /** @description API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids). */
+            revoked_token_ids: string[];
+        };
+        MemberPage: {
+            items: components["schemas"]["Member"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        /** @description Absent fields stay; none is nullable (null answers 422). */
+        MemberPatch: {
+            role?: components["schemas"]["MemberRole"];
+            all_products?: boolean;
+            /** @description Replaces the product scope; with all_products absent or false. */
+            product_ids?: string[];
         };
         ApiTokenPage: {
             items: components["schemas"]["ApiToken"][];
@@ -240,6 +326,107 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    removeMember: {
+        parameters: {
+            query?: {
+                /** @description Also revoke every active API token the member created, each audited. */
+                revoke_tokens?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    /** @description Comma-separated IDs of the API tokens the removal revoked; absent if none. */
+                    "X-Revoked-Token-Ids"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    updateMember: {
+        parameters: {
+            query?: {
+                /** @description Revoke the member's active API tokens above the new role or outside the new scope, each audited. */
+                revoke_tokens?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["MemberPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed member, and the tokens the change revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberUpdated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
 }
