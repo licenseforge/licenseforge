@@ -6,7 +6,9 @@ package weblogin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -42,16 +46,39 @@ type Config struct {
 	ClientID     string
 	ClientSecret string // empty for a public client (PKCE only)
 	RedirectURL  string // https://<host>/auth/callback
+	Banner       string // system use notification (AC-8), plain text; empty = none
+}
+
+// MaxBannerLen bounds the login banner (bytes).
+const MaxBannerLen = 4096
+
+// checkBanner refuses a banner that isn't printable text: it is shown as
+// text (never HTML), but control characters have no place in a notice or
+// in the logs.
+func checkBanner(b string) error {
+	if len(b) > MaxBannerLen {
+		return fmt.Errorf("weblogin: login banner is %d bytes, at most %d", len(b), MaxBannerLen)
+	}
+	if !utf8.ValidString(b) {
+		return errors.New("weblogin: login banner is not UTF-8")
+	}
+	for _, r := range b {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return fmt.Errorf("weblogin: login banner has control character %U", r)
+		}
+	}
+	return nil
 }
 
 // Handler serves GET /auth/login and GET /auth/callback.
 type Handler struct {
-	client *http.Client
-	oauth  oauth2.Config
-	verify *oidc.IDTokenVerifier
-	id     identity.Service
-	log    *slog.Logger
-	cross  *http.CrossOriginProtection // trusts the redirect URL's origin
+	client           *http.Client
+	oauth            oauth2.Config
+	verify           *oidc.IDTokenVerifier
+	id               identity.Service
+	log              *slog.Logger
+	cross            *http.CrossOriginProtection // trusts the redirect URL's origin
+	banner, bannerID string                      // bannerID: hash the login page sends back as acknowledgement
 }
 
 // origin is the browser's Origin for u: lowercase host, no default port.
@@ -91,6 +118,15 @@ func secureURL(u string) bool {
 // at start). Issuer and redirect URL must be https, or http on localhost for
 // development.
 func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (*Handler, error) {
+	c.Banner = strings.TrimSpace(strings.ReplaceAll(c.Banner, "\r\n", "\n"))
+	if err := checkBanner(c.Banner); err != nil {
+		return nil, err
+	}
+	var bannerID string
+	if c.Banner != "" {
+		sum := sha256.Sum256([]byte(c.Banner))
+		bannerID = base64.RawURLEncoding.EncodeToString(sum[:16])
+	}
 	if c.Issuer == "" || c.ClientID == "" || c.RedirectURL == "" {
 		return nil, errors.New("weblogin: issuer, client ID and redirect URL are required")
 	}
@@ -116,15 +152,18 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 			ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURL,
 			Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
 		},
-		verify: p.Verifier(&oidc.Config{ClientID: c.ClientID}),
-		id:     id,
-		log:    log,
-		cross:  cross,
+		verify:   p.Verifier(&oidc.Config{ClientID: c.ClientID}),
+		id:       id,
+		log:      log,
+		cross:    cross,
+		banner:   c.Banner,
+		bannerID: bannerID,
 	}, nil
 }
 
 // Register adds the login routes to mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /auth/config", h.config)
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.Handle("GET /auth/session", h.RequireSession(http.HandlerFunc(h.session)))
@@ -138,7 +177,24 @@ func setCookie(w http.ResponseWriter, name, value string, maxAge int) {
 	})
 }
 
+// config is what the login page needs before anyone signs in: the banner
+// (AC-8) and its ID, which /auth/login wants back as the acknowledgement.
+func (h *Handler) config(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	_ = json.NewEncoder(w).Encode(map[string]string{"banner": h.banner, "banner_id": h.bannerID})
+}
+
+// login starts a login. With a banner configured it needs the banner's ID
+// (?banner=, sent once the user agreed on /login), so no login skips the
+// notice; anything else goes back to /login.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	if h.bannerID != "" && !equal(r.URL.Query().Get("banner"), h.bannerID) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 	state, nonce, verifier := rand.Text(), rand.Text(), oauth2.GenerateVerifier()
 	setCookie(w, flowCookie, state+"."+nonce+"."+verifier, int(flowTTL.Seconds()))
 	w.Header().Set("Cache-Control", "no-store")
@@ -240,7 +296,12 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, http.StatusInternalServerError, "new session", err)
 		return
 	}
-	setCookie(w, SessionCookie, cookie, int(identity.AbsoluteTimeout.Seconds()))
+	// AC-8 evidence: this login started from an acknowledged banner (the
+	// flow cookie exists only if /auth/login checked it).
+	if h.bannerID != "" {
+		h.log.Info("login banner acknowledged", "user", u.ID, "banner_id", h.bannerID)
+	}
+	setCookie(w, SessionCookie, cookie, int(h.id.SessionMaxAge().Seconds()))
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

@@ -37,8 +37,13 @@ type Claims struct {
 	Name          string
 }
 
-// Service runs on the identity pool.
-type Service struct{ DB *store.DB }
+// Service runs on the identity pool. Zero timeouts mean the defaults; set
+// them only to values CheckSessionTimeouts accepts.
+type Service struct {
+	DB          *store.DB
+	IdleTimeout time.Duration
+	MaxAge      time.Duration
+}
 
 // Login creates or refreshes the user for c and returns them. The name is
 // refreshed every login; the email only from a verified email claim, so an

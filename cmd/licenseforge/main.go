@@ -15,6 +15,9 @@
 //	LICENSEFORGE_OIDC_CLIENT_ID         OIDC client registration, required with the issuer
 //	LICENSEFORGE_OIDC_CLIENT_SECRET     empty for a public client (PKCE only)
 //	LICENSEFORGE_OIDC_REDIRECT_URL      https://<host>/auth/callback
+//	LICENSEFORGE_SESSION_IDLE_TIMEOUT   dashboard session idle timeout, default 1h (5m to 24h, AC-12)
+//	LICENSEFORGE_SESSION_MAX_AGE        dashboard session lifetime, default 12h (1h to 24h, at least the idle timeout)
+//	LICENSEFORGE_LOGIN_BANNER           system use notification shown before login (AC-8), plain text up to 4 KB
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -144,6 +147,10 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return db.Ping(ctx)
 	}
 	mux := newMux(ready, log)
+	ids, err := sessionTimeouts(identity.Service{DB: db})
+	if err != nil {
+		return err
+	}
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		login, err := weblogin.New(discoverCtx, weblogin.Config{
@@ -151,7 +158,8 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 			ClientID:     os.Getenv("LICENSEFORGE_OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
-		}, identity.Service{DB: db}, log)
+			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
+		}, ids, log)
 		cancel()
 		if err != nil {
 			return err
@@ -219,6 +227,26 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 	})
 	web.Mount(mux) // more specific routes (health, /auth/, /api/) win
 	return mux
+}
+
+// sessionTimeouts sets s's timeouts from the environment, within bounds.
+func sessionTimeouts(s identity.Service) (identity.Service, error) {
+	var err error
+	for _, v := range []struct {
+		key, def string
+		to       *time.Duration
+	}{
+		{"LICENSEFORGE_SESSION_IDLE_TIMEOUT", identity.DefaultIdleTimeout.String(), &s.IdleTimeout},
+		{"LICENSEFORGE_SESSION_MAX_AGE", identity.DefaultMaxAge.String(), &s.MaxAge},
+	} {
+		if *v.to, err = time.ParseDuration(envOr(v.key, v.def)); err != nil {
+			return s, fmt.Errorf("%s: want a duration like 30m, got %q", v.key, os.Getenv(v.key))
+		}
+	}
+	if err := identity.CheckSessionTimeouts(s.IdleTimeout, s.MaxAge); err != nil {
+		return s, fmt.Errorf("LICENSEFORGE_SESSION_IDLE_TIMEOUT / LICENSEFORGE_SESSION_MAX_AGE: %w", err)
+	}
+	return s, nil
 }
 
 func envOr(key, def string) string {

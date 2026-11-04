@@ -1,6 +1,7 @@
 package weblogin
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -116,16 +117,40 @@ type fixture struct {
 	ids    identity.Service
 	db     *store.DB
 	client *http.Client
+	logs   *syncBuffer
+	ack    string         // ?banner= sent to /auth/login
+	last   *http.Response // the last callback's response (body closed)
 }
 
-func setup(t *testing.T, opts ...func(*idp)) *fixture {
+// syncBuffer collects the handler's logs; server goroutines write to it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func setup(t *testing.T, opts ...func(*idp)) *fixture { return setupWith(t, nil, opts...) }
+
+// setupWith lets cfg change the handler's configuration and identity service.
+func setupWith(t *testing.T, cfg func(*Config, *identity.Service), opts ...func(*idp)) *fixture {
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db}
+	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db, logs: &syncBuffer{}}
 	for _, o := range opts {
 		o(f.idp)
 	}
@@ -134,8 +159,11 @@ func setup(t *testing.T, opts ...func(*idp)) *fixture {
 	f.app = httptest.NewUnstartedServer(mux)
 	f.app.StartTLS()
 	t.Cleanup(f.app.Close)
-	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"},
-		f.ids, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"}
+	if cfg != nil {
+		cfg(&c, &f.ids)
+	}
+	h, err := New(ctx, c, f.ids, slog.New(slog.NewTextHandler(f.logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +178,7 @@ func setup(t *testing.T, opts ...func(*idp)) *fixture {
 
 // start runs /auth/login and returns the authorize request's parameters.
 func (f *fixture) start(t *testing.T) url.Values {
-	resp, err := f.client.Get(f.app.URL + "/auth/login")
+	resp, err := f.client.Get(f.app.URL + "/auth/login?banner=" + url.QueryEscape(f.ack))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +214,7 @@ func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
+	f.last = resp
 	return resp.StatusCode
 }
 
