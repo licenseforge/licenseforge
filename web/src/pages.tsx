@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { authConfigQuery, loginHref } from "@/api/session";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,24 @@ export function LoginPage() {
         </Button>
       )}
     </main>
+  );
+}
+
+export function TenantLayout() {
+  const { slug } = useParams({ from: "/app/t/$slug" });
+  const link = "rounded-md px-2 py-1 text-sm hover:bg-accent [&.active]:font-semibold [&.active]:underline";
+  return (
+    <>
+      <nav aria-label={t("app.name")} className="mb-6 flex gap-2">
+        <Link to="/t/$slug" params={{ slug }} activeOptions={{ exact: true }} className={link}>
+          {t("nav.overview")}
+        </Link>
+        <Link to="/t/$slug/settings/api-tokens" params={{ slug }} className={link}>
+          {t("nav.tokens")}
+        </Link>
+      </nav>
+      <Outlet />
+    </>
   );
 }
 
