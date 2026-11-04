@@ -11,6 +11,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 )
 
@@ -194,5 +196,32 @@ func TestLoginReturnsDisabledUser(t *testing.T) {
 	// The refused user is returned for the audit entry, never as a login.
 	if got, err := s.Login(ctx, c); !errors.Is(err, ErrDisabled) || got == nil || got.ID != u.ID {
 		t.Errorf("disabled login: %+v, %v", got, err)
+	}
+}
+
+// A membership in a tenant the identity login can't see (one the platform
+// pool created under the reserved platform tenant) is left out of the tenant
+// switcher instead of breaking it.
+func TestMembershipsSkipsHiddenTenant(t *testing.T) {
+	s, d := open(t)
+	ctx := context.Background()
+	u, err := s.Login(ctx, Claims{Issuer: "https://idp.example", Subject: sub(), Email: "h@example.com", EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
+		inv, err := tx.Invitation.Create().SetTenantID(audit.PlatformTenant).SetEmail("h@example.com").SetRole(invitation.RoleOwner).
+			SetScopeAll(true).SetTokenHash(store.InvitationTokenHash(sub())).SetExpiresAt(time.Now().Add(time.Hour)).
+			SetAcceptedAt(time.Now()).SetAcceptedBy(u.ID).Save(ctx)
+		if err != nil {
+			return err
+		}
+		return tx.Membership.Create().SetTenantID(audit.PlatformTenant).SetUserID(u.ID).SetInvitationID(inv.ID).
+			SetRole(membership.RoleOwner).SetScopeAll(true).Exec(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ms, err := s.Memberships(ctx, u.ID); err != nil || len(ms) != 0 {
+		t.Errorf("memberships = %+v, %v", ms, err)
 	}
 }

@@ -1,8 +1,11 @@
 -- The reserved platform tenant (ADR-0027, ADR-0029): the row that holds the
 -- platform audit chain (events without a tenant: logins, platform-admin
 -- changes). It is not a real tenant. Its fixed ID is audit.PlatformTenant.
--- Only the platform pool writes its chain, and that pool sees it as a chain,
--- never as a tenant. The tenant FK and the canonical policies stay unchanged:
+-- Only the platform pool writes its chain. On the platform pool only the
+-- tenants row itself is protected: that pool could still create rows under
+-- this tenant in any tenant-scoped table (foreign-key checks bypass RLS), so
+-- platform code must never do that. The tenant FK and the canonical policies
+-- stay unchanged:
 --   * app_tenant_id() never returns it, so the tenant pool (api login) and the
 --     identity pool can't read or write any of its rows through any policy,
 --     today's or a future table's, even when app.tenant_id is set to its ID.

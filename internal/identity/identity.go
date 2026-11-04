@@ -123,6 +123,9 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 			return err
 		}
 		for _, m := range ms {
+			if m.Edges.Tenant == nil { // a tenant this login can't see (the reserved platform tenant): not switchable
+				continue
+			}
 			out = append(out, TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
 				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll})
 		}

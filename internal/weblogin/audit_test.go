@@ -1,12 +1,17 @@
 package weblogin
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/audit"
+	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
@@ -130,6 +135,10 @@ func TestFailedBootstrapDoesNotFailLogin(t *testing.T) {
 	if n := len(f.admins(t)); n != 0 {
 		t.Errorf("%d admins", n)
 	}
+	// The bootstrap was attempted and failed on the database's refusal.
+	if logs := f.logs.String(); !strings.Contains(logs, `msg="bootstrap platform admin"`) || !strings.Contains(logs, "test_refuse") {
+		t.Errorf("no failed bootstrap in the log:\n%s", logs)
+	}
 }
 
 // No session without its audit entry (AU-5).
@@ -159,4 +168,85 @@ func countSessions(t *testing.T) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// lockedBuffer collects the handler's log; requests write it concurrently.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// A user disabled after Login but before the session (here: while the
+// bootstrap waits on the admin-set lock) is refused and the refusal recorded.
+func TestDisabledBeforeSessionIsRefused(t *testing.T) {
+	ctx := context.Background()
+	sub := ids.New("sub")
+	email := "late-" + storetest.Suffix() + "@example.com"
+	owner(t, `DELETE FROM platform_admins`, `DELETE FROM platform_admins`)
+	f := setupAdmin(t, email)
+	u, err := f.ids.Login(ctx, identity.Claims{Issuer: f.idp.srv.URL, Subject: sub, Email: email, EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := f.head(t)
+
+	// Hold the admin-set lock (store.platformAdminLock) so the callback stops in Bootstrap.
+	lock, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	conn, err := lock.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	const adminLock = 0x4C46_5041_444D
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, adminLock); err != nil {
+		t.Fatal(err)
+	}
+	q := f.start(t)
+	done := make(chan int, 1)
+	go func() { done <- f.finish(t, q, q.Get("state"), map[string]any{"sub": sub, "email": email}) }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		var waiting int
+		if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND ((classid::bigint << 32) | objid::bigint) = $1`, int64(adminLock)).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the callback never reached the bootstrap")
+		}
+	}
+	if err := f.db.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, adminLock); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code != http.StatusForbidden {
+		t.Errorf("callback: %d, want 403", code)
+	}
+	if f.session(t) != "" || len(f.admins(t)) != 0 {
+		t.Error("disabled user got a session or the admin role")
+	}
+	if es := f.entries(t, head); len(es) != 1 || es[0].Outcome != auditevent.OutcomeDenied || *es[0].ActorID != u.ID ||
+		es[0].Details != `{"reason":"user_disabled"}` {
+		t.Errorf("platform chain: %+v", es)
+	}
 }

@@ -112,6 +112,7 @@ func (p *idp) sign(t *testing.T, claims map[string]any) string {
 }
 
 type fixture struct {
+	logs   *lockedBuffer // the handler's log
 	idp    *idp
 	app    *httptest.Server
 	ids    identity.Service
@@ -129,7 +130,7 @@ func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db}
+	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db, logs: &lockedBuffer{}}
 	for _, o := range opts {
 		o(f.idp)
 	}
@@ -139,7 +140,7 @@ func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
 	f.app.StartTLS()
 	t.Cleanup(f.app.Close)
 	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback", BootstrapAdmin: admin},
-		f.ids, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		f.ids, slog.New(slog.NewTextHandler(f.logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
