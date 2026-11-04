@@ -66,13 +66,11 @@ func TestLoginRefusals(t *testing.T) {
 	s, d := open(t)
 	ctx := context.Background()
 	for name, c := range map[string]Claims{
-		"no issuer":              {Subject: sub()},
-		"no subject":             {Issuer: "https://idp.example"},
-		"blank subject":          {Issuer: "https://idp.example", Subject: "  "},
-		"NUL in subject":         {Issuer: "https://idp.example", Subject: "a\x00b"},
-		"verified, no email":     {Issuer: "https://idp.example", Subject: sub(), EmailVerified: true},
-		"verified, not an email": {Issuer: "https://idp.example", Subject: sub(), Email: "nope", EmailVerified: true},
-		"subject too long":       {Issuer: "https://idp.example", Subject: strings.Repeat("s", 256)},
+		"no issuer":        {Subject: sub()},
+		"no subject":       {Issuer: "https://idp.example"},
+		"blank subject":    {Issuer: "https://idp.example", Subject: "  "},
+		"NUL in subject":   {Issuer: "https://idp.example", Subject: "a\x00b"},
+		"subject too long": {Issuer: "https://idp.example", Subject: strings.Repeat("s", 256)},
 	} {
 		if _, err := s.Login(ctx, c); !errors.Is(err, ErrInvalidClaims) {
 			t.Errorf("%s: %v", name, err)
@@ -172,15 +170,22 @@ func TestConcurrentFirstLogin(t *testing.T) {
 func TestLoginEdgeCases(t *testing.T) {
 	s, _ := open(t)
 	ctx := context.Background()
-	for name, c := range map[string]Claims{
-		"issuer too long":       {Issuer: "https://" + strings.Repeat("i", 500), Subject: sub()},
-		"email too long":        {Issuer: "https://idp.example", Subject: sub(), Email: strings.Repeat("e", 320) + "@x.io", EmailVerified: true},
-		"email with spaces":     {Issuer: "https://idp.example", Subject: sub(), Email: " a@example.com", EmailVerified: true},
-		"email with bidi":       {Issuer: "https://idp.example", Subject: sub(), Email: "a\u202e@example.com", EmailVerified: true},
-		"email with zero-width": {Issuer: "https://idp.example", Subject: sub(), Email: "a\u200b@example.com", EmailVerified: true},
+	if _, err := s.Login(ctx, Claims{Issuer: "https://" + strings.Repeat("i", 500), Subject: sub()}); !errors.Is(err, ErrInvalidClaims) {
+		t.Errorf("issuer too long: %v", err)
+	}
+	// An unusable "verified" email is treated as unverified: the user still
+	// signs in, with no email stored and the flag off.
+	for name, email := range map[string]string{
+		"no email":      "",
+		"not an email":  "nope",
+		"too long":      strings.Repeat("e", 320) + "@x.io",
+		"spaces":        " a@example.com",
+		"bidi override": "a\u202e@example.com",
+		"zero-width":    "a\u200b@example.com",
 	} {
-		if _, err := s.Login(ctx, c); !errors.Is(err, ErrInvalidClaims) {
-			t.Errorf("%s: %v", name, err)
+		u, err := s.Login(ctx, Claims{Issuer: "https://idp.example", Subject: sub(), Email: email, EmailVerified: true})
+		if err != nil || u.Email != nil || u.EmailVerified {
+			t.Errorf("%s: %+v %v", name, u, err)
 		}
 	}
 	// A name of only format characters leaves the stored name as it was.

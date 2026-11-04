@@ -49,6 +49,9 @@ func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
+	if c.EmailVerified && !usableEmail(c.Email) {
+		c.Email, c.EmailVerified = "", false
+	}
 	u, err := s.login(ctx, c)
 	if ent.IsConstraintError(err) {
 		// Two first logins raced (two tabs, a double redirect): the other one
@@ -130,8 +133,8 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 // token's iss, trailing slash included; the subject may itself contain '|',
 // as Auth0's do), or an email that the IdP verified, compared
 // case-insensitively in ASCII only (no Unicode look-alike folding, such as
-// the long s or the Kelvin sign, for the highest-privilege grant). An empty
-// setting matches nobody.
+// the long s or the Kelvin sign, for the highest-privilege grant; non-ASCII
+// emails never match: use issuer|subject). An empty setting matches nobody.
 func BootstrapMatches(setting string, u *ent.User) bool {
 	setting = strings.TrimSpace(setting)
 	if setting == "" || u == nil {
@@ -159,10 +162,15 @@ func (c Claims) check() error {
 	if !ok(c.Issuer, 500) || !ok(c.Subject, 255) || strings.TrimSpace(c.Issuer) == "" || strings.TrimSpace(c.Subject) == "" {
 		return ErrInvalidClaims
 	}
-	if c.EmailVerified && (!ok(c.Email, 320) || !strings.Contains(c.Email, "@") || !graphic(c.Email)) {
-		return ErrInvalidClaims // a verified email is shown in member lists: no invisible or spoofing characters
-	}
 	return nil
+}
+
+// usableEmail reports whether a verified email can be stored and shown in
+// member lists: no spaces or invisible/spoofing characters. One that isn't is
+// treated as unverified (the user still signs in, but can't accept
+// invitations or bootstrap by email with it).
+func usableEmail(email string) bool {
+	return email != "" && len(email) <= 320 && utf8.ValidString(email) && strings.Contains(email, "@") && graphic(email)
 }
 
 func graphic(s string) bool {
