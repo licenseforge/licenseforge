@@ -6,8 +6,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
 func TestSessions(t *testing.T) {
@@ -38,6 +40,28 @@ func TestSessions(t *testing.T) {
 		if _, err := owner.Exec(q+` WHERE token_hash = $1`, sessionHash(cookie)); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Activity is recorded by the database clock, at most once a minute.
+	seen := func() (ago float64) {
+		t.Helper()
+		if err := owner.QueryRow(`SELECT extract(epoch FROM now() - last_seen_at) FROM sessions WHERE token_hash = $1`, sessionHash(cookie)).Scan(&ago); err != nil {
+			t.Fatal(err)
+		}
+		return ago
+	}
+	age(`UPDATE sessions SET last_seen_at = now() - interval '30 minutes'`)
+	if _, err := s.Session(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	if ago := seen(); ago > 5 {
+		t.Errorf("activity not recorded: last seen %vs ago", ago)
+	}
+	age(`UPDATE sessions SET last_seen_at = now() - interval '30 seconds'`)
+	if _, err := s.Session(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	if ago := seen(); ago < 25 {
+		t.Errorf("activity written more than once a minute: last seen %vs ago", ago)
 	}
 	// Activity keeps it alive; idle too long ends it.
 	age(`UPDATE sessions SET last_seen_at = now() - interval '59 minutes'`)
@@ -85,7 +109,7 @@ func TestSessions(t *testing.T) {
 	if err := owner.QueryRow(`SELECT count(*) FROM sessions WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("sessions left after suspension: %d %v", n, err)
 	}
-	if _, err := s.NewSession(ctx, u.ID); err == nil || !strings.Contains(err.Error(), "new_session") {
+	if _, err := s.NewSession(ctx, u.ID); !errors.Is(err, ErrDisabled) {
 		t.Errorf("new session for a suspended user: %v", err)
 	}
 	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err == nil {
@@ -126,5 +150,77 @@ func TestTenantPoolCantSeeSessions(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Errorf("tenant read sessions: %v", err)
+	}
+}
+
+// The database refuses sessions that don't start now, outlast a day, or
+// belong to a disabled user, even from the identity pool directly.
+func TestNewSessionPolicy(t *testing.T) {
+	s, d := open(t)
+	ctx := context.Background()
+	u, err := s.Login(ctx, Claims{Issuer: "https://idp.example", Subject: sub()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := func(created, expires, seen string) error {
+		return d.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
+				VALUES ($1, $2, $3, `+created+`, `+expires+`, `+seen+`)`, ids.Session(), u.ID, sessionHash(sub()))
+			return err
+		})
+	}
+	const now, later = "clock_timestamp()", "clock_timestamp() + interval '12 hours'"
+	if err := insert(now, later, now); err != nil {
+		t.Fatalf("valid session refused: %v", err)
+	}
+	for name, c := range map[string][3]string{
+		"created in the past": {"clock_timestamp() - interval '1 hour'", later, now},
+		"seen in the future":  {now, later, "clock_timestamp() + interval '1 hour'"},
+		"longer than a day":   {"clock_timestamp() + interval '1 minute'", "clock_timestamp() + interval '25 hours'", now},
+	} {
+		if err := insert(c[0], c[1], c[2]); err == nil || !strings.Contains(err.Error(), "new_session") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE users SET disabled_at = now() WHERE id = $1`, u.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert(now, later, now); err == nil || !strings.Contains(err.Error(), "new_session") {
+		t.Errorf("session for a disabled user: %v", err)
+	}
+}
+
+// A session started while DisableUser is running doesn't survive it: either
+// DisableUser deletes it, or NewSession waits and sees the user disabled.
+func TestNewSessionDuringDisable(t *testing.T) {
+	s, d := open(t)
+	ctx := context.Background()
+	u, err := s.Login(ctx, Claims{Issuer: "https://idp.example", Subject: sub()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error {
+		// users is updated and sessions deleted, not yet committed.
+		go func() { _, err := s.NewSession(ctx, u.ID); done <- err }()
+		time.Sleep(300 * time.Millisecond)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, ErrDisabled) {
+		t.Errorf("NewSession during DisableUser: %v", err)
+	}
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	var n int
+	if err := owner.QueryRow(`SELECT count(*) FROM sessions WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("sessions left after suspension: %d %v", n, err)
 	}
 }

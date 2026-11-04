@@ -12,10 +12,12 @@ CREATE POLICY identity_all ON "sessions" TO licenseforge_identity USING (true) W
 -- A session starts now, for an enabled user, and lasts at most a day.
 CREATE POLICY new_session ON "sessions" AS RESTRICTIVE FOR INSERT TO licenseforge_identity
   WITH CHECK ("created_at" BETWEEN clock_timestamp() - interval '5 minutes' AND clock_timestamp() + interval '5 minutes'
+    AND "last_seen_at" BETWEEN clock_timestamp() - interval '5 minutes' AND clock_timestamp() + interval '5 minutes'
     AND "expires_at" <= clock_timestamp() + interval '1 day'
     AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = "sessions"."user_id" AND u."disabled_at" IS NULL));
--- last_seen_at only moves forward, to about now.
-CREATE POLICY seen_forward ON "sessions" AS RESTRICTIVE FOR UPDATE TO licenseforge_identity
+-- last_seen_at is set to about now (RLS can't see the old value; setting it
+-- back only shortens the session).
+CREATE POLICY seen_now ON "sessions" AS RESTRICTIVE FOR UPDATE TO licenseforge_identity
   USING (true)
   WITH CHECK ("last_seen_at" BETWEEN clock_timestamp() - interval '5 minutes' AND clock_timestamp() + interval '5 minutes');
 CREATE POLICY platform_all ON "sessions" TO licenseforge_platform USING (true) WITH CHECK (true);

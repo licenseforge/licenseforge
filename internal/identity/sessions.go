@@ -37,16 +37,28 @@ func sessionHash(cookie string) []byte {
 
 // NewSession starts a session for userID and returns the cookie value (the
 // HTTP layer sets it HttpOnly, Secure, SameSite=Lax). Only its SHA-256 is
-// stored. Times come from the database clock; the database refuses a
-// session for a disabled user.
+// stored. Times come from the database clock. A disabled user gets
+// ErrDisabled; the user row is share-locked so a concurrent DisableUser
+// either sees this session (and deletes it) or is seen first.
 func (s Service) NewSession(ctx context.Context, userID string) (string, error) {
 	var b [32]byte
 	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (Go 1.24+)
 	cookie := base64.RawURLEncoding.EncodeToString(b[:])
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
-			VALUES ($1, $2, $3, clock_timestamp(), clock_timestamp() + $4::interval, clock_timestamp())`,
-			ids.Session(), userID, sessionHash(cookie), AbsoluteTimeout.String())
+		rows, err := tx.QueryContext(ctx, `SELECT 1 FROM users WHERE id = $1 AND disabled_at IS NULL FOR SHARE`, userID)
+		if err != nil {
+			return err
+		}
+		enabled := rows.Next()
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		if !enabled {
+			return ErrDisabled
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
+			VALUES ($1, $2, $3, clock_timestamp(), clock_timestamp() + make_interval(secs => $4), clock_timestamp())`,
+			ids.Session(), userID, sessionHash(cookie), AbsoluteTimeout.Seconds())
 		return err
 	})
 	if err != nil {
@@ -64,11 +76,10 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 	var u *ent.User
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		var id, userID string
-		var lastSeen time.Time
-		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id
+		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
 			WHERE s.token_hash = $1 AND s.expires_at > clock_timestamp()
-			  AND s.last_seen_at > clock_timestamp() - $2::interval AND u.disabled_at IS NULL`,
-			sessionHash(cookie), IdleTimeout.String())
+			  AND s.last_seen_at > clock_timestamp() - make_interval(secs => $2) AND u.disabled_at IS NULL`,
+			sessionHash(cookie), IdleTimeout.Seconds())
 		if err != nil {
 			return err
 		}
@@ -76,7 +87,7 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 			_ = rows.Close()
 			return errors.Join(sql.ErrNoRows, rows.Err())
 		}
-		err = rows.Scan(&id, &userID, &lastSeen)
+		err = rows.Scan(&id, &userID)
 		if cerr := rows.Close(); err == nil {
 			err = cerr
 		}
@@ -86,10 +97,9 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 		if u, err = tx.User.Query().Where(user.ID(userID)).Only(ctx); err != nil {
 			return err
 		}
-		if time.Since(lastSeen) > seenEvery {
-			_, err = tx.ExecContext(ctx, `UPDATE sessions SET last_seen_at = clock_timestamp()
-				WHERE id = $1 AND last_seen_at < clock_timestamp() - $2::interval`, id, seenEvery.String())
-		}
+		// Decided by the database clock: touches no row until it is due.
+		_, err = tx.ExecContext(ctx, `UPDATE sessions SET last_seen_at = clock_timestamp()
+			WHERE id = $1 AND last_seen_at < clock_timestamp() - make_interval(secs => $2)`, id, seenEvery.Seconds())
 		return err
 	})
 	if errors.Is(err, sql.ErrNoRows) {

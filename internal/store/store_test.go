@@ -407,10 +407,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	// Global tables (no tenant_id), each with its exact policies (ADR-0029).
 	global := map[string]map[string]string{
 		"sessions": {
-			"new_session (restrictive)":  `INSERT licenseforge_identity (((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))) AND (expires_at <= (clock_timestamp() + '1 day'::interval)) AND (EXISTS ( SELECT 1 FROM users u WHERE (((u.id)::text = (sessions.user_id)::text) AND (u.disabled_at IS NULL)))))`,
-			"seen_forward (restrictive)": `UPDATE licenseforge_identity true ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval)))`,
-			"identity_all":               "ALL licenseforge_identity true true",
-			"platform_all":               "ALL licenseforge_platform true true",
+			"new_session (restrictive)": `INSERT licenseforge_identity (((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))) AND ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval))) AND (expires_at <= (clock_timestamp() + '1 day'::interval)) AND (EXISTS ( SELECT 1 FROM users u WHERE (((u.id)::text = (sessions.user_id)::text) AND (u.disabled_at IS NULL)))))`,
+			"seen_now (restrictive)":    `UPDATE licenseforge_identity true ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval)))`,
+			"identity_all":              "ALL licenseforge_identity true true",
+			"platform_all":              "ALL licenseforge_platform true true",
 		},
 		"platform_admins": {
 			"grant_shape (restrictive)": `INSERT licenseforge_platform ((bootstrap AND (NOT (EXISTS ( SELECT 1 FROM platform_admins p)))) OR ((NOT bootstrap) AND (EXISTS ( SELECT 1 FROM platform_admins p WHERE ((p.user_id)::text = (platform_admins.granted_by)::text)))))`,
