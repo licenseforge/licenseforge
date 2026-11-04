@@ -25,6 +25,7 @@
 ## Docs
 - [Architecture Decision Records](docs/adr/README.md)
 - [License file format (`lf1`)](spec/license-format.md)
+- [Verifying a release](docs/verifying-releases.md): signatures, SBOMs and SLSA provenance of images, chart and binaries
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md). Commits must be signed off (DCO). Security issues: [SECURITY policy](https://github.com/licenseforge/.github/blob/main/SECURITY.md).

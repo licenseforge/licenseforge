@@ -95,7 +95,7 @@ func TestLifecycle(t *testing.T) {
 	if _, err := l.Active(ctx, tn); !errors.Is(err, ErrNoActiveKey) {
 		t.Fatalf("new tenant: %v, want ErrNoActiveKey", err)
 	}
-	first, err := l.Create(ctx, tn)
+	first, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	next, err := l.Create(ctx, tn)
+	next, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +122,10 @@ func TestLifecycle(t *testing.T) {
 	if pub, err := l.Public(ctx, tn, next.ID); err != nil || len(pub.Key) != ed25519.PublicKeySize {
 		t.Fatalf("pending key not published: %v", err)
 	}
-	if _, err := l.Create(ctx, tn); !errors.Is(err, ErrPendingExists) {
+	if _, err := l.Create(as(tn), tn); !errors.Is(err, ErrPendingExists) {
 		t.Fatalf("second pending key: %v", err)
 	}
-	if err := l.Promote(ctx, tn, first.ID); !errors.Is(err, ErrNotPending) {
+	if err := l.Promote(as(tn), tn, first.ID); !errors.Is(err, ErrNotPending) {
 		t.Fatalf("promoted the active key: %v", err)
 	}
 	if _, err := l.Sign(ctx, tn, first.ID, []byte("lf1."+next.ID+".eyJ9")); !errors.Is(err, ErrWrongMessage) {
@@ -135,7 +135,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("signed a non-lf1 message: %v", err)
 	}
 
-	if err := l.Promote(ctx, tn, next.ID); err != nil {
+	if err := l.Promote(as(tn), tn, next.ID); err != nil {
 		t.Fatal(err)
 	}
 	if kid, _ := l.Active(ctx, tn); kid != next.ID {
@@ -159,20 +159,20 @@ func TestLifecycle(t *testing.T) {
 	}
 
 	// Abandoned rotation: discard the pending key, then a new one can be made.
-	abandoned, err := l.Create(ctx, tn)
+	abandoned, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Discard(ctx, tn, next.ID); !errors.Is(err, ErrNotPending) {
+	if err := l.Discard(as(tn), tn, next.ID); !errors.Is(err, ErrNotPending) {
 		t.Fatalf("discarded the active key: %v", err)
 	}
-	if err := l.Discard(ctx, tn, abandoned.ID); err != nil {
+	if err := l.Discard(as(tn), tn, abandoned.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Promote(ctx, tn, abandoned.ID); !errors.Is(err, ErrNotPending) {
+	if err := l.Promote(as(tn), tn, abandoned.ID); !errors.Is(err, ErrNotPending) {
 		t.Fatalf("promoted a discarded key: %v", err)
 	}
-	if _, err := l.Create(ctx, tn); err != nil {
+	if _, err := l.Create(as(tn), tn); err != nil {
 		t.Fatalf("new pending key after discard: %v", err)
 	}
 }
@@ -181,11 +181,11 @@ func TestKeysStayInTenant(t *testing.T) {
 	ctx := context.Background()
 	l, platform, _ := setup(t)
 	a, b := newTenant(t, l), newTenant(t, l)
-	ka, err := l.Create(ctx, a)
+	ka, err := l.Create(as(a), a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kb, err := l.Create(ctx, b)
+	kb, err := l.Create(as(b), b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestKeysStayInTenant(t *testing.T) {
 		t.Fatalf("copied ciphertext: %v, want ErrDecrypt", err)
 	}
 	// Within a tenant too: the pending key's ciphertext copied to the active row.
-	pending, err := l.Create(ctx, a)
+	pending, err := l.Create(as(a), a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,15 +220,15 @@ func TestSigningKeysInDatabase(t *testing.T) {
 	ctx := context.Background()
 	l, platform, owner := setup(t)
 	tn := newTenant(t, l)
-	k, err := l.Create(ctx, tn)
+	k, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := l.Create(ctx, tn)
+	next, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Promote(ctx, tn, next.ID); err != nil {
+	if err := l.Promote(as(tn), tn, next.ID); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
@@ -305,14 +305,14 @@ func TestCreateAfterRetirementIsPending(t *testing.T) {
 	ctx := context.Background()
 	l, _, owner := setup(t)
 	tn := newTenant(t, l)
-	k, err := l.Create(ctx, tn)
+	k, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := owner.ExecContext(ctx, `UPDATE signing_keys SET status = 'retired', retired_at = now(), private_key_ciphertext = NULL WHERE id = $1`, k.ID); err != nil {
 		t.Fatal(err)
 	}
-	next, err := l.Create(ctx, tn)
+	next, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestSignRefusesMismatchedKey(t *testing.T) {
 	ctx := context.Background()
 	l, _, owner := setup(t)
 	tn := newTenant(t, l)
-	k, err := l.Create(ctx, tn)
+	k, err := l.Create(as(tn), tn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestConcurrentCreateMakesOneActiveKey(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
-			if _, err := l.Create(ctx, tn); err != nil && !errors.Is(err, ErrPendingExists) {
+			if _, err := l.Create(as(tn), tn); err != nil && !errors.Is(err, ErrPendingExists) {
 				t.Error(err)
 			}
 		})
@@ -379,7 +379,7 @@ func TestConcurrentCreateMakesOneActiveKey(t *testing.T) {
 
 func TestCreateReportsOtherErrorsAsIs(t *testing.T) {
 	l, _, _ := setup(t)
-	_, err := l.Create(context.Background(), "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa") // no such tenant
+	_, err := l.Create(as("tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa"), "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa") // no such tenant
 	if err == nil || errors.Is(err, ErrPendingExists) {
 		t.Fatalf("unknown tenant: %v", err)
 	}

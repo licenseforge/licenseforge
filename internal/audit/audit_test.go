@@ -15,6 +15,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
@@ -414,5 +415,93 @@ func TestIdentityRecordsOnlyInItsTenant(t *testing.T) {
 		return err
 	}); err == nil {
 		t.Error("identity wrote into another tenant's chain")
+	}
+}
+
+// The platform chain (ADR-0027) is written and read on the platform pool only.
+// Its reserved tenant row is no tenant to any pool: not listed, not resolvable
+// by slug, not changeable, and the tenant and identity pools can't reach its
+// rows even with app.tenant_id set to it.
+func TestPlatformChain(t *testing.T) {
+	ctx := context.Background()
+	d := openDB(t)
+	onPlatform := func(fn func(*ent.Tx) error) error { return d.WithPlatform(ctx, fn) }
+	var first, second *ent.AuditEvent
+	if err := onPlatform(func(tx *ent.Tx) error {
+		var err error
+		if first, err = Record(ctx, tx, PlatformTenant, Event{ActorType: auditevent.ActorTypeUser, ActorID: "usr_a", Action: "user.login", Outcome: auditevent.OutcomeSuccess}); err != nil {
+			return err
+		}
+		second, err = Record(ctx, tx, PlatformTenant, Event{ActorType: auditevent.ActorTypeSystem, Action: "platform_admin.bootstrap", Outcome: auditevent.OutcomeSuccess})
+		return err
+	}); err != nil {
+		t.Fatalf("platform pool records on the platform chain: %v", err)
+	}
+	if second.Seq != first.Seq+1 || !bytes.Equal(second.PrevHash, first.Hash) {
+		t.Errorf("platform chain not linked: %+v %+v", first, second)
+	}
+	var head Head
+	if err := onPlatform(func(tx *ent.Tx) error {
+		var err error
+		head, err = Verify(ctx, tx, PlatformTenant)
+		return err
+	}); err != nil || head.Seq != second.Seq || !bytes.Equal(head.Hash, second.Hash) {
+		t.Errorf("Verify platform chain: %+v, %v", head, err)
+	}
+
+	pf := Event{ActorType: auditevent.ActorTypeUser, ActorID: "usr_x", Action: "user.login", Outcome: auditevent.OutcomeSuccess}
+	for name, with := range map[string]func(func(*ent.Tx) error) error{
+		"tenant pool":   func(fn func(*ent.Tx) error) error { return d.WithTenant(ctx, PlatformTenant, fn) },
+		"identity pool": func(fn func(*ent.Tx) error) error { return d.WithIdentity(ctx, PlatformTenant, fn) },
+	} {
+		if err := with(func(tx *ent.Tx) error {
+			n, err := tx.AuditEvent.Query().Count(ctx)
+			if err == nil && n != 0 {
+				t.Errorf("%s reads %d platform-chain entries", name, n)
+			}
+			if ok, err := tx.Tenant.Query().Where(tenant.ID(PlatformTenant)).Exist(ctx); err == nil && ok {
+				t.Errorf("%s reads the platform tenant row", name)
+			}
+			return err
+		}); err != nil {
+			t.Errorf("%s read: %v", name, err)
+		}
+		if err := with(func(tx *ent.Tx) error { _, err := Record(ctx, tx, PlatformTenant, pf); return err }); err == nil {
+			t.Errorf("%s appended to the platform chain", name)
+		}
+	}
+	// Identity resolves slugs and lists tenants (switcher): never the reserved row.
+	if err := d.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		if _, err := tx.Tenant.Query().Where(tenant.Slug("platform")).Select(tenant.FieldID).Only(ctx); !ent.IsNotFound(err) {
+			t.Errorf("identity resolved the slug platform: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The platform pool doesn't list, change, delete or recreate it.
+	if err := onPlatform(func(tx *ent.Tx) error {
+		if ok, err := tx.Tenant.Query().Where(tenant.ID(PlatformTenant)).Exist(ctx); err != nil || ok {
+			t.Errorf("platform pool lists the platform tenant: %v %v", ok, err)
+		}
+		if n, err := tx.Tenant.Update().Where(tenant.ID(PlatformTenant)).SetName("x").Save(ctx); err != nil || n != 0 {
+			t.Errorf("platform pool renamed the platform tenant: %d %v", n, err)
+		}
+		if n, err := tx.Tenant.Delete().Where(tenant.ID(PlatformTenant)).Exec(ctx); err != nil || n != 0 {
+			t.Errorf("platform pool deleted the platform tenant: %d %v", n, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := onPlatform(func(tx *ent.Tx) error {
+		return tx.Tenant.Create().SetID(PlatformTenant).SetSlug("p-" + storetest.Suffix()).SetName("P").Exec(ctx)
+	}); err == nil {
+		t.Error("platform pool created a tenant with the reserved ID")
+	}
+	// It exists all along (owner view), so the chain's foreign key holds.
+	var n int
+	if err := sqlDB(t, env.OwnerURL).QueryRow(`SELECT count(*) FROM tenants WHERE id = $1 AND slug = 'platform'`, PlatformTenant).Scan(&n); err != nil || n != 1 {
+		t.Errorf("reserved row: %d %v", n, err)
 	}
 }

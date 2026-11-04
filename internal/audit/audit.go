@@ -31,6 +31,14 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
+// PlatformTenant is the reserved tenant row holding the platform chain
+// (ADR-0027): events without a tenant, such as logins and platform-admin
+// changes. Record and Verify it in a platform-pool transaction
+// (store.DB.WithPlatform); the database lets no other login read or append to
+// it, and hides it from tenant listings (migration
+// 20261104214810_platform_tenant_security.sql).
+const PlatformTenant = "tnt_platformaaaaaaaaaaaaaaaaaa"
+
 // ErrBroken means the chain doesn't verify; the error names the first bad seq.
 var ErrBroken = errors.New("audit: chain broken")
 
