@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -38,9 +39,16 @@ func safeMethod(m string) bool {
 // RequireSession serves next only for a live session (else 401). Unsafe
 // methods also need the CSRF token and must not be cross-origin (Fetch
 // metadata / Origin, net/http.CrossOriginProtection): two independent
-// defences, either of which stops a forged form post.
+// defences, either of which stops a forged form post. The redirect URL's
+// origin is trusted, so a proxy that rewrites Host doesn't break browsers
+// that send only Origin.
 func (h *Handler) RequireSession(next http.Handler) http.Handler {
 	cross := http.NewCrossOriginProtection()
+	if u, err := url.Parse(h.oauth.RedirectURL); err == nil {
+		if err := cross.AddTrustedOrigin(u.Scheme + "://" + u.Host); err != nil {
+			panic(err) // New checked the URL
+		}
+	}
 	return cross.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		c, err := r.Cookie(SessionCookie)
@@ -72,6 +80,7 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	c, _ := r.Cookie(SessionCookie) // present: RequireSession passed
 	u := User(r.Context())
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff") // holds the CSRF token
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"user":       map[string]any{"id": u.ID, "email": u.Email, "name": u.Name},
 		"csrf_token": csrfToken(c.Value),

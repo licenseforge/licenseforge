@@ -44,7 +44,8 @@ func TestSessionAndLogout(t *testing.T) {
 	}
 	resp, body := do("GET", "/auth/session", nil)
 	token, _ := body["csrf_token"].(string)
-	if resp.StatusCode != http.StatusOK || token == "" || resp.Header.Get("Cache-Control") != "no-store" {
+	if resp.StatusCode != http.StatusOK || token == "" || resp.Header.Get("Cache-Control") != "no-store" ||
+		resp.Header.Get("Content-Type") != "application/json" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("session: %d %v", resp.StatusCode, body)
 	}
 	// Unsafe requests need the token and must be same-origin.
@@ -53,6 +54,7 @@ func TestSessionAndLogout(t *testing.T) {
 		"wrong token":  {CSRFHeader: csrfToken("another session")},
 		"cross-site":   {CSRFHeader: token, "Sec-Fetch-Site": "cross-site"},
 		"other origin": {CSRFHeader: token, "Origin": "https://evil.example"},
+		"sibling site": {CSRFHeader: token, "Sec-Fetch-Site": "same-site", "Origin": "https://other.example"},
 	} {
 		if resp, _ := do("POST", "/auth/logout", h); resp.StatusCode != http.StatusForbidden {
 			t.Errorf("logout with %s: %d", name, resp.StatusCode)
@@ -61,8 +63,21 @@ func TestSessionAndLogout(t *testing.T) {
 	if _, err := f.ids.Session(t.Context(), f.session(t)); err != nil {
 		t.Fatalf("refused logouts ended the session: %v", err)
 	}
+	// Behind a proxy that rewrites Host, the configured public origin is
+	// still same-origin (browsers that send only Origin).
+	req, _ := http.NewRequest("GET", f.app.URL+"/auth/session", nil)
+	req.Host = "licenseforge.internal:8080"
+	req.Header.Set("Origin", f.app.URL)
+	req.Method = "POST" // an unsafe method, so the origin check runs
+	req.URL.Path = "/auth/session"
+	if resp, err := f.client.Do(req); err != nil || resp.StatusCode == http.StatusForbidden {
+		t.Errorf("own origin behind a proxy: %v %v", resp.StatusCode, err)
+	} else {
+		_ = resp.Body.Close()
+	}
 	cookie := f.session(t)
-	if resp, _ := do("POST", "/auth/logout", map[string]string{CSRFHeader: token, "Sec-Fetch-Site": "same-origin"}); resp.StatusCode != http.StatusNoContent {
+	// No Fetch metadata and no Origin: a non-browser client with the token.
+	if resp, _ := do("POST", "/auth/logout", map[string]string{CSRFHeader: token}); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout: %d", resp.StatusCode)
 	}
 	if _, err := f.ids.Session(t.Context(), cookie); err == nil {
