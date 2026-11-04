@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -29,6 +31,11 @@ const (
 	flowTTL       = 10 * time.Minute
 )
 
+// httpTimeout bounds every call to the provider (discovery, keys, token):
+// go-oidc fetches keys in the background, and a hung fetch would otherwise
+// block every login until a restart.
+var httpTimeout = 10 * time.Second
+
 // Config is the OIDC client registration.
 type Config struct {
 	Issuer       string // exactly as in the ID token's iss
@@ -39,23 +46,44 @@ type Config struct {
 
 // Handler serves GET /auth/login and GET /auth/callback.
 type Handler struct {
+	client *http.Client
 	oauth  oauth2.Config
 	verify *oidc.IDTokenVerifier
 	id     identity.Service
 	log    *slog.Logger
 }
 
+// secureURL reports whether u is https, or http on a loopback host (browsers
+// keep Secure cookies only there).
+func secureURL(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil || p.Host == "" {
+		return false
+	}
+	if p.Scheme == "https" {
+		return true
+	}
+	ip := net.ParseIP(p.Hostname())
+	return p.Scheme == "http" && (p.Hostname() == "localhost" || ip != nil && ip.IsLoopback())
+}
+
 // New discovers the provider (fails if it is unreachable, like the database
-// at start).
+// at start). Issuer and redirect URL must be https, or http on localhost for
+// development.
 func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (*Handler, error) {
 	if c.Issuer == "" || c.ClientID == "" || c.RedirectURL == "" {
 		return nil, errors.New("weblogin: issuer, client ID and redirect URL are required")
 	}
-	p, err := oidc.NewProvider(ctx, c.Issuer)
+	if !secureURL(c.Issuer) || !secureURL(c.RedirectURL) {
+		return nil, errors.New("weblogin: issuer and redirect URL must be https (http only on localhost)")
+	}
+	client := &http.Client{Timeout: httpTimeout}
+	p, err := oidc.NewProvider(oidc.ClientContext(ctx, client), c.Issuer) // the provider keeps the client for key fetches
 	if err != nil {
 		return nil, fmt.Errorf("weblogin: discovery: %w", err)
 	}
 	return &Handler{
+		client: client,
 		oauth: oauth2.Config{
 			ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURL,
 			Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
@@ -95,13 +123,13 @@ func (h *Handler) fail(w http.ResponseWriter, code int, reason string, err error
 	http.Error(w, http.StatusText(code), code)
 }
 
+// callback finishes the login whose state matches the flow cookie. A request
+// without that state (a stray or cross-site link) leaves the login in
+// progress alone. ponytail: one login per browser at a time; a second tab's
+// login replaces the first one's cookie, key the cookie by state if that
+// bothers people.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
-	setCookie(w, flowCookie, "", -1) // one use, whatever happens
 	q := r.URL.Query()
-	if e := q.Get("error"); e != "" {
-		h.fail(w, http.StatusUnauthorized, "provider error", errors.New(e))
-		return
-	}
 	c, err := r.Cookie(flowCookie)
 	if err != nil {
 		h.fail(w, http.StatusBadRequest, "no login in progress", err)
@@ -112,9 +140,14 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, http.StatusBadRequest, "state mismatch", nil)
 		return
 	}
+	setCookie(w, flowCookie, "", -1) // one use, whatever happens next
+	if e := q.Get("error"); e != "" {
+		h.fail(w, http.StatusUnauthorized, "provider error", errors.New(e))
+		return
+	}
 	nonce, verifier := parts[1], parts[2]
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), oauth2.HTTPClient, h.client), 15*time.Second)
 	defer cancel()
 	tok, err := h.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(verifier))
 	if err != nil {
@@ -132,12 +165,17 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		Email         string   `json:"email"`
-		EmailVerified flexBool `json:"email_verified"`
-		Name          string   `json:"name"`
+		AuthorizedParty string   `json:"azp"`
+		Email           string   `json:"email"`
+		EmailVerified   flexBool `json:"email_verified"`
+		Name            string   `json:"name"`
 	}
 	if err := idt.Claims(&claims); err != nil {
 		h.fail(w, http.StatusUnauthorized, "id token claims", err)
+		return
+	}
+	if claims.AuthorizedParty != "" && claims.AuthorizedParty != h.oauth.ClientID { // OIDC Core 3.1.3.7
+		h.fail(w, http.StatusUnauthorized, "id token for another client (azp)", nil)
 		return
 	}
 	u, err := h.id.Login(ctx, identity.Claims{

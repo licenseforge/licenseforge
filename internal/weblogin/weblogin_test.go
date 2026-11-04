@@ -39,6 +39,7 @@ type idp struct {
 	key  *rsa.PrivateKey
 	mu   sync.Mutex
 	code map[string]grant
+	hang int // JWKS requests left to hang (until the client gives up)
 }
 
 type grant struct {
@@ -62,7 +63,15 @@ func newIdP(t *testing.T) *idp {
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		})
 	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		hang := p.hang > 0
+		p.hang--
+		p.mu.Unlock()
+		if hang {
+			<-r.Context().Done()
+			return
+		}
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +115,7 @@ type fixture struct {
 	client *http.Client
 }
 
-func setup(t *testing.T) *fixture {
+func setup(t *testing.T, opts ...func(*idp)) *fixture {
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
@@ -114,6 +123,9 @@ func setup(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db}
+	for _, o := range opts {
+		o(f.idp)
+	}
 	mux := http.NewServeMux()
 	// TLS so the browser-side client keeps the Secure __Host- cookies.
 	f.app = httptest.NewUnstartedServer(mux)
@@ -234,6 +246,7 @@ func TestLoginRefusals(t *testing.T) {
 		"other issuer":   {nil, map[string]any{"iss": "https://evil.example"}, http.StatusUnauthorized},
 		"expired token":  {nil, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, http.StatusUnauthorized},
 		"no subject":     {nil, map[string]any{"sub": ""}, http.StatusUnauthorized},
+		"foreign azp":    {nil, map[string]any{"aud": []string{"lf", "other"}, "azp": "other"}, http.StatusUnauthorized},
 	}
 	for name, c := range bad {
 		q := f.start(t)
@@ -254,14 +267,64 @@ func TestLoginRefusals(t *testing.T) {
 	if code := f.finish(t, q2, q2.Get("state"), nil); code != http.StatusUnauthorized {
 		t.Errorf("wrong PKCE verifier: %d", code)
 	}
-	// A provider error is passed on as a failure, not a session.
-	resp, err := f.client.Get(f.app.URL + "/auth/callback?error=access_denied")
-	if err != nil {
-		t.Fatal(err)
+	// A stray callback (cross-site link, no state) leaves the login in
+	// progress alone; a provider error for this login ends it.
+	q := f.start(t)
+	get := func(query string) int {
+		t.Helper()
+		resp, err := f.client.Get(f.app.URL + "/auth/callback?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("provider error: %d", resp.StatusCode)
+	if code := get("error=access_denied"); code != http.StatusBadRequest {
+		t.Errorf("stray callback: %d", code)
+	}
+	if code := get(url.Values{"error": {"access_denied"}, "state": {q.Get("state")}}.Encode()); code != http.StatusUnauthorized {
+		t.Errorf("provider error: %d", code)
+	}
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusBadRequest {
+		t.Errorf("login after a provider error: %d", code)
+	}
+	q = f.start(t)
+	_ = get("error=access_denied")
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
+		t.Errorf("login after a stray callback: %d", code)
+	}
+}
+
+// A provider whose key endpoint hangs fails one login, not all of them.
+func TestKeyFetchTimesOut(t *testing.T) {
+	old := httpTimeout
+	httpTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { httpTimeout = old })
+	f := setup(t, func(p *idp) { p.hang = 1 })
+	q := f.start(t)
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusUnauthorized {
+		t.Errorf("login while keys hang: %d", code)
+	}
+	q = f.start(t)
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
+		t.Errorf("login after the hang: %d", code)
+	}
+}
+
+func TestNewRefusesInsecureURLs(t *testing.T) {
+	for _, c := range []Config{
+		{Issuer: "http://idp.example", ClientID: "lf", RedirectURL: "https://lf.example/auth/callback"},
+		{Issuer: "https://idp.example", ClientID: "lf", RedirectURL: "http://lf.example/auth/callback"},
+		{Issuer: "https://idp.example", ClientID: "lf", RedirectURL: "/auth/callback"},
+	} {
+		if _, err := New(context.Background(), c, identity.Service{}, slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "must be https") {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+	for _, u := range []string{"http://localhost:8080/x", "http://127.0.0.1/x", "http://[::1]:8080/x", "https://lf.example/x"} {
+		if !secureURL(u) {
+			t.Errorf("%s refused", u)
+		}
 	}
 }
 
