@@ -28,6 +28,7 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -45,6 +46,7 @@ const unissuedTenant = "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa"
 // Config is what the API needs from main.
 type Config struct {
 	Tokens   apitokens.Service
+	Members  members.Service
 	Identity identity.Service
 	Sessions *weblogin.Sessions // nil: dashboard login is off, so sessions answer 401
 	// APIHost, if set, accepts only API tokens; every other host only
@@ -224,7 +226,12 @@ func clean(s string) string {
 
 // queryParams are each operation's query parameters; others answer 400.
 // TestRoutesMatchSpec keeps it equal to the spec.
-var queryParams = map[string][]string{"ListApiTokens": {"limit", "cursor"}}
+var queryParams = map[string][]string{
+	"ListApiTokens": {"limit", "cursor"},
+	"ListMembers":   {"limit", "cursor"},
+	"RemoveMember":  {"revoke_tokens"},
+	"UpdateMember":  {"revoke_tokens"},
+}
 
 // strictInput refuses unknown query parameters and decodes the body again
 // strictly: the generated decoder ignores unknown fields, accepts
@@ -393,12 +400,17 @@ func (s *server) badRequest(w http.ResponseWriter, r *http.Request, err error) {
 // fail is the one error mapper for handler errors.
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var p *problem
+	var invalidField *members.InvalidError
 	switch {
 	case errors.As(err, &p):
 	case errors.Is(err, authz.ErrDenied):
 		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
-	case errors.Is(err, apitokens.ErrNotFound):
+	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound):
 		p = errNotFound
+	case errors.As(err, &invalidField):
+		p = invalid(fieldError{invalidField.Field, invalidField.Message})
+	case errors.Is(err, members.ErrLastOwner):
+		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
 	default:
 		p = internal(err)
 	}
