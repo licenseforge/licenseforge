@@ -363,14 +363,15 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"platform_all":     "ALL licenseforge_platform true true",
 	}
 	tenantsPolicies := map[string]string{
-		"tenant_read":  "SELECT licenseforge_app ((id)::text = app_tenant_id())",
-		"platform_all": "ALL licenseforge_platform true true",
+		"tenant_read": "SELECT licenseforge_app ((id)::text = app_tenant_id())",
+		// The reserved platform tenant is no tenant to the platform pool either (ADR-0027).
+		"platform_real_tenants": `ALL licenseforge_platform ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text) ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 	}
 	// Policies beyond the canonical ones, pinned: changing one means changing
 	// this list, so it gets reviewed.
 	extra := map[string]map[string]string{ // ADR-0029: identity role and the invitation rules
 		"tenants": {
-			"identity_read": `SELECT licenseforge_identity true`,
+			"identity_read": `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 		},
 		"audit_events": {
 			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
@@ -514,7 +515,8 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			t.Errorf("function %s: only app_tenant_id is allowed in public; review any new function", name)
 		case secdef || config != "" || publicExec:
 			t.Errorf("app_tenant_id: security definer=%v config=%q executable by PUBLIC=%v", secdef, config, publicExec)
-		case strings.TrimSpace(src) != `SELECT NULLIF(pg_catalog.current_setting('app.tenant_id', true), '')`:
+		// Never the reserved platform tenant (ADR-0027): no tenant or identity policy can reach it.
+		case strings.TrimSpace(src) != `SELECT NULLIF(NULLIF(pg_catalog.current_setting('app.tenant_id', true), ''), 'tnt_platformaaaaaaaaaaaaaaaaaa')`:
 			t.Errorf("app_tenant_id body changed: %q", src)
 		}
 	}

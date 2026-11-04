@@ -24,6 +24,7 @@ import (
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -118,7 +119,10 @@ type fixture struct {
 	client *http.Client
 }
 
-func setup(t *testing.T, opts ...func(*idp)) *fixture {
+func setup(t *testing.T, opts ...func(*idp)) *fixture { return setupAdmin(t, "", opts...) }
+
+// setupAdmin is setup with LICENSEFORGE_BOOTSTRAP_ADMIN set to admin.
+func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
@@ -134,7 +138,7 @@ func setup(t *testing.T, opts ...func(*idp)) *fixture {
 	f.app = httptest.NewUnstartedServer(mux)
 	f.app.StartTLS()
 	t.Cleanup(f.app.Close)
-	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"},
+	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback", BootstrapAdmin: admin},
 		f.ids, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -242,16 +246,18 @@ func TestLoginRefusals(t *testing.T) {
 		state    func(url.Values) string
 		override map[string]any
 		want     int
+		audited  []string // platform-chain reasons
 	}{
-		"state mismatch": {func(url.Values) string { return "x" }, nil, http.StatusBadRequest},
-		"nonce mismatch": {nil, map[string]any{"nonce": "other"}, http.StatusUnauthorized},
-		"other audience": {nil, map[string]any{"aud": "someone-else"}, http.StatusUnauthorized},
-		"other issuer":   {nil, map[string]any{"iss": "https://evil.example"}, http.StatusUnauthorized},
-		"expired token":  {nil, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, http.StatusUnauthorized},
-		"no subject":     {nil, map[string]any{"sub": ""}, http.StatusUnauthorized},
-		"foreign azp":    {nil, map[string]any{"aud": []string{"lf", "other"}, "azp": "other"}, http.StatusUnauthorized},
+		"state mismatch": {func(url.Values) string { return "x" }, nil, http.StatusBadRequest, nil},
+		"nonce mismatch": {nil, map[string]any{"nonce": "other"}, http.StatusUnauthorized, []string{"nonce_mismatch"}},
+		"other audience": {nil, map[string]any{"aud": "someone-else"}, http.StatusUnauthorized, nil},
+		"other issuer":   {nil, map[string]any{"iss": "https://evil.example"}, http.StatusUnauthorized, nil},
+		"expired token":  {nil, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, http.StatusUnauthorized, nil},
+		"no subject":     {nil, map[string]any{"sub": ""}, http.StatusUnauthorized, []string{"invalid_claims"}},
+		"foreign azp":    {nil, map[string]any{"aud": []string{"lf", "other"}, "azp": "other"}, http.StatusUnauthorized, []string{"wrong_azp"}},
 	}
 	for name, c := range bad {
+		head := f.head(t)
 		q := f.start(t)
 		state := q.Get("state")
 		if c.state != nil {
@@ -262,6 +268,11 @@ func TestLoginRefusals(t *testing.T) {
 		}
 		if f.session(t) != "" {
 			t.Errorf("%s: session cookie set", name)
+		}
+		// Only refusals of a verified ID token reach the platform chain.
+		es := f.entries(t, head)
+		if want := c.audited; len(es) != len(want) || len(es) == 1 && es[0].Details != `{"reason":"`+want[0]+`"}` {
+			t.Errorf("%s: platform chain %+v, want reasons %v", name, es, want)
 		}
 	}
 	// PKCE: a code redeemed with another flow's verifier is refused.
@@ -359,11 +370,16 @@ func TestLoginDisabledUser(t *testing.T) {
 	if err := f.db.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
+	head := f.head(t)
 	q := f.start(t)
 	if code := f.finish(t, q, q.Get("state"), map[string]any{"sub": sub}); code != http.StatusForbidden {
 		t.Errorf("disabled user: %d", code)
 	}
 	if f.session(t) != "" {
 		t.Error("session cookie set for a disabled user")
+	}
+	if es := f.entries(t, head); len(es) != 1 || es[0].Outcome != auditevent.OutcomeDenied || *es[0].ActorID != u.ID ||
+		es[0].Details != `{"reason":"user_disabled"}` {
+		t.Errorf("platform chain: %+v", es)
 	}
 }

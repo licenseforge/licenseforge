@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Platform audit chain (ADR-0027, ADR-0029): a reserved platform tenant row (`audit.PlatformTenant`, slug `platform` now taken) holds events without a tenant. `app_tenant_id()` never returns it, so the tenant and identity logins can't read or write any of its rows; no pool lists, renames, deletes or recreates it. Only the platform pool appends to it with `audit.Record`. Dashboard logins are recorded there: success (no session without its entry), a disabled user refused, and refusals of a verified ID token (nonce, claims, `azp`). `LICENSEFORGE_BOOTSTRAP_ADMIN` is now read at start: the matching user becomes platform admin at login while there is none, recorded in the same transaction; a failed bootstrap is logged and never fails the login. Migration `20261104214810_platform_tenant_security.sql`.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0032 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.

@@ -44,7 +44,7 @@ type Service struct{ DB *store.DB }
 // refreshed every login; the email only from a verified email claim, so an
 // unverified claim can't make a member list show a colleague's address
 // (ADR-0029); an unverified claim clears the verified flag. Disabled users
-// get ErrDisabled.
+// get ErrDisabled, with the user (for the audit entry of the refusal only).
 func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
@@ -95,6 +95,9 @@ func (s Service) login(ctx context.Context, c Claims) (*ent.User, error) {
 		u, err = up.Save(ctx)
 		return err
 	})
+	if errors.Is(err, ErrDisabled) {
+		return u, err
+	}
 	if err != nil {
 		return nil, err
 	}
