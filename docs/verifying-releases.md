@@ -70,3 +70,7 @@ On macOS use `shasum -a 256 --ignore-missing -c SHA256SUMS`.
 ## Air-gapped verification
 
 `gh attestation download oci://$IMAGE --repo licenseforge/licenseforge` (and the same for the chart or a binary) saves the attestation bundles. Verify them offline with `gh attestation verify --bundle <file> --custom-trusted-root <trusted_root.jsonl>`; get the trusted root with `gh attestation trusted-root` while online.
+
+## For maintainers: a release that failed halfway
+
+Published versions are never moved. If a release run fails after pushing (for example signing during a Sigstore outage), use **Re-run failed jobs** within 5 days, while the build artifact exists: the publish jobs recognise the identical images and chart and finish signing and attesting them. **Re-run all jobs** rebuilds with new timestamps, so the digests differ and the run stops with "already exists"; the way out then is a new version tag.

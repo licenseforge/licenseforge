@@ -186,8 +186,10 @@ jobs:
           # As for images: never moved; the same chart (a re-run) is reused.
           tgz="out/chart/licenseforge-$VERSION.tgz"
           if skopeo inspect --raw "docker://$CHART:$VERSION" > existing 2> err; then
-            layer=$(jq -r '.layers[0].digest' existing)
-            [ "$layer" = "sha256:$(sha256sum < "$tgz" | cut -d' ' -f1)" ] || { echo "$CHART:$VERSION already exists with another chart"; exit 1; }
+            # Exactly one layer, the chart itself: nothing else rides along.
+            jq -e --arg d "sha256:$(sha256sum < "$tgz" | cut -d' ' -f1)" \
+              '(.layers|length)==1 and .layers[0].digest==$d and .layers[0].mediaType=="application/vnd.cncf.helm.chart.content.v1.tar+gzip"' \
+              existing >/dev/null || { echo "$CHART:$VERSION already exists with another chart"; exit 1; }
             digest="sha256:$(sha256sum < existing | cut -d' ' -f1)"
           else
             grep -qiE 'manifest unknown|name unknown' err || { cat err; exit 1; }
