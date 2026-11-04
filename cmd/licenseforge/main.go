@@ -16,6 +16,7 @@
 //	LICENSEFORGE_OIDC_CLIENT_SECRET     empty for a public client (PKCE only)
 //	LICENSEFORGE_OIDC_REDIRECT_URL      https://<host>/auth/callback
 //	LICENSEFORGE_API_HOST               API-only host (api.example.com): tokens only there, sessions only elsewhere; unset = both
+//	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -42,6 +43,7 @@ import (
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
+	"licenseforge.io/licenseforge/web"
 )
 
 // version is set at build time: -ldflags "-X main.version=v0.1.0".
@@ -155,6 +157,8 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 			ClientID:     os.Getenv("LICENSEFORGE_OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
+			// Read only here, at start: a later change needs a restart.
+			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
 		}, identity.Service{DB: db}, log)
 		cancel()
 		if err != nil {
@@ -168,6 +172,9 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	// API tokens need only the tenant pool (hashes, no keyring).
 	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Identity: identity.Service{DB: db},
 		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
+	if !web.Embedded {
+		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
+	}
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -202,7 +209,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	return nil
 }
 
-// newMux serves the health endpoints. ready reports whether the database is
+// newMux serves the health endpoints and the dashboard. ready reports whether the database is
 // reachable; /readyz fails while it isn't, so Kubernetes stops routing here.
 func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -222,6 +229,7 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 		}
 		text(w, http.StatusOK, "ok\n")
 	})
+	web.Mount(mux) // more specific routes (health, /auth/, /api/) win
 	return mux
 }
 

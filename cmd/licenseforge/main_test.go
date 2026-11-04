@@ -46,7 +46,9 @@ func TestHealthEndpoints(t *testing.T) {
 		{http.MethodGet, "/readyz", true, http.StatusServiceUnavailable},
 		{http.MethodGet, "/healthz", true, http.StatusOK}, // liveness ignores the database
 		{http.MethodPost, "/healthz", false, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/nope", false, http.StatusNotFound},
+		{http.MethodGet, "/t/acme/", false, http.StatusOK}, // the dashboard
+		{http.MethodGet, "/api/v1/nope", false, http.StatusNotFound},
+		{http.MethodPost, "/t/acme/", false, http.StatusMethodNotAllowed},
 	} {
 		readyErr = nil
 		if tc.down {
@@ -56,6 +58,43 @@ func TestHealthEndpoints(t *testing.T) {
 		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
 		if rec.Code != tc.want || strings.Contains(rec.Body.String(), "secret-host") {
 			t.Errorf("%s %s (down=%v) = %d %q, want %d", tc.method, tc.path, tc.down, rec.Code, rec.Body, tc.want)
+		}
+	}
+}
+
+// A route for another method keeps its 405 despite the dashboard's GET /.
+func TestDashboardKeepsMethodNotAllowed(t *testing.T) {
+	mux := newMux(func(context.Context) error { return nil }, quiet)
+	mux.HandleFunc("POST /auth/logout", func(http.ResponseWriter, *http.Request) {})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/logout", nil))
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "POST" {
+		t.Errorf("GET /auth/logout = %d, Allow %q; want 405, POST", rec.Code, rec.Header().Get("Allow"))
+	}
+}
+
+// The real mux takes the API as a method-less /api/v1/ subtree (as serve
+// mounts it) next to the dashboard without a ServeMux registration panic,
+// and each path still reaches its owner.
+func TestMuxBesideAPISubtree(t *testing.T) {
+	mux := newMux(func(context.Context) error { return nil }, quiet)
+	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) }))
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodPost, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodDelete, "/api/v1/x", 299},
+		{http.MethodGet, "/healthz", http.StatusOK},
+		{http.MethodPost, "/healthz", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/t/acme/", http.StatusOK},
+		{http.MethodGet, "/api/v2/x", http.StatusNotFound},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != tc.want {
+			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
 		}
 	}
 }
