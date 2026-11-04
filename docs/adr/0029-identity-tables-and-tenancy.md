@@ -10,20 +10,44 @@
 2. **A second RLS key** `app.user_id`: users and memberships readable where `user_id = app.user_id`. Login still needs a lookup by `(issuer, sub)` before the user ID is known, so it would need a SECURITY DEFINER function, which ADR-0009 refuses.
 3. **Copy users per tenant** (a user row per membership). Breaks "one person, one identity", makes tenant switching and offboarding messy.
 
-## Decision (option 1)
-- **`users`** (`usr_`): `issuer`, `subject`, `email`, `name`, `disabled_at`; unique `(issuer, subject)`; **no `tenant_id`**. Platform pool: SELECT, INSERT, UPDATE of profile columns. Tenant pool: **SELECT only on users with a membership in the current tenant** (policy `users_member_of_tenant`, a join on `memberships` under the current `app.tenant_id`), so member lists show names and emails without exposing other tenants' users. A new canonical variant, added to the isolation test.
-- **`memberships`** (`mem_`), **`invitations`** (`inv_`), **`api_tokens`** (`tok_`): ordinary tenant tables (canonical RLS, `*_same_tenant` keys), plus platform SELECT on memberships so login can list a user's tenants.
-- **Login path** (platform pool, `identity` package only): upsert the user by `(issuer, sub)`, refresh email/name from claims, list memberships for the switcher, accept invitations matching a verified email. Every other request: tenant pool, membership checked for `(user, tenant from URL)`, then `authz.Principal`.
-- **API tokens** carry no tenant; requests name the tenant in the URL (`/v1/tenants/{tenant}/…`), so the lookup by hash runs on the tenant pool under that tenant. A token used against another tenant's URL simply isn't found.
-- **Platform admin**: a `platform_admins` table (user ID), platform pool only, bootstrapped by `LICENSEFORGE_BOOTSTRAP_ADMIN` ([ADR-0003 Identity via generic OIDC, Keycloak as default](0003-identity-via-generic-oidc-keycloak-as-default.md)).
-- **Invitations** are accepted only for an email the IdP marks `email_verified`, and expire (default 7 days).
+## Decision (option 1, with its own database login)
+### A fourth login: identity
+The login path handles untrusted OIDC claims on the internet-facing path, so it must not run with platform rights (all tenants). **This amends [ADR-0009 Multi-tenancy](0009-multi-tenancy.md)**: a fourth group role `licenseforge_identity` with its own login and pool, granted only what login needs:
+
+| Table | identity | tenant pool (`licenseforge_app`) | platform |
+|---|---|---|---|
+| `tenants` | SELECT (id, slug, name, for the switcher and slug → ID) | own row (unchanged) | all |
+| `users` | SELECT, INSERT, UPDATE (profile, `last_login_at`) | SELECT (id, email, name) of members of the current tenant only | SELECT, UPDATE |
+| `memberships` | SELECT, INSERT (invitation acceptance only) | SELECT, UPDATE (role, scope), DELETE | all |
+| `invitations` | SELECT, UPDATE (accept) | SELECT, INSERT, UPDATE (revoke) | all |
+| `platform_admins` | SELECT | none | all |
+| licensing tables | **none** | unchanged | unchanged |
+
+`store.Open` checks the identity login like the other two (`deploy/database-setup.sql`, Helm Secret and env list gain it). A bug on the login path can at most read or write identity data, never licenses or keys.
+
+### Global tables (exempt from "every row has tenant_id")
+- **`users`** (`usr_`): `issuer`, `subject`, `email`, `name`, `last_login_at`, `disabled_at`; unique `(issuer, subject)`. `email` is not unique and never a lookup key (except the bootstrap admin, below).
+- **`platform_admins`** (user ID), and later the dashboard **sessions** of [ADR-0020 Admin dashboard](0020-admin-dashboard.md) (per user).
+- They get their own canonical patterns in the isolation test. The tenant pool's read of `users` is a **column grant** (id, email, name) with policy `users_member_of_tenant`: `EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id AND m.tenant_id = app_tenant_id())`. The subquery runs under `memberships` RLS, so it sees only the current tenant; with `app.tenant_id` unset it returns nothing (tested).
+- References from tenant tables to `users` (`memberships.user_id`, `invitations.invited_by`, `api_tokens.created_by`) have no `*_same_tenant` key: users belong to no tenant. That is safe because the tenant pool can't INSERT memberships: a tenant admin can't attach an arbitrary user ID to read their profile or pull them into the tenant.
+
+### Tenant tables
+- **`memberships`** (`mem_`): user × tenant × role, optional product scope (a `membership_products` table with `*_same_tenant` keys). Created **only** by accepting an invitation (identity pool); changed and removed by tenant admins ([ADR-0019 Authorization model](0019-authorization-model.md) `CanAssign`). Removing the last owner is refused.
+- **`invitations`** (`inv_`): email, role, scope, `invited_by`, `expires_at` (default 7 days), a **single-use token** (shown once in the invite link, stored as a hash), `accepted_at` / `revoked_at`. The role and scope can't exceed the inviter's (`CanAssign`).
+- **`api_tokens`** (`tok_`): role, optional product scope, `created_by`, `last_used_at`, hash and display prefix (#25). **Expiry is required**: default 90 days, at most 1 year. The role and scope can't exceed the creator's at creation (`CanAssign`). The hash is unique per `(tenant_id, hash)`, not globally, so an insert conflict can't reveal another tenant's token.
+
+### Login and invitations
+- **Login** (identity pool): upsert the user by `(issuer, sub)`; refresh `email` from claims **only when `email_verified` is true** (otherwise a user could make their member-list entry look like a colleague); list memberships for the tenant switcher.
+- **Accepting an invitation** needs all of: the invite link's token, a logged-in user whose email matches (compared case-insensitively after Unicode NFC), `email_verified` true, invitation not expired or revoked. Acceptance is an explicit click, never automatic on login; the user can decline.
+- **Requests** name the tenant by slug in the URL; the slug is resolved to an ID once per request (identity pool, or the session), then the tenant pool runs with `app.tenant_id` and the membership for `(user, tenant)` is checked before building the `authz.Principal`.
+- **API tokens** carry no tenant: the lookup by hash runs on the tenant pool under the URL's tenant. Unknown and wrong-tenant tokens get the same response and the same work (no timing difference).
+- **Platform admin**: `platform_admins`, bootstrapped by `LICENSEFORGE_BOOTSTRAP_ADMIN` ([ADR-0003 Identity via generic OIDC, Keycloak as default](0003-identity-via-generic-oidc-keycloak-as-default.md)); an email value only matches with `email_verified` true.
 
 ## Consequences
-- The platform pool is used on the login path, not only for platform-admin operations. Kept narrow: one package, reviewed like `internal/tenant`, and no tenant data beyond memberships.
-- One non-canonical policy (`users_member_of_tenant`) the isolation test must know about.
-- Users survive tenant deletion; a user with no memberships left is kept (re-invitable) until a GDPR erasure removes them.
+- Operators create a fourth login (one more line in the setup script and one more Secret key). In exchange the internet-facing login path has no access to licensing data.
+- A user who belongs to no tenant any more is kept (re-invitable) until erased.
 
 ## Resolved at acceptance (2026-11-04)
 Decided under the maintainer's delegation ("what is best for the product and for people to adopt it"):
-- **User erasure (GDPR)**: a user row is erasable on request. Audit entries keep only the opaque user ID, which no longer resolves to a person once the row is gone ([ADR-0027 Audit log](0027-audit-log.md) retention removes the entries themselves later).
-- **API tokens outlive their creator**: tokens belong to the tenant, so removing a member doesn't break the integrations they set up (CI, billing, provisioning). The dashboard shows each token's creator and last use, and admins revoke. Revoking a removed member's tokens is one click, not automatic.
+- **User erasure (GDPR)**: `licenseforge user erase <usr_id>` (owner login, like `tenant purge` in ADR-0009) deletes the user row, their memberships and pending invitations, and nulls `invited_by` / `created_by` (tokens stay with the tenant). It refuses while the user is a tenant's last owner (hand over first). Audit entries keep the opaque user ID; source IP and user agent in them age out by retention ([ADR-0027 Audit log](0027-audit-log.md)), and audit `details` must never carry emails. If the person logs in again they get a new `usr_` ID. `disabled_at` is suspension (login refused, everything kept), not erasure.
+- **API tokens belong to the tenant** (ADR-0019: the tenant issues them), so offboarding a person doesn't silently break integrations. But removing a member **defaults to revoking their tokens**: the dashboard lists them with "revoke all" preselected, and each revocation is audited. Required expiry, the role cap at creation and `last_used_at` keep forgotten tokens from becoming standing access (SOC 2 deprovisioning).

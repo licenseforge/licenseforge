@@ -9,8 +9,8 @@
 - The server's `go.mod` requires the SDK at `v0.0.0` with `replace licenseforge.io/licenseforge/sdk/go => ./sdk/go`. The server always builds against the SDK in the same commit, which is what ADR-0023 wants.
 - A `replace` only applies inside the server module: vendors importing the SDK are unaffected and pull none of the server's dependencies.
 - The Dockerfile copies `sdk/go/go.mod` before `go mod download`.
-- `go.work` stays an option for local work across modules.
+- `go.work` stays an option for local work across modules. This amends [ADR-0023 Repository structure](0023-repository-structure.md)'s consequence that nested modules need a `go.work`.
 
 ## Consequences
-- The server can't be installed with `go install licenseforge.io/licenseforge/cmd/licenseforge@version`; it ships as container images and release binaries ([ADR-0005 Kubernetes deployment via Helm](0005-kubernetes-deployment-via-helm.md)), so nothing relies on that.
+- The server can't be installed with `go install licenseforge.io/licenseforge/cmd/licenseforge@version` (it already couldn't while the vanity host serves no `go-import` tags); it ships as container images and release binaries ([ADR-0005 Kubernetes deployment via Helm](0005-kubernetes-deployment-via-helm.md)), so nothing relies on that.
 - Revisit when SDK tags are published through the vanity host: the `replace` can stay (monorepo practice) or be dropped for a tagged version.
