@@ -10,7 +10,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 | Variable | Required | Default | Security notes |
 |---|---|---|---|
-| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Use `sslmode=verify-full`. Secret |
+| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Add `sslmode=verify-full` (the server doesn't enforce TLS; see [Database logins](#database-logins)). Secret |
 | `LICENSEFORGE_PLATFORM_DATABASE_URL` | yes (server) | – | Platform pool, login `licenseforge_admin` (all tenants). Secret |
 | `LICENSEFORGE_IDENTITY_DATABASE_URL` | yes (server) | – | Login-path pool, login `licenseforge_login` (ADR-0029). Secret |
 | `LICENSEFORGE_OWNER_DATABASE_URL` | `migrate` only | – | Schema owner. **The server refuses to start if this is set.** Give it only to the migration Job. Secret |
@@ -26,7 +26,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 ## Database logins
 
-Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029). There are two group roles plus their logins, four logins in all, and none is shared:
+Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029). There are three group roles and four logins, and none is shared. Replace the script's placeholder passwords (`change-me-*`) before running it:
 
 | Login | Group | Used by | Can |
 |---|---|---|---|
@@ -43,7 +43,8 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 Also:
 - `REVOKE CONNECT` and `REVOKE TEMPORARY ... FROM PUBLIC` (in the script) keep other logins out and stop temp-table shadowing.
 - On Cloud SQL, create the logins with SQL. Console-created users are members of `cloudsqlsuperuser`, which the server refuses.
-- Use TLS (`sslmode=verify-full`), strong unique passwords or IAM authentication, and rotate them like any secret.
+- **Use TLS with `sslmode=verify-full` in every URL.** The server doesn't enforce database TLS, and the driver (pgx) defaults to `sslmode=prefer`, which falls back to plaintext and doesn't verify the server certificate.
+- Use strong unique passwords or IAM authentication, and rotate them like any secret.
 - Encrypt the database disk and backups (a deployment requirement, ADR-0024).
 
 ## TLS and ingress
@@ -75,8 +76,8 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 - The server verifies the ID token's signature, issuer, audience, `azp`, expiry and nonce, and bounds every IdP call to 10 s.
 - **Enforce MFA in the IdP**, phishing-resistant where required (passkeys, PIV/CAC). Per-tenant enforcement through `acr`/`amr` is *planned* (Roadmap v0.1).
 - An email counts only when the IdP sends `email_verified: true`, and invitations are accepted by verified email. A verified email is only as trustworthy as its IdP, so configure only IdPs that verify emails.
-- Sessions last 1 hour idle and 12 hours at most; neither is configurable yet.
-- With the chart, pass the OIDC variables through `extraEnv`, the secret with `valueFrom.secretKeyRef`. Also allow egress to the IdP: the chart's NetworkPolicy allows only DNS and the database ([NetworkPolicies](#networkpolicies)).
+- Sessions last about 1 hour idle (activity is recorded at most once a minute) and 12 hours at most; neither is configurable yet.
+- With the chart in `main`, pass the OIDC variables through `extraEnv`. `values.yaml` says `extraEnv` is not for secrets, meaning no literal secret values; give the client secret as a `valueFrom.secretKeyRef` entry. Also allow egress to the IdP: the chart's NetworkPolicy allows only DNS and the database ([NetworkPolicies](#networkpolicies)). Once PR #49 is merged, use its first-class `oidc.*` values instead (they add the IdP egress rule).
 
 ## FIPS image
 
@@ -98,7 +99,7 @@ From [`values.yaml`](../deploy/helm/licenseforge/values.yaml). Pod security isn'
 | `migrate.enabled` | `true` | Migrations as a hook Job. Turned off, you must migrate with the owner login elsewhere, never from a serving pod |
 | `replicaCount`, `podDisruptionBudget.*`, `autoscaling.*` | 2, on, off | Availability (CP, SC-5) |
 | `drainSeconds`, `terminationGracePeriodSeconds` | 5, 30 | No dropped requests on rollout; checked at render |
-| `extraEnv` | `[]` | OIDC settings. Use `valueFrom.secretKeyRef` for secrets; never add `LICENSEFORGE_OWNER_DATABASE_URL` (the server would refuse to start) |
+| `extraEnv` | `[]` | Non-secret settings (OIDC until `oidc.*` lands, PR #49); a secret only as `valueFrom.secretKeyRef`, never a literal. Never add `LICENSEFORGE_OWNER_DATABASE_URL` (the server would refuse to start) |
 | `resources` | 100m / 64Mi, limit 256Mi | Bounds a runaway pod |
 | `service.type` | `ClusterIP` | Keep it; expose through a TLS ingress, not `LoadBalancer`/`NodePort` |
 | `networkPolicy.enabled` | `true` | Keep it on (needs a CNI that enforces policies) |
@@ -133,6 +134,6 @@ spec:
 
 - **Database**: use your platform's encrypted backups with point-in-time recovery, run by a database admin, not by a LicenseForge login. Test restores. Licenses, keys, members and the audit log all live here.
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
-- **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary.
+- **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
 - **Audit log**: kept in full until the retention job ships (*planned*). Export the chain head regularly to detect truncation once SIEM export exists (*planned*).

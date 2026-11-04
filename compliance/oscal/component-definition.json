@@ -31,7 +31,7 @@
         "control-implementations": [
           {
             "uuid": "2d3a0acc-3bf2-5cf5-a893-ae46f8cf2947",
-            "source": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+            "source": "https://raw.githubusercontent.com/usnistgov/oscal-content/v1.6.0/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
             "description": "NIST SP 800-53 Rev 5 controls the LicenseForge server implements or supports.",
             "implemented-requirements": [
               {
@@ -84,12 +84,12 @@
               {
                 "uuid": "06470f03-c171-5e53-9919-2e9fbb2c82b2",
                 "control-id": "ac-3",
-                "description": "Two layers. In Go, every service calls authz.Require / authz.CanAssign with a fixed role-to-permission map and explicit product scope (zero scope denies). In PostgreSQL, every table has forced row-level security, and each serving login sees only the current tenant's rows (app.tenant_id, set per transaction). Column grants limit which fields each login may change.",
+                "description": "Two layers. In Go, the API token and offline-issuance services call authz.Require / authz.CanAssign, with a fixed role-to-permission map and explicit product scope (zero scope denies). In PostgreSQL, every table has forced row-level security. The tenant login sees only the rows of the tenant set for the transaction (app.tenant_id); the platform login reads all tenants, and the identity login reads identity tables across tenants. Column grants limit which fields each login may change.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -117,7 +117,7 @@
                     "text": "TestEveryRelationHasCanonicalRLS"
                   }
                 ],
-                "remarks": "The REST API isn't built yet; each handler must call authz.Require (Roadmap v0.1: REST API)."
+                "remarks": "Signing key operations (internal/signing Create, Promote, Discard) call no authz check. Platform operations (DisableUser, GrantPlatformAdmin, RemovePlatformAdmin) have no authorization layer; callers must check platform-admin status. The REST API isn't built yet, and each handler must call authz.Require (Roadmap v0.1: REST API)."
               },
               {
                 "uuid": "c8d7c976-cf3e-54bd-b11a-1e6634ecb880",
@@ -156,7 +156,7 @@
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -174,7 +174,7 @@
                     "text": "TestServeRefuses"
                   }
                 ],
-                "remarks": "Which people hold which role is the operator's decision."
+                "remarks": "Nothing enforces the key-management separation yet: signing key operations don't check key:write (owner only). Which people hold which role is the operator's decision."
               },
               {
                 "uuid": "50fa7422-207d-511e-860e-0b4df403b9f1",
@@ -255,7 +255,7 @@
               {
                 "uuid": "43bef5f6-ef1a-5f0b-a734-c292fb862d84",
                 "control-id": "ac-12",
-                "description": "Dashboard sessions are server-side. A session ends after 1 hour without a request and 12 hours after login, by the database clock. The database caps a session at 1 day. Suspending a user deletes their sessions.",
+                "description": "Dashboard sessions are server-side. A session ends after about 1 hour without a request (activity is recorded at most once a minute) and 12 hours after login, by the database clock. The database caps a session at 1 day. Suspending a user deletes their sessions.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -441,7 +441,7 @@
                     "text": "TestVerifyDetectsTampering"
                   }
                 ],
-                "remarks": "Someone with the owner login could rewrite the whole chain, and truncation is invisible without an exported head. The hash export to a SIEM that anchors the chain outside the database is planned (Roadmap v0.1: SIEM export)."
+                "remarks": "The chain is an unkeyed SHA-256, so any login that may INSERT can append forged entries that verify: the platform login into any tenant's chain, and the tenant and identity logins into the chain of the tenant they set. Someone with the owner login could rewrite the whole chain, and truncation is invisible without an exported head. The hash export to a SIEM that anchors the chain outside the database is planned (Roadmap v0.1: SIEM export)."
               },
               {
                 "uuid": "b0fd6354-21b0-5995-be78-5caea53ea53d",
@@ -603,7 +603,7 @@
               {
                 "uuid": "c2bfbedf-64d7-54d8-871d-c3e70c4f098e",
                 "control-id": "cp-10",
-                "description": "Recovery is a database restore plus a redeploy of the chart. Product support: migrations refuse a database whose applied migrations were changed or are newer than the binary, so a restore can't be silently run against the wrong version.",
+                "description": "Recovery is a database restore plus a redeploy of the chart. Product support: `licenseforge migrate` refuses a database whose applied migrations were changed or are newer than the binary.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -621,7 +621,8 @@
                     "rel": "reference",
                     "text": "TestMigrate"
                   }
-                ]
+                ],
+                "remarks": "Only `migrate` checks the schema version; the server doesn't check it at start, so run `migrate` after every restore."
               },
               {
                 "uuid": "730e09a5-7a6b-553e-bbea-983585789638",
@@ -649,7 +650,8 @@
                     "rel": "reference",
                     "text": "TestAuthenticateRefusals"
                   }
-                ]
+                ],
+                "remarks": "API token authentication isn't reachable over HTTP in main yet (REST API, PR #48 pending)."
               },
               {
                 "uuid": "d716037b-ca0f-5bd5-8ee7-8578153f7a11",
@@ -730,12 +732,12 @@
               {
                 "uuid": "e2458090-079e-53a4-b71e-7c9fdb4291c0",
                 "control-id": "ia-5",
-                "description": "LicenseForge stores no passwords (the IdP owns them). Authenticators it issues are random and stored only as SHA-256 hashes: API tokens (256 bits, checksummed, expiry required, at most 1 year, one-way revocation), session cookies (256 bits) and invitation tokens.",
+                "description": "LicenseForge stores no passwords (the IdP owns them). Authenticators it issues are random and stored only as SHA-256 hashes: API tokens (256 bits, checksummed, expiry required, at most 1 year, one-way revocation) and session cookies (256 bits). Invitation tokens are stored only as SHA-256 hashes (32-byte length CHECK) and accepted by hash.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -757,7 +759,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "API tokens can't be created over HTTP yet (Roadmap v0.1: member/invitation/token HTTP handlers)."
+                "remarks": "No code issues invitation tokens yet; only the hash and acceptance exist. API tokens can't be created over HTTP yet (Roadmap v0.1: member/invitation/token HTTP handlers)."
               },
               {
                 "uuid": "2ef8a521-9977-5b69-9b71-27e5124bb05c",
@@ -780,7 +782,8 @@
                     "rel": "reference",
                     "text": "TestAuthenticateRefusals"
                   }
-                ]
+                ],
+                "remarks": "The API token path isn't reachable over HTTP in main yet (REST API, PR #48 pending)."
               },
               {
                 "uuid": "2ca84393-a009-5014-b7dc-9b13a56ca9a8",
@@ -790,7 +793,7 @@
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -805,7 +808,7 @@
                     "text": "TestLogin"
                   }
                 ],
-                "remarks": "Fixed values (see AC-12)."
+                "remarks": "The lifetime is fixed in code, not configurable (see AC-12)."
               },
               {
                 "uuid": "aed4451d-0066-565a-b2dc-1bf8dd12a6a6",
@@ -837,7 +840,7 @@
               {
                 "uuid": "7e0de78b-633a-5da2-bbe3-5208649853fc",
                 "control-id": "sa-3",
-                "description": "Every significant decision is an ADR. Changes go through pull requests with required CI checks; changes to signing, the license format, authorization or tenant isolation need a maintainer review and tests that fail without the change.",
+                "description": "Every significant decision is an ADR. Changes go through pull requests with required CI checks (no approval required, see SA-10); changes to signing, the license format, authorization or tenant isolation need a maintainer review and tests that fail without the change.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -881,7 +884,7 @@
               {
                 "uuid": "138074b9-fe67-5164-b308-9f9aa664a678",
                 "control-id": "sa-10",
-                "description": "Git on GitHub. The main branch ruleset blocks deletion and force pushes, requires a pull request with resolved review threads, and requires the go, dco and analyze checks. DCO sign-off is checked on every commit (PRs opened by Dependabot excepted); CODEOWNERS sets the reviewers.",
+                "description": "Git on GitHub. The main branch ruleset blocks deletion and force pushes, requires a pull request with resolved review threads, and requires the go, dco and analyze checks. DCO sign-off is checked on every commit (PRs opened by Dependabot excepted); CODEOWNERS sets the default reviewers.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -904,7 +907,7 @@
                     "text": "repository ruleset main"
                   }
                 ],
-                "remarks": "The ruleset requires 0 approvals (single maintainer) and doesn't include the Merge gate check."
+                "remarks": "The ruleset requires 0 approvals and no code-owner review (single maintainer); organization admins can bypass it on pull requests; merge, squash and rebase are all allowed (squash-only isn't enforced); the Merge gate check isn't required."
               },
               {
                 "uuid": "22b05bf4-c685-5307-a9ee-5a7daf6df74d",
@@ -1036,12 +1039,12 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The default policy has no egress to the OIDC provider: add a NetworkPolicy for it when login is enabled (Secure Configuration Guide)."
+                "remarks": "The ingressFrom and databaseTo peers default to any: narrow them. The default policy has no egress to the OIDC provider: add a NetworkPolicy for it when login is enabled (Secure Configuration Guide; first-class oidc.egress values in PR #49)."
               },
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
                 "control-id": "sc-8",
-                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Database connections use TLS through the DSN (sslmode=verify-full in the documented setup).",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Database TLS is set by the operator in the connection strings (the chart README uses sslmode=verify-full).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1064,7 +1067,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh. FIPS-only TLS suites and TLS 1.2+ are planned (Roadmap v0.1: FIPS-only TLS suites in FIPS mode; TLS 1.2+ everywhere)."
+                "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh. The server doesn't enforce database TLS: pgx defaults to sslmode=prefer, which falls back to plaintext and doesn't verify the server; set sslmode=verify-full in every database URL. FIPS-only TLS suites and TLS 1.2+ are planned (Roadmap v0.1: FIPS-only TLS suites in FIPS mode; TLS 1.2+ everywhere)."
               },
               {
                 "uuid": "8be7d414-abfc-58f2-a5b9-0138338d1542",
@@ -1102,7 +1105,7 @@
               {
                 "uuid": "e00928a9-27dc-5c89-967b-9fe4649a29e4",
                 "control-id": "sc-13",
-                "description": "Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256 and SHA-256. The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
+                "description": "Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1130,7 +1133,7 @@
                     "text": "TestFIPSModeWhenRequested"
                   }
                 ],
-                "remarks": "-fips images aren't published yet (no release pipeline; Roadmap v0.1: FIPS build, -fips images). Build one with docker build --build-arg GOFIPS140=certified."
+                "remarks": "The default build and image are not FIPS (GOFIPS140=off). No -fips image is published yet (no release pipeline; Roadmap v0.1: FIPS build, -fips images); build one with docker build --build-arg GOFIPS140=certified."
               },
               {
                 "uuid": "28e4b998-cefd-58b2-b44c-7ac221413101",
@@ -1163,12 +1166,12 @@
               {
                 "uuid": "9b69abbc-fdec-5b62-a2be-8446a4057edb",
                 "control-id": "sc-28",
-                "description": "License keys and signing private keys are encrypted with AES-256-GCM under the master keyring. The ciphertext is bound to purpose, tenant and row, so it can't be moved between rows. The database refuses plaintext in these columns (CHECK). API tokens, session cookies and invitation tokens are stored only as SHA-256 hashes, machine fingerprints only as SHA-256 hashes, domain-separated per tenant and product.",
+                "description": "Implemented for secrets: license keys and signing private keys are encrypted with AES-256-GCM under the master keyring. The ciphertext is bound to purpose, tenant and row, so it can't be moved between rows. The database refuses plaintext in these columns (CHECK). API tokens, session cookies and invitation tokens are stored only as SHA-256 hashes, machine fingerprints only as SHA-256 hashes, domain-separated per tenant and product.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -1188,17 +1191,17 @@
                     "text": "TestSigningKeysInDatabase"
                   }
                 ],
-                "remarks": "Disk and database encryption are the operator's (deployment requirement). No license-issuing service writes licenses yet; the schema and keyring enforce the format (Roadmap v0.1: license lifecycle)."
+                "remarks": "Personal and other data (users, customers, activations, audit entries) aren't encrypted by the application; they rely on the operator's disk, database and backup encryption (inherited, a deployment requirement). No license-issuing service writes licenses yet; the schema and keyring enforce the format (Roadmap v0.1: license lifecycle)."
               },
               {
                 "uuid": "1ae5ac0a-4acd-5b53-8991-b9b82ab0f6dc",
                 "control-id": "sc-28.1",
-                "description": "As SC-28: application-level envelope encryption with AES-256-GCM.",
+                "description": "As SC-28: application-level AES-256-GCM encryption of secrets.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -1217,7 +1220,7 @@
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -1230,7 +1233,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "Only the latest minor release gets fixes until 1.0."
+                "remarks": "No release pipeline in main yet, so fixes can't ship as releases (Roadmap v0.1: signed releases). Only the latest minor release gets fixes until 1.0."
               },
               {
                 "uuid": "3b223228-e2dc-5635-a8ba-8fcb516abfc3",

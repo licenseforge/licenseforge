@@ -26,6 +26,12 @@ const (
 	root       = ".." // the repository, from this module
 )
 
+// external is the evidence outside the repository that may be cited
+// (repository settings); any other non-repository link fails the test.
+var external = map[string]bool{
+	"https://github.com/licenseforge/licenseforge/rules/26381884": true, // ruleset main
+}
+
 func compile(t *testing.T) *jsonschema.Schema {
 	t.Helper()
 	f, err := os.Open(schemaFile)
@@ -152,7 +158,10 @@ func TestEvidenceExists(t *testing.T) {
 		for _, l := range r.Links {
 			path, ok := strings.CutPrefix(l.Href, repoURL)
 			if !ok {
-				continue // external evidence (repository settings)
+				if !external[l.Href] {
+					t.Errorf("%s: %s is neither in the repository nor allow-listed", r.ControlID, l.Href)
+				}
+				continue
 			}
 			body, err := os.ReadFile(filepath.Join(root, path))
 			if err != nil {
