@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
@@ -24,20 +25,29 @@ const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 's
 
 // Mount serves the dashboard on mux for GET (and HEAD) /. A GET for a path
 // that mux routes only for other methods (GET /auth/logout) gets 405 with
-// Allow, as it would without the catch-all, instead of the app or a 404.
+// Allow, as it would without the catch-all, instead of the app or a 404
+// (as problem JSON under /api/, ADR-0032).
+//
+// Don't register a method-less pattern on mux that also matches the SPA's
+// paths (a "/" or "/t/" catch-all): the probe would find it and answer 405
+// for every dashboard route.
 func Mount(mux *http.ServeMux) {
 	spa := Handler()
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var allow []string
 		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-			probe := r.Clone(r.Context())
+			probe := *r // mux.Handler reads only Method, Host and URL
 			probe.Method = m
-			if _, pattern := mux.Handler(probe); pattern != "" {
+			if _, pattern := mux.Handler(&probe); pattern != "" {
 				allow = append(allow, m)
 			}
 		}
 		if len(allow) > 0 {
 			w.Header().Set("Allow", strings.Join(allow, ", "))
+			if under(path.Clean("/"+r.URL.Path), "/api") {
+				problem(w, http.StatusMethodNotAllowed, "method_not_allowed")
+				return
+			}
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
@@ -86,6 +96,13 @@ func newHandler(fsys fs.FS) http.Handler {
 
 type handler struct{ files map[string]file }
 
+// problem writes an RFC 9457 error, like the API's own (ADR-0032).
+func problem(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `{"type":"about:blank","title":%q,"status":%d,"code":%q}`+"\n", http.StatusText(status), status, code)
+}
+
 // under reports whether p is prefix or below it.
 func under(p, prefix string) bool { return p == prefix || strings.HasPrefix(p, prefix+"/") }
 
@@ -95,10 +112,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hd.Set("X-Content-Type-Options", "nosniff")
 	hd.Set("Referrer-Policy", "same-origin")
 	p := path.Clean("/" + r.URL.Path)
-	if under(p, "/api") { // RFC 9457, like the API's own errors (ADR-0032)
-		hd.Set("Content-Type", "application/problem+json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"type":"about:blank","title":"Not Found","status":404,"code":"not_found"}` + "\n"))
+	if under(p, "/api") {
+		problem(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead { // Mount routes only GET; a defence
