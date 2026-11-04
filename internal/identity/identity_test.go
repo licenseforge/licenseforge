@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -118,6 +119,20 @@ func TestMemberships(t *testing.T) {
 	ms, err := s.Memberships(ctx, u.ID)
 	if err != nil || len(ms) != 1 || ms[0].TenantID != tn.ID || ms[0].TenantSlug != tn.Slug || ms[0].TenantName != "Acme" || ms[0].Role != "owner" || !ms[0].ScopeAll {
 		t.Errorf("memberships = %+v, %v", ms, err)
+	}
+	// The API's tenant resolution and grant.
+	for ref, want := range map[string]string{tn.Slug: tn.ID, tn.ID: tn.ID, "nope-" + storetest.Suffix(): "", ids.Tenant(): "", "": ""} {
+		if id, err := s.TenantID(ctx, ref); id != want || (want == "") != errors.Is(err, ErrNotMember) {
+			t.Errorf("TenantID(%q) = %q, %v", ref, id, err)
+		}
+	}
+	if g, err := s.Grant(ctx, u.ID, tn.ID); err != nil || g.Role != authz.Owner || !g.Scope.All || len(g.Scope.Products) != 0 {
+		t.Errorf("grant = %+v, %v", g, err)
+	}
+	for _, c := range [][2]string{{ids.User(), tn.ID}, {u.ID, ids.Tenant()}} {
+		if _, err := s.Grant(ctx, c[0], c[1]); !errors.Is(err, ErrNotMember) {
+			t.Errorf("grant of non-member %v: %v", c, err)
+		}
 	}
 }
 

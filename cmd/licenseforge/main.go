@@ -15,6 +15,7 @@
 //	LICENSEFORGE_OIDC_CLIENT_ID         OIDC client registration, required with the issuer
 //	LICENSEFORGE_OIDC_CLIENT_SECRET     empty for a public client (PKCE only)
 //	LICENSEFORGE_OIDC_REDIRECT_URL      https://<host>/auth/callback
+//	LICENSEFORGE_API_HOST               API-only host (api.example.com): tokens only there, sessions only elsewhere; unset = both
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -34,6 +35,8 @@ import (
 	"syscall"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/api"
+	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
@@ -143,6 +146,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return db.Ping(ctx)
 	}
 	mux := newMux(ready, log)
+	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		login, err := weblogin.New(discoverCtx, weblogin.Config{
@@ -156,9 +160,13 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 			return err
 		}
 		login.Register(mux)
+		sessions = login.Sessions()
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
+	// API tokens need only the tenant pool (hashes, no keyring).
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Identity: identity.Service{DB: db},
+		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,

@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Management REST API foundation (ADR-0032): spec-first `api/openapi.yaml` (OpenAPI 3.0.3) with an oapi-codegen strict `std-http` server in `internal/api/apigen` (generated, committed, `make generate`); one outer handler for every route does the check order (exactly one credential; Bearer `lf_live_` token or dashboard session with CSRF and cross-origin checks; `{tenant}` by slug or ID; same 401 after the same work for unknown tenants and bad tokens; 404 for non-members; 403 for `sdk` tokens; `LICENSEFORGE_API_HOST` splits token and session hosts) and renders every error as RFC 9457 problem+json with `code`, `request_id` and `X-Request-Id`. First endpoints: list (cursor-paginated, newest first), create and revoke API tokens. New dependency: `github.com/oapi-codegen/runtime`.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0032 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.
