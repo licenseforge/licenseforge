@@ -28,6 +28,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -67,6 +68,8 @@ type Client struct {
 	Plan *PlanClient
 	// PlanFeature is the client for interacting with the PlanFeature builders.
 	PlanFeature *PlanFeatureClient
+	// PlatformAdmin is the client for interacting with the PlatformAdmin builders.
+	PlatformAdmin *PlatformAdminClient
 	// Product is the client for interacting with the Product builders.
 	Product *ProductClient
 	// SigningKey is the client for interacting with the SigningKey builders.
@@ -99,6 +102,7 @@ func (c *Client) init() {
 	c.MembershipProduct = NewMembershipProductClient(c.config)
 	c.Plan = NewPlanClient(c.config)
 	c.PlanFeature = NewPlanFeatureClient(c.config)
+	c.PlatformAdmin = NewPlatformAdminClient(c.config)
 	c.Product = NewProductClient(c.config)
 	c.SigningKey = NewSigningKeyClient(c.config)
 	c.Tenant = NewTenantClient(c.config)
@@ -208,6 +212,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		MembershipProduct: NewMembershipProductClient(cfg),
 		Plan:              NewPlanClient(cfg),
 		PlanFeature:       NewPlanFeatureClient(cfg),
+		PlatformAdmin:     NewPlatformAdminClient(cfg),
 		Product:           NewProductClient(cfg),
 		SigningKey:        NewSigningKeyClient(cfg),
 		Tenant:            NewTenantClient(cfg),
@@ -244,6 +249,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		MembershipProduct: NewMembershipProductClient(cfg),
 		Plan:              NewPlanClient(cfg),
 		PlanFeature:       NewPlanFeatureClient(cfg),
+		PlatformAdmin:     NewPlatformAdminClient(cfg),
 		Product:           NewProductClient(cfg),
 		SigningKey:        NewSigningKeyClient(cfg),
 		Tenant:            NewTenantClient(cfg),
@@ -279,8 +285,8 @@ func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.Customer,
 		c.Feature, c.Invitation, c.InvitationProduct, c.License, c.Membership,
-		c.MembershipProduct, c.Plan, c.PlanFeature, c.Product, c.SigningKey, c.Tenant,
-		c.User,
+		c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin, c.Product,
+		c.SigningKey, c.Tenant, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -292,8 +298,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.Customer,
 		c.Feature, c.Invitation, c.InvitationProduct, c.License, c.Membership,
-		c.MembershipProduct, c.Plan, c.PlanFeature, c.Product, c.SigningKey, c.Tenant,
-		c.User,
+		c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin, c.Product,
+		c.SigningKey, c.Tenant, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -328,6 +334,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Plan.mutate(ctx, m)
 	case *PlanFeatureMutation:
 		return c.PlanFeature.mutate(ctx, m)
+	case *PlatformAdminMutation:
+		return c.PlatformAdmin.mutate(ctx, m)
 	case *ProductMutation:
 		return c.Product.mutate(ctx, m)
 	case *SigningKeyMutation:
@@ -2518,6 +2526,155 @@ func (c *PlanFeatureClient) mutate(ctx context.Context, m *PlanFeatureMutation) 
 	}
 }
 
+// PlatformAdminClient is a client for the PlatformAdmin schema.
+type PlatformAdminClient struct {
+	config
+}
+
+// NewPlatformAdminClient returns a client for the PlatformAdmin from the given config.
+func NewPlatformAdminClient(c config) *PlatformAdminClient {
+	return &PlatformAdminClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `platformadmin.Hooks(f(g(h())))`.
+func (c *PlatformAdminClient) Use(hooks ...Hook) {
+	c.hooks.PlatformAdmin = append(c.hooks.PlatformAdmin, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `platformadmin.Intercept(f(g(h())))`.
+func (c *PlatformAdminClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PlatformAdmin = append(c.inters.PlatformAdmin, interceptors...)
+}
+
+// Create returns a builder for creating a PlatformAdmin entity.
+func (c *PlatformAdminClient) Create() *PlatformAdminCreate {
+	mutation := newPlatformAdminMutation(c.config, OpCreate)
+	return &PlatformAdminCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PlatformAdmin entities.
+func (c *PlatformAdminClient) CreateBulk(builders ...*PlatformAdminCreate) *PlatformAdminCreateBulk {
+	return &PlatformAdminCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PlatformAdminClient) MapCreateBulk(slice any, setFunc func(*PlatformAdminCreate, int)) *PlatformAdminCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PlatformAdminCreateBulk{err: fmt.Errorf("calling to PlatformAdminClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PlatformAdminCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PlatformAdminCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PlatformAdmin.
+func (c *PlatformAdminClient) Update() *PlatformAdminUpdate {
+	mutation := newPlatformAdminMutation(c.config, OpUpdate)
+	return &PlatformAdminUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PlatformAdminClient) UpdateOne(_m *PlatformAdmin) *PlatformAdminUpdateOne {
+	mutation := newPlatformAdminMutation(c.config, OpUpdateOne, withPlatformAdmin(_m))
+	return &PlatformAdminUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PlatformAdminClient) UpdateOneID(id string) *PlatformAdminUpdateOne {
+	mutation := newPlatformAdminMutation(c.config, OpUpdateOne, withPlatformAdminID(id))
+	return &PlatformAdminUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PlatformAdmin.
+func (c *PlatformAdminClient) Delete() *PlatformAdminDelete {
+	mutation := newPlatformAdminMutation(c.config, OpDelete)
+	return &PlatformAdminDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PlatformAdminClient) DeleteOne(_m *PlatformAdmin) *PlatformAdminDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PlatformAdminClient) DeleteOneID(id string) *PlatformAdminDeleteOne {
+	builder := c.Delete().Where(platformadmin.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PlatformAdminDeleteOne{builder}
+}
+
+// Query returns a query builder for PlatformAdmin.
+func (c *PlatformAdminClient) Query() *PlatformAdminQuery {
+	return &PlatformAdminQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePlatformAdmin},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PlatformAdmin entity by its id.
+func (c *PlatformAdminClient) Get(ctx context.Context, id string) (*PlatformAdmin, error) {
+	return c.Query().Where(platformadmin.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PlatformAdminClient) GetX(ctx context.Context, id string) *PlatformAdmin {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a PlatformAdmin.
+func (c *PlatformAdminClient) QueryUser(_m *PlatformAdmin) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(platformadmin.Table, platformadmin.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, true, platformadmin.UserTable, platformadmin.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *PlatformAdminClient) Hooks() []Hook {
+	return c.hooks.PlatformAdmin
+}
+
+// Interceptors returns the client interceptors.
+func (c *PlatformAdminClient) Interceptors() []Interceptor {
+	return c.inters.PlatformAdmin
+}
+
+func (c *PlatformAdminClient) mutate(ctx context.Context, m *PlatformAdminMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PlatformAdminCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PlatformAdminUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PlatformAdminUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PlatformAdminDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PlatformAdmin mutation op: %q", m.Op())
+	}
+}
+
 // ProductClient is a client for the Product schema.
 type ProductClient struct {
 	config
@@ -3281,6 +3438,22 @@ func (c *UserClient) QueryAPITokens(_m *User) *APITokenQuery {
 	return query
 }
 
+// QueryPlatformAdmin queries the platform_admin edge of a User.
+func (c *UserClient) QueryPlatformAdmin(_m *User) *PlatformAdminQuery {
+	query := (&PlatformAdminClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(platformadmin.Table, platformadmin.FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, false, user.PlatformAdminTable, user.PlatformAdminColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *UserClient) Hooks() []Hook {
 	return c.hooks.User
@@ -3311,12 +3484,12 @@ type (
 	hooks struct {
 		APIToken, APITokenProduct, Activation, AuditEvent, Customer, Feature,
 		Invitation, InvitationProduct, License, Membership, MembershipProduct, Plan,
-		PlanFeature, Product, SigningKey, Tenant, User []ent.Hook
+		PlanFeature, PlatformAdmin, Product, SigningKey, Tenant, User []ent.Hook
 	}
 	inters struct {
 		APIToken, APITokenProduct, Activation, AuditEvent, Customer, Feature,
 		Invitation, InvitationProduct, License, Membership, MembershipProduct, Plan,
-		PlanFeature, Product, SigningKey, Tenant, User []ent.Interceptor
+		PlanFeature, PlatformAdmin, Product, SigningKey, Tenant, User []ent.Interceptor
 	}
 )
 

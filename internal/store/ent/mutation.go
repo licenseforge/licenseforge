@@ -24,6 +24,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
@@ -54,6 +55,7 @@ const (
 	TypeMembershipProduct = "MembershipProduct"
 	TypePlan              = "Plan"
 	TypePlanFeature       = "PlanFeature"
+	TypePlatformAdmin     = "PlatformAdmin"
 	TypeProduct           = "Product"
 	TypeSigningKey        = "SigningKey"
 	TypeTenant            = "Tenant"
@@ -14597,6 +14599,576 @@ func (m *PlanFeatureMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown PlanFeature edge %s", name)
 }
 
+// PlatformAdminMutation represents an operation that mutates the PlatformAdmin nodes in the graph.
+type PlatformAdminMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *string
+	bootstrap     *bool
+	granted_by    *string
+	created_at    *time.Time
+	clearedFields map[string]struct{}
+	user          *string
+	cleareduser   bool
+	done          bool
+	oldValue      func(context.Context) (*PlatformAdmin, error)
+	predicates    []predicate.PlatformAdmin
+}
+
+var _ ent.Mutation = (*PlatformAdminMutation)(nil)
+
+// platformadminOption allows management of the mutation configuration using functional options.
+type platformadminOption func(*PlatformAdminMutation)
+
+// newPlatformAdminMutation creates new mutation for the PlatformAdmin entity.
+func newPlatformAdminMutation(c config, op Op, opts ...platformadminOption) *PlatformAdminMutation {
+	m := &PlatformAdminMutation{
+		config:        c,
+		op:            op,
+		typ:           TypePlatformAdmin,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withPlatformAdminID sets the ID field of the mutation.
+func withPlatformAdminID(id string) platformadminOption {
+	return func(m *PlatformAdminMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *PlatformAdmin
+		)
+		m.oldValue = func(ctx context.Context) (*PlatformAdmin, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().PlatformAdmin.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withPlatformAdmin sets the old PlatformAdmin of the mutation.
+func withPlatformAdmin(node *PlatformAdmin) platformadminOption {
+	return func(m *PlatformAdminMutation) {
+		m.oldValue = func(context.Context) (*PlatformAdmin, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m PlatformAdminMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m PlatformAdminMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of PlatformAdmin entities.
+func (m *PlatformAdminMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *PlatformAdminMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *PlatformAdminMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().PlatformAdmin.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetUserID sets the "user_id" field.
+func (m *PlatformAdminMutation) SetUserID(s string) {
+	m.user = &s
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *PlatformAdminMutation) UserID() (r string, exists bool) {
+	v := m.user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the PlatformAdmin entity.
+// If the PlatformAdmin object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlatformAdminMutation) OldUserID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *PlatformAdminMutation) ResetUserID() {
+	m.user = nil
+}
+
+// SetBootstrap sets the "bootstrap" field.
+func (m *PlatformAdminMutation) SetBootstrap(b bool) {
+	m.bootstrap = &b
+}
+
+// Bootstrap returns the value of the "bootstrap" field in the mutation.
+func (m *PlatformAdminMutation) Bootstrap() (r bool, exists bool) {
+	v := m.bootstrap
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBootstrap returns the old "bootstrap" field's value of the PlatformAdmin entity.
+// If the PlatformAdmin object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlatformAdminMutation) OldBootstrap(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBootstrap is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBootstrap requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBootstrap: %w", err)
+	}
+	return oldValue.Bootstrap, nil
+}
+
+// ResetBootstrap resets all changes to the "bootstrap" field.
+func (m *PlatformAdminMutation) ResetBootstrap() {
+	m.bootstrap = nil
+}
+
+// SetGrantedBy sets the "granted_by" field.
+func (m *PlatformAdminMutation) SetGrantedBy(s string) {
+	m.granted_by = &s
+}
+
+// GrantedBy returns the value of the "granted_by" field in the mutation.
+func (m *PlatformAdminMutation) GrantedBy() (r string, exists bool) {
+	v := m.granted_by
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGrantedBy returns the old "granted_by" field's value of the PlatformAdmin entity.
+// If the PlatformAdmin object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlatformAdminMutation) OldGrantedBy(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGrantedBy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGrantedBy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGrantedBy: %w", err)
+	}
+	return oldValue.GrantedBy, nil
+}
+
+// ClearGrantedBy clears the value of the "granted_by" field.
+func (m *PlatformAdminMutation) ClearGrantedBy() {
+	m.granted_by = nil
+	m.clearedFields[platformadmin.FieldGrantedBy] = struct{}{}
+}
+
+// GrantedByCleared returns if the "granted_by" field was cleared in this mutation.
+func (m *PlatformAdminMutation) GrantedByCleared() bool {
+	_, ok := m.clearedFields[platformadmin.FieldGrantedBy]
+	return ok
+}
+
+// ResetGrantedBy resets all changes to the "granted_by" field.
+func (m *PlatformAdminMutation) ResetGrantedBy() {
+	m.granted_by = nil
+	delete(m.clearedFields, platformadmin.FieldGrantedBy)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *PlatformAdminMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *PlatformAdminMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the PlatformAdmin entity.
+// If the PlatformAdmin object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlatformAdminMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *PlatformAdminMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// ClearUser clears the "user" edge to the User entity.
+func (m *PlatformAdminMutation) ClearUser() {
+	m.cleareduser = true
+	m.clearedFields[platformadmin.FieldUserID] = struct{}{}
+}
+
+// UserCleared reports if the "user" edge to the User entity was cleared.
+func (m *PlatformAdminMutation) UserCleared() bool {
+	return m.cleareduser
+}
+
+// UserIDs returns the "user" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// UserID instead. It exists only for internal usage by the builders.
+func (m *PlatformAdminMutation) UserIDs() (ids []string) {
+	if id := m.user; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetUser resets all changes to the "user" edge.
+func (m *PlatformAdminMutation) ResetUser() {
+	m.user = nil
+	m.cleareduser = false
+}
+
+// Where appends a list predicates to the PlatformAdminMutation builder.
+func (m *PlatformAdminMutation) Where(ps ...predicate.PlatformAdmin) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the PlatformAdminMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *PlatformAdminMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.PlatformAdmin, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *PlatformAdminMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *PlatformAdminMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (PlatformAdmin).
+func (m *PlatformAdminMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *PlatformAdminMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m.user != nil {
+		fields = append(fields, platformadmin.FieldUserID)
+	}
+	if m.bootstrap != nil {
+		fields = append(fields, platformadmin.FieldBootstrap)
+	}
+	if m.granted_by != nil {
+		fields = append(fields, platformadmin.FieldGrantedBy)
+	}
+	if m.created_at != nil {
+		fields = append(fields, platformadmin.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *PlatformAdminMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case platformadmin.FieldUserID:
+		return m.UserID()
+	case platformadmin.FieldBootstrap:
+		return m.Bootstrap()
+	case platformadmin.FieldGrantedBy:
+		return m.GrantedBy()
+	case platformadmin.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *PlatformAdminMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case platformadmin.FieldUserID:
+		return m.OldUserID(ctx)
+	case platformadmin.FieldBootstrap:
+		return m.OldBootstrap(ctx)
+	case platformadmin.FieldGrantedBy:
+		return m.OldGrantedBy(ctx)
+	case platformadmin.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown PlatformAdmin field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *PlatformAdminMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case platformadmin.FieldUserID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case platformadmin.FieldBootstrap:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBootstrap(v)
+		return nil
+	case platformadmin.FieldGrantedBy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGrantedBy(v)
+		return nil
+	case platformadmin.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown PlatformAdmin field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *PlatformAdminMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *PlatformAdminMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *PlatformAdminMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown PlatformAdmin numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *PlatformAdminMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(platformadmin.FieldGrantedBy) {
+		fields = append(fields, platformadmin.FieldGrantedBy)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *PlatformAdminMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *PlatformAdminMutation) ClearField(name string) error {
+	switch name {
+	case platformadmin.FieldGrantedBy:
+		m.ClearGrantedBy()
+		return nil
+	}
+	return fmt.Errorf("unknown PlatformAdmin nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *PlatformAdminMutation) ResetField(name string) error {
+	switch name {
+	case platformadmin.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case platformadmin.FieldBootstrap:
+		m.ResetBootstrap()
+		return nil
+	case platformadmin.FieldGrantedBy:
+		m.ResetGrantedBy()
+		return nil
+	case platformadmin.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown PlatformAdmin field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *PlatformAdminMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.user != nil {
+		edges = append(edges, platformadmin.EdgeUser)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *PlatformAdminMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case platformadmin.EdgeUser:
+		if id := m.user; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *PlatformAdminMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *PlatformAdminMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *PlatformAdminMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.cleareduser {
+		edges = append(edges, platformadmin.EdgeUser)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *PlatformAdminMutation) EdgeCleared(name string) bool {
+	switch name {
+	case platformadmin.EdgeUser:
+		return m.cleareduser
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *PlatformAdminMutation) ClearEdge(name string) error {
+	switch name {
+	case platformadmin.EdgeUser:
+		m.ClearUser()
+		return nil
+	}
+	return fmt.Errorf("unknown PlatformAdmin unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *PlatformAdminMutation) ResetEdge(name string) error {
+	switch name {
+	case platformadmin.EdgeUser:
+		m.ResetUser()
+		return nil
+	}
+	return fmt.Errorf("unknown PlatformAdmin edge %s", name)
+}
+
 // ProductMutation represents an operation that mutates the Product nodes in the graph.
 type ProductMutation struct {
 	config
@@ -17441,6 +18013,8 @@ type UserMutation struct {
 	api_tokens                  map[string]struct{}
 	removedapi_tokens           map[string]struct{}
 	clearedapi_tokens           bool
+	platform_admin              *string
+	clearedplatform_admin       bool
 	done                        bool
 	oldValue                    func(context.Context) (*User, error)
 	predicates                  []predicate.User
@@ -18142,6 +18716,45 @@ func (m *UserMutation) ResetAPITokens() {
 	m.removedapi_tokens = nil
 }
 
+// SetPlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by id.
+func (m *UserMutation) SetPlatformAdminID(id string) {
+	m.platform_admin = &id
+}
+
+// ClearPlatformAdmin clears the "platform_admin" edge to the PlatformAdmin entity.
+func (m *UserMutation) ClearPlatformAdmin() {
+	m.clearedplatform_admin = true
+}
+
+// PlatformAdminCleared reports if the "platform_admin" edge to the PlatformAdmin entity was cleared.
+func (m *UserMutation) PlatformAdminCleared() bool {
+	return m.clearedplatform_admin
+}
+
+// PlatformAdminID returns the "platform_admin" edge ID in the mutation.
+func (m *UserMutation) PlatformAdminID() (id string, exists bool) {
+	if m.platform_admin != nil {
+		return *m.platform_admin, true
+	}
+	return
+}
+
+// PlatformAdminIDs returns the "platform_admin" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// PlatformAdminID instead. It exists only for internal usage by the builders.
+func (m *UserMutation) PlatformAdminIDs() (ids []string) {
+	if id := m.platform_admin; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetPlatformAdmin resets all changes to the "platform_admin" edge.
+func (m *UserMutation) ResetPlatformAdmin() {
+	m.platform_admin = nil
+	m.clearedplatform_admin = false
+}
+
 // Where appends a list predicates to the UserMutation builder.
 func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
@@ -18438,7 +19051,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.memberships != nil {
 		edges = append(edges, user.EdgeMemberships)
 	}
@@ -18450,6 +19063,9 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.api_tokens != nil {
 		edges = append(edges, user.EdgeAPITokens)
+	}
+	if m.platform_admin != nil {
+		edges = append(edges, user.EdgePlatformAdmin)
 	}
 	return edges
 }
@@ -18482,13 +19098,17 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgePlatformAdmin:
+		if id := m.platform_admin; id != nil {
+			return []ent.Value{*id}
+		}
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.removedmemberships != nil {
 		edges = append(edges, user.EdgeMemberships)
 	}
@@ -18538,7 +19158,7 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.clearedmemberships {
 		edges = append(edges, user.EdgeMemberships)
 	}
@@ -18550,6 +19170,9 @@ func (m *UserMutation) ClearedEdges() []string {
 	}
 	if m.clearedapi_tokens {
 		edges = append(edges, user.EdgeAPITokens)
+	}
+	if m.clearedplatform_admin {
+		edges = append(edges, user.EdgePlatformAdmin)
 	}
 	return edges
 }
@@ -18566,6 +19189,8 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedinvitations_accepted
 	case user.EdgeAPITokens:
 		return m.clearedapi_tokens
+	case user.EdgePlatformAdmin:
+		return m.clearedplatform_admin
 	}
 	return false
 }
@@ -18574,6 +19199,9 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 // if that edge is not defined in the schema.
 func (m *UserMutation) ClearEdge(name string) error {
 	switch name {
+	case user.EdgePlatformAdmin:
+		m.ClearPlatformAdmin()
+		return nil
 	}
 	return fmt.Errorf("unknown User unique edge %s", name)
 }
@@ -18593,6 +19221,9 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgeAPITokens:
 		m.ResetAPITokens()
+		return nil
+	case user.EdgePlatformAdmin:
+		m.ResetPlatformAdmin()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)

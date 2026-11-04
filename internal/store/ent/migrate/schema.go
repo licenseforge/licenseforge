@@ -669,6 +669,38 @@ var (
 			},
 		},
 	}
+	// PlatformAdminsColumns holds the columns for the "platform_admins" table.
+	PlatformAdminsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "bootstrap", Type: field.TypeBool, Default: false},
+		{Name: "granted_by", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "user_id", Type: field.TypeString, Unique: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// PlatformAdminsTable holds the schema information for the "platform_admins" table.
+	PlatformAdminsTable = &schema.Table{
+		Name:       "platform_admins",
+		Columns:    PlatformAdminsColumns,
+		PrimaryKey: []*schema.Column{PlatformAdminsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "platform_admins_users_platform_admin",
+				Columns:    []*schema.Column{PlatformAdminsColumns[4]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "platformadmin_bootstrap",
+				Unique:  true,
+				Columns: []*schema.Column{PlatformAdminsColumns[1]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "bootstrap",
+				},
+			},
+		},
+	}
 	// ProductsColumns holds the columns for the "products" table.
 	ProductsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -811,6 +843,7 @@ var (
 		MembershipProductsTable,
 		PlansTable,
 		PlanFeaturesTable,
+		PlatformAdminsTable,
 		ProductsTable,
 		SigningKeysTable,
 		TenantsTable,
@@ -980,6 +1013,12 @@ func init() {
 		"plan_features_limit_match": "(feature_type = 'limit') = (limit_value IS NOT NULL)",
 		"plan_features_limit_range": "limit_value IS NULL OR (limit_value >= -1 AND limit_value <= 9007199254740991)",
 		"plan_features_type_valid":  "(feature_type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
+	}
+	PlatformAdminsTable.ForeignKeys[0].RefTable = UsersTable
+	PlatformAdminsTable.Annotation = &entsql.Annotation{}
+	PlatformAdminsTable.Annotation.Checks = map[string]string{
+		"platform_admins_grant":     "(bootstrap AND granted_by IS NULL) OR (NOT bootstrap AND granted_by IS NOT NULL AND (granted_by)::text ~ '^usr_[a-z2-7]{26}$'::text)",
+		"platform_admins_id_format": "id ~ '^pad_[a-z2-7]{26}$'",
 	}
 	ProductsTable.ForeignKeys[0].RefTable = TenantsTable
 	ProductsTable.Annotation = &entsql.Annotation{}

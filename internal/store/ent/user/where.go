@@ -672,6 +672,29 @@ func HasAPITokensWith(preds ...predicate.APIToken) predicate.User {
 	})
 }
 
+// HasPlatformAdmin applies the HasEdge predicate on the "platform_admin" edge.
+func HasPlatformAdmin() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, false, PlatformAdminTable, PlatformAdminColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasPlatformAdminWith applies the HasEdge predicate on the "platform_admin" edge with a given conditions (other predicates).
+func HasPlatformAdminWith(preds ...predicate.PlatformAdmin) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newPlatformAdminStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.User) predicate.User {
 	return predicate.User(sql.AndPredicates(predicates...))
