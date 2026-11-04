@@ -39,3 +39,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0033](0033-platform-audit-chain.md) | Platform audit chain | accepted |
 | [ADR-0034](0034-online-leases-and-seat-moves.md) | Online leases and seat moves | accepted |
 | [ADR-0035](0035-api-tokens-follow-their-creator-s-access.md) | API tokens follow their creator's access | accepted |
+| [ADR-0036](0036-audit-retention-and-siem-export.md) | Audit retention and SIEM export | accepted |

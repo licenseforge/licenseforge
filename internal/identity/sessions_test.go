@@ -247,3 +247,85 @@ func TestNewSessionDuringDisable(t *testing.T) {
 		t.Errorf("sessions left after suspension: %d %v", n, err)
 	}
 }
+
+func TestCheckSessionTimeouts(t *testing.T) {
+	for _, c := range []struct {
+		idle, maxAge time.Duration
+		ok           bool
+	}{
+		{DefaultIdleTimeout, DefaultMaxAge, true},
+		{5 * time.Minute, time.Hour, true},     // both minimums
+		{24 * time.Hour, 24 * time.Hour, true}, // both maximums (the database cap)
+		{5*time.Minute - time.Second, time.Hour, false},
+		{24*time.Hour + time.Second, 24 * time.Hour, false},
+		{time.Hour, time.Hour - time.Second, false},
+		{time.Hour, 24*time.Hour + time.Second, false},
+		{2 * time.Hour, time.Hour, false}, // max age below idle
+		{5 * time.Minute, 59 * time.Minute, false},
+		{0, DefaultMaxAge, false},
+		{-time.Hour, DefaultMaxAge, false},
+	} {
+		if err := CheckSessionTimeouts(c.idle, c.maxAge); (err == nil) != c.ok {
+			t.Errorf("CheckSessionTimeouts(%v, %v) = %v, want ok=%v", c.idle, c.maxAge, err, c.ok)
+		}
+	}
+}
+
+// Configured timeouts replace the defaults: the stored lifetime, and the
+// idle cut-off.
+func TestConfiguredSessionTimeouts(t *testing.T) {
+	def, _ := open(t)
+	ctx := context.Background()
+	u, err := def.Login(ctx, Claims{Issuer: "https://idp.example", Subject: sub()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	lifetime := func(cookie string) (secs float64) {
+		t.Helper()
+		if err := owner.QueryRow(`SELECT extract(epoch FROM expires_at - created_at) FROM sessions WHERE token_hash = $1`, sessionHash(cookie)).Scan(&secs); err != nil {
+			t.Fatal(err)
+		}
+		return secs
+	}
+	idle := func(cookie, ago string) {
+		t.Helper()
+		if _, err := owner.Exec(`UPDATE sessions SET last_seen_at = now() - $2::interval WHERE token_hash = $1`, sessionHash(cookie), ago); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c, err := def.NewSession(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lifetime(c); got != DefaultMaxAge.Seconds() || def.SessionMaxAge() != DefaultMaxAge {
+		t.Errorf("default lifetime %vs, SessionMaxAge %v", got, def.SessionMaxAge())
+	}
+	idle(c, "11 minutes")
+	if _, err := def.Session(ctx, c); err != nil {
+		t.Errorf("default idle timeout ended a session idle 11 minutes: %v", err)
+	}
+
+	short := def
+	short.IdleTimeout, short.MaxAge = 10*time.Minute, 24*time.Hour // the maximum the database allows
+	c, err = short.NewSession(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lifetime(c); got != (24*time.Hour).Seconds() || short.SessionMaxAge() != 24*time.Hour {
+		t.Errorf("configured lifetime %vs, SessionMaxAge %v", got, short.SessionMaxAge())
+	}
+	idle(c, "9 minutes")
+	if _, err := short.Session(ctx, c); err != nil {
+		t.Errorf("session idle 9 of 10 minutes: %v", err)
+	}
+	idle(c, "11 minutes")
+	if _, err := short.Session(ctx, c); !errors.Is(err, ErrNoSession) {
+		t.Errorf("session idle 11 of 10 minutes: %v", err)
+	}
+}
