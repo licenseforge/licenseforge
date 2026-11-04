@@ -9,6 +9,10 @@
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
+//	LICENSEFORGE_DRAIN                  wait after SIGTERM before closing, default 5s
+//
+// The serving process refuses to start if the owner login is in its
+// environment: serving pods must never hold it (ADR-0009).
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -49,6 +54,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if flag.NArg() > 1 {
+		flag.Usage()
+		os.Exit(2)
+	}
 	var err error
 	switch flag.Arg(0) {
 	case "":
@@ -83,6 +92,13 @@ func migrate(ctx context.Context, log *slog.Logger) error {
 // serve runs the server on ln until ctx is done. It closes ln.
 func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	defer func() { _ = ln.Close() }()
+	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
+		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
+	}
+	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
+	if err != nil {
+		return fmt.Errorf("LICENSEFORGE_DRAIN: %w", err)
+	}
 	tenantDSN, err := mustEnv("LICENSEFORGE_DATABASE_URL")
 	if err != nil {
 		return err
@@ -96,17 +112,28 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return err
 	}
 	if _, err := secrets.ParseKeyring(keys); err != nil { // fail at start, not on first use
-		return err
+		return fmt.Errorf("LICENSEFORGE_MASTER_KEYS: %w", err)
 	}
-	db, err := store.Open(ctx, tenantDSN, platformDSN)
+	// A database outage at start is a crash loop (Kubernetes retries), not "not ready".
+	openCtx, cancelOpen := context.WithTimeout(ctx, 30*time.Second)
+	db, err := store.Open(openCtx, tenantDSN, platformDSN)
+	cancelOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
+	var draining atomic.Bool
+	ready := func(ctx context.Context) error {
+		if draining.Load() {
+			return errors.New("shutting down")
+		}
+		return db.Ping(ctx)
+	}
 	srv := &http.Server{
-		Handler:           newMux(db.Ping, log),
+		Handler:           newMux(ready, log),
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	errc := make(chan error, 1)
 	go func() {
@@ -119,6 +146,12 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return err
 	case <-ctx.Done():
 	}
+
+	// Fail readiness first and keep serving while load balancers stop
+	// routing here, so a rolling update drops no requests.
+	draining.Store(true)
+	log.Info("draining", "for", drain)
+	time.Sleep(drain)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
