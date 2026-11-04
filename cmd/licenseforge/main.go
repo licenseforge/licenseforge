@@ -38,6 +38,7 @@ import (
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
+	"licenseforge.io/licenseforge/web"
 )
 
 // version is set at build time: -ldflags "-X main.version=v0.1.0".
@@ -159,6 +160,9 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
+	if !web.Embedded {
+		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
+	}
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -193,7 +197,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	return nil
 }
 
-// newMux serves the health endpoints. ready reports whether the database is
+// newMux serves the health endpoints and the dashboard. ready reports whether the database is
 // reachable; /readyz fails while it isn't, so Kubernetes stops routing here.
 func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -213,6 +217,7 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 		}
 		text(w, http.StatusOK, "ok\n")
 	})
+	web.Mount(mux) // more specific routes (health, /auth/, /api/) win
 	return mux
 }
 
