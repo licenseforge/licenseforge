@@ -51,6 +51,26 @@ type Handler struct {
 	verify *oidc.IDTokenVerifier
 	id     identity.Service
 	log    *slog.Logger
+	cross  *http.CrossOriginProtection // trusts the redirect URL's origin
+}
+
+// origin is the browser's Origin for u: lowercase host, no default port.
+func origin(u string) (string, error) {
+	p, err := url.Parse(u)
+	if err != nil {
+		return "", err
+	}
+	host, port := strings.ToLower(p.Hostname()), p.Port()
+	if p.User != nil || strings.Contains(host, "%") {
+		return "", fmt.Errorf("weblogin: %q: no userinfo or IPv6 zone", u)
+	}
+	if port == "" || p.Scheme == "https" && port == "443" || p.Scheme == "http" && port == "80" {
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+		return p.Scheme + "://" + host, nil
+	}
+	return p.Scheme + "://" + net.JoinHostPort(host, port), nil
 }
 
 // secureURL reports whether u is https, or http on a loopback host (browsers
@@ -77,6 +97,14 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 	if !secureURL(c.Issuer) || !secureURL(c.RedirectURL) {
 		return nil, errors.New("weblogin: issuer and redirect URL must be https (http only on localhost)")
 	}
+	own, err := origin(c.RedirectURL)
+	if err != nil {
+		return nil, err
+	}
+	cross := http.NewCrossOriginProtection()
+	if err := cross.AddTrustedOrigin(own); err != nil {
+		return nil, fmt.Errorf("weblogin: redirect URL: %w", err)
+	}
 	client := &http.Client{Timeout: httpTimeout}
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, client), c.Issuer) // the provider keeps the client for key fetches
 	if err != nil {
@@ -91,6 +119,7 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 		verify: p.Verifier(&oidc.Config{ClientID: c.ClientID}),
 		id:     id,
 		log:    log,
+		cross:  cross,
 	}, nil
 }
 
@@ -98,6 +127,8 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
+	mux.Handle("GET /auth/session", h.RequireSession(http.HandlerFunc(h.session)))
+	mux.Handle("POST /auth/logout", h.RequireSession(http.HandlerFunc(h.logout)))
 }
 
 func setCookie(w http.ResponseWriter, name, value string, maxAge int) {
