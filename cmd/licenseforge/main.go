@@ -11,6 +11,10 @@
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_DRAIN                  wait after SIGTERM before closing, default 5s
+//	LICENSEFORGE_OIDC_ISSUER            dashboard login (ADR-0003); unset = no login
+//	LICENSEFORGE_OIDC_CLIENT_ID         OIDC client registration, required with the issuer
+//	LICENSEFORGE_OIDC_CLIENT_SECRET     empty for a public client (PKCE only)
+//	LICENSEFORGE_OIDC_REDIRECT_URL      https://<host>/auth/callback
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -30,8 +34,10 @@ import (
 	"syscall"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
 // version is set at build time: -ldflags "-X main.version=v0.1.0".
@@ -136,8 +142,25 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		}
 		return db.Ping(ctx)
 	}
+	mux := newMux(ready, log)
+	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
+		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		login, err := weblogin.New(discoverCtx, weblogin.Config{
+			Issuer:       issuer,
+			ClientID:     os.Getenv("LICENSEFORGE_OIDC_CLIENT_ID"),
+			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
+			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
+		}, identity.Service{DB: db}, log)
+		cancel()
+		if err != nil {
+			return err
+		}
+		login.Register(mux)
+	} else {
+		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
+	}
 	srv := &http.Server{
-		Handler:           newMux(ready, log),
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
