@@ -22,8 +22,12 @@ ALTER TABLE "invitation_products" ADD CONSTRAINT "invitation_products_invitation
   FOREIGN KEY ("tenant_id", "invitation_id", "scope_all") REFERENCES "invitations" ("tenant_id", "id", "scope_all");
 ALTER TABLE "invitation_products" ADD CONSTRAINT "invitation_products_product_same_tenant"
   FOREIGN KEY ("tenant_id", "product_id") REFERENCES "products" ("tenant_id", "id");
+-- A membership is its invitation's acceptance by that user: at commit the
+-- invitation must be marked accepted_by the member (deferred, because the
+-- membership is inserted first). This holds whatever code path writes.
 ALTER TABLE "memberships" ADD CONSTRAINT "memberships_invitation_same_tenant"
-  FOREIGN KEY ("tenant_id", "invitation_id") REFERENCES "invitations" ("tenant_id", "id");
+  FOREIGN KEY ("tenant_id", "invitation_id", "user_id") REFERENCES "invitations" ("tenant_id", "id", "accepted_by")
+  DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE "membership_products" ADD CONSTRAINT "membership_products_membership_same_tenant"
   FOREIGN KEY ("tenant_id", "membership_id", "scope_all") REFERENCES "memberships" ("tenant_id", "id", "scope_all");
 ALTER TABLE "membership_products" ADD CONSTRAINT "membership_products_product_same_tenant"
@@ -89,6 +93,11 @@ ALTER TABLE "invitation_products" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "invitation_products" FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "invitation_products" TO licenseforge_app
   USING ("tenant_id" = app_tenant_id()) WITH CHECK ("tenant_id" = app_tenant_id());
+-- Scope is set while the invitation is open: no products added to an accepted
+-- or revoked invitation (it would no longer match the membership).
+CREATE POLICY open_invitation ON "invitation_products" AS RESTRICTIVE FOR INSERT TO licenseforge_app
+  WITH CHECK (EXISTS (SELECT 1 FROM "invitations" i WHERE i."id" = "invitation_products"."invitation_id"
+    AND i."accepted_at" IS NULL AND i."revoked_at" IS NULL));
 CREATE POLICY identity_read ON "invitation_products" FOR SELECT TO licenseforge_identity USING (true);
 CREATE POLICY platform_all ON "invitation_products" TO licenseforge_platform USING (true) WITH CHECK (true);
 CREATE POLICY migrator_all ON "invitation_products" TO CURRENT_USER USING (true) WITH CHECK (true);
@@ -119,6 +128,7 @@ CREATE POLICY identity_accept ON "memberships" FOR INSERT TO licenseforge_identi
       AND u."email_verified" AND u."disabled_at" IS NULL
       AND lower(normalize(u."email", NFC)) = lower(normalize(i."email", NFC))
       AND (i."issuer" IS NULL OR i."issuer" = u."issuer")
+      AND current_setting('app.invite_token', true) <> ''
       AND i."token_hash" = sha256(convert_to(current_setting('app.invite_token', true), 'UTF8'))));
 CREATE POLICY platform_all ON "memberships" TO licenseforge_platform USING (true) WITH CHECK (true);
 CREATE POLICY migrator_all ON "memberships" TO CURRENT_USER USING (true) WITH CHECK (true);

@@ -8,6 +8,8 @@ CREATE TABLE "invitations" ("id" character varying(40) NOT NULL, "created_at" ti
 CREATE INDEX "invitation_tenant_id" ON "invitations" ("tenant_id");
 -- Create index "invitation_tenant_id_id" to table: "invitations"
 CREATE UNIQUE INDEX "invitation_tenant_id_id" ON "invitations" ("tenant_id", "id");
+-- Create index "invitation_tenant_id_id_accepted_by" to table: "invitations"
+CREATE UNIQUE INDEX "invitation_tenant_id_id_accepted_by" ON "invitations" ("tenant_id", "id", "accepted_by");
 -- Create index "invitation_tenant_id_id_scope_all" to table: "invitations"
 CREATE UNIQUE INDEX "invitation_tenant_id_id_scope_all" ON "invitations" ("tenant_id", "id", "scope_all");
 -- Create index "invitation_token_hash" to table: "invitations"

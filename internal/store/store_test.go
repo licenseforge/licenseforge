@@ -382,10 +382,11 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
 		"invitation_products": {
-			"identity_read": `SELECT licenseforge_identity true`,
+			"identity_read":                 `SELECT licenseforge_identity true`,
+			"open_invitation (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM invitations i WHERE (((i.id)::text = (invitation_products.invitation_id)::text) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL))))`,
 		},
 		"memberships": {
-			"identity_accept": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (invitations i JOIN users u ON (((u.id)::text = (memberships.user_id)::text))) WHERE (((i.id)::text = (memberships.invitation_id)::text) AND ((i.tenant_id)::text = (memberships.tenant_id)::text) AND ((i.role)::text = (memberships.role)::text) AND (i.scope_all = memberships.scope_all) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL) AND (i.expires_at > clock_timestamp()) AND u.email_verified AND (u.disabled_at IS NULL) AND (lower(NORMALIZE(u.email, NFC)) = lower(NORMALIZE(i.email, NFC))) AND ((i.issuer IS NULL) OR ((i.issuer)::text = (u.issuer)::text)) AND (i.token_hash = sha256(convert_to(current_setting('app.invite_token'::text, true), 'UTF8'::name)))))))`,
+			"identity_accept": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (invitations i JOIN users u ON (((u.id)::text = (memberships.user_id)::text))) WHERE (((i.id)::text = (memberships.invitation_id)::text) AND ((i.tenant_id)::text = (memberships.tenant_id)::text) AND ((i.role)::text = (memberships.role)::text) AND (i.scope_all = memberships.scope_all) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL) AND (i.expires_at > clock_timestamp()) AND u.email_verified AND (u.disabled_at IS NULL) AND (lower(NORMALIZE(u.email, NFC)) = lower(NORMALIZE(i.email, NFC))) AND ((i.issuer IS NULL) OR ((i.issuer)::text = (u.issuer)::text)) AND (current_setting('app.invite_token'::text, true) <> ''::text) AND (i.token_hash = sha256(convert_to(current_setting('app.invite_token'::text, true), 'UTF8'::name)))))))`,
 			"identity_read":   `SELECT licenseforge_identity true`,
 		},
 		"membership_products": {

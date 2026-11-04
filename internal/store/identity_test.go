@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -80,7 +82,7 @@ func newIdentityFixture(t *testing.T) identityFixture {
 			t.Fatal(err)
 		}
 		*o.id = f.newUser(t, o.email, true)
-		if _, err := d.AcceptInvitation(ctx, tok, *o.id, nil); err != nil {
+		if _, err := d.AcceptInvitation(ctx, tok, *o.id, noRecord); err != nil {
 			t.Fatalf("bootstrap owner of %s: %v", o.tenant, err)
 		}
 	}
@@ -445,10 +447,10 @@ func TestAcceptInvitation(t *testing.T) {
 	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, func(*ent.Tx, *ent.Membership) error { return context.Canceled }); err == nil || f.sees(t, f.a, u) {
 		t.Fatalf("a failed record left the membership: %v", err)
 	}
-	if _, err := f.d.AcceptInvitation(ctx, "not-the-token", u, nil); !errors.Is(err, ErrInvitation) {
+	if _, err := f.d.AcceptInvitation(ctx, "not-the-token", u, noRecord); !errors.Is(err, ErrInvitation) {
 		t.Errorf("wrong token: %v", err)
 	}
-	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil)
+	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, noRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +465,7 @@ func TestAcceptInvitation(t *testing.T) {
 	}); err != nil || n != 2 {
 		t.Errorf("copied products = %d, %v", n, err)
 	}
-	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], f.newUser(t, "s@example.com", true), nil); !errors.Is(err, ErrInvitation) {
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], f.newUser(t, "s@example.com", true), noRecord); !errors.Is(err, ErrInvitation) {
 		t.Errorf("second use: %v", err)
 	}
 }
@@ -487,7 +489,7 @@ func TestAcceptWaitsForConcurrentRevoke(t *testing.T) {
 		})
 	}()
 	<-locked
-	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil); !errors.Is(err, ErrInvitation) {
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, noRecord); !errors.Is(err, ErrInvitation) {
 		t.Errorf("accept during revoke: %v, want ErrInvitation", err)
 	}
 	if err := <-done; err != nil {
@@ -504,7 +506,7 @@ func TestScopeCantBeReaddedAfterAcceptance(t *testing.T) {
 	ctx := context.Background()
 	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "q@example.com", role: invitation.RoleSupport, products: []string{f.prodA, f.prodA2}})
 	u := f.newUser(t, "q@example.com", true)
-	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil)
+	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, noRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,6 +603,131 @@ func TestIdentityGrants(t *testing.T) {
 		}
 		if got != g.want {
 			t.Errorf("%s %s on %s.%s = %v, want %v", g.role, g.priv, g.table, g.column, got, g.want)
+		}
+	}
+}
+
+// noRecord stands in for the audit write in tests that don't check it.
+func noRecord(*ent.Tx, *ent.Membership) error { return nil }
+
+func TestAcceptInvitationRefusals(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	if _, err := f.d.AcceptInvitation(ctx, "", f.ownerA, noRecord); err == nil {
+		t.Error("empty token accepted")
+	}
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "n@example.com", role: invitation.RoleViewer})
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], f.newUser(t, "n@example.com", true), nil); err == nil {
+		t.Error("accepted without an audit record func")
+	}
+	// Already a member (owner A invited again under her own email).
+	again := f.invite(t, f.a, f.ownerA, inviteOpts{email: "owner-a@example.com", role: invitation.RoleViewer})
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[again.ID], f.ownerA, noRecord); !errors.Is(err, ErrInvitation) {
+		t.Errorf("already a member: %v", err)
+	}
+	expired := f.invite(t, f.a, f.ownerA, inviteOpts{email: "e@example.com", role: invitation.RoleViewer})
+	f.owner(t, `UPDATE invitations SET created_at = now() - interval '9 days', expires_at = now() - interval '1 day' WHERE id = $1`, expired.ID)
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[expired.ID], f.newUser(t, "e@example.com", true), noRecord); !errors.Is(err, ErrInvitation) {
+		t.Errorf("expired: %v", err)
+	}
+	disabled := f.invite(t, f.a, f.ownerA, inviteOpts{email: "d@example.com", role: invitation.RoleViewer})
+	du := f.newUser(t, "d@example.com", true)
+	f.platform(t, `UPDATE users SET disabled_at = now() WHERE id = $1`, du)
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[disabled.ID], du, noRecord); !errors.Is(err, ErrInvitation) {
+		t.Errorf("disabled user: %v", err)
+	}
+}
+
+// Two users accepting at once: one wins, the other is refused.
+func TestConcurrentAccepts(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "c@example.com", role: invitation.RoleViewer})
+	users := []string{f.newUser(t, "c@example.com", true), f.newUser(t, "C@example.com", true)}
+	errs := make(chan error, 2)
+	for _, u := range users {
+		go func() { _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, noRecord); errs <- err }()
+	}
+	var ok, refused int
+	for range users {
+		switch err := <-errs; {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrInvitation):
+			refused++
+		default:
+			t.Errorf("unexpected: %v", err)
+		}
+	}
+	if ok != 1 || refused != 1 {
+		t.Errorf("ok=%d refused=%d, want 1 and 1", ok, refused)
+	}
+}
+
+// Whatever code writes it, a membership whose invitation isn't marked accepted
+// by that member doesn't commit (deferred key).
+func TestUnmarkedMembershipDoesntCommit(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "um@example.com", role: invitation.RoleViewer})
+	u := f.newUser(t, "um@example.com", true)
+	err := f.d.WithIdentity(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.invite_token', $1, true)`, f.tokens[inv.ID]); err != nil {
+			return err
+		}
+		_, err := tx.Membership.Create().SetTenantID(f.a).SetUserID(u).SetRole(membership.RoleViewer).
+			SetScopeAll(true).SetInvitationID(inv.ID).Save(ctx)
+		return err // no mark
+	})
+	if err == nil || !strings.Contains(err.Error(), "memberships_invitation_same_tenant") {
+		t.Errorf("unmarked membership committed: %v", err)
+	}
+	if f.sees(t, f.a, u) {
+		t.Error("member visible")
+	}
+}
+
+// No products can be added to an accepted invitation.
+func TestNoScopeChangeOnClosedInvitation(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "sc@example.com", role: invitation.RoleSupport, products: []string{f.prodA}})
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], f.newUser(t, "sc@example.com", true), noRecord); err != nil {
+		t.Fatal(err)
+	}
+	err := f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		_, err := tx.InvitationProduct.Create().SetTenantID(f.a).SetInvitationID(inv.ID).SetProductID(f.prodA2).Save(ctx)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "row-level security") {
+		t.Errorf("product added to an accepted invitation: %v", err)
+	}
+}
+
+// An invitation whose token hashes the empty string still needs a token.
+func TestEmptyTokenNeverMatches(t *testing.T) {
+	f := newIdentityFixture(t)
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "et@example.com", role: invitation.RoleViewer})
+	f.platform(t, `UPDATE invitations SET token_hash = $2 WHERE id = $1`, inv.ID, InvitationTokenHash(""))
+	err := f.accept(inv, f.newUser(t, "et@example.com", true), acceptOpts{token: ptrTo("")})
+	if err == nil || !strings.Contains(err.Error(), "row-level security") {
+		t.Errorf("accepted with no token: %v", err)
+	}
+}
+
+func TestRefusedKeepsOutages(t *testing.T) {
+	for _, c := range []struct {
+		code, msg string
+		refusal   bool
+	}{
+		{"42501", `new row violates row-level security policy for table "memberships"`, true},
+		{"23505", `duplicate key value violates unique constraint "membership_tenant_id_user_id"`, true},
+		{"42501", "permission denied for table memberships", false}, // a missing grant is an outage
+		{"08006", "connection failure", false},
+	} {
+		err := refused(&pgconn.PgError{Code: c.code, Message: c.msg})
+		if errors.Is(err, ErrInvitation) != c.refusal {
+			t.Errorf("%s %q: ErrInvitation=%v, want %v", c.code, c.msg, !c.refusal, c.refusal)
 		}
 	}
 }

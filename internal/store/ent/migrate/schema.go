@@ -250,6 +250,11 @@ var (
 				Unique:  true,
 				Columns: []*schema.Column{InvitationsColumns[11], InvitationsColumns[0], InvitationsColumns[5]},
 			},
+			{
+				Name:    "invitation_tenant_id_id_accepted_by",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationsColumns[11], InvitationsColumns[0], InvitationsColumns[13]},
+			},
 		},
 	}
 	// InvitationProductsColumns holds the columns for the "invitation_products" table.

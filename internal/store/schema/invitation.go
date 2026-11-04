@@ -60,7 +60,8 @@ func (Invitation) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("token_hash").Unique(), // acceptance looks the invitation up by token
 		index.Fields("tenant_id", "id").Unique(),
-		index.Fields("tenant_id", "id", "scope_all").Unique(), // target of the products' same-tenant key
+		index.Fields("tenant_id", "id", "scope_all").Unique(),   // target of the products' same-tenant key
+		index.Fields("tenant_id", "id", "accepted_by").Unique(), // target of the memberships' key
 	}
 }
 

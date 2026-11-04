@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -30,12 +31,17 @@ func InvitationTokenHash(token string) []byte {
 // AcceptInvitation makes userID a member of the invitation's tenant, with its
 // role and scope (ADR-0029). token is the invite link's secret. It is the only
 // way the identity pool adds members; the database also refuses anything the
-// invitation doesn't allow (identity_accept). record runs in the same
-// transaction, after the membership exists: write the audit entry there.
+// invitation doesn't allow (identity_accept, and a deferred key that the
+// invitation is marked accepted by the member at commit). record runs in the
+// same transaction, after the membership exists, and must write the audit
+// entry (ADR-0027): an acceptance is never committed unrecorded.
 //
 // The invitation is locked first, so a concurrent revoke either commits
 // before (and the accept is refused) or waits until the accept is done.
 func (d *DB) AcceptInvitation(ctx context.Context, token, userID string, record func(*ent.Tx, *ent.Membership) error) (*ent.Membership, error) {
+	if token == "" || record == nil {
+		return nil, errors.New("store: AcceptInvitation needs the token and an audit record func")
+	}
 	var m *ent.Membership
 	err := inTx(ctx, d.identity, func(tx *ent.Tx) error {
 		// FOR UPDATE applies identity's UPDATE policy: only open, unexpired
@@ -75,10 +81,7 @@ func (d *DB) AcceptInvitation(ctx context.Context, token, userID string, record 
 		if n != 1 { // never commit an unmarked membership
 			return ErrInvitation
 		}
-		if record != nil {
-			return record(tx, m)
-		}
-		return nil
+		return record(tx, m)
 	})
 	if err != nil {
 		return nil, err
@@ -87,10 +90,12 @@ func (d *DB) AcceptInvitation(ctx context.Context, token, userID string, record 
 }
 
 // refused maps the database's refusals (row-level security, unique
-// violations: already a member or used) to ErrInvitation; other errors stay.
+// violations: already a member or used) to ErrInvitation. Other errors stay,
+// including a missing grant ("permission denied", also 42501): that is an
+// outage, not the user's invitation.
 func refused(err error) error {
 	var pe *pgconn.PgError
-	if errors.As(err, &pe) && (pe.Code == "42501" || pe.Code == "23505") {
+	if errors.As(err, &pe) && ((pe.Code == "42501" && strings.Contains(pe.Message, "row-level security")) || pe.Code == "23505") {
 		return fmt.Errorf("%w: %s", ErrInvitation, pe.Message)
 	}
 	return err
