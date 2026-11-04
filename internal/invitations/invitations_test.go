@@ -258,7 +258,7 @@ func TestCreateRefusals(t *testing.T) {
 	}{
 		"no @":                     {"nope", authz.Viewer, all, "/email"},
 		"space":                    {"a b@example.com", authz.Viewer, all, "/email"},
-		"bidi override":            {"a‮@example.com", authz.Viewer, all, "/email"},
+		"bidi override":            {"a\u202e@example.com", authz.Viewer, all, "/email"},
 		"too long":                 {strings.Repeat("a", 320) + "@x", authz.Viewer, all, "/email"},
 		"unknown role":             {f.email(), "root", all, "/role"},
 		"sdk":                      {f.email(), authz.SDK, all, "/role"},
