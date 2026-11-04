@@ -1,0 +1,36 @@
+# Local development only: `docker compose up --build`, then
+# http://127.0.0.1:8080/readyz. Passwords and the master key below are public
+# dev values; never use them anywhere else.
+services:
+  db:
+    image: postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+    environment:
+      POSTGRES_PASSWORD: dev
+    volumes:
+      # Creates the three logins and the database, as an operator would (ADR-0009).
+      - ./deploy/database-setup.sql:/docker-entrypoint-initdb.d/setup.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "licenseforge"]
+      interval: 2s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["migrate"]
+    environment:
+      LICENSEFORGE_OWNER_DATABASE_URL: postgres://licenseforge_owner:change-me-owner@db:5432/licenseforge?sslmode=disable
+    depends_on:
+      db: {condition: service_healthy}
+
+  server:
+    build: .
+    environment:
+      LICENSEFORGE_DATABASE_URL: postgres://licenseforge_api:change-me-api@db:5432/licenseforge?sslmode=disable
+      LICENSEFORGE_PLATFORM_DATABASE_URL: postgres://licenseforge_admin:change-me-admin@db:5432/licenseforge?sslmode=disable
+      LICENSEFORGE_MASTER_KEYS: dev=ZGV2LW9ubHktbWFzdGVyLWtleS1kby1ub3QtdXNlISE=
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
