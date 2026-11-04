@@ -73,6 +73,32 @@ func TestDashboardKeepsMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// The real mux takes the API as a method-less /api/v1/ subtree (as serve
+// mounts it) next to the dashboard without a ServeMux registration panic,
+// and each path still reaches its owner.
+func TestMuxBesideAPISubtree(t *testing.T) {
+	mux := newMux(func(context.Context) error { return nil }, quiet)
+	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) }))
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodPost, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodDelete, "/api/v1/x", 299},
+		{http.MethodGet, "/healthz", http.StatusOK},
+		{http.MethodPost, "/healthz", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/t/acme/", http.StatusOK},
+		{http.MethodGet, "/api/v2/x", http.StatusNotFound},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != tc.want {
+			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+		}
+	}
+}
+
 const testKeys = "k1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 func setEnv(t *testing.T, tenant, platform, keys string) {
