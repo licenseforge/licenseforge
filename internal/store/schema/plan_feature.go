@@ -16,6 +16,11 @@ import (
 // and feature_type let composite foreign keys guarantee plan and feature
 // belong to the same product (and tenant) and that limit_value matches the
 // feature's type.
+//
+// Lock contract: anything that inserts, updates or deletes plan features must
+// first lock the plan row FOR UPDATE in the same transaction. Issuing reads
+// the plan FOR SHARE (internal/licenses), so a license never snapshots half
+// of a plan edit.
 type PlanFeature struct{ ent.Schema }
 
 func (PlanFeature) Mixin() []ent.Mixin { return []ent.Mixin{TenantScoped{}, Timestamps{}} }
