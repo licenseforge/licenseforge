@@ -24,6 +24,7 @@ import (
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -111,21 +112,33 @@ func (p *idp) sign(t *testing.T, claims map[string]any) string {
 }
 
 type fixture struct {
+	logs   *lockedBuffer // the handler's log
 	idp    *idp
 	app    *httptest.Server
 	ids    identity.Service
 	db     *store.DB
 	client *http.Client
+	h      *Handler
+	ack    string         // ?banner= sent to /auth/login
+	last   *http.Response // the last callback's response (body closed)
 }
 
-func setup(t *testing.T, opts ...func(*idp)) *fixture {
+func setup(t *testing.T, opts ...func(*idp)) *fixture { return setupWith(t, nil, opts...) }
+
+// setupAdmin is setup with LICENSEFORGE_BOOTSTRAP_ADMIN set to admin.
+func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
+	return setupWith(t, func(c *Config, _ *identity.Service) { c.BootstrapAdmin = admin }, opts...)
+}
+
+// setupWith lets cfg change the handler's configuration and identity service.
+func setupWith(t *testing.T, cfg func(*Config, *identity.Service), opts ...func(*idp)) *fixture {
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db}
+	f := &fixture{idp: newIdP(t), ids: identity.Service{DB: db}, db: db, logs: &lockedBuffer{}}
 	for _, o := range opts {
 		o(f.idp)
 	}
@@ -134,11 +147,15 @@ func setup(t *testing.T, opts ...func(*idp)) *fixture {
 	f.app = httptest.NewUnstartedServer(mux)
 	f.app.StartTLS()
 	t.Cleanup(f.app.Close)
-	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"},
-		f.ids, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"}
+	if cfg != nil {
+		cfg(&c, &f.ids)
+	}
+	h, err := New(ctx, c, f.ids, slog.New(slog.NewTextHandler(f.logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.h = h
 	h.Register(mux)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "home") })
 	jar, _ := cookiejar.New(nil)
@@ -150,7 +167,7 @@ func setup(t *testing.T, opts ...func(*idp)) *fixture {
 
 // start runs /auth/login and returns the authorize request's parameters.
 func (f *fixture) start(t *testing.T) url.Values {
-	resp, err := f.client.Get(f.app.URL + "/auth/login")
+	resp, err := f.client.Get(f.app.URL + "/auth/login?banner=" + url.QueryEscape(f.ack))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +186,18 @@ func (f *fixture) start(t *testing.T) url.Values {
 // finish registers a code at the IdP with claims (merged over valid ones)
 // and calls back with state; it returns the callback response status.
 func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[string]any) int {
+	resp, err := f.client.Get(f.callbackURL(q, state, override))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	f.last = resp
+	return resp.StatusCode
+}
+
+// callbackURL registers a code at the IdP (as finish) and returns the
+// callback URL to call with it. Safe outside the test goroutine.
+func (f *fixture) callbackURL(q url.Values, state string, override map[string]any) string {
 	claims := map[string]any{
 		"iss": f.idp.srv.URL, "aud": "lf", "sub": ids.New("sub"), "nonce": q.Get("nonce"),
 		"iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(),
@@ -181,12 +210,7 @@ func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[
 	f.idp.mu.Lock()
 	f.idp.code[code] = grant{challenge: q.Get("code_challenge"), claims: claims}
 	f.idp.mu.Unlock()
-	resp, err := f.client.Get(f.app.URL + "/auth/callback?" + url.Values{"code": {code}, "state": {state}}.Encode())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode
+	return f.app.URL + "/auth/callback?" + url.Values{"code": {code}, "state": {state}}.Encode()
 }
 
 func (f *fixture) session(t *testing.T) string {
@@ -242,16 +266,18 @@ func TestLoginRefusals(t *testing.T) {
 		state    func(url.Values) string
 		override map[string]any
 		want     int
+		audited  []string // platform-chain reasons
 	}{
-		"state mismatch": {func(url.Values) string { return "x" }, nil, http.StatusBadRequest},
-		"nonce mismatch": {nil, map[string]any{"nonce": "other"}, http.StatusUnauthorized},
-		"other audience": {nil, map[string]any{"aud": "someone-else"}, http.StatusUnauthorized},
-		"other issuer":   {nil, map[string]any{"iss": "https://evil.example"}, http.StatusUnauthorized},
-		"expired token":  {nil, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, http.StatusUnauthorized},
-		"no subject":     {nil, map[string]any{"sub": ""}, http.StatusUnauthorized},
-		"foreign azp":    {nil, map[string]any{"aud": []string{"lf", "other"}, "azp": "other"}, http.StatusUnauthorized},
+		"state mismatch": {func(url.Values) string { return "x" }, nil, http.StatusBadRequest, nil},
+		"nonce mismatch": {nil, map[string]any{"nonce": "other"}, http.StatusUnauthorized, []string{"nonce_mismatch"}},
+		"other audience": {nil, map[string]any{"aud": "someone-else"}, http.StatusUnauthorized, nil},
+		"other issuer":   {nil, map[string]any{"iss": "https://evil.example"}, http.StatusUnauthorized, nil},
+		"expired token":  {nil, map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, http.StatusUnauthorized, nil},
+		"no subject":     {nil, map[string]any{"sub": ""}, http.StatusUnauthorized, []string{"invalid_claims"}},
+		"foreign azp":    {nil, map[string]any{"aud": []string{"lf", "other"}, "azp": "other"}, http.StatusUnauthorized, []string{"wrong_azp"}},
 	}
 	for name, c := range bad {
+		head := f.head(t)
 		q := f.start(t)
 		state := q.Get("state")
 		if c.state != nil {
@@ -262,6 +288,11 @@ func TestLoginRefusals(t *testing.T) {
 		}
 		if f.session(t) != "" {
 			t.Errorf("%s: session cookie set", name)
+		}
+		// Only refusals of a verified ID token reach the platform chain.
+		es := f.entries(t, head)
+		if want := c.audited; len(es) != len(want) || len(es) == 1 && es[0].Details != `{"reason":"`+want[0]+`"}` {
+			t.Errorf("%s: platform chain %+v, want reasons %v", name, es, want)
 		}
 	}
 	// PKCE: a code redeemed with another flow's verifier is refused.
@@ -359,11 +390,16 @@ func TestLoginDisabledUser(t *testing.T) {
 	if err := f.db.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
+	head := f.head(t)
 	q := f.start(t)
 	if code := f.finish(t, q, q.Get("state"), map[string]any{"sub": sub}); code != http.StatusForbidden {
 		t.Errorf("disabled user: %d", code)
 	}
 	if f.session(t) != "" {
 		t.Error("session cookie set for a disabled user")
+	}
+	if es := f.entries(t, head); len(es) != 1 || es[0].Outcome != auditevent.OutcomeDenied || *es[0].ActorID != u.ID ||
+		es[0].Details != `{"reason":"user_disabled"}` {
+		t.Errorf("platform chain: %+v", es)
 	}
 }

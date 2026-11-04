@@ -12,11 +12,13 @@ import (
 
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	entapitoken "licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -175,7 +177,7 @@ func TestAuthenticateRefusals(t *testing.T) {
 	}
 	other := mk(f.b, f.ownerB)
 	revoked := mk(f.a, f.ownerA)
-	if err := f.s.Revoke(f.as(f.a, f.ownerA, authz.Owner), revoked.Row.ID); err != nil {
+	if _, err := f.s.Revoke(f.as(f.a, f.ownerA, authz.Owner), revoked.Row.ID); err != nil {
 		t.Fatal(err)
 	}
 	expired := mk(f.a, f.ownerA)
@@ -247,16 +249,16 @@ func TestRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An admin can't revoke an owner token (couldn't have given that role).
-	if err := f.s.Revoke(f.as(f.a, f.adminA, authz.Admin), ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+	if _, err := f.s.Revoke(f.as(f.a, f.adminA, authz.Admin), ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("admin revokes owner token: %v", err)
 	}
-	if err := f.s.Revoke(owner, ownerTok.Row.ID); err != nil {
+	if _, err := f.s.Revoke(owner, ownerTok.Row.ID); err != nil {
 		t.Fatal(err)
 	}
 	if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != ownerTok.Row.ID {
 		t.Errorf("audit = %+v", e)
 	}
-	if err := f.s.Revoke(owner, ownerTok.Row.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := f.s.Revoke(owner, ownerTok.Row.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second revoke: %v", err)
 	}
 	// Another tenant's token is not found, and malformed IDs too.
@@ -265,7 +267,7 @@ func TestRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{b.Row.ID, "tok_\x00"} {
-		if err := f.s.Revoke(owner, id); !errors.Is(err, ErrNotFound) {
+		if _, err := f.s.Revoke(owner, id); !errors.Is(err, ErrNotFound) {
 			t.Errorf("revoke %q: %v", id, err)
 		}
 	}
@@ -348,6 +350,62 @@ func TestCreateWithStalePrincipal(t *testing.T) {
 	}
 }
 
+// The principal is re-checked in the transaction: an owner demoted to admin
+// can't create an admin token on the old principal, though the database's
+// creator_is_member policy would let an admin do so.
+func TestCreateRechecksPrincipal(t *testing.T) {
+	f := setup(t)
+	if _, err := f.s.Create(f.as(f.a, f.adminA, authz.Owner), "CI", authz.Admin, all, 0); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("stale owner principal: %v", err)
+	}
+	if _, err := f.s.Create(f.as(f.a, f.adminA, authz.Admin), "CI", authz.Admin, all, 0); err != nil {
+		t.Errorf("current principal: %v", err)
+	}
+}
+
+// A token created while its creator is being removed doesn't survive the
+// removal: the removal waits for the creation and then revokes the token.
+func TestCreateRacesRemoval(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var memberID string
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		var err error
+		memberID, err = tx.Membership.Query().Where(membership.UserID(f.adminA)).OnlyID(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	removed := make(chan error, 1)
+	t.Cleanup(func() { testHookCreated = nil })
+	testHookCreated = func() { // the token is inserted, not committed
+		testHookCreated = nil
+		go func() {
+			_, err := members.Service{DB: f.db}.Remove(f.as(f.a, f.ownerA, authz.Owner), memberID, true)
+			removed <- err
+		}()
+		select { // give a removal that doesn't wait the chance to finish first
+		case err := <-removed:
+			removed <- err
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	c, err := f.s.Create(f.as(f.a, f.adminA, authz.Admin), "CI", authz.Viewer, all, 0)
+	select {
+	case rerr := <-removed:
+		if rerr != nil {
+			t.Fatalf("remove: %v", rerr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("removal didn't finish")
+	}
+	if err == nil {
+		if _, err := f.s.Authenticate(ctx, f.a, c.Token); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("token survived its creator's removal: %v", err)
+		}
+	}
+}
+
 func TestRevokeAuditAndRights(t *testing.T) {
 	f := setup(t)
 	owner, admin := f.as(f.a, f.ownerA, authz.Owner), f.as(f.a, f.adminA, authz.Admin)
@@ -359,13 +417,13 @@ func TestRevokeAuditAndRights(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.Revoke(admin, ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+	if _, err := f.s.Revoke(admin, ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
 		t.Fatalf("admin revokes owner token: %v", err)
 	}
 	if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeDenied {
 		t.Errorf("denied revoke audit = %+v", e)
 	}
-	if err := f.s.Revoke(admin, adminTok.Row.ID); err != nil {
+	if _, err := f.s.Revoke(admin, adminTok.Row.ID); err != nil {
 		t.Errorf("admin revokes admin token: %v", err)
 	}
 	bTok, err := f.s.Create(f.as(f.b, f.ownerB, authz.Owner), "CI", authz.SDK, all, 0)
@@ -375,18 +433,64 @@ func TestRevokeAuditAndRights(t *testing.T) {
 	// Not-found revokes are audited without naming an object that isn't the
 	// tenant's (unknown, or another tenant's token).
 	for _, id := range []string{ids.APIToken(), bTok.Row.ID} {
-		if err := f.s.Revoke(owner, id); !errors.Is(err, ErrNotFound) {
+		if _, err := f.s.Revoke(owner, id); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("revoke %s: %v", id, err)
 		}
 		if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil {
 			t.Errorf("not-found revoke audit = %+v", e)
 		}
 	}
-	// Without token:write, existing and unknown IDs look the same.
+	// Lookup before rights (ADR-0032): a viewer gets not-found for a missing
+	// token and denied for a visible one; a product-scoped caller sees none.
 	viewer := f.as(f.a, f.viewerA, authz.Viewer)
-	for _, id := range []string{ownerTok.Row.ID, ids.APIToken()} {
-		if err := f.s.Revoke(viewer, id); !errors.Is(err, authz.ErrDenied) {
-			t.Errorf("viewer revoke %s: %v, want ErrDenied", id, err)
+	if _, err := f.s.Revoke(viewer, ids.APIToken()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("viewer revokes a missing token: %v", err)
+	}
+	if _, err := f.s.Revoke(viewer, ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("viewer revokes a token: %v", err)
+	}
+	scoped := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.ownerA, TenantID: f.a, Role: authz.Owner, Scope: authz.Scope{Products: []string{f.prodA}}})
+	if _, err := f.s.Revoke(scoped, ownerTok.Row.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("scoped caller revokes a token: %v", err)
+	}
+}
+
+func TestList(t *testing.T) {
+	f := setup(t)
+	owner := f.as(f.a, f.ownerA, authz.Owner)
+	var made []string
+	for range 3 {
+		c, err := f.s.Create(owner, "CI", authz.Viewer, all, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		made = append(made, c.Row.ID)
+	}
+	if _, err := f.s.Create(f.as(f.b, f.ownerB, authz.Owner), "other", authz.Viewer, all, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Revoke(owner, made[0]); err != nil {
+		t.Fatal(err)
+	}
+	// Newest first, two pages, revoked included, never another tenant's.
+	viewer := f.as(f.a, f.viewerA, authz.Viewer)
+	p1, err := f.s.List(viewer, 2, time.Time{}, "")
+	if err != nil || len(p1) != 2 || p1[0].ID != made[2] || p1[1].ID != made[1] {
+		t.Fatalf("page 1 = %v, %v", p1, err)
+	}
+	p2, err := f.s.List(viewer, 2, p1[1].CreatedAt, p1[1].ID)
+	if err != nil || len(p2) != 1 || p2[0].ID != made[0] || p2[0].RevokedAt == nil {
+		t.Fatalf("page 2 = %v, %v", p2, err)
+	}
+	// Tokens are tenant-wide: a product-scoped principal sees none.
+	scoped := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.viewerA, TenantID: f.a, Role: authz.Viewer, Scope: authz.Scope{Products: []string{f.prodA}}})
+	if rows, err := f.s.List(scoped, 10, time.Time{}, ""); err != nil || len(rows) != 0 {
+		t.Errorf("scoped list: %v, %v", rows, err)
+	}
+	sdk := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.Token, ID: ids.APIToken(), TenantID: f.a, Role: authz.SDK, Scope: all})
+	for name, ctx := range map[string]context.Context{"no principal": context.Background(), "sdk": sdk} {
+		if _, err := f.s.List(ctx, 10, time.Time{}, ""); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }

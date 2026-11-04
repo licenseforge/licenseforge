@@ -1,0 +1,1468 @@
+{
+  "component-definition": {
+    "uuid": "2e540aa4-20c7-5263-83d3-c2eb48ee1945",
+    "metadata": {
+      "title": "LicenseForge server: NIST SP 800-53 Rev 5 component definition",
+      "last-modified": "2026-11-04T00:00:00Z",
+      "version": "0.1.0-draft",
+      "oscal-version": "1.2.3",
+      "remarks": "Describes the controls the LicenseForge server implements or plans, for use in the system security plan of a system that runs it. Status (prop implementation-status, namespace https://licenseforge.io/ns/oscal): implemented = in main with tests; partial = in main, with the gaps in remarks; planned = a roadmap item, not in main; inherited = met by the deploying organization or its platform. Designed to support FedRAMP Moderate, HIPAA and NIST 800-53 assessments; it is not a FedRAMP authorization or readiness designation. Human-readable version: compliance/nist-800-53-matrix.md."
+    },
+    "components": [
+      {
+        "uuid": "8883b59b-10a3-5cba-8697-d30d57508865",
+        "type": "software",
+        "title": "LicenseForge server",
+        "description": "Self-hosted software licensing server (Go, PostgreSQL 17+ with forced row-level security), deployed on Kubernetes with the LicenseForge Helm chart. Signs licenses with per-tenant Ed25519 keys and authenticates users through the operator's OIDC provider.",
+        "purpose": "Issue, sign and manage software licenses for one or more vendor tenants.",
+        "props": [
+          {
+            "name": "version",
+            "value": "unreleased (main)"
+          }
+        ],
+        "links": [
+          {
+            "href": "https://github.com/licenseforge/licenseforge/blob/main/",
+            "rel": "reference",
+            "text": "Source repository"
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "2d3a0acc-3bf2-5cf5-a893-ae46f8cf2947",
+            "source": "https://raw.githubusercontent.com/usnistgov/oscal-content/v1.6.0/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+            "description": "NIST SP 800-53 Rev 5 controls the LicenseForge server implements or supports.",
+            "implemented-requirements": [
+              {
+                "uuid": "ad4de6d5-864d-5efa-a728-5d106f498ae5",
+                "control-id": "ac-2",
+                "description": "Users are OIDC identities keyed by (issuer, subject), created at first login. A tenant membership can only be created by accepting an open invitation: the database checks role, scope, expiry, single use and a verified matching email (policy identity_accept). Suspending a user (DisableUser) refuses later logins and deletes all their sessions in the same transaction. The first platform admin is bootstrapped only while none exists; the last one can't be removed.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/invitations.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/users.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/platform_admins.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/identity_test.go",
+                    "rel": "reference",
+                    "text": "TestTenantPoolCantAddMembers"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/identity_test.go",
+                    "rel": "reference",
+                    "text": "TestAcceptanceRefusals"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestNewSessionDuringDisable"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/platform_admins_test.go",
+                    "rel": "reference",
+                    "text": "TestPlatformAdminGrantsAndRemoval"
+                  }
+                ],
+                "remarks": "Removing a member doesn't yet revoke their sessions and API tokens (Roadmap v0.1: member removal revokes sessions and tokens). No HTTP API or dashboard for members, invitations or suspension yet (Roadmap v0.1: member/invitation/token HTTP handlers)."
+              },
+              {
+                "uuid": "06470f03-c171-5e53-9919-2e9fbb2c82b2",
+                "control-id": "ac-3",
+                "description": "Two layers. In Go, the API token and offline-issuance services call authz.Require / authz.CanAssign, with a fixed role-to-permission map and explicit product scope (zero scope denies). In PostgreSQL, every table has forced row-level security. The tenant login sees only the rows of the tenant set for the transaction (app.tenant_id); the platform login reads all tenants, and the identity login reads identity tables across tenants. Column grants limit which fields each login may change.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/authz/authz.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/authz/authz_test.go",
+                    "rel": "reference",
+                    "text": "TestMatrix"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestTenantIsolation"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestEveryRelationHasCanonicalRLS"
+                  }
+                ],
+                "remarks": "Signing key operations (internal/signing Create, Promote, Discard) call no authz check. Platform operations (DisableUser, GrantPlatformAdmin, RemovePlatformAdmin) have no authorization layer; callers must check platform-admin status. The REST API isn't built yet, and each handler must call authz.Require (Roadmap v0.1: REST API)."
+              },
+              {
+                "uuid": "c8d7c976-cf3e-54bd-b11a-1e6634ecb880",
+                "control-id": "ac-4",
+                "description": "Tenant data can't flow between tenants: forced RLS on every table, and every reference between tenant tables uses a composite *_same_tenant key, because foreign key checks bypass RLS. At the network level, the Helm NetworkPolicies allow server ingress on 8080 only and egress to DNS and the database port only.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/schema_test.go",
+                    "rel": "reference",
+                    "text": "TestCrossTableReferencesAreSameTenant"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/licenses_test.go",
+                    "rel": "reference",
+                    "text": "TestLicenseReferencesStayInTenant"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/networkpolicy.yaml",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "NetworkPolicy peers default to 'any': narrow ingressFrom and databaseTo (Secure Configuration Guide)."
+              },
+              {
+                "uuid": "93b3a4e2-7739-566f-8ff3-381fa11ea638",
+                "control-id": "ac-5",
+                "description": "Built-in tenant roles (owner, admin, manager, support, viewer; sdk for tokens) separate key management, access management, license operations and read-only support. Database duties are split across four logins: owner (migrations only), api (tenant requests), admin (platform operations) and login (the login path). The server refuses to start with the owner login in its environment.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/authz/authz.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/database-setup.sql",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main_test.go",
+                    "rel": "reference",
+                    "text": "TestServeRefuses"
+                  }
+                ],
+                "remarks": "Nothing enforces the key-management separation yet: signing key operations don't check key:write (owner only). Which people hold which role is the operator's decision."
+              },
+              {
+                "uuid": "50fa7422-207d-511e-860e-0b4df403b9f1",
+                "control-id": "ac-6",
+                "description": "Each role has only its permissions; a member can only grant roles within their own, and only owners touch owner (CanAssign). Database logins get explicit table and column grants. store.Open refuses a serving login that has SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION, owns schema objects, can create temporary tables or objects, or belongs to any other role. The login path has no access to licensing tables. Pods run non-root with a read-only root filesystem, no capabilities and no service account token.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/authz/authz_test.go",
+                    "rel": "reference",
+                    "text": "TestCanAssignSubset"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestOpenRefusesUnsafeRoles"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/identity_test.go",
+                    "rel": "reference",
+                    "text": "TestIdentityHasNoLicensingAccess"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/_helpers.tpl",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "Custom roles aren't supported (ADR-0019)."
+              },
+              {
+                "uuid": "66948324-455f-5d78-9939-fcc161470249",
+                "control-id": "ac-6.9",
+                "description": "API token creation and revocation and offline license issuance write audit entries in the action's transaction; denied and failed attempts are recorded too. Invitation acceptance, user suspension and platform-admin changes take an audit callback in the same transaction.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens_test.go",
+                    "rel": "reference",
+                    "text": "TestRevokeAuditAndRights"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/issue/issue_test.go",
+                    "rel": "reference",
+                    "text": "TestOfflineFileDenied"
+                  }
+                ],
+                "remarks": "Signing key operations aren't audited yet (ADR-0026). The callbacks are wired only once the HTTP handlers exist (Roadmap v0.1: REST API, member/invitation/token handlers)."
+              },
+              {
+                "uuid": "224ce3fa-4bd2-580b-af15-35e18aa6bdae",
+                "control-id": "ac-8",
+                "description": "LICENSEFORGE_LOGIN_BANNER sets a plain-text system use notification (at most 4 KB; control, format and separator characters refused at start). GET /auth/config serves it without authentication; /login shows it as text and enables the login button only after an explicit agreement. With a banner set, /auth/login starts a login only with the banner's ID, which travels in the login flow cookie; the callback refuses a login whose acknowledged ID isn't the current banner's, and every completed login logs the user and the acknowledged banner ID.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestBannerGate"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestAuthConfig"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestCheckBanner"
+                  }
+                ],
+                "remarks": "The acknowledgement is recorded in the application log (with the user and banner ID), not in the audit chain; it reaches a SIEM with the log export."
+              },
+              {
+                "uuid": "43bef5f6-ef1a-5f0b-a734-c292fb862d84",
+                "control-id": "ac-12",
+                "description": "Dashboard sessions are server-side. A session ends after the idle timeout without a request (LICENSEFORGE_SESSION_IDLE_TIMEOUT, default 1 hour; activity is recorded at most once a minute) and at its max age after login (LICENSEFORGE_SESSION_MAX_AGE, default 12 hours), by the database clock. The server refuses to start outside the bounds (idle at least 5 minutes and at most the max age; max age 1 to 24 hours). The database caps a session at 1 day. The session cookie's Max-Age follows the max age. Suspending a user deletes their sessions.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestSessions"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestConfiguredSessionTimeouts"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestCheckSessionTimeouts"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/migrations/20261104201448_sessions_security.sql",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "e5ee76f3-3f91-52b6-b03d-6f4e2583c119",
+                "control-id": "ac-12.1",
+                "description": "POST /auth/logout deletes the server-side session and clears the cookie. Like every unsafe request, it needs the CSRF token.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session_test.go",
+                    "rel": "reference",
+                    "text": "TestSessionAndLogout"
+                  }
+                ],
+                "remarks": "The dashboard (Roadmap v0.1: dashboard core) will show the logout and its confirmation message (AC-12(1)(b))."
+              },
+              {
+                "uuid": "74627718-5e8c-5d06-a842-f12117e54a3b",
+                "control-id": "au-2",
+                "description": "Logged today: api_token.create and api_token.revoke, and license.offline_file, with success, failure and denied outcomes. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token) and platform_admin.bootstrap. The audit log design covers admin actions, logins, token use, key operations and platform-admin actions (ADR-0021, ADR-0027).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens_test.go",
+                    "rel": "reference",
+                    "text": "TestRevokeAuditAndRights"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/issue/issue_test.go",
+                    "rel": "reference",
+                    "text": "TestOfflineFile"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginBootstrapsAndRecords"
+                  }
+                ],
+                "remarks": "Not logged yet: logouts, login failures before a verified ID token (logged only: anyone can cause them), signing key operations, member and platform-admin grants and removals (Roadmap v0.1: audit log; member/invitation/token HTTP handlers)."
+              },
+              {
+                "uuid": "f23fe45c-968e-5a4a-8454-6ea41630f923",
+                "control-id": "au-3",
+                "description": "Each entry records actor type and ID, action, object type and ID, outcome (success, failure, denied), tenant, a database-clock timestamp, source IP, user agent and a details object. The details hold no secrets and no PHI.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/schema/audit_event.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestHashCoversEveryFieldUnambiguously"
+                  }
+                ],
+                "remarks": "Source IP and user agent are filled in only once HTTP handlers exist (Roadmap v0.1: REST API)."
+              },
+              {
+                "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
+                "control-id": "au-5",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestRolledBackActionLeavesNoEntry"
+                  }
+                ],
+                "remarks": "No alert or metric for audit failures yet (Roadmap v0.1: alert on audit failure; Prometheus /metrics)."
+              },
+              {
+                "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",
+                "control-id": "au-6",
+                "description": "Export to a SIEM via syslog (RFC 5424 over TLS) and OpenTelemetry logs. A dashboard audit viewer.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "remarks": "Not implemented (Roadmap v0.1: SIEM export via syslog (TLS) and OTel; v0.2: audit log viewer)."
+              },
+              {
+                "uuid": "73f6ddcd-57bc-5f54-b68b-66d9640e06f2",
+                "control-id": "au-8",
+                "description": "Audit timestamps come from the database clock (clock_timestamp()), in UTC with microsecond precision, taken after the per-tenant chain lock, so entries from several replicas agree with seq order.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestConcurrentWritersDontFork"
+                  }
+                ],
+                "remarks": "The database host's clock sync (NTP) is the operator's."
+              },
+              {
+                "uuid": "b0f2318e-33f2-54b8-a279-86fdbc26c20a",
+                "control-id": "au-9",
+                "description": "Append-only: the serving logins have INSERT and SELECT only (no UPDATE, no DELETE), under forced RLS per tenant. Tamper evidence: each tenant's entries form a SHA-256 hash chain over every field and the previous hash; Verify reports the first changed, reordered or removed entry.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/migrations/20261102222200_audit_events_security.sql",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestAppendOnlyAndIsolated"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestVerifyDetectsTampering"
+                  }
+                ],
+                "remarks": "The chain is an unkeyed SHA-256, so any login that may INSERT can append forged entries that verify: the platform login into any tenant's chain, and the tenant and identity logins into the chain of the tenant they set. Someone with the owner login could rewrite the whole chain, and truncation is invisible without an exported head. The hash export to a SIEM that anchors the chain outside the database is planned (Roadmap v0.1: SIEM export)."
+              },
+              {
+                "uuid": "b0fd6354-21b0-5995-be78-5caea53ea53d",
+                "control-id": "au-11",
+                "description": "A per-tenant retention setting; the retention job deletes only a prefix of the chain. The default keeps everything.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "remarks": "No retention job yet: everything is kept (Roadmap v0.1: audit log configurable retention)."
+              },
+              {
+                "uuid": "00e192a5-5cfe-5c0c-ae45-c044db63d4cf",
+                "control-id": "au-12",
+                "description": "audit.Record writes an entry in the caller's transaction, serialized per tenant by an advisory lock. It refuses snapshot isolation levels, where it could read a stale chain head.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestRecordRefusesStaleSnapshot"
+                  }
+                ],
+                "remarks": "Same coverage gaps as AU-2."
+              },
+              {
+                "uuid": "74e36684-a47a-5b56-b0c4-0a14ddd664bd",
+                "control-id": "cm-2",
+                "description": "The baseline is the Helm chart with secure defaults (Pod Security restricted, NetworkPolicies on, PodDisruptionBudget, two replicas) and a Dockerfile with base images pinned by digest. Values that would break the baseline fail at render time; CI lints and renders the chart.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/values.yaml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Dockerfile",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/ci.yml",
+                    "rel": "reference",
+                    "text": "chart job"
+                  }
+                ],
+                "remarks": "No Ingress in the chart yet (operator-supplied)."
+              },
+              {
+                "uuid": "ea4a7171-b482-5d55-a99d-bc06ec27b4e1",
+                "control-id": "cm-6",
+                "description": "The Secure Configuration Guide documents every setting. The server refuses unsafe settings at start: the owner login in its environment, unsafe database logins, a malformed keyring, and http OIDC issuer or redirect URLs other than localhost.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/compliance/secure-configuration-guide.md",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main_test.go",
+                    "rel": "reference",
+                    "text": "TestServeRefuses"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestNewRefusesInsecureURLs"
+                  }
+                ]
+              },
+              {
+                "uuid": "14269ea7-d088-51e2-a3a3-28c1b2bcc2a6",
+                "control-id": "cm-7",
+                "description": "A single static binary on distroless/static, non-root, with no shell. It serves only /healthz, /readyz and, when OIDC is configured, /auth/*. Egress is limited to DNS and the database by NetworkPolicy, and no service account token is mounted.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Dockerfile",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/deployment.yaml",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "5239a180-3516-5d95-a141-14bb3e0c2403",
+                "control-id": "cm-8",
+                "description": "An SBOM for every release.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/go.mod",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "No release pipeline yet (Roadmap v0.1: signed releases + SBOM + SLSA provenance). go.mod and go.sum list the Go dependencies."
+              },
+              {
+                "uuid": "21b9d3a2-153b-5d0a-a776-87f258ac0efd",
+                "control-id": "cp-9",
+                "description": "The server is stateless. Everything lives in PostgreSQL and in the master key Secret, and both are the operator's to back up. Stored license keys and signing keys are encrypted, so a database backup alone doesn't expose them.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "inherited"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/compliance/secure-configuration-guide.md",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "Back up the master keys separately from the database: without them, encrypted data can't be read (Secure Configuration Guide, Backups)."
+              },
+              {
+                "uuid": "c2bfbedf-64d7-54d8-871d-c3e70c4f098e",
+                "control-id": "cp-10",
+                "description": "Recovery is a database restore plus a redeploy of the chart. Product support: `licenseforge migrate` refuses a database whose applied migrations were changed or are newer than the binary.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "inherited"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestMigrate"
+                  }
+                ],
+                "remarks": "Only `migrate` checks the schema version; the server doesn't check it at start, so run `migrate` after every restore."
+              },
+              {
+                "uuid": "730e09a5-7a6b-553e-bbea-983585789638",
+                "control-id": "ia-2",
+                "description": "Dashboard users sign in through the operator's OIDC provider with Authorization Code + PKCE, state and nonce. The ID token's signature, issuer, audience, azp and expiry are verified. API clients use API tokens, checked per tenant.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginRefusals"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens_test.go",
+                    "rel": "reference",
+                    "text": "TestAuthenticateRefusals"
+                  }
+                ],
+                "remarks": "API token authentication isn't reachable over HTTP in main yet (REST API, PR #48 pending)."
+              },
+              {
+                "uuid": "d716037b-ca0f-5bd5-8ee7-8578153f7a11",
+                "control-id": "ia-2.1",
+                "description": "Per-tenant MFA enforcement through the IdP's acr and amr claims, including a 'require phishing-resistant MFA' policy (ADR-0024).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "remarks": "Not implemented: MFA is whatever the IdP enforces (Roadmap v0.1: MFA enforcement per tenant via amr/acr)."
+              },
+              {
+                "uuid": "8a03dceb-ea4b-50a5-af7d-dd144c89186f",
+                "control-id": "ia-2.2",
+                "description": "As IA-2(1).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "remarks": "As IA-2(1)."
+              },
+              {
+                "uuid": "be29326b-aa2f-5724-bd6b-14a06044504a",
+                "control-id": "ia-2.8",
+                "description": "The login flow is single-use: state, nonce and the PKCE verifier sit in a short-lived __Host- cookie that is cleared on the first callback, the nonce is bound to the ID token, and the PKCE S256 challenge is bound to the code exchange.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginRefusals"
+                  }
+                ]
+              },
+              {
+                "uuid": "c7c894ca-81f4-53b2-b027-a8bcbbc4ad82",
+                "control-id": "ia-4",
+                "description": "Users are identified by (issuer, subject), unique in the database, never by email. All objects get random prefixed IDs (usr_, tnt_, tok_ …, 128 random bits).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/schema/user.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/ids/ids.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/identity_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginCreatesAndRefreshes"
+                  }
+                ]
+              },
+              {
+                "uuid": "e2458090-079e-53a4-b71e-7c9fdb4291c0",
+                "control-id": "ia-5",
+                "description": "LicenseForge stores no passwords (the IdP owns them). Authenticators it issues are random and stored only as SHA-256 hashes: API tokens (256 bits, checksummed, expiry required, at most 1 year, one-way revocation) and session cookies (256 bits). Invitation tokens are stored only as SHA-256 hashes (32-byte length CHECK) and accepted by hash.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitoken/apitoken.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/tokens_test.go",
+                    "rel": "reference",
+                    "text": "TestAPITokenCreation"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions.go",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "No code issues invitation tokens yet; only the hash and acceptance exist. API tokens can't be created over HTTP yet (Roadmap v0.1: member/invitation/token HTTP handlers)."
+              },
+              {
+                "uuid": "2ef8a521-9977-5b69-9b71-27e5124bb05c",
+                "control-id": "ia-6",
+                "description": "Failed logins show only an HTTP status; the reason goes to the server log. Unknown, malformed, revoked, expired and wrong-tenant API tokens get the same error.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitokens/apitokens_test.go",
+                    "rel": "reference",
+                    "text": "TestAuthenticateRefusals"
+                  }
+                ],
+                "remarks": "The API token path isn't reachable over HTTP in main yet (REST API, PR #48 pending)."
+              },
+              {
+                "uuid": "2ca84393-a009-5014-b7dc-9b13a56ca9a8",
+                "control-id": "ia-11",
+                "description": "Sessions end at most their configured max age after login (LICENSEFORGE_SESSION_MAX_AGE, default 12 hours, at most 24), and a new login always starts a new session.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestSessions"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestConfiguredSessionTimeouts"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestLogin"
+                  }
+                ]
+              },
+              {
+                "uuid": "aed4451d-0066-565a-b2dc-1bf8dd12a6a6",
+                "control-id": "ra-5",
+                "description": "CodeQL runs on every PR, on main and weekly. Dependabot security and version updates cover Go modules and GitHub Actions, and OpenSSF Scorecard runs weekly.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/codeql.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/dependabot.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/scorecard.yml",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "No govulncheck or container image scanning in CI yet; no roadmap item."
+              },
+              {
+                "uuid": "7e0de78b-633a-5da2-bbe3-5208649853fc",
+                "control-id": "sa-3",
+                "description": "Every significant decision is an ADR. Changes go through pull requests with required CI checks (no approval required, see SA-10); CONTRIBUTING.md requires a maintainer review and tests that fail without the change for signing, the license format, authorization and tenant isolation (policy; the ruleset doesn't enforce it, see SA-10).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/adr/README.md",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/CONTRIBUTING.md",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "88d0a1cd-45ab-52f3-8962-50cbef5fe871",
+                "control-id": "sa-8",
+                "description": "Defense in depth: application authorization with database RLS behind it. The product fails closed (unsafe logins refused at start, audit failure rolls the action back). Crypto is stdlib only, with no hand-rolled primitives, and data is minimized (PHI-free by design, hashed fingerprints).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/adr/0009-multi-tenancy.md",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/adr/0024-hipaa-nist-and-fedramp-readiness-from-day-1.md",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "138074b9-fe67-5164-b308-9f9aa664a678",
+                "control-id": "sa-10",
+                "description": "Git on GitHub. The main branch ruleset blocks deletion and force pushes, requires a pull request with resolved review threads, and requires the go, dco and analyze checks. DCO sign-off is checked on every commit (PRs opened by Dependabot excepted); CODEOWNERS sets the default reviewers.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/dco.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/CODEOWNERS",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/rules/26381884",
+                    "rel": "reference",
+                    "text": "repository ruleset main"
+                  }
+                ],
+                "remarks": "The ruleset requires 0 approvals and no code-owner review (single maintainer); organization admins can bypass it on pull requests; merge, squash and rebase are all allowed (squash-only isn't enforced); the Merge gate check isn't required."
+              },
+              {
+                "uuid": "22b05bf4-c685-5307-a9ee-5a7daf6df74d",
+                "control-id": "sa-11",
+                "description": "Unit and PostgreSQL integration tests run with -race on every PR, and the suite runs again in FIPS 140-3 mode. Tenant-isolation tests are release-blocking, and the lf1 format has conformance vectors. Static analysis: go vet, golangci-lint and CodeQL.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/ci.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Makefile",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestEveryRelationHasCanonicalRLS"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/spec/vectors/lf1.json",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "7d8f45c5-72f4-547d-a453-904e40c666c0",
+                "control-id": "sa-15",
+                "description": "The Go toolchain version is pinned in go.mod. Linters are configured in the repo, Actions and images are pinned by digest, and generated code and migrations are checked against their sources in CI.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/go.mod",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.golangci.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/CONTRIBUTING.md",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "b015f52d-9076-5b54-bd53-61a24bfddc5e",
+                "control-id": "sc-4",
+                "description": "No state survives on a pooled connection between requests: statements run unnamed, DISCARD ALL runs before every reuse, the tenant setting is transaction-local, and serving logins can't create temporary tables.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestSessionStateIsResetBetweenRequests"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestTenantScopeDoesNotLeak"
+                  }
+                ]
+              },
+              {
+                "uuid": "671b5971-8004-5f3a-a71a-2771bed5a4e3",
+                "control-id": "sc-5",
+                "description": "Bounded timeouts: HTTP read-header (10 s) and idle (60 s), IdP calls (10 s), the startup database connect (30 s) and the readiness check (2 s). Chart resource limits; optional HPA.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestKeyFetchTimesOut"
+                  }
+                ],
+                "remarks": "No request rate limiting in the server: configure it at the ingress (Secure Configuration Guide)."
+              },
+              {
+                "uuid": "1085c3b2-eb7f-54de-8357-9cc26371ca4a",
+                "control-id": "sc-7",
+                "description": "NetworkPolicies (on by default): server ingress on 8080 only; egress for the server and the migration Job to DNS and the database port only. The Service is ClusterIP; exposure is through the operator's ingress.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/networkpolicy.yaml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/_netpol.tpl",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "The ingressFrom and databaseTo peers default to any: narrow them. The default policy has no egress to the OIDC provider: add a NetworkPolicy for it when login is enabled (Secure Configuration Guide; first-class oidc.egress values in PR #49)."
+              },
+              {
+                "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
+                "control-id": "sc-8",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Database TLS is set by the operator in the connection strings (the chart README uses sslmode=verify-full).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestNewRefusesInsecureURLs"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/README.md",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh. The server doesn't enforce database TLS: pgx defaults to sslmode=prefer, which falls back to plaintext and doesn't verify the server; set sslmode=verify-full in every database URL. FIPS-only TLS suites and TLS 1.2+ are planned (Roadmap v0.1: FIPS-only TLS suites in FIPS mode; TLS 1.2+ everywhere)."
+              },
+              {
+                "uuid": "8be7d414-abfc-58f2-a5b9-0138338d1542",
+                "control-id": "sc-12",
+                "description": "Master keyring (LICENSEFORGE_MASTER_KEYS): named 32-byte keys, the first active, all usable to decrypt, so rotation needs no downtime; HKDF-SHA256 derives separate encryption and lookup subkeys. Per-tenant Ed25519 signing keys go pending → active → retired, and a retired key's private key is erased from the live table.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/secrets/secrets.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/secrets/secrets_test.go",
+                    "rel": "reference",
+                    "text": "TestRotation"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/signing.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/signing_test.go",
+                    "rel": "reference",
+                    "text": "TestLifecycle"
+                  }
+                ],
+                "remarks": "No re-encryption job after a master-key rotation: old keys must stay in the keyring (ADR-0025). Erased signing keys survive in backups and WAL until the master key is rotated out. KMS/HSM custody comes in v0.4 (Roadmap: KMS/HSM Signer)."
+              },
+              {
+                "uuid": "e00928a9-27dc-5c89-967b-9fe4649a29e4",
+                "control-id": "sc-13",
+                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Makefile",
+                    "rel": "reference",
+                    "text": "test-fips"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/ci.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Dockerfile",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/go/licensefile/licensefile_test.go",
+                    "rel": "reference",
+                    "text": "TestFIPSModeWhenRequested"
+                  }
+                ],
+                "remarks": "The default build and image are not FIPS (GOFIPS140=off). No -fips image is published yet (no release pipeline; Roadmap v0.1: FIPS build, -fips images); build one with docker build --build-arg GOFIPS140=certified."
+              },
+              {
+                "uuid": "28e4b998-cefd-58b2-b44c-7ac221413101",
+                "control-id": "sc-23",
+                "description": "Session cookies are 256 random bits, stored as a hash, HttpOnly, Secure, SameSite=Lax, with the __Host- prefix. Every login starts a new session (no fixation). Unsafe requests need a CSRF token derived from the session and must be same-origin (net/http CrossOriginProtection).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session_test.go",
+                    "rel": "reference",
+                    "text": "TestSessionAndLogout"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
+                    "rel": "reference",
+                    "text": "TestLogin"
+                  }
+                ]
+              },
+              {
+                "uuid": "9b69abbc-fdec-5b62-a2be-8446a4057edb",
+                "control-id": "sc-28",
+                "description": "Implemented for secrets: license keys and signing private keys are encrypted with AES-256-GCM under the master keyring. The ciphertext is bound to purpose, tenant and row, so it can't be moved between rows. The database refuses plaintext in these columns (CHECK). API tokens, session cookies and invitation tokens are stored only as SHA-256 hashes, machine fingerprints only as SHA-256 hashes, domain-separated per tenant and product.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/secrets/secrets_test.go",
+                    "rel": "reference",
+                    "text": "TestDecryptRejects"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/licenses_test.go",
+                    "rel": "reference",
+                    "text": "TestLicenseConstraintsInDatabase"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/signing_test.go",
+                    "rel": "reference",
+                    "text": "TestSigningKeysInDatabase"
+                  }
+                ],
+                "remarks": "Personal and other data (users, customers, activations, audit entries) aren't encrypted by the application; they rely on the operator's disk, database and backup encryption (inherited, a deployment requirement). No license-issuing service writes licenses yet; the schema and keyring enforce the format (Roadmap v0.1: license lifecycle)."
+              },
+              {
+                "uuid": "1ae5ac0a-4acd-5b53-8991-b9b82ab0f6dc",
+                "control-id": "sc-28.1",
+                "description": "As SC-28: application-level AES-256-GCM encryption of secrets.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/secrets/secrets.go",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "As SC-28."
+              },
+              {
+                "uuid": "b9a68872-7cfd-52cb-8cb2-a1ecd38ba911",
+                "control-id": "si-2",
+                "description": "Remediation targets: Critical and High 30 days, Moderate 90, Low 180 (SECURITY.md, org policy). Dependabot opens dependency update PRs weekly; fixes ship through the normal PR process.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/SECURITY.md",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/dependabot.yml",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "No release pipeline in main yet, so fixes can't ship as releases (Roadmap v0.1: signed releases). Only the latest minor release gets fixes until 1.0."
+              },
+              {
+                "uuid": "3b223228-e2dc-5635-a8ba-8fcb516abfc3",
+                "control-id": "si-4",
+                "description": "Prometheus /metrics and SIEM export of audit entries.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main.go",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "Only structured JSON logs and health endpoints exist today (Roadmap v0.1: Prometheus /metrics; SIEM export)."
+              },
+              {
+                "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
+                "control-id": "si-7",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/store_test.go",
+                    "rel": "reference",
+                    "text": "TestMigrate"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/go.sum",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "Release signatures (cosign), SBOM and SLSA provenance are planned (Roadmap v0.1: signed releases + SBOM + SLSA provenance)."
+              },
+              {
+                "uuid": "2022ca7e-f1ce-53ab-8c6a-5b108c5e6079",
+                "control-id": "si-10",
+                "description": "Inputs are checked at the boundary and again in the database. License keys and API tokens are format-checked before any query. OIDC claims are length- and UTF-8-checked, and names cleaned. Database CHECK constraints cover formats, ranges and invariants. All SQL is parameterized (ent and placeholders).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/licensekey/licensekey_test.go",
+                    "rel": "reference",
+                    "text": "TestNormalize"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/apitoken/apitoken_test.go",
+                    "rel": "reference",
+                    "text": "TestCheckRejects"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/identity_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginRefusals"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/licenses_test.go",
+                    "rel": "reference",
+                    "text": "TestLicenseConstraintsInDatabase"
+                  }
+                ]
+              },
+              {
+                "uuid": "6144290a-b9e2-5f32-9de3-705025b44887",
+                "control-id": "si-11",
+                "description": "Callers get a status only; details go to the server log. /readyz says only 'database unavailable', and login failures show only the HTTP status. Keyring parse errors never contain key material.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/main.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/secrets/secrets_test.go",
+                    "rel": "reference",
+                    "text": "TestParseKeyring"
+                  }
+                ]
+              },
+              {
+                "uuid": "9b73feda-ad24-5efa-8db9-0895c86430bc",
+                "control-id": "si-12",
+                "description": "Commands for tenant export, tenant purge (`licenseforge tenant purge`) and user erasure (`licenseforge user erase`); audit retention (AU-11).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/compliance/data-inventory.md",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "None of these are implemented (ADR-0009, ADR-0029; Roadmap v0.1: audit log retention). The data inventory lists what is kept."
+              },
+              {
+                "uuid": "4ae2d152-d204-5a86-a016-6814d72019ba",
+                "control-id": "sr-3",
+                "description": "Actions are pinned by full commit SHA and container images by digest. Dependabot covers Go modules and Actions, and OpenSSF Scorecard runs weekly.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "implemented"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/ci.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/scorecard.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/dependabot.yml",
+                    "rel": "reference"
+                  }
+                ]
+              },
+              {
+                "uuid": "189020f1-6f8e-5f9c-a590-a2feef62a61d",
+                "control-id": "sr-4",
+                "description": "SLSA provenance and SBOM generated in CI for every release.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "planned"
+                  }
+                ],
+                "remarks": "No release pipeline yet (Roadmap v0.1: signed releases + SBOM + SLSA provenance)."
+              },
+              {
+                "uuid": "6e02511f-677f-518f-a809-94d3e788d566",
+                "control-id": "sr-11",
+                "description": "Go modules are verified against go.sum and the Go checksum database; base images are pulled by digest.",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/go.sum",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/Dockerfile",
+                    "rel": "reference"
+                  }
+                ],
+                "remarks": "LicenseForge's own images, chart and SDK releases aren't signed yet (cosign; Roadmap v0.1: signed releases)."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -28,7 +28,7 @@ func (Plan) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.Plan),
 		field.String("product_id").Immutable().NotEmpty().SchemaType(idType),
-		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(slugRE).SchemaType(slugType),
+		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(SlugRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 		field.Int("duration_months").Optional().Nillable().Range(1, 1200),
 		field.Int64("duration_seconds").Optional().Nillable().Range(1, maxSeconds),

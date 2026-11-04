@@ -23,36 +23,45 @@ import (
 const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
 	"object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
-// Mount serves the dashboard on mux for GET (and HEAD) /. A GET for a path
-// that mux routes only for other methods (GET /auth/logout) gets 405 with
-// Allow, as it would without the catch-all, instead of the app or a 404
-// (as problem JSON under /api/, ADR-0032).
-//
-// Don't register a method-less pattern on mux that also matches the SPA's
-// paths (a "/" or "/t/" catch-all): the probe would find it and answer 405
-// for every dashboard route.
+// Mount serves the dashboard on mux as the catch-all "/". It is method-less
+// so that method-less subtrees like the API's "/api/v1/" can coexist (a
+// "GET /" would conflict with them and make ServeMux panic). The mux's own
+// 405 is kept: a request that reaches "/" while mux routes its path for
+// other methods (GET /auth/logout, POST /healthz) gets 405 with Allow (as
+// problem JSON under /api/, ADR-0032). Other methods on dashboard paths get
+// 405 too; everything else gets the app or the handler's 404.
 func Mount(mux *http.ServeMux) {
 	spa := Handler()
-	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var allow []string
-		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := path.Clean("/" + r.URL.Path)
+		var allow []string // methods with their own route for this path
+		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			probe := *r // mux.Handler reads only Method, Host and URL
 			probe.Method = m
-			if _, pattern := mux.Handler(&probe); pattern != "" {
+			if _, pattern := mux.Handler(&probe); pattern != "" && pattern != "/" {
 				allow = append(allow, m)
+				if m == http.MethodGet {
+					allow = append(allow, http.MethodHead)
+				}
 			}
 		}
-		if len(allow) > 0 {
-			w.Header().Set("Allow", strings.Join(allow, ", "))
-			if under(path.Clean("/"+r.URL.Path), "/api") {
-				problem(w, http.StatusMethodNotAllowed, "method_not_allowed")
-				return
-			}
-			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		if len(allow) == 0 {
+			// The app (GET, HEAD; 405 otherwise) or the handler's 404s.
+			spa.ServeHTTP(w, r)
 			return
 		}
-		spa.ServeHTTP(w, r)
+		w.Header().Set("Allow", strings.Join(allow, ", "))
+		if under(p, "/api") {
+			problem(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	}))
+}
+
+// serverPath reports whether p belongs to the server, never the app.
+func serverPath(p string) bool {
+	return under(p, "/api") || under(p, "/auth") || p == "/healthz" || p == "/readyz"
 }
 
 // Handler serves the dashboard: files from the bundle, and index.html for
@@ -116,13 +125,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead { // Mount routes only GET; a defence
-		hd.Set("Allow", "GET, HEAD")
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+	if serverPath(p) {
+		http.NotFound(w, r)
 		return
 	}
-	if under(p, "/auth") || p == "/healthz" || p == "/readyz" {
-		http.NotFound(w, r)
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		hd.Set("Allow", "GET, HEAD")
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
 	name := strings.TrimPrefix(p, "/")

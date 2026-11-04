@@ -13,11 +13,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
+	"licenseforge.io/licenseforge/internal/store/ids"
+	"licenseforge.io/licenseforge/internal/store/schema"
 )
 
 var (
@@ -37,14 +40,19 @@ type Claims struct {
 	Name          string
 }
 
-// Service runs on the identity pool.
-type Service struct{ DB *store.DB }
+// Service runs on the identity pool. Zero timeouts mean the defaults; set
+// them only to values CheckSessionTimeouts accepts.
+type Service struct {
+	DB          *store.DB
+	IdleTimeout time.Duration
+	MaxAge      time.Duration
+}
 
 // Login creates or refreshes the user for c and returns them. The name is
 // refreshed every login; the email only from a verified email claim, so an
 // unverified claim can't make a member list show a colleague's address
 // (ADR-0029); an unverified claim clears the verified flag. Disabled users
-// get ErrDisabled.
+// get ErrDisabled, with the user (for the audit entry of the refusal only).
 func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
@@ -95,6 +103,9 @@ func (s Service) login(ctx context.Context, c Claims) (*ent.User, error) {
 		u, err = up.Save(ctx)
 		return err
 	})
+	if errors.Is(err, ErrDisabled) {
+		return u, err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +131,9 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 			return err
 		}
 		for _, m := range ms {
+			if m.Edges.Tenant == nil { // a tenant this login can't see (the reserved platform tenant): not switchable
+				continue
+			}
 			out = append(out, TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
 				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll})
 		}
@@ -197,4 +211,52 @@ func clean(s string, n int) string {
 		out = out[:len(out)-size]
 	}
 	return out
+}
+
+// ErrNotMember means the tenant doesn't exist or the user isn't its member;
+// callers answer the same for both (ADR-0032).
+var ErrNotMember = errors.New("identity: not a member of that tenant")
+
+// TenantID resolves a path's tenant reference, a slug or an ID (tnt_…;
+// slugs have no "_"), on the identity pool, whose tenants read excludes the
+// reserved platform tenant (ADR-0029). An unknown one is ErrNotMember.
+func (s Service) TenantID(ctx context.Context, ref string) (string, error) {
+	p := tenant.Slug(ref)
+	switch {
+	case ids.Valid("tnt", ref):
+		p = tenant.ID(ref)
+	case len(ref) > 63 || !schema.SlugRE.MatchString(ref): // e.g. invalid UTF-8, which PostgreSQL refuses
+		return "", ErrNotMember
+	}
+	var id string
+	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		var err error
+		id, err = tx.Tenant.Query().Where(p).OnlyID(ctx)
+		return err
+	})
+	if ent.IsNotFound(err) {
+		return "", ErrNotMember
+	}
+	return id, err
+}
+
+// Grant returns userID's role and product scope in tenantID, or
+// ErrNotMember.
+func (s Service) Grant(ctx context.Context, userID, tenantID string) (authz.Grant, error) {
+	var g authz.Grant
+	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		m, err := tx.Membership.Query().Where(membership.TenantID(tenantID), membership.UserID(userID)).WithProducts().Only(ctx)
+		if err != nil {
+			return err
+		}
+		g = authz.Grant{Role: authz.Role(m.Role), Scope: authz.Scope{All: m.ScopeAll}}
+		for _, p := range m.Edges.Products {
+			g.Scope.Products = append(g.Scope.Products, p.ProductID)
+		}
+		return nil
+	})
+	if ent.IsNotFound(err) {
+		return authz.Grant{}, ErrNotMember
+	}
+	return g, err
 }

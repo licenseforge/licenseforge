@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check
+.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 # The dashboard (web/, needs Node) is embedded only with TAGS=webui:
@@ -38,9 +38,9 @@ fmt:
 run:
 	go run ./cmd/licenseforge
 
-# Code generation (ent). CI fails if generated code is stale.
+# Code generation (ent, oapi-codegen). CI fails if generated code is stale.
 generate:
-	go generate ./internal/store
+	go generate ./internal/store ./internal/api/apigen
 
 # Throwaway PostgreSQL for tests and migration generation.
 DEV_DB_IMAGE := postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
@@ -58,3 +58,7 @@ dev-db-stop:
 # Fails if the ent schema needs a migration that isn't in internal/store/migrations.
 migrate-check:
 	go run ./internal/store/tools/migrate check
+
+# Validates compliance/ (OSCAL schema, cited evidence, links); its own module.
+compliance:
+	cd compliance && go test -count=1 ./...

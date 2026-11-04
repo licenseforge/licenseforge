@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"licenseforge.io/licenseforge/internal/identity"
@@ -16,9 +17,9 @@ import (
 // (ADR-0020). The dashboard reads the token from GET /auth/session.
 const CSRFHeader = "X-CSRF-Token"
 
-// csrfToken is derived from the session secret, so it needs no storage and
+// CSRFToken is the CSRF token of the session cookie: derived from the session secret, so it needs no storage and
 // can't be computed by anyone who doesn't hold the cookie.
-func csrfToken(cookie string) string {
+func CSRFToken(cookie string) string {
 	h := sha256.Sum256([]byte("licenseforge csrf\x00" + cookie))
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
@@ -35,37 +36,75 @@ func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
 }
 
-// RequireSession serves next only for a live session (else 401). Unsafe
-// methods also need the CSRF token and must not be cross-origin (Fetch
-// metadata / Origin, net/http.CrossOriginProtection): two independent
-// defences, either of which stops a forged form post. The redirect URL's
-// origin is trusted, so a proxy that rewrites Host doesn't break browsers
-// that send only Origin.
+// Sessions checks dashboard sessions: RequireSession here and the
+// management API (internal/api) share it.
+type Sessions struct {
+	id    identity.Service
+	cross *http.CrossOriginProtection // trusts the redirect URL's origin
+}
+
+// NewSessions checks sessions of id, trusting redirectURL's origin as same-origin.
+func NewSessions(id identity.Service, redirectURL string) (*Sessions, error) {
+	own, err := origin(redirectURL)
+	if err != nil {
+		return nil, err
+	}
+	cross := http.NewCrossOriginProtection()
+	if err := cross.AddTrustedOrigin(own); err != nil {
+		return nil, fmt.Errorf("weblogin: redirect URL: %w", err)
+	}
+	return &Sessions{id: id, cross: cross}, nil
+}
+
+// Check returns the user of r's live session. Unsafe methods must also not
+// be cross-origin (Fetch metadata / Origin, net/http.CrossOriginProtection)
+// and carry the CSRF token: two independent defences, either of which stops
+// a forged form post. The redirect URL's origin is trusted, so a proxy that
+// rewrites Host doesn't break browsers that send only Origin. On failure it
+// returns the status to answer (401, 403, or 500) and why; it writes
+// nothing except clearing a dead session cookie.
+func (s *Sessions) Check(w http.ResponseWriter, r *http.Request) (*ent.User, int, error) {
+	if err := s.cross.Check(r); err != nil {
+		return nil, http.StatusForbidden, err
+	}
+	c, err := r.Cookie(SessionCookie)
+	if err != nil {
+		return nil, http.StatusUnauthorized, err
+	}
+	if !safeMethod(r.Method) && !equal(r.Header.Get(CSRFHeader), CSRFToken(c.Value)) {
+		return nil, http.StatusForbidden, errors.New("missing or wrong " + CSRFHeader)
+	}
+	u, err := s.id.Session(r.Context(), c.Value)
+	if errors.Is(err, identity.ErrNoSession) {
+		setCookie(w, SessionCookie, "", -1)
+		return nil, http.StatusUnauthorized, err
+	}
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	return u, 0, nil
+}
+
+// Sessions returns h's session checker.
+func (h *Handler) Sessions() *Sessions { return h.sessions }
+
+// RequireSession serves next only for a session that passes Sessions.Check.
 func (h *Handler) RequireSession(next http.Handler) http.Handler {
-	return h.cross.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		c, err := r.Cookie(SessionCookie)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
+		u, code, err := h.sessions.Check(w, r)
+		switch code {
+		case 0:
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))
+		case http.StatusForbidden: // our own or net/http's message
+			http.Error(w, err.Error(), code)
+		default:
+			if code == http.StatusInternalServerError {
+				h.log.Error("session lookup", "err", err)
+			}
+			http.Error(w, http.StatusText(code), code)
 		}
-		if !safeMethod(r.Method) && !equal(r.Header.Get(CSRFHeader), csrfToken(c.Value)) {
-			http.Error(w, "missing or wrong "+CSRFHeader, http.StatusForbidden)
-			return
-		}
-		u, err := h.id.Session(r.Context(), c.Value)
-		if errors.Is(err, identity.ErrNoSession) {
-			setCookie(w, SessionCookie, "", -1)
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-		if err != nil {
-			h.log.Error("session lookup", "err", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))
-	}))
+	})
 }
 
 // session tells the dashboard who is signed in and its CSRF token.
@@ -76,7 +115,7 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff") // holds the CSRF token
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"user":       map[string]any{"id": u.ID, "email": u.Email, "name": u.Name},
-		"csrf_token": csrfToken(c.Value),
+		"csrf_token": CSRFToken(c.Value),
 	})
 }
 

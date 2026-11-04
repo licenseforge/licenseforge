@@ -1,6 +1,9 @@
 {{- if not .Values.secrets.server }}{{ fail "secrets.server is required: a Secret with database-url, platform-database-url, identity-database-url and master-keys" }}{{ end }}
 {{- if not (regexMatch "^[0-9]+$" (toString .Values.drainSeconds)) }}{{ fail "drainSeconds must be whole seconds, e.g. 5" }}{{ end }}
 {{- if le (int .Values.terminationGracePeriodSeconds) (add (int .Values.drainSeconds) 15) }}{{ fail "terminationGracePeriodSeconds must exceed drainSeconds + 15" }}{{ end }}
+{{- /* dig: values reused from a release older than oidc.* have no oidc key. */}}
+{{- $oidc := .Values.oidc | default dict }}
+{{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +52,18 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: master-keys}}
             - name: LICENSEFORGE_DRAIN
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
+            {{- if $oidc.enabled }}
+            - name: LICENSEFORGE_OIDC_ISSUER
+              value: {{ $oidc.issuer | quote }}
+            - name: LICENSEFORGE_OIDC_CLIENT_ID
+              value: {{ $oidc.clientID | quote }}
+            - name: LICENSEFORGE_OIDC_REDIRECT_URL
+              value: {{ $oidc.redirectURL | quote }}
+            {{- with dig "clientSecret" "secretName" "" $oidc }}
+            - name: LICENSEFORGE_OIDC_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: {{ . | quote }}, key: {{ required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc) | quote }}}}
+            {{- end }}
+            {{- end }}
             {{- with .Values.extraEnv }}{{ toYaml . | nindent 12 }}{{ end }}
           startupProbe: # covers the startup database connect (up to 30s) before liveness applies
             httpGet: {path: /healthz, port: http}

@@ -73,6 +73,32 @@ func TestDashboardKeepsMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// The real mux takes the API as a method-less /api/v1/ subtree (as serve
+// mounts it) next to the dashboard without a ServeMux registration panic,
+// and each path still reaches its owner.
+func TestMuxBesideAPISubtree(t *testing.T) {
+	mux := newMux(func(context.Context) error { return nil }, quiet)
+	mux.Handle("/api/v1/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) }))
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodPost, "/api/v1/tenants/acme/api-tokens", 299},
+		{http.MethodDelete, "/api/v1/x", 299},
+		{http.MethodGet, "/healthz", http.StatusOK},
+		{http.MethodPost, "/healthz", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/t/acme/", http.StatusOK},
+		{http.MethodGet, "/api/v2/x", http.StatusNotFound},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != tc.want {
+			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+		}
+	}
+}
+
 const testKeys = "k1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 func setEnv(t *testing.T, tenant, platform, keys string) {
@@ -82,8 +108,8 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", platform)
 	t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
-	for _, k := range []string{"ISSUER", "CLIENT_ID", "CLIENT_SECRET", "REDIRECT_URL"} {
-		t.Setenv("LICENSEFORGE_OIDC_"+k, "")
+	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "SESSION_IDLE_TIMEOUT", "SESSION_MAX_AGE", "LOGIN_BANNER"} {
+		t.Setenv("LICENSEFORGE_"+k, "")
 	}
 }
 
@@ -136,6 +162,9 @@ func TestServe(t *testing.T) {
 	if code != http.StatusOK {
 		t.Errorf("readyz = %d", code)
 	}
+	if code := get("/api/v1/tenants/acme/api-tokens"); code != http.StatusUnauthorized { // the API is mounted
+		t.Errorf("api without credentials = %d", code)
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- stop() }()
 	for range 25 { // until readiness flips; the drain window is still open
@@ -166,6 +195,11 @@ func TestServeRefuses(t *testing.T) {
 		"no identity URL":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_IDENTITY_DATABASE_URL is not set"},
 		"platform as identity": {env.TenantURL, env.PlatformURL, testKeys, "", "identity pool"},
 		"OIDC without client":  {env.TenantURL, env.PlatformURL, testKeys, "", "client ID"},
+		"bad idle timeout":     {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_SESSION_IDLE_TIMEOUT: want a duration"},
+		"idle timeout too low": {env.TenantURL, env.PlatformURL, testKeys, "", "idle timeout 1m0s"},
+		"max age over a day":   {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
+		"max age below idle":   {env.TenantURL, env.PlatformURL, testKeys, "", "below the idle timeout"},
+		"bad banner":           {env.TenantURL, env.PlatformURL, testKeys, "", "login banner"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -178,6 +212,18 @@ func TestServeRefuses(t *testing.T) {
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.PlatformURL)
 		case "OIDC without client":
 			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
+		case "bad idle timeout":
+			t.Setenv("LICENSEFORGE_SESSION_IDLE_TIMEOUT", "1 hour")
+		case "idle timeout too low":
+			t.Setenv("LICENSEFORGE_SESSION_IDLE_TIMEOUT", "1m")
+		case "max age over a day":
+			t.Setenv("LICENSEFORGE_SESSION_MAX_AGE", "25h")
+		case "max age below idle":
+			t.Setenv("LICENSEFORGE_SESSION_IDLE_TIMEOUT", "3h")
+			t.Setenv("LICENSEFORGE_SESSION_MAX_AGE", "2h")
+		case "bad banner":
+			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
+			t.Setenv("LICENSEFORGE_LOGIN_BANNER", strings.Repeat("x", 4097))
 		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

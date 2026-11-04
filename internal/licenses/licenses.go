@@ -150,7 +150,7 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 		if err := authz.Require(ctx, authz.LicenseIssue, req.ProductID); err != nil {
 			return err
 		}
-		now, err := dbNow(ctx, tx)
+		now, err := DBNow(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -188,7 +188,7 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 			SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
 		// from_first_activation: the term starts at first activation (nil until then).
 		if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
-			c.SetNillableExpiresAt(expiry(now, pl.DurationMonths, pl.DurationSeconds))
+			c.SetNillableExpiresAt(Expiry(now, pl.DurationMonths, pl.DurationSeconds))
 		}
 		if row, err = c.Save(ctx); err != nil {
 			return err
@@ -274,10 +274,10 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 	return schema.LicenseEntitlements{Features: slices.Sorted(maps.Keys(bools)), Limits: limits}, nil
 }
 
-// expiry is start plus the term; nil for a perpetual plan. Months are
+// Expiry is start plus the term; nil for a perpetual plan. Months are
 // calendar months, clamped to the month's last day (Jan 31 + 1 month = Feb
 // 28/29), as billing periods are, rather than Go's normalisation into March.
-func expiry(start time.Time, months *int, seconds *int64) *time.Time {
+func Expiry(start time.Time, months *int, seconds *int64) *time.Time {
 	var t time.Time
 	switch {
 	case months != nil:
@@ -402,9 +402,9 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 	return row, nil
 }
 
-// dbNow is the database clock, as stored (microseconds), in UTC so calendar
+// DBNow is the database clock, as stored (microseconds), in UTC so calendar
 // months are counted in UTC.
-func dbNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
+func DBNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT clock_timestamp()`)
 	if err != nil {
 		return time.Time{}, err
@@ -421,13 +421,14 @@ func dbNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
 }
 
 // validRefs: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
-// of up to 255 bytes of valid UTF-8 without control characters (incl. NUL).
+// of up to 255 bytes of valid UTF-8 without control, format or separator
+// characters (incl. NUL, zero-width and bidi controls).
 func validRefs(refs map[string]string) bool {
 	if len(refs) > 20 {
 		return false
 	}
 	for k, v := range refs {
-		if !refKeyRE.MatchString(k) || len(v) > 255 || !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
+		if !refKeyRE.MatchString(k) || len(v) > 255 || !utf8.ValidString(v) || strings.ContainsFunc(v, invisible) {
 			return false
 		}
 	}
@@ -435,6 +436,10 @@ func validRefs(refs map[string]string) bool {
 }
 
 var refKeyRE = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
+
+// invisible: control and format characters (zero-width, bidi overrides) and
+// line or paragraph separators, which make a value read differently than it is.
+func invisible(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) }
 
 func event(p authz.Principal, action, objectID string) audit.Event {
 	actor := auditevent.ActorTypeUser
