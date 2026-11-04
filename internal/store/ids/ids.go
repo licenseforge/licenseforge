@@ -5,6 +5,7 @@ package ids
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"regexp"
 )
 
 var enc = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
@@ -16,6 +17,15 @@ func New(prefix string) string {
 	var b [16]byte
 	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (Go 1.24+)
 	return prefix + "_" + enc.EncodeToString(b[:])
+}
+
+var body = regexp.MustCompile(`^[a-z2-7]{26}$`)
+
+// Valid reports whether id is prefix + "_" + 26 base32 characters, the form
+// New produces (and the *_id_format CHECKs enforce). Check untrusted IDs with
+// it before they reach a query or an audit entry.
+func Valid(prefix, id string) bool {
+	return len(id) == len(prefix)+27 && id[:len(prefix)+1] == prefix+"_" && body.MatchString(id[len(prefix)+1:])
 }
 
 // Generators for each entity, used as ent default functions.

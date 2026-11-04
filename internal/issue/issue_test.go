@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,7 +154,8 @@ func (f fixture) lastEvent(t *testing.T) *ent.AuditEvent {
 
 func TestOfflineFile(t *testing.T) {
 	f := setup(t)
-	l := f.newLicense(t, nil)
+	until := time.Date(2027, 12, 31, 23, 59, 59, 900_000_000, time.UTC)
+	l := f.newLicense(t, func(c *ent.LicenseCreate) { c.SetUpdatesUntil(until) })
 	now := time.Date(2026, 11, 4, 12, 0, 0, 999_000_000, time.UTC)
 	is := Issuer{DB: f.db, Keys: f.keys, Now: func() time.Time { return now }}
 
@@ -174,12 +176,14 @@ func TestOfflineFile(t *testing.T) {
 	if c.LicenseID != l.ID || c.Tenant != f.tenant || c.Plan != "site" || c.CustomerID != f.customer ||
 		!c.IssuedAt.Equal(now.Truncate(time.Second)) || c.Expires == nil || !c.Expires.Equal(wantExp) ||
 		c.Grace != time.Hour || c.Binding.Type != licensefile.BindNone ||
-		!c.Entitlements.HasFeature("sso") || c.Entitlements.Limit("nodes") != 10 || c.CustomerName != "" {
+		!c.Entitlements.HasFeature("sso") || c.Entitlements.Limit("nodes") != 10 || c.CustomerName != "" ||
+		c.UpdatesUntil == nil || !c.UpdatesUntil.Equal(until.Truncate(time.Second)) {
 		t.Errorf("claims = %+v", c)
 	}
 	e := f.lastEvent(t)
 	if e == nil || e.Action != "license.offline_file" || e.Outcome != auditevent.OutcomeSuccess ||
-		e.ObjectID == nil || *e.ObjectID != l.ID || e.ActorID == nil || *e.ActorID != "usr_test" {
+		e.ObjectID == nil || *e.ObjectID != l.ID || e.ActorID == nil || *e.ActorID != "usr_test" ||
+		e.ActorType != auditevent.ActorTypeUser || e.Details != `{"kid":"`+f.kid+`"}` {
 		t.Errorf("audit = %+v", e)
 	}
 }
@@ -191,6 +195,7 @@ func TestOfflineFileDenied(t *testing.T) {
 	is := Issuer{DB: f.db, Keys: f.keys}
 	for name, ctx := range map[string]context.Context{
 		"support can't export":   f.as(authz.Support, all),
+		"viewer can't export":    f.as(authz.Viewer, all),
 		"scoped to another prod": f.as(authz.Manager, authz.Scope{Products: []string{f.otherProd}}),
 		"unknown license":        f.as(authz.Manager, all),
 	} {
@@ -233,7 +238,8 @@ func TestOfflineFileNotIssuable(t *testing.T) {
 		if _, err := is.OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) {
 			t.Errorf("%s: err = %v", name, err)
 		}
-		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || *e.ObjectID != l.ID {
+		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || *e.ObjectID != l.ID ||
+			!strings.Contains(e.Details, `"reason":"issue: license can't be issued`) {
 			t.Errorf("%s: audit = %+v", name, e)
 		}
 	}
@@ -264,8 +270,8 @@ func TestOfflineFileRevokedWhileSigning(t *testing.T) {
 	if file, err := is.OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) || file != "" {
 		t.Errorf("OfflineFile = %q, %v", file, err)
 	}
-	if e := f.lastEvent(t); (e == nil) != (before == nil) || (e != nil && e.Seq != before.Seq) {
-		t.Errorf("an entry was recorded for a file that wasn't handed out: %+v", e)
+	if e := f.lastEvent(t); before != nil || e == nil || e.Seq != 1 || e.Outcome != auditevent.OutcomeFailure {
+		t.Errorf("want exactly one failure entry, no success: %+v", e)
 	}
 }
 
@@ -279,5 +285,102 @@ func TestOfflineFileNeedsActiveKey(t *testing.T) {
 	}
 	if _, err := (Issuer{DB: f.db, Keys: f.keys}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, signing.ErrNoActiveKey) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Hostile IDs are refused before any query and the attempt is still recorded,
+// without the ID.
+func TestOfflineFileMalformedID(t *testing.T) {
+	f := setup(t)
+	is := Issuer{DB: f.db, Keys: f.keys}
+	for _, id := range []string{"", "lic_" + strings.Repeat("a", 150), "lic_aaaaaaaaaaaaaaaaaaaaaaaaa\x00", "lic_aaaaaaaaaaaaaaaaaaaaaaaaa\xff", "cus_aaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		if _, err := is.OfflineFile(f.as(authz.Owner, all), id); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("%q: err = %v", id, err)
+		}
+		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeDenied || e.ObjectID != nil {
+			t.Errorf("%q: audit = %+v", id, e)
+		}
+	}
+}
+
+func TestOfflineFileTokenAndPerpetual(t *testing.T) {
+	f := setup(t)
+	l := f.newLicense(t, func(c *ent.LicenseCreate) {
+		c.Mutation().ResetDurationMonths() // no term: perpetual
+		c.Mutation().ResetExpiresAt()
+	})
+	ctx := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.Token, ID: "tok_test", TenantID: f.tenant, Role: authz.Manager, Scope: all})
+	file, err := (Issuer{DB: f.db, Keys: f.keys}).OfflineFile(ctx, l.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _, err := licensefile.Verify(file, f.keySet(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err := licensefile.ParseClaims(payload); err != nil || c.Expires != nil {
+		t.Errorf("perpetual: %+v %v", c, err)
+	}
+	if e := f.lastEvent(t); e == nil || e.ActorType != auditevent.ActorTypeToken || *e.ActorID != "tok_test" {
+		t.Errorf("audit = %+v", e)
+	}
+}
+
+func (f fixture) keySet(t *testing.T) licensefile.KeySet {
+	t.Helper()
+	pk, err := f.keys.Public(context.Background(), f.tenant, f.kid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return licensefile.KeySet{{KID: pk.KID, Alg: licensefile.AlgEd25519, Key: pk.Key}}
+}
+
+// rotatedOnce fails the first Sign as if a rotation retired the key.
+type rotatedOnce struct {
+	signing.Local
+	n *int
+}
+
+func (r rotatedOnce) Sign(ctx context.Context, tenantID, kid string, msg []byte) ([]byte, error) {
+	if *r.n++; *r.n == 1 {
+		return nil, signing.ErrNotActive
+	}
+	return r.Local.Sign(ctx, tenantID, kid, msg)
+}
+
+type alwaysRotated struct {
+	signing.Local
+	n *int
+}
+
+func (r alwaysRotated) Sign(context.Context, string, string, []byte) ([]byte, error) {
+	*r.n++
+	return nil, signing.ErrNotActive
+}
+
+// badSigner returns a signature that doesn't verify.
+type badSigner struct{ signing.Local }
+
+func (badSigner) Sign(context.Context, string, string, []byte) ([]byte, error) {
+	return make([]byte, 64), nil
+}
+
+func TestOfflineFileSigning(t *testing.T) {
+	f := setup(t)
+	l := f.newLicense(t, nil)
+	n := 0
+	if _, err := (Issuer{DB: f.db, Keys: rotatedOnce{Local: f.keys, n: &n}}).OfflineFile(f.as(authz.Owner, all), l.ID); err != nil || n != 2 {
+		t.Errorf("retry after rotation: n=%d err=%v", n, err)
+	}
+	n = -1_000_000 // rotated on every call: one retry, then the error
+	if _, err := (Issuer{DB: f.db, Keys: alwaysRotated{f.keys, &n}}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, signing.ErrNotActive) || n != -1_000_000+2 {
+		t.Errorf("always rotated: n=%d err=%v", n, err)
+	}
+	before := f.lastEvent(t)
+	if file, err := (Issuer{DB: f.db, Keys: badSigner{f.keys}}).OfflineFile(f.as(authz.Owner, all), l.ID); err == nil || file != "" {
+		t.Errorf("bad signature: %q %v", file, err)
+	}
+	if e := f.lastEvent(t); e.Seq != before.Seq {
+		t.Errorf("bad signature was recorded: %+v", e)
 	}
 }

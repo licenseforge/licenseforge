@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/audit"
@@ -19,6 +20,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
 )
 
@@ -61,60 +63,104 @@ func (i Issuer) OfflineFile(ctx context.Context, licenseID string) (string, erro
 		return "", err
 	}
 	p, _ := authz.FromContext(ctx)
-	ev := audit.Event{ActorType: actorType(p), ActorID: p.ID, Action: "license.offline_file", ObjectType: "license", ObjectID: licenseID}
+	ev := audit.Event{ActorType: actorType(p), ActorID: p.ID, Action: "license.offline_file", ObjectType: "license"}
+	if !ids.Valid("lic", licenseID) { // hostile input: refuse before any query; not stored in the entry
+		return "", i.refused(ctx, tenantID, ev, authz.ErrDenied)
+	}
+	ev.ObjectID = licenseID
+	now := i.now()
 
 	var claims licensefile.Claims
-	var updated time.Time
 	err = i.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		l, err := tx.License.Query().Where(license.ID(licenseID)).WithProduct().Only(ctx)
-		if ent.IsNotFound(err) {
-			return authz.ErrDenied // as for another tenant's license: don't reveal it exists
-		}
-		if err != nil {
-			return err
-		}
-		if err := authz.Require(ctx, authz.ActivationOffline, l.ProductID); err != nil {
-			return err
-		}
-		claims, err = offlineClaims(l, i.now())
-		updated = l.UpdatedAt
+		claims, err = i.check(ctx, tx, licenseID, now, false)
 		return err
 	})
 	if err != nil {
 		return "", i.refused(ctx, tenantID, ev, err)
 	}
-
-	kid, err := i.Keys.Active(ctx, tenantID)
-	if err != nil {
-		return "", err
-	}
 	payload, err := licensefile.Encode(claims)
 	if err != nil {
 		return "", err
 	}
-	file, err := licensefile.Sign(kid, &signer{ctx: ctx, keys: i.Keys, tenantID: tenantID, kid: kid}, payload)
+	file, kid, err := i.sign(ctx, tenantID, payload)
 	if err != nil {
 		return "", err
 	}
 
-	// Record before returning, and only if the license didn't change while
-	// signing (e.g. revoked): an unrecorded export must not leave.
+	// Record before returning. The license is read again under a share lock
+	// (a concurrent revoke waits for this commit) and must still give the
+	// same claims: an export of a license that changed while signing, or an
+	// unrecorded export, must not leave. Lock order: license row, then the
+	// audit lock; writers that change a license and audit it must update the
+	// row first, then call audit.Record.
 	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"kid": kid}
 	err = i.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		l, err := tx.License.Query().Where(license.ID(licenseID)).ForShare().Only(ctx)
+		again, err := i.check(ctx, tx, licenseID, now, true)
 		if err != nil {
 			return err
 		}
-		if !l.UpdatedAt.Equal(updated) {
+		if !reflect.DeepEqual(again, claims) {
 			return fmt.Errorf("%w: license changed while issuing; retry", ErrNotIssuable)
 		}
 		_, err = audit.Record(ctx, tx, tenantID, ev)
 		return err
 	})
 	if err != nil {
-		return "", err
+		ev.Details = nil
+		return "", i.refused(ctx, tenantID, ev, err)
 	}
 	return file, nil
+}
+
+// check reads the license (FOR SHARE if lock), applies the permission and
+// issuability checks, and returns its claims at now.
+func (i Issuer) check(ctx context.Context, tx *ent.Tx, licenseID string, now time.Time, lock bool) (licensefile.Claims, error) {
+	q := tx.License.Query().Where(license.ID(licenseID)).WithProduct()
+	if lock {
+		q = q.ForShare()
+	}
+	l, err := q.Only(ctx)
+	if ent.IsNotFound(err) {
+		return licensefile.Claims{}, authz.ErrDenied // as for another tenant's license: don't reveal it exists
+	}
+	if err != nil {
+		return licensefile.Claims{}, err
+	}
+	if err := authz.Require(ctx, authz.ActivationOffline, l.ProductID); err != nil {
+		return licensefile.Claims{}, err
+	}
+	return offlineClaims(l, now)
+}
+
+// sign signs payload with the tenant's active key, reading the kid again once
+// if a rotation retired it in between (signing.Signer). The signature is
+// verified before the file is used, so a faulty signer (KMS) can't hand out
+// a broken file.
+func (i Issuer) sign(ctx context.Context, tenantID string, payload []byte) (file, kid string, err error) {
+	for attempt := 0; ; attempt++ {
+		if kid, err = i.Keys.Active(ctx, tenantID); err != nil {
+			return "", "", err
+		}
+		pk, err := i.Keys.Public(ctx, tenantID, kid)
+		if err != nil {
+			return "", "", err
+		}
+		if pk.Alg != "ed25519" || len(pk.Key) != ed25519.PublicKeySize {
+			return "", "", fmt.Errorf("issue: key %s is %s; only ed25519 is supported", kid, pk.Alg)
+		}
+		file, err = licensefile.Sign(kid, &signer{ctx: ctx, keys: i.Keys, tenantID: tenantID, kid: kid, pub: pk.Key}, payload)
+		if errors.Is(err, signing.ErrNotActive) && attempt == 0 {
+			continue
+		}
+		if err != nil {
+			return "", "", err
+		}
+		keys := licensefile.KeySet{{KID: kid, Alg: licensefile.AlgEd25519, Key: pk.Key}}
+		if _, _, err := licensefile.Verify(file, keys); err != nil {
+			return "", "", fmt.Errorf("issue: signer produced an invalid signature: %w", err)
+		}
+		return file, kid, nil
+	}
 }
 
 // offlineClaims checks that l can be exported as an offline site license now
@@ -151,7 +197,7 @@ func offlineClaims(l *ent.License, now time.Time) (licensefile.Claims, error) {
 
 // refused records a denied or failed attempt in a transaction of its own
 // (ADR-0027) and returns err. Errors that aren't the caller's (database
-// down) aren't attempts and aren't recorded.
+// down, no active key) aren't attempts and aren't recorded.
 func (i Issuer) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
 	switch {
 	case errors.Is(err, authz.ErrDenied):
@@ -183,15 +229,10 @@ type signer struct {
 	keys     Keys
 	tenantID string
 	kid      string
+	pub      ed25519.PublicKey
 }
 
-func (s *signer) Public() crypto.PublicKey {
-	pk, err := s.keys.Public(s.ctx, s.tenantID, s.kid)
-	if err != nil || pk.Alg != "ed25519" {
-		return nil // licensefile.Sign refuses a non-Ed25519 key
-	}
-	return ed25519.PublicKey(pk.Key)
-}
+func (s *signer) Public() crypto.PublicKey { return s.pub }
 
 func (s *signer) Sign(_ io.Reader, msg []byte, _ crypto.SignerOpts) ([]byte, error) {
 	return s.keys.Sign(s.ctx, s.tenantID, s.kid, msg)
