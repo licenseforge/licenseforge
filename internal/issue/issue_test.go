@@ -182,7 +182,7 @@ func TestOfflineFile(t *testing.T) {
 	}
 	e := f.lastEvent(t)
 	if e == nil || e.Action != "license.offline_file" || e.Outcome != auditevent.OutcomeSuccess ||
-		e.ObjectID == nil || *e.ObjectID != l.ID || e.ActorID == nil || *e.ActorID != "usr_test" ||
+		e.ObjectID == nil || deref(e.ObjectID) != l.ID || e.ActorID == nil || *e.ActorID != "usr_test" ||
 		e.ActorType != auditevent.ActorTypeUser || e.Details != `{"kid":"`+f.kid+`"}` {
 		t.Errorf("audit = %+v", e)
 	}
@@ -206,7 +206,7 @@ func TestOfflineFileDenied(t *testing.T) {
 		if _, err := is.OfflineFile(ctx, id); !errors.Is(err, authz.ErrDenied) {
 			t.Errorf("%s: err = %v", name, err)
 		}
-		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeDenied || *e.ObjectID != id {
+		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeDenied || deref(e.ObjectID) != id {
 			t.Errorf("%s: audit = %+v", name, e)
 		}
 	}
@@ -238,7 +238,7 @@ func TestOfflineFileNotIssuable(t *testing.T) {
 		if _, err := is.OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) {
 			t.Errorf("%s: err = %v", name, err)
 		}
-		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || *e.ObjectID != l.ID ||
+		if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || deref(e.ObjectID) != l.ID ||
 			!strings.Contains(e.Details, `"reason":"issue: license can't be issued`) {
 			t.Errorf("%s: audit = %+v", name, e)
 		}
@@ -321,7 +321,7 @@ func TestOfflineFileTokenAndPerpetual(t *testing.T) {
 	if c, err := licensefile.ParseClaims(payload); err != nil || c.Expires != nil {
 		t.Errorf("perpetual: %+v %v", c, err)
 	}
-	if e := f.lastEvent(t); e == nil || e.ActorType != auditevent.ActorTypeToken || *e.ActorID != "tok_test" {
+	if e := f.lastEvent(t); e == nil || e.ActorType != auditevent.ActorTypeToken || deref(e.ActorID) != "tok_test" {
 		t.Errorf("audit = %+v", e)
 	}
 }
@@ -372,15 +372,83 @@ func TestOfflineFileSigning(t *testing.T) {
 	if _, err := (Issuer{DB: f.db, Keys: rotatedOnce{Local: f.keys, n: &n}}).OfflineFile(f.as(authz.Owner, all), l.ID); err != nil || n != 2 {
 		t.Errorf("retry after rotation: n=%d err=%v", n, err)
 	}
-	n = -1_000_000 // rotated on every call: one retry, then the error
-	if _, err := (Issuer{DB: f.db, Keys: alwaysRotated{f.keys, &n}}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, signing.ErrNotActive) || n != -1_000_000+2 {
+	n = 0 // rotated on every call: one retry, then the error
+	if _, err := (Issuer{DB: f.db, Keys: alwaysRotated{f.keys, &n}}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, signing.ErrNotActive) || n != 2 {
 		t.Errorf("always rotated: n=%d err=%v", n, err)
 	}
-	before := f.lastEvent(t)
+	if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || !strings.Contains(e.Details, "rotated") {
+		t.Errorf("rotation failure audit = %+v", e)
+	}
 	if file, err := (Issuer{DB: f.db, Keys: badSigner{f.keys}}).OfflineFile(f.as(authz.Owner, all), l.ID); err == nil || file != "" {
 		t.Errorf("bad signature: %q %v", file, err)
 	}
-	if e := f.lastEvent(t); e.Seq != before.Seq {
-		t.Errorf("bad signature was recorded: %+v", e)
+	if e := f.lastEvent(t); e == nil || e.Outcome != auditevent.OutcomeFailure || e.Details != `{"reason":"the signer produced an invalid signature"}` {
+		t.Errorf("bad signature audit = %+v", e)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// changeWhileSigning runs change on the license inside Sign, as a concurrent
+// request would, and lets signing go ahead.
+type changeWhileSigning struct {
+	signing.Local
+	f      fixture
+	change func(context.Context, *ent.Tx) error
+}
+
+func (c changeWhileSigning) Sign(ctx context.Context, tenantID, kid string, msg []byte) ([]byte, error) {
+	if err := c.f.db.WithTenant(ctx, tenantID, func(tx *ent.Tx) error { return c.change(ctx, tx) }); err != nil {
+		return nil, err
+	}
+	return c.Local.Sign(ctx, tenantID, kid, msg)
+}
+
+// A license that changed while signing but is still issuable (here: its
+// entitlements) gives no file: the signed claims would be stale.
+func TestOfflineFileChangedWhileSigning(t *testing.T) {
+	f := setup(t)
+	l := f.newLicense(t, nil)
+	keys := changeWhileSigning{Local: f.keys, f: f, change: func(ctx context.Context, tx *ent.Tx) error {
+		return tx.License.UpdateOneID(l.ID).SetEntitlements(schema.LicenseEntitlements{Features: []string{"sso", "audit"}}).Exec(ctx)
+	}}
+	if file, err := (Issuer{DB: f.db, Keys: keys}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) || file != "" {
+		t.Errorf("OfflineFile = %q, %v", file, err)
+	}
+	if e := f.lastEvent(t); e == nil || e.Seq != 1 || e.Outcome != auditevent.OutcomeFailure {
+		t.Errorf("want exactly one failure entry: %+v", e)
+	}
+}
+
+// A revoke that holds the row lock while the export records its success
+// makes the export wait and then see the revocation (FOR SHARE).
+func TestOfflineFileWaitsForConcurrentRevoke(t *testing.T) {
+	f := setup(t)
+	l := f.newLicense(t, nil)
+	locked, done := make(chan struct{}), make(chan error, 1)
+	keys := changeWhileSigning{Local: f.keys, f: f, change: func(context.Context, *ent.Tx) error {
+		go func() {
+			done <- f.db.WithTenant(context.Background(), f.tenant, func(tx *ent.Tx) error {
+				if err := tx.License.UpdateOneID(l.ID).SetStatus(license.StatusRevoked).SetRevokedAt(time.Now()).Exec(context.Background()); err != nil {
+					return err
+				}
+				close(locked)                      // the row is locked, not yet committed
+				time.Sleep(500 * time.Millisecond) // the export reaches FOR SHARE meanwhile
+				return nil
+			})
+		}()
+		<-locked
+		return nil
+	}}
+	if file, err := (Issuer{DB: f.db, Keys: keys}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) || file != "" {
+		t.Errorf("OfflineFile = %q, %v; want the revocation seen", file, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

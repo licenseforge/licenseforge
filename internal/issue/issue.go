@@ -28,6 +28,8 @@ import (
 // says why.
 var ErrNotIssuable = errors.New("issue: license can't be issued as a file")
 
+var errBadSignature = errors.New("issue: signer produced an invalid signature")
+
 // Keys is the tenant's signing keys: the active kid and a Signer for it.
 // signing.Local implements it.
 type Keys interface {
@@ -84,7 +86,7 @@ func (i Issuer) OfflineFile(ctx context.Context, licenseID string) (string, erro
 	}
 	file, kid, err := i.sign(ctx, tenantID, payload)
 	if err != nil {
-		return "", err
+		return "", i.signFailed(ctx, tenantID, ev, err)
 	}
 
 	// Record before returning. The license is read again under a share lock
@@ -157,7 +159,7 @@ func (i Issuer) sign(ctx context.Context, tenantID string, payload []byte) (file
 		}
 		keys := licensefile.KeySet{{KID: kid, Alg: licensefile.AlgEd25519, Key: pk.Key}}
 		if _, _, err := licensefile.Verify(file, keys); err != nil {
-			return "", "", fmt.Errorf("issue: signer produced an invalid signature: %w", err)
+			return "", "", fmt.Errorf("%w: %w", errBadSignature, err)
 		}
 		return file, kid, nil
 	}
@@ -207,6 +209,29 @@ func (i Issuer) refused(ctx context.Context, tenantID string, ev audit.Event, er
 	default:
 		return err
 	}
+	if rerr := i.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		_, err := audit.Record(ctx, tx, tenantID, ev)
+		return err
+	}); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	return err
+}
+
+// signFailed records a signing failure with a fixed reason (never the
+// signer's error text) and returns err. An invalid signature from a signer
+// is a security signal (a faulty or tampered KMS), so it is always recorded.
+func (i Issuer) signFailed(ctx context.Context, tenantID string, ev audit.Event, err error) error {
+	reason := "signing failed"
+	switch {
+	case errors.Is(err, signing.ErrNoActiveKey):
+		reason = "the tenant has no active signing key"
+	case errors.Is(err, signing.ErrNotActive):
+		reason = "the signing key was rotated while issuing; retry"
+	case errors.Is(err, errBadSignature):
+		reason = "the signer produced an invalid signature"
+	}
+	ev.Outcome, ev.Details = auditevent.OutcomeFailure, map[string]any{"reason": reason}
 	if rerr := i.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		_, err := audit.Record(ctx, tx, tenantID, ev)
 		return err
