@@ -102,6 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
+      fail-fast: false # one variant failing doesn't cancel the other half-published
       matrix:
         suffix: ["", "-fips"]
     permissions:
@@ -122,13 +123,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          # A published version is never moved (a re-run would re-sign new digests).
-          if skopeo inspect --raw "docker://$IMAGE:$VERSION$SUFFIX" >/dev/null 2>&1; then
-            echo "$IMAGE:$VERSION$SUFFIX already exists"; exit 1
+          # A published version is never moved. The same digest (a re-run of failed
+          # jobs reuses the artifact) skips the copy; sign and attest run again.
+          ref="docker://$IMAGE:$VERSION$SUFFIX"
+          want="sha256:$(skopeo inspect --raw "oci-archive:out/oci/image$SUFFIX.tar" | sha256sum | cut -d' ' -f1)"
+          if skopeo inspect --raw "$ref" > existing 2> err; then
+            have="sha256:$(sha256sum < existing | cut -d' ' -f1)"
+            [ "$have" = "$want" ] || { echo "$ref already exists as $have, not $want"; exit 1; }
+            echo "$ref already published with this digest"
+          else
+            # Only "doesn't exist" goes on (ghcr says manifest unknown even for a
+            # new package); anything else, including denied, fails.
+            grep -qiE 'manifest unknown|name unknown' err || { cat err; exit 1; }
+            skopeo copy --all --preserve-digests "oci-archive:out/oci/image$SUFFIX.tar" "$ref"
           fi
-          skopeo copy --all --preserve-digests --digestfile digest \
-            "oci-archive:out/oci/image$SUFFIX.tar" "docker://$IMAGE:$VERSION$SUFFIX"
-          echo "digest=$(cat digest)" >> "$GITHUB_OUTPUT"
+          echo "digest=$want" >> "$GITHUB_OUTPUT"
       - name: Sign (keyless; the index and every platform manifest)
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -174,11 +183,17 @@ jobs:
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          if skopeo inspect --raw "docker://$CHART:$VERSION" >/dev/null 2>&1; then
-            echo "$CHART:$VERSION already exists"; exit 1
+          # As for images: never moved; the same chart (a re-run) is reused.
+          tgz="out/chart/licenseforge-$VERSION.tgz"
+          if skopeo inspect --raw "docker://$CHART:$VERSION" > existing 2> err; then
+            layer=$(jq -r '.layers[0].digest' existing)
+            [ "$layer" = "sha256:$(sha256sum < "$tgz" | cut -d' ' -f1)" ] || { echo "$CHART:$VERSION already exists with another chart"; exit 1; }
+            digest="sha256:$(sha256sum < existing | cut -d' ' -f1)"
+          else
+            grep -qiE 'manifest unknown|name unknown' err || { cat err; exit 1; }
+            helm push "$tgz" "oci://${CHART%/*}" | tee push.log
+            digest=$(awk '/^Digest:/ {print $2}' push.log)
           fi
-          helm push "out/chart/licenseforge-$VERSION.tgz" "oci://${CHART%/*}" | tee push.log
-          digest=$(awk '/^Digest:/ {print $2}' push.log)
           echo "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' || { echo "no digest from helm push"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Sign (keyless)
