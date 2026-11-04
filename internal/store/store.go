@@ -49,7 +49,7 @@ type DB struct {
 	tenantDB, platformDB, identityDB *sql.DB
 }
 
-// Logins are the connection strings of the three serving logins.
+// Logins are the connection strings of the serving logins (not the owner).
 type Logins struct {
 	Tenant   string // member of AppRole: tenant requests
 	Platform string // member of PlatformRole: platform-admin work

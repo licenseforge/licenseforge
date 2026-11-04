@@ -41,8 +41,8 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 	s := storetest.Suffix()
 	ownerRole := "lf_own_" + strings.TrimPrefix(env.Name, "lf_test_")
 	creator, byp, member := "lf_cr_"+s, "lf_byp_"+s, "lf_mem_"+s
-	inOwner, inProgram, temp, creates := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s
-	logins := []string{creator, member, inOwner, inProgram, temp, creates}
+	inOwner, inProgram, temp, creates, twoGroups := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s, "lf_2g_"+s
+	logins := []string{creator, member, inOwner, inProgram, temp, creates, twoGroups}
 	for _, r := range append(logins, byp) {
 		storetest.AddCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
 	}
@@ -56,6 +56,7 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.Name, temp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, creates),
 		fmt.Sprintf(`GRANT CREATE ON DATABASE %s TO %s`, env.Name, creates),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, licenseforge_identity`, twoGroups),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.Name, strings.Join(logins, ", ")),
 	); err != nil {
 		t.Fatal(err)
@@ -82,6 +83,16 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 				t.Fatalf("got %v, want ErrUnsafeRole", err)
 			}
 		})
+	}
+	// A login in two groups is refused by both pools.
+	twoGroupsURL := storetest.UserURL(env.AdminURL, twoGroups, env.Name)
+	for name, l := range map[string]Logins{
+		"two groups as tenant pool":   {Tenant: twoGroupsURL, Platform: env.PlatformURL, Identity: env.IdentityURL},
+		"two groups as identity pool": {Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: twoGroupsURL},
+	} {
+		if _, err := Open(context.Background(), l); !errors.Is(err, ErrUnsafeRole) {
+			t.Errorf("%s: got %v, want ErrUnsafeRole", name, err)
+		}
 	}
 	// Every pool refuses the other pools' logins (ADR-0009, ADR-0029).
 	for name, l := range map[string]Logins{
