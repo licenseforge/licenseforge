@@ -69,6 +69,9 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", platform)
 	t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
+	for _, k := range []string{"ISSUER", "CLIENT_ID", "CLIENT_SECRET", "REDIRECT_URL"} {
+		t.Setenv("LICENSEFORGE_OIDC_"+k, "")
+	}
 }
 
 // startServe runs serve and returns its address and a function that stops it
