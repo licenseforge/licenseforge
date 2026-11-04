@@ -13,5 +13,5 @@ export default defineConfig({
   // No inline scripts or styles, so the strict CSP holds.
   build: { assetsInlineLimit: 0, modulePreload: { polyfill: false } },
   server: { proxy: { "/auth": server, "/api": server } },
-  test: { environment: "node" },
+  test: { environment: "jsdom" }, // window.location for same-origin URLs, DOM for the dialog test
 });
