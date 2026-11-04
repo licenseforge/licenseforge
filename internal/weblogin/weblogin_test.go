@@ -325,6 +325,22 @@ func TestNewRefusesInsecureURLs(t *testing.T) {
 			t.Errorf("%+v: %v", c, err)
 		}
 	}
+	for u, want := range map[string]string{
+		"https://LF.Example:443/auth/callback":  "https://lf.example",
+		"https://lf.example:8443/auth/callback": "https://lf.example:8443",
+		"http://localhost:80/auth/callback":     "http://localhost",
+		"https://[::1]:443/x":                   "https://[::1]",
+		"https://[::1]:8443/x":                  "https://[::1]:8443",
+	} {
+		if got, err := origin(u); got != want || err != nil {
+			t.Errorf("origin(%s) = %q, %v; want %q", u, got, err, want)
+		}
+	}
+	for _, u := range []string{"https://u:p@lf.example/x", "https://[fe80::1%25en0]/x"} {
+		if _, err := origin(u); err == nil {
+			t.Errorf("origin(%s) accepted", u)
+		}
+	}
 	for _, u := range []string{"http://localhost:8080/x", "http://127.0.0.1/x", "http://[::1]:8080/x", "https://lf.example/x"} {
 		if !secureURL(u) {
 			t.Errorf("%s refused", u)

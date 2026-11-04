@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -43,13 +42,7 @@ func safeMethod(m string) bool {
 // origin is trusted, so a proxy that rewrites Host doesn't break browsers
 // that send only Origin.
 func (h *Handler) RequireSession(next http.Handler) http.Handler {
-	cross := http.NewCrossOriginProtection()
-	if u, err := url.Parse(h.oauth.RedirectURL); err == nil {
-		if err := cross.AddTrustedOrigin(u.Scheme + "://" + u.Host); err != nil {
-			panic(err) // New checked the URL
-		}
-	}
-	return cross.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return h.cross.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		c, err := r.Cookie(SessionCookie)
 		if err != nil {

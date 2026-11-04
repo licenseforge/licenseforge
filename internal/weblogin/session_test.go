@@ -67,9 +67,10 @@ func TestSessionAndLogout(t *testing.T) {
 	}
 	// Behind a proxy that rewrites Host, the configured public origin is
 	// still same-origin (browsers that send only Origin).
-	// It may fail later (wrong token), but not at the origin check.
+	// It passes the origin and cookie checks and stops at the (wrong) token.
 	req, _ := http.NewRequest("POST", f.app.URL+"/auth/logout", nil)
-	req.Host = "licenseforge.internal:8080"
+	req.Host = "licenseforge.internal:8080" // the jar then sends no cookie: set it
+	req.AddCookie(&http.Cookie{Name: SessionCookie, Value: f.session(t)})
 	req.Header.Set("Origin", f.app.URL)
 	req.Header.Set(CSRFHeader, "wrong")
 	resp, err := f.client.Do(req)
@@ -78,7 +79,7 @@ func TestSessionAndLogout(t *testing.T) {
 	}
 	why, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if strings.Contains(string(why), "cross-origin") {
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(why), CSRFHeader) {
 		t.Errorf("own origin behind a proxy refused by the origin check: %d %s", resp.StatusCode, why)
 	}
 	cookie := f.session(t)
