@@ -299,6 +299,9 @@ func TestCreateInputRefusals(t *testing.T) {
 		"NUL in name":              {"a\x00b", 0, nil},
 		"invalid UTF-8":            {"\xff", 0, nil},
 		"name too long":            {strings.Repeat("x", 201), 0, nil},
+		"zero-width only":          {"\u200b\u200b", 0, nil},
+		"bidi override":            {"ok\u202Eevil", 0, nil},
+		"line separator":           {"a\u2028b", 0, nil},
 		"lifetime under 1m":        {"CI", time.Second, nil},
 		"malformed product":        {"CI", 0, []string{"prd_x"}},
 		"duplicate products":       {"CI", 0, []string{f.prodA, f.prodA}},
@@ -316,8 +319,16 @@ func TestCreateInputRefusals(t *testing.T) {
 			t.Errorf("%s: audit = %+v", name, e)
 		}
 	}
-	if _, err := f.s.Create(owner, "longest", authz.SDK, all, MaxTTL); err != nil {
-		t.Errorf("MaxTTL refused: %v", err)
+	c, err := f.s.Create(owner, "longest", authz.SDK, all, MaxTTL)
+	if err != nil {
+		t.Fatalf("MaxTTL refused: %v", err)
+	}
+	if d := time.Until(c.Row.ExpiresAt); d > MaxTTL-skew || d < MaxTTL-skew-time.Minute {
+		t.Errorf("MaxTTL token expires in %v, want just under %v", d, MaxTTL-skew)
+	}
+	// The limit is 200 bytes: 100 two-byte characters fit.
+	if _, err := f.s.Create(owner, strings.Repeat("é", 100), authz.SDK, all, 0); err != nil {
+		t.Errorf("100 two-byte characters: %v", err)
 	}
 }
 
@@ -357,11 +368,19 @@ func TestRevokeAuditAndRights(t *testing.T) {
 	if err := f.s.Revoke(admin, adminTok.Row.ID); err != nil {
 		t.Errorf("admin revokes admin token: %v", err)
 	}
-	if err := f.s.Revoke(owner, ids.APIToken()); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown token: %v", err)
+	bTok, err := f.s.Create(f.as(f.b, f.ownerB, authz.Owner), "CI", authz.SDK, all, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeFailure {
-		t.Errorf("not-found revoke audit = %+v", e)
+	// Not-found revokes are audited without naming an object that isn't the
+	// tenant's (unknown, or another tenant's token).
+	for _, id := range []string{ids.APIToken(), bTok.Row.ID} {
+		if err := f.s.Revoke(owner, id); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("revoke %s: %v", id, err)
+		}
+		if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil {
+			t.Errorf("not-found revoke audit = %+v", e)
+		}
 	}
 	// Without token:write, existing and unknown IDs look the same.
 	viewer := f.as(f.a, f.viewerA, authz.Viewer)

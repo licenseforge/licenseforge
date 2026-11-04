@@ -76,7 +76,7 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 		ttl = DefaultTTL
 	}
 	if err := validName(name); err != nil || ttl < MinTTL || ttl > MaxTTL || !validProducts(scope.Products) {
-		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name of 1-200 printable characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid))
+		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name of up to 200 bytes of graphic characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid))
 	}
 	expires := time.Now().Add(min(ttl, MaxTTL-skew))
 	tok := apitoken.New()
@@ -107,13 +107,15 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	return Created{Token: tok, Row: row}, nil
 }
 
-// validName: 1-200 printable characters (no control characters), not blank.
+// validName: up to 200 bytes (the ent schema's limit), all graphic (letters, marks, numbers,
+// punctuation, symbols, spaces: no control, format such as zero-width or
+// bidi overrides, or line separators), not blank.
 func validName(name string) error {
-	if strings.TrimSpace(name) == "" || len(name) > 200 || !utf8.ValidString(name) {
+	if strings.TrimSpace(name) == "" || !utf8.ValidString(name) || len(name) > 200 {
 		return ErrInvalid
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) {
+		if !unicode.IsGraphic(r) {
 			return ErrInvalid
 		}
 	}
@@ -143,8 +145,8 @@ func dbRefusal(err error) error {
 	case !errors.As(err, &pe):
 		return err
 	case pe.Code == "42501" && strings.Contains(pe.Message, "row-level security"):
-		return fmt.Errorf("%w (database refused: %s)", authz.ErrDenied, pe.ConstraintName)
-	case pe.Code == "23503":
+		return fmt.Errorf("%w (database refused: %s)", authz.ErrDenied, pe.Message)
+	case pe.Code == "23503" && pe.ConstraintName == "api_token_products_product_same_tenant":
 		return fmt.Errorf("%w: unknown product", ErrInvalid)
 	}
 	return err
@@ -212,15 +214,15 @@ func (s Service) Revoke(ctx context.Context, tokenID string) error {
 	if !ids.Valid("tok", tokenID) {
 		return s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
-	ev.ObjectID = tokenID
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		row, err := tx.APIToken.Query().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).WithProducts().Only(ctx)
 		if ent.IsNotFound(err) {
-			return ErrNotFound
+			return ErrNotFound // the entry names no object: it isn't this tenant's
 		}
 		if err != nil {
 			return err
 		}
+		ev.ObjectID = row.ID
 		var products []string
 		for _, p := range row.Edges.Products {
 			products = append(products, p.ProductID)
