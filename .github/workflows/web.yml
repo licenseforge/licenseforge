@@ -1,0 +1,34 @@
+name: Web
+# The dashboard (ADR-0020). Path-filtered so Go-only changes skip it
+# (ADR-0023); the go job in ci.yml builds the server without Node.
+on:
+  push:
+    branches: [main]
+    paths: [web/**, .github/workflows/web.yml]
+  pull_request:
+    paths: [web/**, .github/workflows/web.yml]
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run: { working-directory: web }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - name: Serve the built bundle (CSP-compatible, SPA routing)
+        run: go test -tags webui ./
