@@ -3,7 +3,8 @@ import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect
 import { requireSession } from "@/api/session";
 import { tenantsQuery } from "@/api/tenants";
 import { AppShell } from "@/app-shell";
-import { ErrorPage, LoginPage, NoTenants, NotFound, Overview } from "@/pages";
+import { ErrorPage, LoginPage, NoTenants, NotFound, Overview, TenantLayout } from "@/pages";
+import { TokensPage } from "@/tokens-page";
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Outlet,
@@ -32,10 +33,11 @@ const indexRoute = createRoute({
 });
 
 // Tenant in the URL (ADR-0020): /t/{slug}/..., so links are shareable.
-const tenantRoute = createRoute({ getParentRoute: () => appRoute, path: "t/$slug", component: Outlet });
+const tenantRoute = createRoute({ getParentRoute: () => appRoute, path: "t/$slug", component: TenantLayout });
 const overviewRoute = createRoute({ getParentRoute: () => tenantRoute, path: "/", component: Overview });
+const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/api-tokens", component: TokensPage });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute])])]);
+const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, tokensRoute])])]);
 
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({ routeTree, context: { queryClient } });
