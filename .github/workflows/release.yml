@@ -15,6 +15,9 @@ on:
       - Makefile
       - deploy/helm/**
 permissions: {}
+defaults:
+  run:
+    shell: bash # -eo pipefail; the runner default has no pipefail
 env:
   IMAGE: ghcr.io/licenseforge/licenseforge
   CHART: ghcr.io/licenseforge/charts/licenseforge
@@ -69,8 +72,9 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Built from source through the Go checksum database; the version stamp names it in the SBOM.
-          go install -ldflags "-X main.version=1.55.0" github.com/anchore/syft/cmd/syft@v1.55.0
+          # Built from source through the Go checksum database (its toolchain too, if
+          # syft needs a newer Go); the version stamp names it in the SBOM.
+          GOTOOLCHAIN=auto go install -ldflags "-X main.version=1.55.0" github.com/anchore/syft/cmd/syft@v1.55.0
           mkdir -p out/sbom
           for suffix in "" -fips; do
             # ponytail: one SBOM per image, from the amd64 manifest. The arm64 one has
