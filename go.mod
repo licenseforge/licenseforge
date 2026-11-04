@@ -2,6 +2,9 @@ module licenseforge.io/licenseforge
 
 go 1.26.4
 
+// npm packages may ship .go files; keep them out of ./...
+ignore ./web/node_modules
+
 require (
 	ariga.io/atlas v1.3.0
 	entgo.io/ent v0.14.6
