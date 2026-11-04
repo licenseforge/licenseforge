@@ -7,32 +7,50 @@
 
 ## Decision
 ### Paths and versions
-- Management API under **`/api/v1`**; tenant resources under **`/api/v1/tenants/{tenant}/…`**, `{tenant}` the tenant **slug** (the same as the dashboard's `/t/{slug}/…`, so links and API calls line up).
+- Management API under **`/api/v1`** on every host (one path everywhere, deliberately, even where `api.` makes `/api` redundant). This refines the `/v1/…` examples in [ADR-0019 Authorization model](0019-authorization-model.md) and [ADR-0023 Repository structure](0023-repository-structure.md).
+- Tenant resources under **`/api/v1/tenants/{tenant}/…`**. `{tenant}` is the tenant **slug** (the dashboard's `/t/{slug}/…`) **or its ID** (`tnt_…`; slugs can't contain `_`, so the forms never collide). Integrations (Terraform, n8n, connectors) should store the ID, which survives slug renames.
+- Platform-admin endpoints live under `/api/v1/platform/…`; impersonation is decided with that work.
 - The activation API (SDKs, license keys) gets its own prefix later; it is not part of this ADR.
-- A breaking change means `/api/v2`. Adding fields or endpoints isn't breaking: **clients must ignore unknown fields**.
-- JSON only, `snake_case` fields, IDs as the prefixed strings the store uses (`lic_…`), times in RFC 3339 UTC.
+- A breaking change means `/api/v2`. Adding fields, endpoints or **enum values** isn't breaking: clients must ignore unknown fields and tolerate unknown enum values.
+- JSON only, `snake_case` fields, IDs as the prefixed strings the store uses (`lic_…`), times in RFC 3339 UTC. `GET` and `HEAD` never change state (the CSRF exemption relies on it).
 
 ### Authentication: one of two, never both
-- **API token**: `Authorization: Bearer lf_live_…`. The token's tenant must be the path's tenant. No cookies are read on such a request.
-- **Dashboard session**: the session cookie plus `X-CSRF-Token` on unsafe methods ([ADR-0020 Admin dashboard](0020-admin-dashboard.md)); the user must be a member of the path's tenant.
-- A request with both is refused (400). With neither: 401.
-- Either way the handler gets an `authz.Principal` (role, product scope, tenant) and checks it with `authz.Require` ([ADR-0019 Authorization model](0019-authorization-model.md)). `sdk` tokens get 403 on the management API.
+- **API token**: `Authorization: Bearer lf_live_…`. A Bearer value of another form answers 401; IdP client-credentials JWTs ([ADR-0003 Identity via generic OIDC, Keycloak as default](0003-identity-via-generic-oidc-keycloak-as-default.md)) are deferred to their own ADR.
+- **Dashboard session**: the session cookie plus `X-CSRF-Token` and the cross-origin check on unsafe methods ([ADR-0020 Admin dashboard](0020-admin-dashboard.md)).
+- **Hosts** (refines [ADR-0023 Repository structure](0023-repository-structure.md), Domains): when an API host is configured (`api.licenseforge.io`), sessions are refused there: the cookie's value is never used and a cookie alone answers 401. The dashboard calls `/api/v1` on its own origin, so **no CORS headers are sent anywhere**. With one hostname (typical self-hosting) both modes are accepted on it.
+- A request carrying both a Bearer token and the session cookie is refused (400); the cookie's presence is checked only to refuse it. With neither: 401.
 
-### Not found rather than forbidden
-- A tenant the caller can't access, and an object outside the caller's product scope, answer **404**, so the API never confirms that something exists. 403 is for a visible object the caller's role can't change.
+### Order of checks
+Each step answers before the next runs, so later steps can't reveal what earlier ones hide:
+1. **Authenticate.** No or invalid credentials: 401, whatever the slug.
+2. **Token**: looked up by hash under the path's tenant ([ADR-0029 Identity tables and tenancy](0029-identity-tables-and-tenancy.md)): an unknown slug, a wrong-tenant token, an unknown, revoked or expired token all answer the **same 401 after the same work**. `sdk` tokens: 403 on the management API.
+3. **Session**: an unknown slug and a tenant the user isn't a member of answer the same **404**.
+4. **Object lookup** under the caller's product scope: hidden and missing objects answer **byte-identical 404s**. A write that references an out-of-scope object (a license for an out-of-scope product) answers exactly as if it didn't exist.
+5. **Permission**: 403, for a visible object the caller's role can't change.
+6. **Validation**: 400 for malformed requests (bad JSON, wrong types), 422 for well-formed but invalid values. Never before 4–5.
+
+Either credential yields an `authz.Principal` (role, product scope, tenant), checked with `authz.Require` ([ADR-0019 Authorization model](0019-authorization-model.md)).
 
 ### Errors
-- **RFC 9457** `application/problem+json`: `type`, `title`, `status`, `detail`, plus a stable machine-readable **`code`** (`not_found`, `invalid_request`, `conflict`, …) that clients switch on. `detail` never carries internal errors; those go to logs with the request ID.
-- Validation errors list the offending fields in `errors: [{field, message}]`.
+- **RFC 9457** `application/problem+json` everywhere, including errors produced outside handlers: request-binding errors of the generated server, unknown routes, 405, 413 (bodies are size-limited) and panics. A test covers each.
+- Fields: `type`, `title`, `status`, `detail`, a stable machine-readable **`code`** (`not_found`, `invalid_request`, `validation_failed`, `conflict`, …) and `request_id`. `detail` never carries internal errors; they go to logs with the request ID.
+- Validation errors list `errors: [{field, message}]`, `field` a JSON Pointer (RFC 6901). Messages never echo stored values, only the caller's own input.
+- Every response carries **`X-Request-Id`** (server-generated); an inbound value is logged only as a correlation field, length-limited and cleaned.
 
 ### Lists
-- **Cursor pagination**: `?limit=` (default 50, max 200) and an opaque `?cursor=`; responses are `{"items": [...], "next_cursor": "…"}`, no `next_cursor` on the last page. No offsets: they skip or repeat rows under concurrent writes.
-- Stable order: creation time, then ID.
+- **Cursor pagination**: `?limit=` (default 50, max 200) and `?cursor=`; responses are `{"items": [...], "next_cursor": "…"}`, no `next_cursor` on the last page. No offsets (they skip or repeat rows under concurrent writes) and no total counts.
+- Order is fixed per endpoint: **newest first** by `created_at` (database clock), then ID. `?order=asc` at most; no `?sort=` in v1.
+- A cursor encodes only a position (`created_at`, `id`), base64url. Every page re-applies tenant, product scope and filters from the current request, never from the cursor, so a forged cursor moves only within what the caller may see. A malformed cursor answers 400 `invalid_cursor`.
+- Lists silently filter to the caller's product scope. Filters are named equality parameters (`?product_id=`, `?customer_id=`, `?status=`) plus `created_after` / `created_before`; a filter naming a hidden or missing object returns an empty list either way. Unknown parameters answer 400.
 
 ### Writes
-- `POST` creates and answers **201** with the object. `PATCH` takes the fields to change (absent = unchanged). `DELETE` answers 204.
-- State changes that are not edits are explicit sub-resources: `POST …/licenses/{id}/suspend`, `/revoke`, `/reinstate`. They are audited operations, not field edits.
-- **`Idempotency-Key`** is accepted on POSTs that create licenses and activations, so billing and CRM retries never issue twice.
+- `POST` creates and answers **201** with the object. `PATCH` follows **JSON Merge Patch** (RFC 7396): absent = unchanged, `null` = clear (nullable fields only, else 422), and answers 200 with the full object. `DELETE` answers 204.
+- State changes that are not edits are explicit sub-resources: `POST …/licenses/{id}/suspend`, `/revoke`, `/reinstate`; they answer 200 with the object and are audited operations, not field edits.
+- **`Idempotency-Key`** (modelled on the IETF httpapi idempotency-key draft): accepted on every non-idempotent POST, honoured at least on license and activation creation. A key is scoped to (tenant, credential: token ID or user ID), stored in a tenant table under RLS with a hash of the request (method, path, body) and the response, kept 24 hours, at most 255 printable ASCII characters. Same key and same request: the stored status and body are replayed after authorization is checked again. Same key, different request: 422 `idempotency_key_reused`. Still in flight: 409 `idempotency_in_progress`.
+- Optimistic concurrency (`ETag` / `If-Match`) is deferred until the first editor that needs it (the feature × plan matrix); adding it later isn't breaking.
+
+### Limits
+- Rate limits answer 429 with `Retry-After` and the IETF `RateLimit-Policy` / `RateLimit` headers. SDKs and the Terraform provider retry 429 and 503 honouring `Retry-After`. Limits themselves are set with the rate-limiting work.
 
 ### Generated code and the spec
 - Handlers implement oapi-codegen's **strict server** interface (`std-http` target, stdlib `net/http`); the generated code is committed, and CI fails if it is stale ([ADR-0023 Repository structure](0023-repository-structure.md)).
@@ -40,10 +58,12 @@
 
 ## Consequences
 - New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version) and its small runtime package.
-- Slugs in paths mean renaming a tenant's slug breaks old links; slug changes are rare and can keep a redirect later.
-- Every endpoint inherits authn, tenant resolution, 404-hiding and problem errors from one middleware, so a handler can't forget them.
+- One middleware gives every endpoint the same authentication, check order, 404-hiding and problem errors, so a handler can't forget them.
+- Idempotency needs a tenant table and a cleanup of keys older than 24 hours.
+- Accepting slug or ID costs one lookup branch; it removes the slug-rename breakage for integrations.
 
 ## Alternatives considered
 - **Tenant from the token / header instead of the path**: shorter URLs, but sessions span tenants, and links stop being shareable.
 - **Offset pagination**: simpler, but wrong under concurrent writes and slow on large tables.
+- **Signed (HMAC) cursors**: unnecessary when every page re-applies scope and filters.
 - **Hand-written handlers without generation**: more freedom, but the spec drifts from the code; ADR-0023 already chose spec-first.
