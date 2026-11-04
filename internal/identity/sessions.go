@@ -94,7 +94,10 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 		if err != nil {
 			return err
 		}
-		if u, err = tx.User.Query().Where(user.ID(userID)).Only(ctx); err != nil {
+		// Checked again: the user may have been disabled since the join.
+		if u, err = tx.User.Query().Where(user.ID(userID), user.DisabledAtIsNil()).Only(ctx); ent.IsNotFound(err) {
+			return sql.ErrNoRows
+		} else if err != nil {
 			return err
 		}
 		// Decided by the database clock: touches no row until it is due.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -202,12 +203,34 @@ func TestNewSessionDuringDisable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admin, err := sql.Open("pgx", env.AdminURL) // sees other logins' queries
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
 	done := make(chan error, 1)
 	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error {
-		// users is updated and sessions deleted, not yet committed.
+		// users is updated and sessions deleted, not yet committed: NewSession
+		// must wait for this transaction (proven by its lock wait).
 		go func() { _, err := s.NewSession(ctx, u.ID); done <- err }()
-		time.Sleep(300 * time.Millisecond)
-		return nil
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			var waiting int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity
+				WHERE datname = $1 AND wait_event_type = 'Lock' AND query LIKE '%FOR SHARE%'`, env.Name).Scan(&waiting); err != nil {
+				return err
+			}
+			if waiting > 0 {
+				return nil
+			}
+			select {
+			case err := <-done:
+				return fmt.Errorf("NewSession didn't wait for DisableUser: %v", err)
+			default:
+			}
+			if time.Now().After(deadline) {
+				return errors.New("NewSession never waited")
+			}
+		}
 	}); err != nil {
 		t.Fatal(err)
 	}
