@@ -307,7 +307,7 @@
               {
                 "uuid": "74627718-5e8c-5d06-a842-f12117e54a3b",
                 "control-id": "au-2",
-                "description": "Logged today: api_token.create and api_token.revoke, and license.offline_file, with success, failure and denied outcomes. The audit log design covers admin actions, logins, token use, key operations and platform-admin actions (ADR-0021, ADR-0027).",
+                "description": "Logged today: api_token.create and api_token.revoke, and license.offline_file, with success, failure and denied outcomes. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token) and platform_admin.bootstrap. The audit log design covers admin actions, logins, token use, key operations and platform-admin actions (ADR-0021, ADR-0027).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -329,9 +329,14 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/issue/issue_test.go",
                     "rel": "reference",
                     "text": "TestOfflineFile"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginBootstrapsAndRecords"
                   }
                 ],
-                "remarks": "Not logged yet: logins and logouts, signing key operations, member and platform-admin changes (Roadmap v0.1: audit log, platform chain; member/invitation/token HTTP handlers)."
+                "remarks": "Not logged yet: logouts, login failures before a verified ID token (logged only: anyone can cause them), signing key operations, member and platform-admin grants and removals (Roadmap v0.1: audit log; member/invitation/token HTTP handlers)."
               },
               {
                 "uuid": "f23fe45c-968e-5a4a-8454-6ea41630f923",
