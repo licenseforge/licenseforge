@@ -57,7 +57,7 @@ type Handler struct {
 // keep Secure cookies only there).
 func secureURL(u string) bool {
 	p, err := url.Parse(u)
-	if err != nil || p.Host == "" {
+	if err != nil || p.Hostname() == "" {
 		return false
 	}
 	if p.Scheme == "https" {
@@ -201,6 +201,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cookie, err := h.id.NewSession(ctx, u.ID)
+	if errors.Is(err, identity.ErrDisabled) { // disabled since Login
+		h.fail(w, http.StatusForbidden, "user disabled", err)
+		return
+	}
 	if err != nil {
 		h.fail(w, http.StatusInternalServerError, "new session", err)
 		return

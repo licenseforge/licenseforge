@@ -68,8 +68,11 @@ func newIdP(t *testing.T) *idp {
 		hang := p.hang > 0
 		p.hang--
 		p.mu.Unlock()
-		if hang {
-			<-r.Context().Done()
+		if hang { // until the client gives up; past the callback's 15 s, so only a client timeout rescues the next login
+			select {
+			case <-r.Context().Done():
+			case <-time.After(20 * time.Second):
+			}
 			return
 		}
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
@@ -316,6 +319,7 @@ func TestNewRefusesInsecureURLs(t *testing.T) {
 		{Issuer: "http://idp.example", ClientID: "lf", RedirectURL: "https://lf.example/auth/callback"},
 		{Issuer: "https://idp.example", ClientID: "lf", RedirectURL: "http://lf.example/auth/callback"},
 		{Issuer: "https://idp.example", ClientID: "lf", RedirectURL: "/auth/callback"},
+		{Issuer: "https://:443", ClientID: "lf", RedirectURL: "https://lf.example/auth/callback"},
 	} {
 		if _, err := New(context.Background(), c, identity.Service{}, slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "must be https") {
 			t.Errorf("%+v: %v", c, err)
