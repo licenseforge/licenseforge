@@ -2,6 +2,7 @@ package apitoken
 
 import (
 	"bytes"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,41 @@ func TestCheckRejects(t *testing.T) {
 	} {
 		if Check(s) == nil {
 			t.Errorf("%s: accepted %q", name, s)
+		}
+	}
+}
+
+// Fixed vectors, computed independently (Python: base64.b32encode, zlib.crc32
+// big-endian, hashlib.sha256). The format is an external contract for secret
+// scanners and clients, and Hash is what stored tokens are found by.
+func TestVectors(t *testing.T) {
+	var ff [32]byte
+	for i := range ff {
+		ff[i] = 0xff
+	}
+	for _, v := range []struct {
+		raw         [32]byte
+		token, hash string
+	}{
+		{[32]byte{}, "lf_live_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaatida6lq", "8fb5af68f3c9c95f71eb74177f276040b423387ccd466183e16f65d704f1ead4"},
+		{ff, "lf_live_777777777777777777777777777777777777777777777777777qv3x4uxa", "d82cea83af04330af6b02239a534cd0d08ab8a4854c4814060d3b1cef404a960"},
+	} {
+		if got := encode(v.raw); got != v.token {
+			t.Errorf("encode = %s, want %s", got, v.token)
+		}
+		if err := Check(v.token); err != nil {
+			t.Error(err)
+		}
+		if got := hex.EncodeToString(Hash(v.token)); got != v.hash {
+			t.Errorf("Hash = %s, want %s", got, v.hash)
+		}
+	}
+}
+
+func TestDisplayRejectsMalformed(t *testing.T) {
+	for _, s := range []string{"", "short", "lf_live_", strings.Repeat("x", 100), New() + "x"} {
+		if d := Display(s); d != "" {
+			t.Errorf("Display(%q) = %q", s, d)
 		}
 	}
 }

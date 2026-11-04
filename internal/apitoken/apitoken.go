@@ -17,7 +17,8 @@ import (
 	"strings"
 )
 
-// prefix marks LicenseForge API tokens.
+// prefix marks LicenseForge API tokens. "live" leaves room for a future
+// test-mode prefix; there is none today.
 const prefix = "lf_live_"
 
 const (
@@ -35,10 +36,17 @@ var ErrInvalid = errors.New("apitoken: invalid API token")
 func New() string {
 	var b [32]byte
 	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (Go 1.24+)
+	return encode(b)
+}
+
+func encode(b [32]byte) string {
 	s := prefix + enc.EncodeToString(b[:])
 	return s + checksum(s)
 }
 
+// checksum is CRC-32/IEEE of the prefix and body, big-endian, in the token
+// alphabet. External scanners and clients compute the same; see the test
+// vectors.
 func checksum(s string) string {
 	return enc.EncodeToString(binary.BigEndian.AppendUint32(nil, crc32.ChecksumIEEE([]byte(s))))
 }
@@ -53,14 +61,16 @@ func Check(s string) error {
 	body, sum := s[len(prefix):len(prefix)+bodyLen], s[len(prefix)+bodyLen:]
 	raw, err := enc.DecodeString(body)
 	// Re-encoding rejects non-canonical bodies (nonzero unused trailing bits).
-	if err != nil || len(raw) != 32 || enc.EncodeToString(raw) != body || checksum(s[:len(s)-sumLen]) != sum {
+	if err != nil || enc.EncodeToString(raw) != body || checksum(s[:len(s)-sumLen]) != sum {
 		return ErrInvalid
 	}
 	return nil
 }
 
-// Hash is what the database stores and looks tokens up by. The token is 256
-// random bits, so a plain SHA-256 can't be brute-forced and needs no key.
+// Hash is what the database stores and looks tokens up by: SHA-256 of the
+// whole token. The token is 256 random bits, so a plain hash can't be
+// brute-forced and needs no key. Check the token first, so malformed input
+// never reaches the database.
 func Hash(token string) []byte {
 	h := sha256.Sum256([]byte(token))
 	return h[:]
@@ -68,6 +78,10 @@ func Hash(token string) []byte {
 
 // Display is the part shown in lists so users can tell tokens apart:
 // "lf_live_" + the first 8 body characters. It reveals 40 of the 256 bits.
+// Anything that isn't a well-formed token gives "", never part of the input.
 func Display(token string) string {
+	if Check(token) != nil {
+		return ""
+	}
 	return token[:len(prefix)+8] + "…"
 }
