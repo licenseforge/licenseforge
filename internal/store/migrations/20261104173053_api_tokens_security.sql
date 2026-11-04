@@ -42,8 +42,12 @@ CREATE POLICY not_revoked ON "api_tokens" AS RESTRICTIVE FOR UPDATE TO licensefo
     AND ("revoked_at" IS NULL OR "revoked_at" BETWEEN clock_timestamp() - interval '5 minutes' AND clock_timestamp() + interval '5 minutes'));
 -- A use only moves forward, to about now: it can't be backdated, cleared or
 -- written after expiry. The subquery reads the row before this update (the
--- statement's snapshot). Record use with clock_timestamp() or in a short
--- transaction.
+-- statement's snapshot). Residual (accepted, no triggers per ADR-0009): two
+-- concurrent writers can move last_used_at back by at most 5 minutes, since a
+-- waiting update compares with its snapshot, not the version committed
+-- meanwhile. Record use in one DB-side statement, e.g.
+-- SET last_used_at = GREATEST(coalesce(last_used_at, '-infinity'), clock_timestamp()),
+-- and treat a refusal as a no-op (never fail authentication on it).
 CREATE POLICY use_moves_forward ON "api_tokens" AS RESTRICTIVE FOR UPDATE TO licenseforge_app
   USING (true)
   WITH CHECK (EXISTS (SELECT 1 FROM "api_tokens" o WHERE o."id" = "api_tokens"."id"
