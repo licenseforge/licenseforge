@@ -93,6 +93,7 @@ func TestHandler(t *testing.T) {
 func TestMount(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/logout", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("PUT /things/{id}", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("DELETE /things/{id}", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("POST /api/v1/things", func(http.ResponseWriter, *http.Request) {})
@@ -107,8 +108,12 @@ func TestMount(t *testing.T) {
 		{"HEAD", "/auth/logout", 405, "POST"},
 		{"GET", "/t/acme/", 200, ""},
 		{"HEAD", "/", 200, ""},
-		{"POST", "/t/acme/", 405, "GET, HEAD"}, // the mux's own 405
+		{"POST", "/t/acme/", 405, "GET, HEAD"},
 		{"GET", "/api/v1/things", 405, "POST"},
+		{"POST", "/healthz", 405, "GET, HEAD"},
+		{"PUT", "/auth/logout", 405, "POST"},
+		{"POST", "/api/v2/nope", 404, ""},
+		{"POST", "/auth/nope", 404, ""},
 	} {
 		rec := get(mux, tc.method, tc.path)
 		if rec.Code != tc.code || rec.Header().Get("Allow") != tc.allow {
@@ -123,6 +128,22 @@ func TestMount(t *testing.T) {
 	}
 	if rec := get(mux, "GET", "/auth/logout"); strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem") {
 		t.Error("problem JSON outside /api")
+	}
+}
+
+// A method-less subtree (the API's /api/v1/) coexists with the dashboard:
+// "GET /" would make ServeMux panic on registration.
+func TestMountBesideSubtree(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) })
+	Mount(mux)
+	for _, m := range []string{"GET", "POST", "DELETE"} {
+		if rec := get(mux, m, "/api/v1/x"); rec.Code != 299 {
+			t.Errorf("%s /api/v1/x = %d, want the subtree", m, rec.Code)
+		}
+	}
+	if rec := get(mux, "GET", "/t/acme/"); rec.Code != 200 || rec.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Errorf("GET /t/acme/ = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }
 
