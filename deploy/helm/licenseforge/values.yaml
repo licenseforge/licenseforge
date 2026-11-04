@@ -34,6 +34,29 @@ terminationGracePeriodSeconds: 30
 
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
+# Dashboard login through your OIDC provider (ADR-0003). Off: no login.
+oidc:
+  enabled: false
+  issuer: ""        # exactly the ID token's iss, https
+  clientID: ""
+  redirectURL: ""   # https://<public host>/auth/callback
+  # Client secret from an existing Secret; empty secretName = public client (PKCE only).
+  clientSecret:
+    secretName: ""
+    key: client-secret
+  # Server egress to the provider (discovery, keys, token), added to the
+  # NetworkPolicy. port is the provider's pod port as the CNI sees it, after
+  # the Service's DNAT: 443 for an external IdP, Keycloak's 8443 (or 8080) in
+  # the cluster. Empty `to`: any destination on that port only (in-cluster
+  # pods, nodes and the API server included; narrow it in production), as
+  # databaseTo and dns.to (no 0.0.0.0/0 ipBlock, which some CNIs such as
+  # Cilium don't match for pods). Narrow it, e.g.
+  # [{ipBlock: {cidr: 203.0.113.0/24}}] or a namespace/pod selector for an
+  # in-cluster Keycloak.
+  egress:
+    port: 443
+    to: []
+
 resources:
   requests: {cpu: 100m, memory: 64Mi}
   limits: {memory: 256Mi}
