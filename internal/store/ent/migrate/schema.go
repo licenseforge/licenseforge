@@ -741,6 +741,41 @@ var (
 			},
 		},
 	}
+	// SessionsColumns holds the columns for the "sessions" table.
+	SessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "token_hash", Type: field.TypeBytes},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "expires_at", Type: field.TypeTime},
+		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "user_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// SessionsTable holds the schema information for the "sessions" table.
+	SessionsTable = &schema.Table{
+		Name:       "sessions",
+		Columns:    SessionsColumns,
+		PrimaryKey: []*schema.Column{SessionsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "sessions_users_sessions",
+				Columns:    []*schema.Column{SessionsColumns[5]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "session_token_hash",
+				Unique:  true,
+				Columns: []*schema.Column{SessionsColumns[1]},
+			},
+			{
+				Name:    "session_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{SessionsColumns[5]},
+			},
+		},
+	}
 	// SigningKeysColumns holds the columns for the "signing_keys" table.
 	SigningKeysColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -845,6 +880,7 @@ var (
 		PlanFeaturesTable,
 		PlatformAdminsTable,
 		ProductsTable,
+		SessionsTable,
 		SigningKeysTable,
 		TenantsTable,
 		UsersTable,
@@ -1026,6 +1062,13 @@ func init() {
 		"products_id_format":      "id ~ '^prd_[a-z2-7]{26}$'",
 		"products_name_not_blank": "btrim(name) <> ''",
 		"products_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
+	SessionsTable.ForeignKeys[0].RefTable = UsersTable
+	SessionsTable.Annotation = &entsql.Annotation{}
+	SessionsTable.Annotation.Checks = map[string]string{
+		"sessions_expiry":    "expires_at > created_at AND expires_at <= (created_at + '1 day'::interval)",
+		"sessions_hash_len":  "length(token_hash) = 32",
+		"sessions_id_format": "id ~ '^ses_[a-z2-7]{26}$'",
 	}
 	SigningKeysTable.ForeignKeys[0].RefTable = TenantsTable
 	SigningKeysTable.Annotation = &entsql.Annotation{}

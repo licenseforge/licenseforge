@@ -49,6 +49,8 @@ func (User) Edges() []ent.Edge {
 		edge.To("invitations_accepted", Invitation.Type).Annotations(entsql.OnDelete(entsql.NoAction)),
 		// Tokens belong to the tenant and outlive their creator (ADR-0029).
 		edge.To("api_tokens", APIToken.Type).Annotations(entsql.OnDelete(entsql.SetNull)),
+		// Erasing a user ends their sessions.
+		edge.To("sessions", Session.Type).Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("platform_admin", PlatformAdmin.Type).Unique(),
 	}
 }

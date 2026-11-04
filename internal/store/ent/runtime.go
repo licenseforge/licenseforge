@@ -20,6 +20,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
+	"licenseforge.io/licenseforge/internal/store/ent/session"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
@@ -1281,6 +1282,44 @@ func init() {
 	// product.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	product.IDValidator = func() func(string) error {
 		validators := productDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	sessionFields := schema.Session{}.Fields()
+	_ = sessionFields
+	// sessionDescUserID is the schema descriptor for user_id field.
+	sessionDescUserID := sessionFields[1].Descriptor()
+	// session.UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
+	session.UserIDValidator = sessionDescUserID.Validators[0].(func(string) error)
+	// sessionDescTokenHash is the schema descriptor for token_hash field.
+	sessionDescTokenHash := sessionFields[2].Descriptor()
+	// session.TokenHashValidator is a validator for the "token_hash" field. It is called by the builders before save.
+	session.TokenHashValidator = sessionDescTokenHash.Validators[0].(func([]byte) error)
+	// sessionDescCreatedAt is the schema descriptor for created_at field.
+	sessionDescCreatedAt := sessionFields[3].Descriptor()
+	// session.DefaultCreatedAt holds the default value on creation for the created_at field.
+	session.DefaultCreatedAt = sessionDescCreatedAt.Default.(func() time.Time)
+	// sessionDescLastSeenAt is the schema descriptor for last_seen_at field.
+	sessionDescLastSeenAt := sessionFields[5].Descriptor()
+	// session.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
+	session.DefaultLastSeenAt = sessionDescLastSeenAt.Default.(func() time.Time)
+	// sessionDescID is the schema descriptor for id field.
+	sessionDescID := sessionFields[0].Descriptor()
+	// session.DefaultID holds the default value on creation for the id field.
+	session.DefaultID = sessionDescID.Default.(func() string)
+	// session.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	session.IDValidator = func() func(string) error {
+		validators := sessionDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
