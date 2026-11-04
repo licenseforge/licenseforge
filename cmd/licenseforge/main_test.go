@@ -123,6 +123,9 @@ func TestServe(t *testing.T) {
 	if code != http.StatusOK {
 		t.Errorf("readyz = %d", code)
 	}
+	if code := get("/api/v1/tenants/acme/api-tokens"); code != http.StatusUnauthorized { // the API is mounted
+		t.Errorf("api without credentials = %d", code)
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- stop() }()
 	for range 25 { // until readiness flips; the drain window is still open

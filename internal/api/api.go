@@ -1,0 +1,339 @@
+// Package api is the management REST API (ADR-0032). One outer handler
+// wraps the whole router generated from api/openapi.yaml (apigen): it
+// authenticates every request and resolves its tenant (steps 1–3 of the
+// order of checks) before parameter binding, and renders every refusal,
+// from any layer, as problem+json. Handlers do steps 4–6 and return errors
+// that one mapper (fail) renders.
+package api
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"reflect"
+	"runtime/debug"
+	"slices"
+	"strings"
+
+	"licenseforge.io/licenseforge/internal/api/apigen"
+	"licenseforge.io/licenseforge/internal/apitoken"
+	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/weblogin"
+)
+
+// Prefix is where the API is mounted.
+const Prefix = "/api/v1"
+
+// maxBody bounds request bodies (413 above it).
+const maxBody = 1 << 20
+
+// unissuedTenant is well-formed but never issued (IDs are 128 random bits;
+// this is all zeros): an unresolved tenant's token lookup runs under it, so
+// it does the same work as a real one (ADR-0029, ADR-0032 step 2).
+const unissuedTenant = "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+// Config is what the API needs from main.
+type Config struct {
+	Tokens   apitokens.Service
+	Identity identity.Service
+	Sessions *weblogin.Sessions // nil: dashboard login is off, so sessions answer 401
+	// APIHost, if set, accepts only API tokens; every other host only
+	// sessions. Empty: both everywhere (one hostname).
+	APIHost string
+	Log     *slog.Logger
+}
+
+type server struct {
+	Config
+	mux *http.ServeMux
+}
+
+// New returns the API handler; mount it at Prefix + "/".
+func New(c Config) http.Handler {
+	s := &server{Config: c, mux: http.NewServeMux()}
+	s.routes(s.mux)
+	return s
+}
+
+func (s *server) routes(m apigen.ServeMux) {
+	strict := apigen.NewStrictHandlerWithOptions(s, []apigen.StrictMiddlewareFunc{strictInput},
+		apigen.StrictHTTPServerOptions{RequestErrorHandlerFunc: s.badRequest, ResponseErrorHandlerFunc: s.fail})
+	apigen.HandlerWithOptions(strict, apigen.StdHTTPServerOptions{BaseURL: Prefix, BaseRouter: m, ErrorHandlerFunc: s.badRequest})
+}
+
+type reqKey struct{}
+type bodyKey struct{}
+
+type reqInfo struct{ id, client string }
+
+func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ri := reqInfo{id: rand.Text(), client: clean(r.Header.Get("X-Request-Id"))}
+	w.Header().Set("X-Request-Id", ri.id)
+	w.Header().Set("Cache-Control", "no-store")
+	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
+	defer func() {
+		if v := recover(); v != nil {
+			if v == http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
+				panic(v)
+			}
+			s.write(w, r, &problem{status: http.StatusInternalServerError, code: "internal", err: fmt.Errorf("panic: %v\n%s", v, debug.Stack())})
+		}
+	}()
+	p, prob := s.authenticate(w, r)
+	if prob != nil {
+		s.write(w, r, prob)
+		return
+	}
+	// Read the body whole (bounded) so strictInput can decode it strictly.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r = r.WithContext(context.WithValue(authz.WithPrincipal(r.Context(), p), bodyKey{}, body))
+	if _, pattern := s.mux.Handler(r); pattern == "" {
+		s.unrouted(w, r)
+		return
+	}
+	s.mux.ServeHTTP(w, r)
+}
+
+// authenticate does steps 1–3: exactly one credential the host accepts, and
+// the path's tenant.
+func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
+	auth := r.Header.Values("Authorization")
+	_, err := r.Cookie(weblogin.SessionCookie)
+	bearer, cookie := len(auth) > 0, err == nil
+	apiHost := s.APIHost != "" && sameHost(r.Host, s.APIHost)
+	switch {
+	case bearer && cookie:
+		return authz.Principal{}, &problem{status: http.StatusBadRequest, code: "ambiguous_credentials", detail: "Send an API token or a session, not both."}
+	case bearer && (s.APIHost == "" || apiHost):
+		return s.token(r, auth)
+	case cookie && !apiHost && s.Sessions != nil:
+		return s.session(w, r)
+	}
+	return authz.Principal{}, errUnauthenticated
+}
+
+func (s *server) token(r *http.Request, auth []string) (authz.Principal, *problem) {
+	scheme, tok, _ := strings.Cut(auth[0], " ")
+	if len(auth) != 1 || !strings.EqualFold(scheme, "Bearer") || apitoken.Check(tok) != nil {
+		return authz.Principal{}, errUnauthenticated
+	}
+	ref, ok := tenantRef(r)
+	if !ok {
+		return authz.Principal{}, errNotFound
+	}
+	ctx := r.Context()
+	tenantID, err := s.Identity.TenantID(ctx, ref)
+	if errors.Is(err, identity.ErrNotMember) {
+		tenantID = unissuedTenant
+	} else if err != nil {
+		return authz.Principal{}, internal(err)
+	}
+	p, err := s.Tokens.Authenticate(ctx, tenantID, tok)
+	if errors.Is(err, apitokens.ErrUnauthenticated) {
+		return authz.Principal{}, errUnauthenticated
+	}
+	if err != nil {
+		return authz.Principal{}, internal(err)
+	}
+	if p.Role == authz.SDK {
+		return authz.Principal{}, &problem{status: http.StatusForbidden, code: "forbidden", detail: "sdk tokens can't use the management API."}
+	}
+	return p, nil
+}
+
+func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
+	u, code, err := s.Sessions.Check(w, r)
+	switch code {
+	case 0:
+	case http.StatusUnauthorized:
+		return authz.Principal{}, errUnauthenticated
+	case http.StatusForbidden:
+		return authz.Principal{}, &problem{status: code, code: "csrf_failed", detail: "Unsafe requests need the " + weblogin.CSRFHeader + " header and must be same-origin.", err: err}
+	default:
+		return authz.Principal{}, internal(err)
+	}
+	ref, ok := tenantRef(r)
+	if !ok {
+		return authz.Principal{}, errNotFound
+	}
+	ctx := r.Context()
+	tenantID, err := s.Identity.TenantID(ctx, ref)
+	var g authz.Grant
+	if err == nil {
+		g, err = s.Identity.Grant(ctx, u.ID, tenantID)
+	}
+	if errors.Is(err, identity.ErrNotMember) {
+		return authz.Principal{}, errNotFound
+	}
+	if err != nil {
+		return authz.Principal{}, internal(err)
+	}
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope}, nil
+}
+
+// tenantRef is the {tenant} segment of /api/v1/tenants/{tenant}/…, split
+// from the escaped path as ServeMux does.
+func tenantRef(r *http.Request) (string, bool) {
+	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), Prefix+"/tenants/")
+	seg, _, _ := strings.Cut(rest, "/")
+	ref, err := url.PathUnescape(seg)
+	return ref, ok && err == nil && ref != ""
+}
+
+func sameHost(a, b string) bool {
+	hostOnly := func(h string) string {
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			return host
+		}
+		return h
+	}
+	return strings.EqualFold(hostOnly(a), hostOnly(b))
+}
+
+// clean keeps an inbound request ID loggable: printable ASCII, 64 bytes.
+func clean(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x21 || r > 0x7e {
+			return -1
+		}
+		return r
+	}, s)
+	return s[:min(len(s), 64)]
+}
+
+// queryParams are each operation's query parameters; others answer 400.
+// TestRoutesMatchSpec keeps it equal to the spec.
+var queryParams = map[string][]string{"ListApiTokens": {"limit", "cursor"}}
+
+// strictInput refuses unknown query parameters and decodes the body again
+// strictly (the generated decoder ignores unknown fields).
+func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
+		for k := range r.URL.Query() {
+			if !slices.Contains(queryParams[op], k) {
+				return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Unknown query parameter."}
+			}
+		}
+		if v := reflect.ValueOf(req); v.Kind() == reflect.Struct {
+			if b := v.FieldByName("Body"); b.IsValid() && b.Kind() == reflect.Pointer {
+				raw, _ := ctx.Value(bodyKey{}).([]byte)
+				dec := json.NewDecoder(bytes.NewReader(raw))
+				dec.DisallowUnknownFields()
+				if err := dec.Decode(reflect.New(b.Type().Elem()).Interface()); err != nil || dec.More() {
+					return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "The body must be one JSON object with only the documented fields.", err: err}
+				}
+			}
+		}
+		return f(ctx, w, r, req)
+	}
+}
+
+// unrouted answers a request no route matches: 404, or 405 with Allow.
+func (s *server) unrouted(w http.ResponseWriter, r *http.Request) {
+	h, _ := s.mux.Handler(r)
+	rec := &discard{header: http.Header{}}
+	h.ServeHTTP(rec, r)
+	if rec.code == http.StatusMethodNotAllowed {
+		w.Header().Set("Allow", rec.header.Get("Allow"))
+		s.write(w, r, &problem{status: rec.code, code: "method_not_allowed"})
+		return
+	}
+	s.write(w, r, errNotFound)
+}
+
+type discard struct {
+	header http.Header
+	code   int
+}
+
+func (d *discard) Header() http.Header         { return d.header }
+func (d *discard) Write(b []byte) (int, error) { return len(b), nil }
+func (d *discard) WriteHeader(code int)        { d.code = code }
+
+// problem is an RFC 9457 answer. err is logged, never sent.
+type problem struct {
+	status       int
+	code, detail string
+	fields       []fieldError
+	err          error
+}
+
+type fieldError struct {
+	Field   string `json:"field"` // JSON Pointer into the body
+	Message string `json:"message"`
+}
+
+func (p *problem) Error() string { return p.code }
+
+var (
+	errUnauthenticated = &problem{status: http.StatusUnauthorized, code: "unauthenticated", detail: "Missing or invalid credentials."}
+	errNotFound        = &problem{status: http.StatusNotFound, code: "not_found"}
+)
+
+func internal(err error) *problem {
+	return &problem{status: http.StatusInternalServerError, code: "internal", err: err}
+}
+
+// badRequest renders binding and body errors.
+func (s *server) badRequest(w http.ResponseWriter, r *http.Request, err error) {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		s.write(w, r, &problem{status: http.StatusRequestEntityTooLarge, code: "body_too_large", detail: fmt.Sprintf("Bodies are limited to %d bytes.", maxBody), err: err})
+		return
+	}
+	s.write(w, r, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Malformed parameter or body.", err: err})
+}
+
+// fail is the one error mapper for handler errors.
+func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	var p *problem
+	switch {
+	case errors.As(err, &p):
+	case errors.Is(err, authz.ErrDenied):
+		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
+	case errors.Is(err, apitokens.ErrNotFound):
+		p = errNotFound
+	default:
+		p = internal(err)
+	}
+	s.write(w, r, p)
+}
+
+func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
+	ri, _ := r.Context().Value(reqKey{}).(reqInfo)
+	level := slog.LevelInfo
+	if p.status >= 500 {
+		level = slog.LevelError
+	}
+	s.Log.Log(r.Context(), level, "api refusal", "request_id", ri.id, "client_request_id", ri.client,
+		"method", r.Method, "path", r.URL.Path, "status", p.status, "code", p.code, "err", p.err)
+	if p.status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="licenseforge"`)
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(p.status)
+	_ = json.NewEncoder(w).Encode(struct {
+		Type      string       `json:"type"`
+		Title     string       `json:"title"`
+		Status    int          `json:"status"`
+		Detail    string       `json:"detail,omitempty"`
+		Code      string       `json:"code"`
+		RequestID string       `json:"request_id"`
+		Errors    []fieldError `json:"errors,omitempty"`
+	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, ri.id, p.fields})
+}

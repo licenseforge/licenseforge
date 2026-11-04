@@ -46,12 +46,12 @@ type Config struct {
 
 // Handler serves GET /auth/login and GET /auth/callback.
 type Handler struct {
-	client *http.Client
-	oauth  oauth2.Config
-	verify *oidc.IDTokenVerifier
-	id     identity.Service
-	log    *slog.Logger
-	cross  *http.CrossOriginProtection // trusts the redirect URL's origin
+	client   *http.Client
+	oauth    oauth2.Config
+	verify   *oidc.IDTokenVerifier
+	id       identity.Service
+	log      *slog.Logger
+	sessions *Sessions
 }
 
 // origin is the browser's Origin for u: lowercase host, no default port.
@@ -97,13 +97,9 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 	if !secureURL(c.Issuer) || !secureURL(c.RedirectURL) {
 		return nil, errors.New("weblogin: issuer and redirect URL must be https (http only on localhost)")
 	}
-	own, err := origin(c.RedirectURL)
+	sessions, err := NewSessions(id, c.RedirectURL)
 	if err != nil {
 		return nil, err
-	}
-	cross := http.NewCrossOriginProtection()
-	if err := cross.AddTrustedOrigin(own); err != nil {
-		return nil, fmt.Errorf("weblogin: redirect URL: %w", err)
 	}
 	client := &http.Client{Timeout: httpTimeout}
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, client), c.Issuer) // the provider keeps the client for key fetches
@@ -116,10 +112,10 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 			ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURL,
 			Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
 		},
-		verify: p.Verifier(&oidc.Config{ClientID: c.ClientID}),
-		id:     id,
-		log:    log,
-		cross:  cross,
+		verify:   p.Verifier(&oidc.Config{ClientID: c.ClientID}),
+		id:       id,
+		log:      log,
+		sessions: sessions,
 	}, nil
 }
 

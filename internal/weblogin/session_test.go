@@ -53,7 +53,7 @@ func TestSessionAndLogout(t *testing.T) {
 	// Unsafe requests need the token and must be same-origin.
 	for name, h := range map[string]map[string]string{
 		"no token":     nil,
-		"wrong token":  {CSRFHeader: csrfToken("another session")},
+		"wrong token":  {CSRFHeader: CSRFToken("another session")},
 		"cross-site":   {CSRFHeader: token, "Sec-Fetch-Site": "cross-site"},
 		"other origin": {CSRFHeader: token, "Origin": "https://evil.example"},
 		"sibling site": {CSRFHeader: token, "Sec-Fetch-Site": "same-site", "Origin": "https://other.example"},
