@@ -1,0 +1,45 @@
+{{- if .Values.migrate.enabled }}
+{{- if not .Values.secrets.migrate }}{{ fail "secrets.migrate is required when migrate.enabled: a Secret with owner-database-url" }}{{ end }}
+# Applies migrations as the schema owner before install and upgrade, so the
+# serving pods never hold the owner login (ADR-0009).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "licenseforge.fullname" . }}-migrate
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "licenseforge.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext: {{- include "licenseforge.podSecurityContext" . | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "licenseforge.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [migrate]
+          securityContext: {{- include "licenseforge.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: LICENSEFORGE_OWNER_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.migrate | quote }}, key: owner-database-url}}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

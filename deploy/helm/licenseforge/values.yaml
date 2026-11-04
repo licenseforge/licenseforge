@@ -1,0 +1,76 @@
+# Image. Prefer a digest in production: it is what cosign signatures cover.
+image:
+  repository: ghcr.io/licenseforge/licenseforge
+  tag: ""        # default: the chart's appVersion; add -fips for the FIPS build (ADR-0024)
+  digest: ""     # e.g. sha256:...; overrides tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 2
+
+# Secrets are never put in values (ADR-0005). Create them yourself or with
+# External Secrets. The server Secret must NOT contain the owner login.
+secrets:
+  # Keys: database-url (licenseforge_api), platform-database-url
+  # (licenseforge_admin), master-keys (LICENSEFORGE_MASTER_KEYS).
+  server: ""
+  # Key: owner-database-url (licenseforge_owner). Only the migration Job reads it.
+  migrate: ""
+
+# Run `licenseforge migrate` as a pre-install/pre-upgrade hook. Turn off if
+# migrations run elsewhere (then upgrade the schema before the Deployment).
+migrate:
+  enabled: true
+  backoffLimit: 2
+  # Keep below helm --timeout (default 5m), or Helm gives up while the Job still runs.
+  activeDeadlineSeconds: 280
+
+# Seconds the server keeps serving after SIGTERM while readiness fails, so
+# load balancers stop routing first. terminationGracePeriodSeconds must exceed
+# drain + 15s of graceful shutdown (checked at render). Whole seconds.
+drainSeconds: 5
+terminationGracePeriodSeconds: 30
+
+extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
+
+resources:
+  requests: {cpu: 100m, memory: 64Mi}
+  limits: {memory: 256Mi}
+
+service:
+  type: ClusterIP
+  port: 80
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1   # never blocks node drains, even with one replica
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+networkPolicy:
+  enabled: true
+  # Who may reach the server on 8080. Empty: any pod in any namespace (an
+  # ingress controller). Narrow it, e.g. to your ingress namespace.
+  ingressFrom: []
+  # Where the database is: NetworkPolicy peers, e.g. [{ipBlock: {cidr: 10.0.5.0/24}}]
+  # or a namespace/pod selector for an in-cluster database. Empty: any
+  # destination on databasePort.
+  databaseTo: []
+  databasePort: 5432
+  # DNS egress. OpenShift's DNS pods listen on 5353. Empty `to` allows any
+  # resolver (needed for NodeLocal DNSCache); narrow it, e.g.
+  # [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}}].
+  dns:
+    ports: [53]
+    to: []
+
+podAnnotations: {}
+podLabels: {}   # the chart's app.kubernetes.io/* and helm.sh/chart labels are reserved
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

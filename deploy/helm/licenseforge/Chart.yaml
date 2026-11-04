@@ -1,0 +1,11 @@
+apiVersion: v2
+name: licenseforge
+description: LicenseForge, an open-source software licensing server (ADR-0005)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/licenseforge/licenseforge
+sources: ["https://github.com/licenseforge/licenseforge"]
+annotations:
+  licenses: Apache-2.0
+keywords: [licensing, license-server]

@@ -52,3 +52,27 @@ jobs:
       - name: Test SDK
         working-directory: sdk/go
         run: go test ./...
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v4.3.1 }
+      - name: Lint and render the Helm chart
+        working-directory: deploy/helm/licenseforge
+        run: |
+          set -eu
+          s="--set secrets.server=s --set secrets.migrate=m"
+          helm lint --strict . $s
+          helm template t . $s >/dev/null
+          helm template t . $s --set autoscaling.enabled=true --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 >/dev/null
+          helm template t . --set secrets.server=s --set migrate.enabled=false --set networkPolicy.enabled=false --set podDisruptionBudget.enabled=false >/dev/null
+          helm template t . $s --set 'networkPolicy.databaseTo[0].ipBlock.cidr=10.0.0.0/8' --set 'networkPolicy.dns.ports={53,5353}' --set podLabels.team=a --set 'extraEnv[0].name=X' --set 'extraEnv[0].value=y' >/dev/null
+          # Bad values fail the render instead of producing a broken release.
+          for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}'; do
+            if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
+          done
+          if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi
+          # The serving pods never get the owner login (ADR-0009).
+          if helm template t . $s --show-only templates/deployment.yaml | grep -qE 'owner-database-url|OWNER_DATABASE_URL'; then echo "owner login in Deployment"; exit 1; fi
