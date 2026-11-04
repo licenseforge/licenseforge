@@ -279,6 +279,40 @@ var (
 			},
 		},
 	}
+	// IdempotencyKeysColumns holds the columns for the "idempotency_keys" table.
+	IdempotencyKeysColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "credential", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "key", Type: field.TypeString, Size: 255, SchemaType: map[string]string{"postgres": "varchar(255)"}},
+		{Name: "request_hash", Type: field.TypeBytes},
+		{Name: "status", Type: field.TypeInt, Nullable: true},
+		{Name: "body", Type: field.TypeBytes, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// IdempotencyKeysTable holds the schema information for the "idempotency_keys" table.
+	IdempotencyKeysTable = &schema.Table{
+		Name:       "idempotency_keys",
+		Columns:    IdempotencyKeysColumns,
+		PrimaryKey: []*schema.Column{IdempotencyKeysColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "idempotencykey_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{IdempotencyKeysColumns[1]},
+			},
+			{
+				Name:    "idempotencykey_tenant_id_credential_key",
+				Unique:  true,
+				Columns: []*schema.Column{IdempotencyKeysColumns[1], IdempotencyKeysColumns[2], IdempotencyKeysColumns[3]},
+			},
+			{
+				Name:    "idempotencykey_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{IdempotencyKeysColumns[7]},
+			},
+		},
+	}
 	// InvitationsColumns holds the columns for the "invitations" table.
 	InvitationsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -871,6 +905,7 @@ var (
 		AuditEventsTable,
 		CustomersTable,
 		FeaturesTable,
+		IdempotencyKeysTable,
 		InvitationsTable,
 		InvitationProductsTable,
 		LicensesTable,
@@ -948,6 +983,15 @@ func init() {
 		"features_name_not_blank": "btrim(name) <> ''",
 		"features_type_valid":     "(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
 		"features_unit_set":       "unit IS NULL OR btrim(unit) <> ''",
+	}
+	IdempotencyKeysTable.Annotation = &entsql.Annotation{}
+	IdempotencyKeysTable.Annotation.Checks = map[string]string{
+		"idempotency_keys_credential": "credential ~ '^(tok|usr)_[a-z2-7]{26}$'",
+		"idempotency_keys_hash_len":   "length(request_hash) = 32",
+		"idempotency_keys_id_format":  "id ~ '^idk_[a-z2-7]{26}$'",
+		"idempotency_keys_key":        "key ~ '^[ -~]{1,255}$'",
+		"idempotency_keys_outcome":    "(status IS NULL) = (body IS NULL)",
+		"idempotency_keys_status":     "status IS NULL OR (status >= 200 AND status <= 299) OR (status >= 400 AND status <= 499)",
 	}
 	InvitationsTable.ForeignKeys[0].RefTable = TenantsTable
 	InvitationsTable.ForeignKeys[1].RefTable = UsersTable
