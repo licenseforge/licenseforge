@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"strings"
@@ -365,6 +366,45 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"tenant_read":  "SELECT licenseforge_app ((id)::text = app_tenant_id())",
 		"platform_all": "ALL licenseforge_platform true true",
 	}
+	// Policies beyond the canonical ones, pinned: changing one means changing
+	// this list, so it gets reviewed.
+	extra := map[string]map[string]string{ // ADR-0029: identity role and the invitation rules
+		"tenants": {
+			"identity_read": `SELECT licenseforge_identity true`,
+		},
+		"audit_events": {
+			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
+		},
+		"invitations": {
+			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
+			"identity_read":                   `SELECT licenseforge_identity true`,
+			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
+		},
+		"invitation_products": {
+			"identity_read": `SELECT licenseforge_identity true`,
+		},
+		"memberships": {
+			"identity_accept": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (invitations i JOIN users u ON (((u.id)::text = (memberships.user_id)::text))) WHERE (((i.id)::text = (memberships.invitation_id)::text) AND ((i.tenant_id)::text = (memberships.tenant_id)::text) AND ((i.role)::text = (memberships.role)::text) AND (i.scope_all = memberships.scope_all) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL) AND (i.expires_at > clock_timestamp()) AND u.email_verified AND (u.disabled_at IS NULL) AND (lower(NORMALIZE(u.email, NFC)) = lower(NORMALIZE(i.email, NFC))) AND ((i.issuer IS NULL) OR ((i.issuer)::text = (u.issuer)::text))))))`,
+			"identity_read":   `SELECT licenseforge_identity true`,
+		},
+		"membership_products": {
+			"identity_copy_scope": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (memberships m JOIN invitation_products ip ON ((((ip.invitation_id)::text = (m.invitation_id)::text) AND ((ip.tenant_id)::text = (m.tenant_id)::text)))) WHERE (((m.id)::text = (membership_products.membership_id)::text) AND ((ip.product_id)::text = (membership_products.product_id)::text)))))`,
+			"identity_read":       `SELECT licenseforge_identity true`,
+		},
+	}
+	// Global tables (no tenant_id), each with its exact policies (ADR-0029).
+	global := map[string]map[string]string{
+		"users": {
+			"users_member_of_tenant": `SELECT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.user_id)::text = (users.id)::text) AND ((m.tenant_id)::text = app_tenant_id()))))`,
+			"identity_all":           "ALL licenseforge_identity true true",
+			"platform_all":           "ALL licenseforge_platform true true",
+		},
+	}
+	with := func(base map[string]string, table string) map[string]string {
+		out := maps.Clone(base)
+		maps.Copy(out, extra[table])
+		return out
+	}
 	ou, _ := url.Parse(env.OwnerURL)
 	ownerRole := ou.User.Username()
 
@@ -407,7 +447,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			if permissive != "PERMISSIVE" {
 				name += " (restrictive)"
 			}
-			got[name] = strings.TrimSpace(cmd + " " + roles + " " + qual + " " + check)
+			got[name] = strings.Join(strings.Fields(cmd+" "+roles+" "+qual+" "+check), " ")
 		}
 		return got
 	}
@@ -497,12 +537,14 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		case !r.enabled || !r.forced:
 			t.Errorf("table %s: RLS enabled=%v forced=%v", r.name, r.enabled, r.forced)
 		case r.name == "tenants":
-			checkPolicies(r, tenantsPolicies)
+			checkPolicies(r, with(tenantsPolicies, r.name))
+		case global[r.name] != nil && !r.hasTenant:
+			checkPolicies(r, global[r.name])
 		case !r.hasTenant:
 			t.Errorf("table %s has no tenant_id: add one or allow-list it here with a reason", r.name)
 		default:
 			tenantTables++
-			checkPolicies(r, tenantPolicies)
+			checkPolicies(r, with(tenantPolicies, r.name))
 		}
 	}
 	if tenantTables == 0 {

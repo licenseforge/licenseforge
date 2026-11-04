@@ -18,8 +18,20 @@ type Customer func(*sql.Selector)
 // Feature is the predicate function for feature builders.
 type Feature func(*sql.Selector)
 
+// Invitation is the predicate function for invitation builders.
+type Invitation func(*sql.Selector)
+
+// InvitationProduct is the predicate function for invitationproduct builders.
+type InvitationProduct func(*sql.Selector)
+
 // License is the predicate function for license builders.
 type License func(*sql.Selector)
+
+// Membership is the predicate function for membership builders.
+type Membership func(*sql.Selector)
+
+// MembershipProduct is the predicate function for membershipproduct builders.
+type MembershipProduct func(*sql.Selector)
 
 // Plan is the predicate function for plan builders.
 type Plan func(*sql.Selector)
@@ -35,3 +47,6 @@ type SigningKey func(*sql.Selector)
 
 // Tenant is the predicate function for tenant builders.
 type Tenant func(*sql.Selector)
+
+// User is the predicate function for user builders.
+type User func(*sql.Selector)

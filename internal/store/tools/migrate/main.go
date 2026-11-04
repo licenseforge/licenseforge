@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log"
 	"os"
@@ -27,7 +28,42 @@ import (
 )
 
 // ent's diff opens the dev database with the "postgres" driver name.
-func init() { sql.Register("postgres", stdlib.GetDefaultDriver()) }
+func init() { sql.Register("postgres", cascadeDriver{stdlib.GetDefaultDriver()}) }
+
+// cascadeDriver is pgx with one change, for the throwaway dev database only:
+// DROP TABLE gets CASCADE. After replaying the migrations, ent drops every
+// table in foreign-key order, but row-level security policies that read other
+// tables (ADR-0029) are dependencies too, and plain DROP TABLE refuses them.
+type cascadeDriver struct{ driver.Driver }
+
+func (d cascadeDriver) Open(name string) (driver.Conn, error) {
+	c, err := d.Driver.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	pc, ok := c.(pgxConn)
+	if !ok {
+		return nil, fmt.Errorf("unexpected driver connection %T", c)
+	}
+	return cascadeConn{pc}, nil
+}
+
+type pgxConn interface {
+	driver.Conn
+	driver.ExecerContext
+	driver.QueryerContext
+	driver.ConnBeginTx
+	driver.ConnPrepareContext
+}
+
+type cascadeConn struct{ pgxConn }
+
+func (c cascadeConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if strings.HasPrefix(query, "DROP TABLE ") && !strings.HasSuffix(query, " CASCADE") {
+		query += " CASCADE"
+	}
+	return c.pgxConn.ExecContext(ctx, query, args)
+}
 
 const dirPath = "internal/store/migrations"
 

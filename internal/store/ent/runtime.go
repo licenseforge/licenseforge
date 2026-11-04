@@ -9,12 +9,17 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/invitationproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ent/user"
 	"licenseforge.io/licenseforge/internal/store/schema"
 )
 
@@ -401,6 +406,142 @@ func init() {
 			return nil
 		}
 	}()
+	invitationMixin := schema.Invitation{}.Mixin()
+	invitationMixinFields0 := invitationMixin[0].Fields()
+	_ = invitationMixinFields0
+	invitationMixinFields1 := invitationMixin[1].Fields()
+	_ = invitationMixinFields1
+	invitationFields := schema.Invitation{}.Fields()
+	_ = invitationFields
+	// invitationDescTenantID is the schema descriptor for tenant_id field.
+	invitationDescTenantID := invitationMixinFields0[0].Descriptor()
+	// invitation.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	invitation.TenantIDValidator = func() func(string) error {
+		validators := invitationDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// invitationDescCreatedAt is the schema descriptor for created_at field.
+	invitationDescCreatedAt := invitationMixinFields1[0].Descriptor()
+	// invitation.DefaultCreatedAt holds the default value on creation for the created_at field.
+	invitation.DefaultCreatedAt = invitationDescCreatedAt.Default.(func() time.Time)
+	// invitationDescUpdatedAt is the schema descriptor for updated_at field.
+	invitationDescUpdatedAt := invitationMixinFields1[1].Descriptor()
+	// invitation.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	invitation.DefaultUpdatedAt = invitationDescUpdatedAt.Default.(func() time.Time)
+	// invitation.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	invitation.UpdateDefaultUpdatedAt = invitationDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// invitationDescEmail is the schema descriptor for email field.
+	invitationDescEmail := invitationFields[1].Descriptor()
+	// invitation.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	invitation.EmailValidator = func() func(string) error {
+		validators := invitationDescEmail.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(email string) error {
+			for _, fn := range fns {
+				if err := fn(email); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// invitationDescIssuer is the schema descriptor for issuer field.
+	invitationDescIssuer := invitationFields[4].Descriptor()
+	// invitation.IssuerValidator is a validator for the "issuer" field. It is called by the builders before save.
+	invitation.IssuerValidator = invitationDescIssuer.Validators[0].(func(string) error)
+	// invitationDescTokenHash is the schema descriptor for token_hash field.
+	invitationDescTokenHash := invitationFields[6].Descriptor()
+	// invitation.TokenHashValidator is a validator for the "token_hash" field. It is called by the builders before save.
+	invitation.TokenHashValidator = invitationDescTokenHash.Validators[0].(func([]byte) error)
+	// invitationDescID is the schema descriptor for id field.
+	invitationDescID := invitationFields[0].Descriptor()
+	// invitation.DefaultID holds the default value on creation for the id field.
+	invitation.DefaultID = invitationDescID.Default.(func() string)
+	// invitation.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	invitation.IDValidator = func() func(string) error {
+		validators := invitationDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	invitationproductMixin := schema.InvitationProduct{}.Mixin()
+	invitationproductMixinFields0 := invitationproductMixin[0].Fields()
+	_ = invitationproductMixinFields0
+	invitationproductFields := schema.InvitationProduct{}.Fields()
+	_ = invitationproductFields
+	// invitationproductDescTenantID is the schema descriptor for tenant_id field.
+	invitationproductDescTenantID := invitationproductMixinFields0[0].Descriptor()
+	// invitationproduct.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	invitationproduct.TenantIDValidator = func() func(string) error {
+		validators := invitationproductDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// invitationproductDescInvitationID is the schema descriptor for invitation_id field.
+	invitationproductDescInvitationID := invitationproductFields[1].Descriptor()
+	// invitationproduct.InvitationIDValidator is a validator for the "invitation_id" field. It is called by the builders before save.
+	invitationproduct.InvitationIDValidator = invitationproductDescInvitationID.Validators[0].(func(string) error)
+	// invitationproductDescProductID is the schema descriptor for product_id field.
+	invitationproductDescProductID := invitationproductFields[2].Descriptor()
+	// invitationproduct.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	invitationproduct.ProductIDValidator = invitationproductDescProductID.Validators[0].(func(string) error)
+	// invitationproductDescScopeAll is the schema descriptor for scope_all field.
+	invitationproductDescScopeAll := invitationproductFields[3].Descriptor()
+	// invitationproduct.DefaultScopeAll holds the default value on creation for the scope_all field.
+	invitationproduct.DefaultScopeAll = invitationproductDescScopeAll.Default.(bool)
+	// invitationproductDescID is the schema descriptor for id field.
+	invitationproductDescID := invitationproductFields[0].Descriptor()
+	// invitationproduct.DefaultID holds the default value on creation for the id field.
+	invitationproduct.DefaultID = invitationproductDescID.Default.(func() string)
+	// invitationproduct.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	invitationproduct.IDValidator = func() func(string) error {
+		validators := invitationproductDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	licenseMixin := schema.License{}.Mixin()
 	licenseMixinFields0 := licenseMixin[0].Fields()
 	_ = licenseMixinFields0
@@ -524,6 +665,124 @@ func init() {
 	// license.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	license.IDValidator = func() func(string) error {
 		validators := licenseDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	membershipMixin := schema.Membership{}.Mixin()
+	membershipMixinFields0 := membershipMixin[0].Fields()
+	_ = membershipMixinFields0
+	membershipMixinFields1 := membershipMixin[1].Fields()
+	_ = membershipMixinFields1
+	membershipFields := schema.Membership{}.Fields()
+	_ = membershipFields
+	// membershipDescTenantID is the schema descriptor for tenant_id field.
+	membershipDescTenantID := membershipMixinFields0[0].Descriptor()
+	// membership.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	membership.TenantIDValidator = func() func(string) error {
+		validators := membershipDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// membershipDescCreatedAt is the schema descriptor for created_at field.
+	membershipDescCreatedAt := membershipMixinFields1[0].Descriptor()
+	// membership.DefaultCreatedAt holds the default value on creation for the created_at field.
+	membership.DefaultCreatedAt = membershipDescCreatedAt.Default.(func() time.Time)
+	// membershipDescUpdatedAt is the schema descriptor for updated_at field.
+	membershipDescUpdatedAt := membershipMixinFields1[1].Descriptor()
+	// membership.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	membership.DefaultUpdatedAt = membershipDescUpdatedAt.Default.(func() time.Time)
+	// membership.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	membership.UpdateDefaultUpdatedAt = membershipDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// membershipDescUserID is the schema descriptor for user_id field.
+	membershipDescUserID := membershipFields[1].Descriptor()
+	// membership.UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
+	membership.UserIDValidator = membershipDescUserID.Validators[0].(func(string) error)
+	// membershipDescInvitationID is the schema descriptor for invitation_id field.
+	membershipDescInvitationID := membershipFields[4].Descriptor()
+	// membership.InvitationIDValidator is a validator for the "invitation_id" field. It is called by the builders before save.
+	membership.InvitationIDValidator = membershipDescInvitationID.Validators[0].(func(string) error)
+	// membershipDescID is the schema descriptor for id field.
+	membershipDescID := membershipFields[0].Descriptor()
+	// membership.DefaultID holds the default value on creation for the id field.
+	membership.DefaultID = membershipDescID.Default.(func() string)
+	// membership.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	membership.IDValidator = func() func(string) error {
+		validators := membershipDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	membershipproductMixin := schema.MembershipProduct{}.Mixin()
+	membershipproductMixinFields0 := membershipproductMixin[0].Fields()
+	_ = membershipproductMixinFields0
+	membershipproductFields := schema.MembershipProduct{}.Fields()
+	_ = membershipproductFields
+	// membershipproductDescTenantID is the schema descriptor for tenant_id field.
+	membershipproductDescTenantID := membershipproductMixinFields0[0].Descriptor()
+	// membershipproduct.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	membershipproduct.TenantIDValidator = func() func(string) error {
+		validators := membershipproductDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// membershipproductDescMembershipID is the schema descriptor for membership_id field.
+	membershipproductDescMembershipID := membershipproductFields[1].Descriptor()
+	// membershipproduct.MembershipIDValidator is a validator for the "membership_id" field. It is called by the builders before save.
+	membershipproduct.MembershipIDValidator = membershipproductDescMembershipID.Validators[0].(func(string) error)
+	// membershipproductDescProductID is the schema descriptor for product_id field.
+	membershipproductDescProductID := membershipproductFields[2].Descriptor()
+	// membershipproduct.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	membershipproduct.ProductIDValidator = membershipproductDescProductID.Validators[0].(func(string) error)
+	// membershipproductDescScopeAll is the schema descriptor for scope_all field.
+	membershipproductDescScopeAll := membershipproductFields[3].Descriptor()
+	// membershipproduct.DefaultScopeAll holds the default value on creation for the scope_all field.
+	membershipproduct.DefaultScopeAll = membershipproductDescScopeAll.Default.(bool)
+	// membershipproductDescID is the schema descriptor for id field.
+	membershipproductDescID := membershipproductFields[0].Descriptor()
+	// membershipproduct.DefaultID holds the default value on creation for the id field.
+	membershipproduct.DefaultID = membershipproductDescID.Default.(func() string)
+	// membershipproduct.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	membershipproduct.IDValidator = func() func(string) error {
+		validators := membershipproductDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
@@ -967,6 +1226,89 @@ func init() {
 	// tenant.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	tenant.IDValidator = func() func(string) error {
 		validators := tenantDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	userMixin := schema.User{}.Mixin()
+	userMixinFields0 := userMixin[0].Fields()
+	_ = userMixinFields0
+	userFields := schema.User{}.Fields()
+	_ = userFields
+	// userDescCreatedAt is the schema descriptor for created_at field.
+	userDescCreatedAt := userMixinFields0[0].Descriptor()
+	// user.DefaultCreatedAt holds the default value on creation for the created_at field.
+	user.DefaultCreatedAt = userDescCreatedAt.Default.(func() time.Time)
+	// userDescUpdatedAt is the schema descriptor for updated_at field.
+	userDescUpdatedAt := userMixinFields0[1].Descriptor()
+	// user.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	user.DefaultUpdatedAt = userDescUpdatedAt.Default.(func() time.Time)
+	// user.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	user.UpdateDefaultUpdatedAt = userDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// userDescIssuer is the schema descriptor for issuer field.
+	userDescIssuer := userFields[1].Descriptor()
+	// user.IssuerValidator is a validator for the "issuer" field. It is called by the builders before save.
+	user.IssuerValidator = func() func(string) error {
+		validators := userDescIssuer.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(issuer string) error {
+			for _, fn := range fns {
+				if err := fn(issuer); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// userDescSubject is the schema descriptor for subject field.
+	userDescSubject := userFields[2].Descriptor()
+	// user.SubjectValidator is a validator for the "subject" field. It is called by the builders before save.
+	user.SubjectValidator = func() func(string) error {
+		validators := userDescSubject.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(subject string) error {
+			for _, fn := range fns {
+				if err := fn(subject); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// userDescEmail is the schema descriptor for email field.
+	userDescEmail := userFields[3].Descriptor()
+	// user.EmailValidator is a validator for the "email" field. It is called by the builders before save.
+	user.EmailValidator = userDescEmail.Validators[0].(func(string) error)
+	// userDescEmailVerified is the schema descriptor for email_verified field.
+	userDescEmailVerified := userFields[4].Descriptor()
+	// user.DefaultEmailVerified holds the default value on creation for the email_verified field.
+	user.DefaultEmailVerified = userDescEmailVerified.Default.(bool)
+	// userDescName is the schema descriptor for name field.
+	userDescName := userFields[5].Descriptor()
+	// user.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	user.NameValidator = userDescName.Validators[0].(func(string) error)
+	// userDescID is the schema descriptor for id field.
+	userDescID := userFields[0].Descriptor()
+	// user.DefaultID holds the default value on creation for the id field.
+	user.DefaultID = userDescID.Default.(func() string)
+	// user.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	user.IDValidator = func() func(string) error {
+		validators := userDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
