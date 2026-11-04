@@ -25,20 +25,9 @@ const (
 // Handlers use the principal's tenant (authz invariant), never the path's.
 
 func (s *server) ListApiTokens(ctx context.Context, req apigen.ListApiTokensRequestObject) (apigen.ListApiTokensResponseObject, error) {
-	limit := defaultLimit
-	if req.Params.Limit != nil {
-		limit = *req.Params.Limit
-	}
-	if limit < 1 || limit > maxLimit {
-		return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "limit must be 1 to 200."}
-	}
-	var at time.Time
-	var after string
-	if req.Params.Cursor != nil {
-		var ok bool
-		if at, after, ok = decodeCursor(*req.Params.Cursor, "tok"); !ok {
-			return nil, &problem{status: http.StatusBadRequest, code: "invalid_cursor", detail: "Malformed cursor."}
-		}
+	limit, at, after, err := pageParams(req.Params.Limit, req.Params.Cursor, "tok")
+	if err != nil {
+		return nil, err
 	}
 	rows, err := s.Tokens.List(ctx, limit+1, at, after)
 	if err != nil {
