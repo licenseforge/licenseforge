@@ -74,7 +74,8 @@ func setup(t *testing.T) fixture {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		k, err := keys.Create(ctx, *tn)
+		owner := authz.Principal{Kind: authz.User, ID: "usr_owner", TenantID: *tn, Role: authz.Owner, Scope: authz.Scope{All: true}}
+		k, err := keys.Create(authz.WithPrincipal(ctx, owner), *tn) // key:write (ADR-0019)
 		if err != nil {
 			t.Fatal(err)
 		}

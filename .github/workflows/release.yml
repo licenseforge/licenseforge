@@ -1,0 +1,252 @@
+name: Release
+# Signed release of the server, images and chart (ADR-0005, ADR-0021, ADR-0024).
+# `build` makes every artifact with a read-only token; the publish jobs run only
+# on v* tags, build nothing, and only push, sign and attest what `build` made.
+# PRs that touch the release inputs run `build` alone: a dry run, nothing leaves CI.
+# Verification for users: docs/verifying-releases.md.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - Dockerfile
+      - .dockerignore
+      - Makefile
+      - deploy/helm/**
+permissions: {}
+defaults:
+  run:
+    shell: bash # -eo pipefail; the runner default has no pipefail
+env:
+  IMAGE: ghcr.io/licenseforge/licenseforge
+  CHART: ghcr.io/licenseforge/charts/licenseforge
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod, cache: false } # release builds never restore a cache written elsewhere
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v4.3.1 }
+      - name: Version from the tag (one semver for server, images and chart, ADR-0023)
+        id: version
+        run: |
+          v=0.0.0-rc.0 # dry run (pull requests)
+          if [ "$GITHUB_EVENT_NAME" = push ]; then v=${GITHUB_REF_NAME#v}; fi
+          # vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N; "fips" can't appear, so the
+          # standard image never lands on a -fips tag.
+          echo "$v" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?' || { echo "tag is not vX.Y.Z[-(alpha|beta|rc).N]: $GITHUB_REF_NAME"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Server binaries and checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p out/bin
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch make build VERSION="$VERSION"
+            mv bin/licenseforge "out/bin/licenseforge_${VERSION}_linux_${arch}"
+          done
+          (cd out/bin && sha256sum licenseforge_* > SHA256SUMS && cat SHA256SUMS)
+      - name: Images, linux/amd64 and linux/arm64, standard and FIPS (OCI archives)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx create --use --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+          mkdir -p out/oci
+          for suffix in "" -fips; do
+            fips=off; [ -z "$suffix" ] || fips=certified
+            # BuildKit's own unsigned attestations are off; publish adds signed ones.
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              --build-arg VERSION="$VERSION" --build-arg GOFIPS140=$fips \
+              --provenance=false --sbom=false \
+              --output "type=oci,dest=out/oci/image$suffix.tar" .
+          done
+      - name: SBOMs (SPDX)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Built from source through the Go checksum database (its toolchain too, if
+          # syft needs a newer Go); the version stamp names it in the SBOM.
+          GOTOOLCHAIN=auto go install -ldflags "-X main.version=1.55.0" github.com/anchore/syft/cmd/syft@v1.55.0
+          mkdir -p out/sbom
+          for suffix in "" -fips; do
+            # ponytail: one SBOM per image, from the amd64 manifest. The arm64 one has
+            # the same Go modules and distroless packages; per-platform SBOMs if that changes.
+            syft scan "oci-archive:out/oci/image$suffix.tar" --platform linux/amd64 \
+              --source-name "$IMAGE" --source-version "$VERSION$suffix" \
+              -o "spdx-json=out/sbom/image$suffix.spdx.json"
+          done
+          # Both binaries come from the same module graph; one SBOM covers them.
+          syft scan "file:out/bin/licenseforge_${VERSION}_linux_amd64" \
+            --source-name licenseforge --source-version "$VERSION" \
+            -o "spdx-json=out/bin/licenseforge_${VERSION}.spdx.json"
+      - name: Helm chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: helm package deploy/helm/licenseforge --version "$VERSION" --app-version "$VERSION" --destination out/chart
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: release, path: out/, retention-days: 5, if-no-files-found: error }
+
+  images:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false # one variant failing doesn't cancel the other half-published
+      matrix:
+        suffix: ["", "-fips"]
+    permissions:
+      packages: write # push to ghcr.io
+      id-token: write # Sigstore keyless signing
+      attestations: write # GitHub attestation store
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      SUFFIX: ${{ matrix.suffix }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release, path: out }
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with: { cosign-release: v3.1.4 }
+      - name: Push (digest-preserving copy of the built archive)
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # A published version is never moved. The same digest (a re-run of failed
+          # jobs reuses the artifact) skips the copy; sign and attest run again.
+          ref="docker://$IMAGE:$VERSION$SUFFIX"
+          want="sha256:$(skopeo inspect --raw "oci-archive:out/oci/image$SUFFIX.tar" | sha256sum | cut -d' ' -f1)"
+          if skopeo inspect --raw "$ref" > existing 2> err; then
+            have="sha256:$(sha256sum < existing | cut -d' ' -f1)"
+            [ "$have" = "$want" ] || { echo "$ref already exists as $have, not $want"; exit 1; }
+            echo "$ref already published with this digest"
+          else
+            # Only "doesn't exist" goes on (ghcr says manifest unknown even for a
+            # new package); anything else, including denied, fails.
+            grep -qiE 'manifest unknown|name unknown' err || { cat err; exit 1; }
+            skopeo copy --all --preserve-digests "oci-archive:out/oci/image$SUFFIX.tar" "$ref"
+          fi
+          echo "digest=$want" >> "$GITHUB_OUTPUT"
+      - name: Sign (keyless; the index and every platform manifest)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes --recursive "$IMAGE@$DIGEST"
+      - name: SLSA build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: SBOM attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: out/sbom/image${{ matrix.suffix }}.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+  chart:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write # push to ghcr.io
+      id-token: write # Sigstore keyless signing
+      attestations: write # GitHub attestation store
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release, path: out }
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v4.3.1 }
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with: { cosign-release: v3.1.4 }
+      - name: Push to oci://ghcr.io/licenseforge/charts
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # As for images: never moved; the same chart (a re-run) is reused.
+          tgz="out/chart/licenseforge-$VERSION.tgz"
+          if skopeo inspect --raw "docker://$CHART:$VERSION" > existing 2> err; then
+            # Exactly one layer, the chart itself: nothing else rides along.
+            jq -e --arg d "sha256:$(sha256sum < "$tgz" | cut -d' ' -f1)" \
+              '(.layers|length)==1 and .layers[0].digest==$d and .layers[0].mediaType=="application/vnd.cncf.helm.chart.content.v1.tar+gzip"' \
+              existing >/dev/null || { echo "$CHART:$VERSION already exists with another chart"; exit 1; }
+            digest="sha256:$(sha256sum < existing | cut -d' ' -f1)"
+          else
+            grep -qiE 'manifest unknown|name unknown' err || { cat err; exit 1; }
+            helm push "$tgz" "oci://${CHART%/*}" | tee push.log
+            digest=$(awk '/^Digest:/ {print $2}' push.log)
+          fi
+          echo "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' || { echo "no digest from helm push"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Sign (keyless)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$CHART@$DIGEST"
+      - name: SLSA build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.CHART }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+  github-release:
+    # Last, so a release page only appears once its images and chart are out.
+    needs: [build, images, chart]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release
+      id-token: write # Sigstore keyless signing
+      attestations: write # GitHub attestation store
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release, path: out }
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with: { cosign-release: v3.1.4 }
+      - name: Verify checksums, sign them (keyless)
+        working-directory: out/bin
+        run: |
+          sha256sum -c SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+      - name: SLSA build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: out/bin/SHA256SUMS
+      - name: SBOM attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: out/bin/SHA256SUMS
+          sbom-path: out/bin/licenseforge_${{ env.VERSION }}.spdx.json
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=; case "$VERSION" in *-*) pre=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag $pre \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+            --notes "Verify before use: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/verifying-releases.md" \
+            out/bin/*

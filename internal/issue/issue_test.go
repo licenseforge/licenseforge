@@ -62,7 +62,7 @@ func setup(t *testing.T) fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	k, err := f.keys.Create(ctx, f.tenant)
+	k, err := f.keys.Create(f.as(authz.Owner, all), f.tenant)
 	if err != nil {
 		t.Fatal(err)
 	}

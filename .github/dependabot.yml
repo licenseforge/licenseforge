@@ -3,6 +3,14 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /compliance # OSCAL schema validator (test-only module)
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly }
+    groups: # one PR per week, not one per package
+      web: { patterns: ["*"] }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }

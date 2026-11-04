@@ -36,3 +36,6 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0030](0030-server-uses-the-go-sdk-module-in-tree.md) | Server uses the Go SDK module in-tree | accepted |
 | [ADR-0031](0031-platform-admin-lifecycle.md) | Platform admin lifecycle | accepted |
 | [ADR-0032](0032-rest-api-conventions.md) | REST API conventions | accepted |
+| [ADR-0033](0033-platform-audit-chain.md) | Platform audit chain | accepted |
+| [ADR-0034](0034-online-leases-and-seat-moves.md) | Online leases and seat moves | accepted |
+| [ADR-0035](0035-api-tokens-follow-their-creator-s-access.md) | API tokens follow their creator's access | accepted |

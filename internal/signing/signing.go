@@ -17,6 +17,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -66,6 +67,19 @@ type Local struct {
 
 var _ Signer = Local{}
 
+// authorize refuses (authz.ErrDenied) unless ctx's principal may manage the
+// signing keys of tenantID: key:write (owners, ADR-0019) on the whole tenant,
+// so a product-scoped principal is refused, acting in that same tenant.
+func authorize(ctx context.Context, tenantID string) error {
+	if err := authz.Require(ctx, authz.KeyWrite, ""); err != nil {
+		return err
+	}
+	if tn, err := authz.TenantID(ctx); err != nil || tn != tenantID {
+		return authz.ErrDenied
+	}
+	return nil
+}
+
 func binding(tenantID, kid string) secrets.Binding {
 	return secrets.Binding{Purpose: PurposeSigningKey, TenantID: tenantID, RowID: kid}
 }
@@ -74,8 +88,12 @@ func binding(tenantID, kid string) secrets.Binding {
 // pending (published for vendors to trust, then Promote). A tenant left
 // without an active key still gets a pending one: activating a key no build
 // trusts would break every deployed build (ADR-0026). It fails with
-// ErrPendingExists if the tenant already has a pending key.
+// ErrPendingExists if the tenant already has a pending key. ctx's principal
+// needs key:write in tenantID (authz.ErrDenied otherwise).
 func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, error) {
+	if err := authorize(ctx, tenantID); err != nil {
+		return nil, err
+	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -109,8 +127,11 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 
 // Promote makes the pending key kid active and retires the active one,
 // destroying its private key. Vendor builds that don't trust kid reject
-// everything signed afterwards (ADR-0026).
+// everything signed afterwards (ADR-0026). Needs key:write, like Create.
 func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
+	if err := authorize(ctx, tenantID); err != nil {
+		return err
+	}
 	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		now := time.Now()
 		// Lock the tenant's active and pending keys, so concurrent promotions
@@ -142,8 +163,11 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 }
 
 // Discard retires the pending key kid without it ever signing (rotation
-// abandoned, or the pending key leaked).
+// abandoned, or the pending key leaked). Needs key:write, like Create.
 func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
+	if err := authorize(ctx, tenantID); err != nil {
+		return err
+	}
 	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		n, err := tx.SigningKey.Update().
 			Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).

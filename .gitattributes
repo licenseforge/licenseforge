@@ -2,3 +2,4 @@
 # Generated code: collapsed in diffs, excluded from language stats.
 internal/store/ent/** linguist-generated=true
 internal/api/gen/** linguist-generated=true
+web/package-lock.json linguist-generated=true
