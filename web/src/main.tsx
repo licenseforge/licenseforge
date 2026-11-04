@@ -2,20 +2,16 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ApiError } from "@/api/client";
+import { onAuthError } from "@/api/client";
 import { createAppRouter } from "@/router";
 import { applyTheme, storedTheme } from "@/theme";
 import "./index.css";
 
 applyTheme(storedTheme());
 
-// A session that ends mid-use (expiry, logout in another tab) sends the user to sign in.
-const onError = (e: Error) => {
-  if (e instanceof ApiError && e.status === 401) window.location.assign("/login");
-};
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError }),
-  mutationCache: new MutationCache({ onError }),
+  queryCache: new QueryCache({ onError: onAuthError }),
+  mutationCache: new MutationCache({ onError: onAuthError }),
 });
 const router = createAppRouter(queryClient);
 

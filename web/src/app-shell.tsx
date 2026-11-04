@@ -91,7 +91,7 @@ function ThemeToggle() {
 function UserMenu() {
   const { session } = app.useRouteContext();
   const out = useMutation({
-    mutationFn: () => logout(session.csrf_token),
+    mutationFn: logout,
     // A full navigation drops every cached query along with the session.
     onSuccess: () => window.location.assign("/login"),
   });
