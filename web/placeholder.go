@@ -11,3 +11,6 @@ import "embed"
 var files embed.FS
 
 const root = "placeholder"
+
+// Embedded reports whether the real dashboard bundle is in the binary.
+const Embedded = false

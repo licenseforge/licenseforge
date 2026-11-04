@@ -102,6 +102,8 @@ function UserMenu() {
           {t("user.logoutFailed")}
         </span>
       )}
+      {/* modal={false}: modal Radix components inject a <style> element, which the
+          CSP (style-src 'self') blocks. Keep it, or add the Playwright CSP check first. */}
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" aria-label={t("user.menu", { name: session.user.name || session.user.email })}>

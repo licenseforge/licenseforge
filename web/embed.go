@@ -8,6 +8,8 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"path"
@@ -20,10 +22,33 @@ import (
 const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
 	"object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
-// Handler serves the dashboard at /: files from the bundle, and index.html
-// for any other path so the app's router handles it. It never answers for
-// the server's own paths (/api/, /auth/, /healthz, /readyz) if they reach it
-// unmatched: those get a 404, as JSON under /api/.
+// Mount serves the dashboard on mux for GET (and HEAD) /. A GET for a path
+// that mux routes only for other methods (GET /auth/logout) gets 405 with
+// Allow, as it would without the catch-all, instead of the app or a 404.
+func Mount(mux *http.ServeMux) {
+	spa := Handler()
+	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var allow []string
+		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			probe := r.Clone(r.Context())
+			probe.Method = m
+			if _, pattern := mux.Handler(probe); pattern != "" {
+				allow = append(allow, m)
+			}
+		}
+		if len(allow) > 0 {
+			w.Header().Set("Allow", strings.Join(allow, ", "))
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		spa.ServeHTTP(w, r)
+	}))
+}
+
+// Handler serves the dashboard: files from the bundle, and index.html for
+// any other path so the app's router handles it. It never answers for the
+// server's own paths (/api/, /auth/, /healthz, /readyz) if they reach it
+// unmatched: those get a 404, as problem JSON under /api/.
 func Handler() http.Handler {
 	sub, err := fs.Sub(files, root)
 	if err != nil {
@@ -32,18 +57,34 @@ func Handler() http.Handler {
 	return newHandler(sub)
 }
 
-func newHandler(files fs.FS) http.Handler {
-	index, err := fs.ReadFile(files, "index.html")
-	if err != nil {
-		panic("web: bundle without index.html: " + err.Error())
-	}
-	return &handler{files: files, index: index}
+type file struct {
+	data []byte
+	etag string // validator, so no-cache files can answer 304
 }
 
-type handler struct {
-	files fs.FS
-	index []byte
+// newHandler loads the whole bundle (it is embedded, so already in memory)
+// and hashes each file once.
+func newHandler(fsys fs.FS) http.Handler {
+	files := map[string]file{}
+	err := fs.WalkDir(fsys, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(fsys, name)
+		sum := sha256.Sum256(b)
+		files[name] = file{b, `"` + base64.RawURLEncoding.EncodeToString(sum[:16]) + `"`}
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
+	if _, ok := files["index.html"]; !ok {
+		panic("web: bundle without index.html")
+	}
+	return &handler{files: files}
 }
+
+type handler struct{ files map[string]file }
 
 // under reports whether p is prefix or below it.
 func under(p, prefix string) bool { return p == prefix || strings.HasPrefix(p, prefix+"/") }
@@ -60,7 +101,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"type":"about:blank","title":"Not Found","status":404,"code":"not_found"}` + "\n"))
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead { // Mount routes only GET; a defence
 		hd.Set("Allow", "GET, HEAD")
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
@@ -70,19 +111,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimPrefix(p, "/")
-	if b, err := fs.ReadFile(h.files, name); err == nil {
-		if strings.HasPrefix(name, "assets/") { // content-hashed names (Vite)
-			hd.Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			hd.Set("Cache-Control", "no-cache")
-		}
-		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
-		return
-	}
-	if under(p, "/assets") { // a stale index.html's asset: don't answer with HTML
+	f, ok := h.files[name]
+	switch {
+	case ok && strings.HasPrefix(name, "assets/"): // content-hashed names (Vite)
+		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
+	case ok:
+		hd.Set("Cache-Control", "no-cache")
+	case under(p, "/assets"): // a stale index.html's asset: don't answer with HTML
 		http.NotFound(w, r)
 		return
+	default:
+		name, f = "index.html", h.files["index.html"]
+		hd.Set("Cache-Control", "no-cache")
 	}
-	hd.Set("Cache-Control", "no-cache")
-	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(h.index))
+	hd.Set("ETag", f.etag)
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(f.data))
 }

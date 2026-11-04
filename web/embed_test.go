@@ -90,6 +90,54 @@ func TestHandler(t *testing.T) {
 	}
 }
 
+func TestMount(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/logout", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("PUT /things/{id}", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("DELETE /things/{id}", func(http.ResponseWriter, *http.Request) {})
+	Mount(mux)
+	for _, tc := range []struct {
+		method, path string
+		code         int
+		allow        string
+	}{
+		{"GET", "/auth/logout", 405, "POST"},
+		{"GET", "/things/1", 405, "PUT, DELETE"},
+		{"HEAD", "/auth/logout", 405, "POST"},
+		{"GET", "/t/acme/", 200, ""},
+		{"HEAD", "/", 200, ""},
+		{"POST", "/t/acme/", 405, "GET, HEAD"}, // the mux's own 405
+	} {
+		rec := get(mux, tc.method, tc.path)
+		if rec.Code != tc.code || rec.Header().Get("Allow") != tc.allow {
+			t.Errorf("%s %s = %d, Allow %q; want %d, %q", tc.method, tc.path, rec.Code, rec.Header().Get("Allow"), tc.code, tc.allow)
+		}
+	}
+}
+
+func TestHeadAndETag(t *testing.T) {
+	h := newHandler(bundle)
+	if rec := get(h, "HEAD", "/"); rec.Code != 200 || rec.Body.Len() != 0 {
+		t.Errorf("HEAD / = %d with %d body bytes", rec.Code, rec.Body.Len())
+	}
+	for _, p := range []string{"/", "/t/acme/", "/favicon.svg", "/assets/app-1a2b.js"} {
+		etag := get(h, "GET", p).Header().Get("ETag")
+		if etag == "" {
+			t.Fatalf("GET %s: no ETag", p)
+		}
+		req := httptest.NewRequest("GET", p, nil)
+		req.Header.Set("If-None-Match", etag)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+			t.Errorf("GET %s If-None-Match = %d %q, want 304", p, rec.Code, rec.Body)
+		}
+	}
+	if get(h, "GET", "/").Header().Get("ETag") == get(h, "GET", "/favicon.svg").Header().Get("ETag") {
+		t.Error("different files share an ETag")
+	}
+}
+
 // The embedded bundle (the real one with -tags webui) must work under the
 // CSP: every script is an external file, and there are no inline styles.
 func TestEmbeddedBundleFitsCSP(t *testing.T) {
