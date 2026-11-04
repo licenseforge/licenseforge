@@ -33,7 +33,10 @@ const safe = new Set(["GET", "HEAD", "OPTIONS"]);
 
 async function apiFetch(input: Request): Promise<Response> {
   const req = new Request(input, { credentials: "same-origin" });
-  if (!safe.has(req.method) && csrfToken) req.headers.set("X-CSRF-Token", csrfToken);
+  // Never send the token to another origin.
+  if (!safe.has(req.method) && csrfToken && new URL(req.url).origin === window.location.origin) {
+    req.headers.set("X-CSRF-Token", csrfToken);
+  }
   return fetch(req);
 }
 

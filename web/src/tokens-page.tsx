@@ -9,6 +9,7 @@ import {
   assignableTokenRoles,
   canManageTokens,
   createToken,
+  type Membership,
   type Role,
   revokeToken,
   tokensQuery,
@@ -22,12 +23,12 @@ const errorText = (e: unknown) => problemMessage(e instanceof ApiError ? e.code 
 export function TokensPage() {
   const { slug } = useParams({ from: "/app/t/$slug/settings/api-tokens" });
   const { data: tenants = [] } = useQuery(tenantsQuery);
-  const role: Role = tenants.find((tn) => tn.slug === slug)?.role ?? "viewer";
+  const member: Membership = tenants.find((tn) => tn.slug === slug) ?? { role: "viewer", scope: { all: false, products: [] } };
   const list = useInfiniteQuery(tokensQuery(slug));
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<ApiToken | null>(null);
   const tokens = list.data?.pages.flatMap((p) => p.items) ?? [];
-  const manage = canManageTokens(role);
+  const manage = canManageTokens(member);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -91,7 +92,7 @@ export function TokensPage() {
           {t("tokens.more")}
         </Button>
       )}
-      {creating && <CreateTokenDialog tenant={slug} role={role} onClose={() => setCreating(false)} />}
+      {creating && <CreateTokenDialog tenant={slug} member={member} onClose={() => setCreating(false)} />}
       {revoking && <RevokeDialog tenant={slug} token={revoking} onClose={() => setRevoking(null)} />}
     </>
   );
@@ -130,14 +131,14 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 const ttlDays = [7, 30, 90, 180, 365];
 const input = "h-9 w-full rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-export function CreateTokenDialog({ tenant, role, onClose }: { tenant: string; role: Role; onClose: () => void }) {
+export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string; member: Membership; onClose: () => void }) {
   const qc = useQueryClient();
-  const roles = assignableTokenRoles(role);
+  const roles = assignableTokenRoles(member);
   const [created, setCreated] = useState<ApiTokenCreated | null>(null); // the secret lives here only
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [all, setAll] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const fields = fieldErrors(error);
   const close = () => {
     setCreated(null);
@@ -190,12 +191,22 @@ export function CreateTokenDialog({ tenant, role, onClose }: { tenant: string; r
             spellCheck={false}
           />
           <Button
-            onClick={() => void navigator.clipboard.writeText(created.token).then(() => setCopied(true))}
+            onClick={() =>
+              void navigator.clipboard.writeText(created.token).then(
+                () => setCopy("copied"),
+                () => setCopy("failed"), // no permission, or not a secure context
+              )
+            }
             aria-live="polite"
           >
-            {copied ? t("tokens.copied") : t("tokens.copy")}
+            {copy === "copied" ? t("tokens.copied") : t("tokens.copy")}
           </Button>
         </div>
+        {copy === "failed" && (
+          <p role="alert" className="mt-2 text-sm">
+            {t("tokens.copyFailed")}
+          </p>
+        )}
         <div className="mt-6 flex justify-end">
           <Button variant="ghost" onClick={close}>
             {t("tokens.close")}

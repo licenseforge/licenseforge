@@ -21,7 +21,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 function Harness() {
   const [open, setOpen] = useState(true);
-  return open ? <CreateTokenDialog tenant="acme" role="owner" onClose={() => setOpen(false)} /> : <p>closed</p>;
+  return open ? <CreateTokenDialog tenant="acme" member={{ role: "owner", scope: { all: true, products: [] } }} onClose={() => setOpen(false)} /> : <p>closed</p>;
 }
 
 it("shows the secret once and keeps it nowhere after the dialog closes", async () => {
@@ -30,13 +30,19 @@ it("shows the secret once and keeps it nowhere after the dialog closes", async (
     created_by: "usr_1", created_at: "2026-11-04T00:00:00Z", expires_at: "2027-02-02T00:00:00Z",
     last_used_at: null, revoked_at: null,
   };
+  // After the create, list reads fail: a refetch can't overwrite a secret
+  // that the dialog wrongly put into the cached list.
+  let created = false;
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (req: Request) =>
-      req.method === "POST"
-        ? new Response(JSON.stringify({ ...row, token: SECRET }), { status: 201, headers: { "Content-Type": "application/json" } })
-        : new Response(JSON.stringify({ items: [row] }), { headers: { "Content-Type": "application/json" } }),
-    ),
+    vi.fn(async (req: Request) => {
+      if (req.method === "POST") {
+        created = true;
+        return json({ ...row, token: SECRET }, 201);
+      }
+      return created ? json({ code: "internal" }, 500) : json({ items: [row] });
+    }),
   );
   const qc = new QueryClient();
   await qc.prefetchInfiniteQuery(tokensQuery("acme")); // the list is cached, as on the page
@@ -63,7 +69,6 @@ it("shows the secret once and keeps it nowhere after the dialog closes", async (
   const close = [...el.querySelectorAll("button")].find((b) => b.textContent === "Close")!;
   await act(async () => close.click());
   await vi.waitFor(() => expect(el.textContent).toContain("closed"));
-  await act(async () => qc.refetchQueries());
 
   const kept = JSON.stringify([
     el.innerHTML,

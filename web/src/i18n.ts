@@ -55,6 +55,7 @@ const en = {
   "tokens.secretWarning": "This is the only time the token is shown. Store it somewhere safe now; it can't be recovered.",
   "tokens.copy": "Copy",
   "tokens.copied": "Copied",
+  "tokens.copyFailed": "Copying failed. Select the token and copy it yourself.",
   "problem.unauthenticated": "Your session has ended. Sign in again.",
   "problem.forbidden": "You don't have permission to do this.",
   "problem.not_found": "Not found. It may have been removed.",

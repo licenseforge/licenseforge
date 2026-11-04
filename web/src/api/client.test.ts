@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { problemMessage } from "@/i18n";
-import { ApiError, fieldErrors, setCsrfToken } from "./client";
-import { assignableTokenRoles, createToken, revokeToken, tokensQuery } from "./tokens";
+import { ApiError, api, fieldErrors, setCsrfToken } from "./client";
+import { assignableTokenRoles, canManageTokens, createToken, revokeToken, tokensQuery } from "./tokens";
 import { QueryClient } from "@tanstack/react-query";
 
 function serve(status: number, body: unknown, type = "application/json") {
@@ -34,6 +34,18 @@ describe("generated client wrapper", () => {
     expect(req.url).toBe(`${window.location.origin}/api/v1/tenants/acme/api-tokens`);
     expect(req.credentials).toBe("same-origin");
     expect(req.headers.get("X-CSRF-Token")).toBe("csrf-1");
+  });
+
+  it("never sends the CSRF token to another origin", async () => {
+    setCsrfToken("csrf-1");
+    const f = serve(201, created);
+    await api.POST("/tenants/{tenant}/api-tokens", {
+      baseUrl: "https://evil.example/api/v1",
+      params: { path: { tenant: "acme" } },
+      body: { name: "ci", role: "sdk", all_products: true },
+    });
+    expect(sent(f).url).toBe("https://evil.example/api/v1/tenants/acme/api-tokens");
+    expect(sent(f).headers.has("X-CSRF-Token")).toBe(false);
   });
 
   it("sends no CSRF token on reads", async () => {
@@ -76,11 +88,19 @@ describe("generated client wrapper", () => {
 });
 
 describe("assignableTokenRoles", () => {
+  const all = { all: true, products: [] };
   it("offers the caller's role and below, plus sdk", () => {
-    expect(assignableTokenRoles("owner")).toEqual(["owner", "admin", "manager", "support", "viewer", "sdk"]);
-    expect(assignableTokenRoles("admin")).toEqual(["admin", "manager", "support", "viewer", "sdk"]);
+    expect(assignableTokenRoles({ role: "owner", scope: all })).toEqual(["owner", "admin", "manager", "support", "viewer", "sdk"]);
+    expect(assignableTokenRoles({ role: "admin", scope: all })).toEqual(["admin", "manager", "support", "viewer", "sdk"]);
   });
   it("offers nothing to roles without token:write", () => {
-    for (const r of ["manager", "support", "viewer", "sdk"] as const) expect(assignableTokenRoles(r)).toEqual([]);
+    for (const role of ["manager", "support", "viewer", "sdk"] as const) expect(assignableTokenRoles({ role, scope: all })).toEqual([]);
+  });
+  it("offers nothing to product-scoped members, owners included", () => {
+    for (const role of ["owner", "admin"] as const) {
+      const m = { role, scope: { all: false, products: ["prd_1"] } };
+      expect(assignableTokenRoles(m)).toEqual([]);
+      expect(canManageTokens(m)).toBe(false);
+    }
   });
 });

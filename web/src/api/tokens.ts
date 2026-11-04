@@ -29,14 +29,20 @@ export async function revokeToken(tenant: string, id: string): Promise<ApiToken>
 // Member roles, most powerful first: each has every permission of the ones after it (internal/authz).
 const ranked: Role[] = ["owner", "admin", "manager", "support", "viewer"];
 
-/** Whether the role may create and revoke tokens (token:write). */
-export const canManageTokens = (role: Role) => role === "owner" || role === "admin";
+/** A member's role and product scope in a tenant (authz.Grant). */
+export type Membership = { role: Role; scope: { all: boolean; products: string[] } };
+
+/**
+ * Whether the member may create and revoke tokens: token:write on every
+ * product, since scoped members can't manage access (authz.CanAssign).
+ */
+export const canManageTokens = (m: Membership) => (m.role === "owner" || m.role === "admin") && m.scope.all;
 
 /**
  * Roles a member may give a token: their own and below, plus sdk
  * (authz.CanAssign). Only to hide choices; the API is the real check.
  */
-export function assignableTokenRoles(role: Role): Role[] {
-  if (!canManageTokens(role)) return [];
-  return [...ranked.slice(ranked.indexOf(role)), "sdk"];
+export function assignableTokenRoles(m: Membership): Role[] {
+  if (!canManageTokens(m)) return [];
+  return [...ranked.slice(ranked.indexOf(m.role)), "sdk"];
 }
