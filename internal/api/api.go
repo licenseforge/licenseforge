@@ -76,8 +76,9 @@ type bodyKey struct{}
 
 type reqInfo struct{ id, client string }
 
-func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	ri := reqInfo{id: rand.Text(), client: clean(r.Header.Get("X-Request-Id"))}
+	w := &tracked{ResponseWriter: rw}
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
 	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
@@ -86,7 +87,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if v == http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
 				panic(v)
 			}
-			s.write(w, r, &problem{status: http.StatusInternalServerError, code: "internal", err: fmt.Errorf("panic: %v\n%s", v, debug.Stack())})
+			p := &problem{status: http.StatusInternalServerError, code: "internal", err: fmt.Errorf("panic: %v\n%s", v, debug.Stack())}
+			if w.started { // too late for a problem body; log only
+				s.Log.ErrorContext(r.Context(), "api panic after the response started", "request_id", ri.id, "err", p.err)
+				return
+			}
+			s.write(w, r, p)
 		}
 	}()
 	p, prob := s.authenticate(w, r)
@@ -133,8 +139,8 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 		return authz.Principal{}, errUnauthenticated
 	}
 	ref, ok := tenantRef(r)
-	if !ok {
-		return authz.Principal{}, errNotFound
+	if !ok { // a token can't be verified without its tenant
+		return authz.Principal{}, errUnauthenticated
 	}
 	ctx := r.Context()
 	tenantID, err := s.Identity.TenantID(ctx, ref)
@@ -221,7 +227,8 @@ func clean(s string) string {
 var queryParams = map[string][]string{"ListApiTokens": {"limit", "cursor"}}
 
 // strictInput refuses unknown query parameters and decodes the body again
-// strictly (the generated decoder ignores unknown fields).
+// strictly: the generated decoder ignores unknown fields, accepts
+// case-variant names and trailing data.
 func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
 		for k := range r.URL.Query() {
@@ -234,13 +241,38 @@ func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc
 				raw, _ := ctx.Value(bodyKey{}).([]byte)
 				dec := json.NewDecoder(bytes.NewReader(raw))
 				dec.DisallowUnknownFields()
-				if err := dec.Decode(reflect.New(b.Type().Elem()).Interface()); err != nil || dec.More() {
+				err := dec.Decode(reflect.New(b.Type().Elem()).Interface())
+				if err == nil && dec.Decode(&struct{}{}) != io.EOF {
+					err = errors.New("data after the JSON object")
+				}
+				if err == nil && !exactKeys(raw, b.Type().Elem()) {
+					err = errors.New("a field name differs from the documented one")
+				}
+				if err != nil {
 					return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "The body must be one JSON object with only the documented fields.", err: err}
 				}
 			}
 		}
 		return f(ctx, w, r, req)
 	}
+}
+
+// exactKeys reports whether every key of the JSON object raw is exactly a
+// json tag of struct t (encoding/json matches names case-insensitively).
+func exactKeys(raw []byte, t reflect.Type) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return false
+	}
+	for k := range m {
+		if !slices.ContainsFunc(reflect.VisibleFields(t), func(f reflect.StructField) bool {
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			return name == k
+		}) {
+			return false
+		}
+	}
+	return true
 }
 
 // unrouted answers a request no route matches: 404, or 405 with Allow.
@@ -255,6 +287,19 @@ func (s *server) unrouted(w http.ResponseWriter, r *http.Request) {
 	}
 	s.write(w, r, errNotFound)
 }
+
+// tracked notes whether the response has started.
+type tracked struct {
+	http.ResponseWriter
+	started bool
+}
+
+func (t *tracked) WriteHeader(code int) { t.started = true; t.ResponseWriter.WriteHeader(code) }
+func (t *tracked) Write(b []byte) (int, error) {
+	t.started = true
+	return t.ResponseWriter.Write(b)
+}
+func (t *tracked) Unwrap() http.ResponseWriter { return t.ResponseWriter }
 
 type discard struct {
 	header http.Header

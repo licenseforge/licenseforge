@@ -103,11 +103,6 @@ func (s *server) CreateApiToken(ctx context.Context, req apigen.CreateApiTokenRe
 }
 
 func (s *server) RevokeApiToken(ctx context.Context, req apigen.RevokeApiTokenRequestObject) (apigen.RevokeApiTokenResponseObject, error) {
-	// Tokens are tenant-wide: hidden from product-scoped callers, so they
-	// get the same 404 as for a missing token.
-	if authz.Require(ctx, authz.TokenRead, "") != nil {
-		return nil, apitokens.ErrNotFound
-	}
 	row, err := s.Tokens.Revoke(ctx, req.Id)
 	if err != nil {
 		return nil, err

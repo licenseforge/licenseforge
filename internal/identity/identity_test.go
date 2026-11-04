@@ -121,7 +121,7 @@ func TestMemberships(t *testing.T) {
 		t.Errorf("memberships = %+v, %v", ms, err)
 	}
 	// The API's tenant resolution and grant.
-	for ref, want := range map[string]string{tn.Slug: tn.ID, tn.ID: tn.ID, "nope-" + storetest.Suffix(): "", ids.Tenant(): "", "": ""} {
+	for ref, want := range map[string]string{tn.Slug: tn.ID, tn.ID: tn.ID, "nope-" + storetest.Suffix(): "", ids.Tenant(): "", "": "", "\x00": "", "\xff": "", "x\xc3(": "", strings.Repeat("a", 64): ""} {
 		if id, err := s.TenantID(ctx, ref); id != want || (want == "") != errors.Is(err, ErrNotMember) {
 			t.Errorf("TenantID(%q) = %q, %v", ref, id, err)
 		}

@@ -20,6 +20,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 	"licenseforge.io/licenseforge/internal/store/ids"
+	"licenseforge.io/licenseforge/internal/store/schema"
 )
 
 var (
@@ -210,8 +211,11 @@ var ErrNotMember = errors.New("identity: not a member of that tenant")
 // reserved platform tenant (ADR-0029). An unknown one is ErrNotMember.
 func (s Service) TenantID(ctx context.Context, ref string) (string, error) {
 	p := tenant.Slug(ref)
-	if ids.Valid("tnt", ref) {
+	switch {
+	case ids.Valid("tnt", ref):
 		p = tenant.ID(ref)
+	case len(ref) > 63 || !schema.SlugRE.MatchString(ref): // e.g. invalid UTF-8, which PostgreSQL refuses
+		return "", ErrNotMember
 	}
 	var id string
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {

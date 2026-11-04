@@ -382,12 +382,18 @@ func TestRevokeAuditAndRights(t *testing.T) {
 			t.Errorf("not-found revoke audit = %+v", e)
 		}
 	}
-	// Without token:write, existing and unknown IDs look the same.
+	// Lookup before rights (ADR-0032): a viewer gets not-found for a missing
+	// token and denied for a visible one; a product-scoped caller sees none.
 	viewer := f.as(f.a, f.viewerA, authz.Viewer)
-	for _, id := range []string{ownerTok.Row.ID, ids.APIToken()} {
-		if _, err := f.s.Revoke(viewer, id); !errors.Is(err, authz.ErrDenied) {
-			t.Errorf("viewer revoke %s: %v, want ErrDenied", id, err)
-		}
+	if _, err := f.s.Revoke(viewer, ids.APIToken()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("viewer revokes a missing token: %v", err)
+	}
+	if _, err := f.s.Revoke(viewer, ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("viewer revokes a token: %v", err)
+	}
+	scoped := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.ownerA, TenantID: f.a, Role: authz.Owner, Scope: authz.Scope{Products: []string{f.prodA}}})
+	if _, err := f.s.Revoke(scoped, ownerTok.Row.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("scoped caller revokes a token: %v", err)
 	}
 }
 

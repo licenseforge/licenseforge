@@ -176,8 +176,8 @@ func (f *fixture) do(t *testing.T, method, path, body string, opts ...opt) resp 
 	f.srv.ServeHTTP(rec, r)
 	out := resp{code: rec.Code, h: rec.Header(), raw: rec.Body.String()}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out.body)
-	if out.h.Get("X-Request-Id") == "" {
-		t.Errorf("%s %s: no X-Request-Id", method, path)
+	if out.h.Get("X-Request-Id") == "" || out.h.Get("Cache-Control") != "no-store" {
+		t.Errorf("%s %s: X-Request-Id %q, Cache-Control %q", method, path, out.h.Get("X-Request-Id"), out.h.Get("Cache-Control"))
 	}
 	return out
 }
@@ -260,14 +260,17 @@ func TestTokenAuth(t *testing.T) {
 	}
 	var first map[string]any
 	for name, c := range map[string]struct{ ref, tok string }{
-		"another tenant's":  {f.a.Slug, other.Token},
-		"wrong tenant (ID)": {f.b.ID, good.Token},
-		"unknown slug":      {"nope-" + storetest.Suffix(), good.Token},
-		"unknown tenant ID": {ids.Tenant(), good.Token},
-		"reserved fallback": {unissuedTenant, good.Token},
-		"unknown token":     {f.a.Slug, apitoken.New()},
-		"revoked":           {f.a.Slug, revoked.Token},
-		"expired":           {f.a.Slug, expired.Token},
+		"another tenant's":   {f.a.Slug, other.Token},
+		"wrong tenant (ID)":  {f.b.ID, good.Token},
+		"unknown slug":       {"nope-" + storetest.Suffix(), good.Token},
+		"NUL in slug":        {"%00", good.Token},
+		"invalid UTF-8 slug": {"%ff", good.Token},
+		"bad UTF-8 sequence": {"x%C3%28", good.Token},
+		"unknown tenant ID":  {ids.Tenant(), good.Token},
+		"reserved fallback":  {unissuedTenant, good.Token},
+		"unknown token":      {f.a.Slug, apitoken.New()},
+		"revoked":            {f.a.Slug, revoked.Token},
+		"expired":            {f.a.Slug, expired.Token},
 	} {
 		got := f.do(t, "GET", tokensPath(c.ref), "", bearer(c.tok)).problem(t, 401, "unauthenticated")
 		if first == nil {
@@ -292,7 +295,7 @@ func TestSessionAuth(t *testing.T) {
 		t.Errorf("member: %d %s", r.code, r.raw)
 	}
 	nonMember := f.do(t, "GET", tokensPath(f.a.Slug), "", f.session(t, f.outsider, false)).problem(t, 404, "not_found")
-	for _, ref := range []string{"nope-" + storetest.Suffix(), ids.Tenant(), f.a.ID + "x"} {
+	for _, ref := range []string{"nope-" + storetest.Suffix(), ids.Tenant(), f.a.ID + "x", "%00", "%ff", "x%C3%28"} {
 		if got := f.do(t, "GET", tokensPath(ref), "", f.session(t, f.ownerA, false)).problem(t, 404, "not_found"); !reflect.DeepEqual(got, nonMember) {
 			t.Errorf("unknown tenant %s: %v, non-member %v", ref, got, nonMember)
 		}
@@ -378,6 +381,7 @@ func TestTokenEndpoints(t *testing.T) {
 	viewer := f.session(t, f.viewerA, true)
 	f.do(t, "POST", p, `{"name":"","role":"nope","all_products":true}`, viewer).problem(t, 403, "forbidden")
 	f.do(t, "POST", p+"/"+made[1]["id"].(string)+"/revoke", "", viewer).problem(t, 403, "forbidden")
+	f.do(t, "POST", p+"/"+ids.APIToken()+"/revoke", "", viewer).problem(t, 404, "not_found") // lookup before rights
 	f.do(t, "POST", p, `{"name":"x","role":"owner","all_products":true}`, f.session(t, f.adminA, true)).problem(t, 403, "forbidden")
 	// Validation.
 	bad := f.do(t, "POST", p, `{"name":" ","role":"root","all_products":true,"product_ids":["`+f.prodA+`"],"ttl_seconds":59}`, owner).problem(t, 422, "validation_failed")
@@ -390,7 +394,11 @@ func TestTokenEndpoints(t *testing.T) {
 	}
 	f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":false,"product_ids":["`+ids.Product()+`"]}`, owner).problem(t, 422, "validation_failed")
 	f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":true,"extra":1}`, owner).problem(t, 400, "invalid_request")
-	f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":true}{}`, owner).problem(t, 400, "invalid_request")
+	for _, trailing := range []string{"{}", "}", "]", " x"} {
+		f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":true}`+trailing, owner).problem(t, 400, "invalid_request")
+	}
+	f.do(t, "POST", p, `{"NAME":"x","role":"viewer","all_products":true}`, owner).problem(t, 400, "invalid_request")
+	f.do(t, "POST", p, `{"name":"x","Role":"viewer","all_products":true}`, owner).problem(t, 400, "invalid_request")
 	f.do(t, "POST", p, `{"name":1}`, owner).problem(t, 400, "invalid_request")
 }
 
@@ -418,7 +426,8 @@ func TestErrorsAreProblems(t *testing.T) {
 	owner := f.session(t, f.ownerA, true)
 	p := tokensPath(f.a.Slug)
 	f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/nope", "", tok).problem(t, 404, "not_found")
-	f.do(t, "GET", Prefix+"/nope", "", tok).problem(t, 404, "not_found")
+	f.do(t, "GET", Prefix+"/nope", "", tok).problem(t, 401, "unauthenticated") // no tenant to verify the token in
+	f.do(t, "GET", Prefix+"/nope", "", owner).problem(t, 404, "not_found")
 	if r := f.do(t, "DELETE", p, "", tok); r.h.Get("Allow") == "" {
 		t.Errorf("405 without Allow: %v", r.h)
 	} else {
@@ -513,4 +522,39 @@ type recordMux struct {
 func (m *recordMux) HandleFunc(p string, h func(http.ResponseWriter, *http.Request)) {
 	m.patterns = append(m.patterns, p)
 	m.ServeMux.HandleFunc(p, h)
+}
+
+func TestClean(t *testing.T) {
+	for in, want := range map[string]string{
+		"abc-123":                "abc-123",
+		"a\r\nb\x00c d\u202e":    "abcd",
+		strings.Repeat("x", 100): strings.Repeat("x", 64),
+	} {
+		if got := clean(in); got != want {
+			t.Errorf("clean(%q) = %q", in, got)
+		}
+	}
+}
+
+func TestPanics(t *testing.T) {
+	f := setup(t)
+	tok := bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token)
+	f.srv.mux.HandleFunc("GET "+Prefix+"/tenants/{tenant}/abort", func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
+	f.srv.mux.HandleFunc("GET "+Prefix+"/tenants/{tenant}/late", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "partial")
+		panic("late")
+	})
+	// http.ErrAbortHandler is re-panicked for net/http to abort the response.
+	func() {
+		defer func() {
+			if v := recover(); v != http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
+				t.Errorf("recovered %v, want http.ErrAbortHandler", v)
+			}
+		}()
+		f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/abort", "", tok)
+	}()
+	// After the response started, no problem body is appended.
+	if r := f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/late", "", tok); r.code != 200 || r.raw != "partial" {
+		t.Errorf("late panic: %d %q", r.code, r.raw)
+	}
 }

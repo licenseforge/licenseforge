@@ -230,9 +230,11 @@ func (s Service) List(ctx context.Context, limit int, afterAt time.Time, afterID
 	return rows, err
 }
 
-// Revoke revokes an active token of ctx's tenant and returns it. The caller
-// needs token:write and may only revoke a token whose role it could have
-// given.
+// Revoke revokes an active token of ctx's tenant and returns it. Order
+// (ADR-0032): a missing token, or any token for a caller who can't see
+// tokens (product-scoped: tokens are tenant-wide), is ErrNotFound; then the
+// caller needs token:write and may only revoke a token whose role it could
+// have given (authz.ErrDenied).
 func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, error) {
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
@@ -240,12 +242,7 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 	}
 	p, _ := authz.FromContext(ctx)
 	ev := event(p, "api_token.revoke", "")
-	// Authorization first (token:write, as a user with every product), so a
-	// caller who may not revoke can't probe which IDs exist.
-	if err := authz.CanAssign(ctx, authz.Token, &authz.Grant{Role: authz.SDK, Scope: authz.Scope{All: true}}, nil); err != nil {
-		return nil, s.refused(ctx, tenantID, ev, err)
-	}
-	if !ids.Valid("tok", tokenID) {
+	if authz.Require(ctx, authz.TokenRead, "") != nil || !ids.Valid("tok", tokenID) {
 		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
 	var row *ent.APIToken
