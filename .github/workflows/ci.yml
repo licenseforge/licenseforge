@@ -42,7 +42,7 @@ jobs:
   sdk-os:
     # Fingerprint sources are OS-specific; run them where they live. macOS has
     # no hosted runner available to this org; add it back with a self-hosted
-    # runner. Until then `make lint vet-cross` covers darwin at compile time.
+    # runner. Until then `make vet-cross` (go job) type-checks darwin, tests included.
     strategy:
       matrix:
         os: [windows-latest]

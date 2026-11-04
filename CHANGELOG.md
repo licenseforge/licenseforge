@@ -28,7 +28,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Claim conformance vectors in `spec/vectors/lf1-claims.json` (98 cases); fingerprint derivation vectors in `spec/vectors/fingerprint.json`.
 - `Entitlements.HasFeature`, `Limit` and `Allows` (ADR-0015): unknown keys are never an error; an absent limit behaves as 0; `Allows` takes the resulting total and rejects negative values.
 - Go SDK `clock` package: clock rollback protection (ADR-0018): HMAC-authenticated high-water mark, `Now`/`Observe`/`Reset`, 24h default tolerance (0 = strict), rollback check that always runs (also on read-only storage), and a `FileStore` with OS file locks that is atomic and safe across processes.
-- CI runs the SDK's OS-specific tests on Windows only; macOS returns with a self-hosted runner (darwin is still vetted and linted by cross-compilation).
+- CI runs the SDK's OS-specific tests on Windows only; macOS returns with a self-hosted runner (darwin is still type-checked by `make vet-cross`).
 - CI runs tests in FIPS 140-3 mode (`GOFIPS140=certified`).
 - Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per tenant and product.
 
