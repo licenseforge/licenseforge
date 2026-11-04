@@ -26,8 +26,12 @@ func TestInstrumentLabelsByRoutePattern(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /t/{tenant}/licenses/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	mux.HandleFunc("GET /ok", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /hints", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints) // informational: the final status follows
+		w.WriteHeader(http.StatusNotFound)
+	})
 	h := Instrument(mux)
-	for _, p := range []string{"/t/acme/licenses/lic_secret1", "/t/other/licenses/lic_secret2", "/ok", "/LF-KEY-in-a-path"} {
+	for _, p := range []string{"/t/acme/licenses/lic_secret1", "/t/other/licenses/lic_secret2", "/ok", "/LF-KEY-in-a-path", "/hints"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, p, nil))
 	}
 	if n := testutil.ToFloat64(requests.WithLabelValues("GET /t/{tenant}/licenses/{id}", "4xx")); n != 2 {
@@ -35,6 +39,9 @@ func TestInstrumentLabelsByRoutePattern(t *testing.T) {
 	}
 	if n := testutil.ToFloat64(requests.WithLabelValues("GET /ok", "2xx")); n != 1 {
 		t.Errorf("implicit 200 = %v", n)
+	}
+	if n := testutil.ToFloat64(requests.WithLabelValues("GET /hints", "4xx")); n != 1 {
+		t.Errorf("1xx then 404 = %v, want one 4xx", n)
 	}
 	if n := testutil.ToFloat64(requests.WithLabelValues("unmatched", "4xx")); n != 1 {
 		t.Errorf("unmatched = %v", n)

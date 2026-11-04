@@ -81,7 +81,12 @@ jobs:
           if helm template t . $s --show-only templates/deployment.yaml | grep -qE 'owner-database-url|OWNER_DATABASE_URL'; then echo "owner login in Deployment"; exit 1; fi
           # Metrics: own port, env and Service port; ingress on it only from the scrapers.
           d=$(helm template t . $s --set metrics.port=9100 --show-only templates/deployment.yaml --show-only templates/service.yaml)
-          for want in 'containerPort: 9100' 'value: ":9100"' 'targetPort: metrics'; do grep -qF -- "$want" <<<"$d" || { echo "metrics: missing $want"; exit 1; }; done
+          for want in 'containerPort: 9100' 'value: ":9100"' 'targetPort: metrics' 'name: t-licenseforge-metrics'; do grep -qF -- "$want" <<<"$d" || { echo "metrics: missing $want"; exit 1; }; done
+          # A public service.type never publishes metrics: the main Service has no metrics port, theirs stays ClusterIP.
+          main=$(helm template t . $s --set service.type=LoadBalancer --show-only templates/service.yaml | awk '/^---/{n++} n==1')
+          grep -qF 'type: LoadBalancer' <<<"$main" || { echo "main Service not found"; exit 1; }
+          if grep -qE '9090|metrics' <<<"$main"; then echo "metrics port on the main Service"; exit 1; fi
+          helm template t . $s --set service.type=LoadBalancer --show-only templates/service.yaml | awk '/^---/{n++} n==2' | grep -qF 'type: ClusterIP' || { echo "metrics Service not ClusterIP"; exit 1; }
           n=$(helm template t . $s --show-only templates/networkpolicy.yaml)
           grep -A4 -F -- '- ports: [{port: 9090, protocol: TCP}]' <<<"$n" | grep -qF 'kubernetes.io/metadata.name: monitoring' || { echo "metrics ingress not limited to the scrapers"; exit 1; }
           if helm template t . $s --set metrics.scrapeFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: 9090'; then echo "metrics open without scrapers"; exit 1; fi

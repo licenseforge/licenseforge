@@ -100,7 +100,7 @@ type statusWriter struct {
 }
 
 func (w *statusWriter) WriteHeader(code int) {
-	if !w.written {
+	if !w.written && code >= 200 { // 1xx (e.g. 103 Early Hints) is not the final status
 		w.code, w.written = code, true
 	}
 	w.ResponseWriter.WriteHeader(code)

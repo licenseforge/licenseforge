@@ -232,3 +232,15 @@ func TestMigrate(t *testing.T) {
 		t.Errorf("migrate = %v", err)
 	}
 }
+
+// A metrics listener that fails stops the server with an error naming it.
+func TestServeFailsWithMetricsListener(t *testing.T) {
+	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
+	mln := listen(t)
+	_ = mln.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := serve(ctx, listen(t), mln, quiet); err == nil || !strings.Contains(err.Error(), "metrics listener") {
+		t.Errorf("serve = %v, want a metrics listener error", err)
+	}
+}

@@ -51,9 +51,12 @@ Helm's default `--timeout` of 5m; raise both together for long migrations. Set `
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;
-  empty: nobody). The Service exposes it as port `metrics`; set
-  `metrics.serviceMonitor.enabled` for the Prometheus Operator, with
-  `metrics.serviceMonitor.labels` matching your Prometheus. Labels carry route
+  empty: nobody). A separate, always-ClusterIP Service `<release>-metrics`
+  exposes it as port `metrics`, so a LoadBalancer or NodePort `service.type`
+  never publishes it. Set `metrics.serviceMonitor.enabled` for the Prometheus
+  Operator, with `metrics.serviceMonitor.labels` matching your Prometheus, and
+  keep `metrics.scrapeFrom` matching where that Prometheus runs: with an empty
+  `scrapeFrom` the ServiceMonitor exists but every scrape is blocked. Labels carry route
   patterns and outcomes only, never tenants, users or license keys.
 - **Shutdown**: on SIGTERM the server fails readiness and keeps serving for
   `drainSeconds`, then shuts down gracefully (up to 15s). Keep
