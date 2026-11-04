@@ -72,9 +72,18 @@ jobs:
           helm template t . --set secrets.server=s --set migrate.enabled=false --set networkPolicy.enabled=false --set podDisruptionBudget.enabled=false >/dev/null
           helm template t . $s --set 'networkPolicy.databaseTo[0].ipBlock.cidr=10.0.0.0/8' --set 'networkPolicy.dns.ports={53,5353}' --set podLabels.team=a --set 'extraEnv[0].name=X' --set 'extraEnv[0].value=y' >/dev/null
           # Bad values fail the render instead of producing a broken release.
-          for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}'; do
+          for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}' \
+            metrics.port=8080 metrics.port=null 'metrics.scrapeFrom[0].ports[0].port=1' metrics.serviceMonitor.interval=soon; do
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi
           # The serving pods never get the owner login (ADR-0009).
           if helm template t . $s --show-only templates/deployment.yaml | grep -qE 'owner-database-url|OWNER_DATABASE_URL'; then echo "owner login in Deployment"; exit 1; fi
+          # Metrics: own port, env and Service port; ingress on it only from the scrapers.
+          d=$(helm template t . $s --set metrics.port=9100 --show-only templates/deployment.yaml --show-only templates/service.yaml)
+          for want in 'containerPort: 9100' 'value: ":9100"' 'targetPort: metrics'; do grep -qF -- "$want" <<<"$d" || { echo "metrics: missing $want"; exit 1; }; done
+          n=$(helm template t . $s --show-only templates/networkpolicy.yaml)
+          grep -A4 -F -- '- ports: [{port: 9090, protocol: TCP}]' <<<"$n" | grep -qF 'kubernetes.io/metadata.name: monitoring' || { echo "metrics ingress not limited to the scrapers"; exit 1; }
+          if helm template t . $s --set metrics.scrapeFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: 9090'; then echo "metrics open without scrapers"; exit 1; fi
+          if helm template t . $s --show-only templates/servicemonitor.yaml >/dev/null 2>&1; then echo "ServiceMonitor while off"; exit 1; fi
+          helm template t . $s --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.labels.release=kps --show-only templates/servicemonitor.yaml | grep -qF 'release: kps' || { echo "no ServiceMonitor"; exit 1; }

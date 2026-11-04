@@ -87,18 +87,24 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	}
 }
 
-// startServe runs serve and returns its address and a function that stops it
-// and returns serve's error.
-func startServe(t *testing.T) (string, func() error) {
+func listen(t *testing.T) net.Listener {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	return ln
+}
+
+// startServe runs serve and returns its address, its metrics address and a
+// function that stops it and returns serve's error.
+func startServe(t *testing.T) (string, string, func() error) {
+	t.Helper()
+	ln, mln := listen(t), listen(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
-	go func() { errc <- serve(ctx, ln, quiet) }()
-	return ln.Addr().String(), func() error {
+	go func() { errc <- serve(ctx, ln, mln, quiet) }()
+	return ln.Addr().String(), mln.Addr().String(), func() error {
 		cancel()
 		select {
 		case err := <-errc:
@@ -112,19 +118,24 @@ func startServe(t *testing.T) (string, func() error) {
 func TestServe(t *testing.T) {
 	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
 	t.Setenv("LICENSEFORGE_DRAIN", "3s")
-	addr, stop := startServe(t)
+	addr, maddr, stop := startServe(t)
 	client := &http.Client{Timeout: 2 * time.Second}
+	fetch := func(host, p string) (int, string) {
+		resp, err := client.Get("http://" + host + p)
+		if err != nil {
+			return 0, ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
 	get := func(path ...string) int {
 		p := "/readyz"
 		if len(path) > 0 {
 			p = path[0]
 		}
-		resp, err := client.Get("http://" + addr + p)
-		if err != nil {
-			return 0
-		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
+		code, _ := fetch(addr, p)
+		return code
 	}
 	var code int
 	for range 50 { // the listener is bound; serve may still be opening the database
@@ -135,6 +146,29 @@ func TestServe(t *testing.T) {
 	}
 	if code != http.StatusOK {
 		t.Errorf("readyz = %d", code)
+	}
+	// /metrics is on its own listener only (no auth: never public).
+	if code, body := fetch(addr, "/metrics"); strings.Contains(body, "licenseforge_http_requests_total") || strings.Contains(body, "go_goroutines") {
+		t.Errorf("public listener serves metrics (%d)", code)
+	}
+	code, body := fetch(maddr, "/metrics")
+	for _, want := range []string{
+		`licenseforge_http_requests_total{code="2xx",route="GET /readyz"}`,
+		`licenseforge_db_pool_open_connections{pool="tenant"}`, `licenseforge_db_pool_open_connections{pool="identity"}`,
+		`licenseforge_logins_total{outcome="success"} 0`, "go_goroutines", "process_cpu_seconds_total",
+	} {
+		if code != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("metrics listener: %d, missing %s", code, want)
+		}
+	}
+	if strings.Contains(body, `route="/metrics"`) || strings.Contains(body, `route="GET /metrics"`) {
+		t.Error("scrapes counted as public requests")
+	}
+	if code := get("/metrics"); code == 0 {
+		t.Error("public listener down")
+	}
+	if code, _ := fetch(maddr, "/readyz"); code != http.StatusNotFound {
+		t.Errorf("metrics listener serves /readyz: %d", code)
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- stop() }()
@@ -179,12 +213,8 @@ func TestServeRefuses(t *testing.T) {
 		case "OIDC without client":
 			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
 		}
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a serve that doesn't refuse returns nil here
-		err = serve(ctx, ln, quiet)
+		err := serve(ctx, listen(t), listen(t), quiet)
 		cancel()
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: serve = %v, want %q", name, err, c.want)

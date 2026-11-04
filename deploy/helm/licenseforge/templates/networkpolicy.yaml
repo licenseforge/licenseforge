@@ -1,5 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
-# Server pods: ingress on 8080 only; egress to DNS and the database only.
+# Server pods: ingress on 8080, and on the metrics port from the scrapers only;
+# egress to DNS and the database only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -14,6 +15,11 @@ spec:
       {{- with .Values.networkPolicy.ingressFrom }}
       from: {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- /* Metrics have no auth: only the scrapers, never "any" (no from at all). */}}
+    {{- with .Values.metrics.scrapeFrom }}
+    - ports: [{port: {{ $.Values.metrics.port }}, protocol: TCP}]
+      from: {{- toYaml . | nindent 8 }}
+    {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}
 {{- if .Values.migrate.enabled }}
 ---

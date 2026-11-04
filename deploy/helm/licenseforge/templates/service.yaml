@@ -10,3 +10,7 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+    # Prometheus scrapes here; the NetworkPolicy admits only metrics.scrapeFrom.
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics

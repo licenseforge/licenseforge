@@ -37,6 +37,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
           env:
             # Explicit keys, never envFrom: the owner login must not reach serving pods.
             - name: LICENSEFORGE_DATABASE_URL
@@ -49,6 +51,8 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: master-keys}}
             - name: LICENSEFORGE_DRAIN
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
+            - name: LICENSEFORGE_METRICS_ADDR
+              value: {{ printf ":%d" (int .Values.metrics.port) | quote }}
             {{- with .Values.extraEnv }}{{ toYaml . | nindent 12 }}{{ end }}
           startupProbe: # covers the startup database connect (up to 30s) before liveness applies
             httpGet: {path: /healthz, port: http}
