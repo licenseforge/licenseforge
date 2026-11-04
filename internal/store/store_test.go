@@ -363,14 +363,15 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"platform_all":     "ALL licenseforge_platform true true",
 	}
 	tenantsPolicies := map[string]string{
-		"tenant_read":  "SELECT licenseforge_app ((id)::text = app_tenant_id())",
-		"platform_all": "ALL licenseforge_platform true true",
+		"tenant_read": "SELECT licenseforge_app ((id)::text = app_tenant_id())",
+		// The reserved platform tenant is no tenant to the platform pool either (ADR-0027).
+		"platform_real_tenants": `ALL licenseforge_platform ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text) ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 	}
 	// Policies beyond the canonical ones, pinned: changing one means changing
 	// this list, so it gets reviewed.
 	extra := map[string]map[string]string{ // ADR-0029: identity role and the invitation rules
 		"tenants": {
-			"identity_read": `SELECT licenseforge_identity true`,
+			"identity_read": `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 		},
 		"audit_events": {
 			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
@@ -502,7 +503,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	// not executable by PUBLIC. Triggers and rules run with owner rights and
 	// are refused until reviewed.
 	frows, err := owner.Query(`
-		SELECT p.proname, p.prosecdef, p.prosrc, COALESCE(array_to_string(p.proconfig, ','), ''),
+		SELECT p.proname, p.prosecdef, p.prosrc, COALESCE(array_to_string(p.proconfig, ','), ''), p.provolatile::text,
 		       has_function_privilege('public', p.oid, 'EXECUTE')
 		FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 		WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'`)
@@ -510,9 +511,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	for frows.Next() {
-		var name, src, config string
+		var name, src, config, volatility string
 		var secdef, publicExec bool
-		if err := frows.Scan(&name, &secdef, &src, &config, &publicExec); err != nil {
+		if err := frows.Scan(&name, &secdef, &src, &config, &volatility, &publicExec); err != nil {
 			t.Fatal(err)
 		}
 		switch {
@@ -520,7 +521,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			t.Errorf("function %s: only app_tenant_id is allowed in public; review any new function", name)
 		case secdef || config != "" || publicExec:
 			t.Errorf("app_tenant_id: security definer=%v config=%q executable by PUBLIC=%v", secdef, config, publicExec)
-		case strings.TrimSpace(src) != `SELECT NULLIF(pg_catalog.current_setting('app.tenant_id', true), '')`:
+		case volatility != "s": // STABLE: inlined into policies, so indexes on tenant_id stay usable
+			t.Errorf("app_tenant_id: volatility %q, want STABLE (s)", volatility)
+		// Never the reserved platform tenant (ADR-0027): no tenant or identity policy can reach it.
+		case strings.TrimSpace(src) != `SELECT NULLIF(NULLIF(pg_catalog.current_setting('app.tenant_id', true), ''), 'tnt_platformaaaaaaaaaaaaaaaaaa')`:
 			t.Errorf("app_tenant_id body changed: %q", src)
 		}
 	}
