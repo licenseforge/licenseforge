@@ -20,6 +20,8 @@ type PlatformAdmin struct {
 	ID string `json:"id,omitempty"`
 	// UserID holds the value of the "user_id" field.
 	UserID string `json:"user_id,omitempty"`
+	// Bootstrap holds the value of the "bootstrap" field.
+	Bootstrap bool `json:"bootstrap,omitempty"`
 	// GrantedBy holds the value of the "granted_by" field.
 	GrantedBy *string `json:"granted_by,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -55,6 +57,8 @@ func (*PlatformAdmin) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case platformadmin.FieldBootstrap:
+			values[i] = new(sql.NullBool)
 		case platformadmin.FieldID, platformadmin.FieldUserID, platformadmin.FieldGrantedBy:
 			values[i] = new(sql.NullString)
 		case platformadmin.FieldCreatedAt:
@@ -85,6 +89,12 @@ func (_m *PlatformAdmin) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field user_id", values[i])
 			} else if value.Valid {
 				_m.UserID = value.String
+			}
+		case platformadmin.FieldBootstrap:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field bootstrap", values[i])
+			} else if value.Valid {
+				_m.Bootstrap = value.Bool
 			}
 		case platformadmin.FieldGrantedBy:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -142,6 +152,9 @@ func (_m *PlatformAdmin) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("user_id=")
 	builder.WriteString(_m.UserID)
+	builder.WriteString(", ")
+	builder.WriteString("bootstrap=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Bootstrap))
 	builder.WriteString(", ")
 	if v := _m.GrantedBy; v != nil {
 		builder.WriteString("granted_by=")

@@ -1173,8 +1173,12 @@ func init() {
 	platformadminDescUserID := platformadminFields[1].Descriptor()
 	// platformadmin.UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
 	platformadmin.UserIDValidator = platformadminDescUserID.Validators[0].(func(string) error)
+	// platformadminDescBootstrap is the schema descriptor for bootstrap field.
+	platformadminDescBootstrap := platformadminFields[2].Descriptor()
+	// platformadmin.DefaultBootstrap holds the default value on creation for the bootstrap field.
+	platformadmin.DefaultBootstrap = platformadminDescBootstrap.Default.(bool)
 	// platformadminDescCreatedAt is the schema descriptor for created_at field.
-	platformadminDescCreatedAt := platformadminFields[3].Descriptor()
+	platformadminDescCreatedAt := platformadminFields[4].Descriptor()
 	// platformadmin.DefaultCreatedAt holds the default value on creation for the created_at field.
 	platformadmin.DefaultCreatedAt = platformadminDescCreatedAt.Default.(func() time.Time)
 	// platformadminDescID is the schema descriptor for id field.

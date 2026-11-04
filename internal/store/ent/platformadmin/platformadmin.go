@@ -16,6 +16,8 @@ const (
 	FieldID = "id"
 	// FieldUserID holds the string denoting the user_id field in the database.
 	FieldUserID = "user_id"
+	// FieldBootstrap holds the string denoting the bootstrap field in the database.
+	FieldBootstrap = "bootstrap"
 	// FieldGrantedBy holds the string denoting the granted_by field in the database.
 	FieldGrantedBy = "granted_by"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -37,6 +39,7 @@ const (
 var Columns = []string{
 	FieldID,
 	FieldUserID,
+	FieldBootstrap,
 	FieldGrantedBy,
 	FieldCreatedAt,
 }
@@ -54,6 +57,8 @@ func ValidColumn(column string) bool {
 var (
 	// UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
 	UserIDValidator func(string) error
+	// DefaultBootstrap holds the default value on creation for the "bootstrap" field.
+	DefaultBootstrap bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultID holds the default value on creation for the "id" field.
@@ -73,6 +78,11 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 // ByUserID orders the results by the user_id field.
 func ByUserID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUserID, opts...).ToFunc()
+}
+
+// ByBootstrap orders the results by the bootstrap field.
+func ByBootstrap(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBootstrap, opts...).ToFunc()
 }
 
 // ByGrantedBy orders the results by the granted_by field.

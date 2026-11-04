@@ -27,6 +27,20 @@ func (_c *PlatformAdminCreate) SetUserID(v string) *PlatformAdminCreate {
 	return _c
 }
 
+// SetBootstrap sets the "bootstrap" field.
+func (_c *PlatformAdminCreate) SetBootstrap(v bool) *PlatformAdminCreate {
+	_c.mutation.SetBootstrap(v)
+	return _c
+}
+
+// SetNillableBootstrap sets the "bootstrap" field if the given value is not nil.
+func (_c *PlatformAdminCreate) SetNillableBootstrap(v *bool) *PlatformAdminCreate {
+	if v != nil {
+		_c.SetBootstrap(*v)
+	}
+	return _c
+}
+
 // SetGrantedBy sets the "granted_by" field.
 func (_c *PlatformAdminCreate) SetGrantedBy(v string) *PlatformAdminCreate {
 	_c.mutation.SetGrantedBy(v)
@@ -109,6 +123,10 @@ func (_c *PlatformAdminCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *PlatformAdminCreate) defaults() {
+	if _, ok := _c.mutation.Bootstrap(); !ok {
+		v := platformadmin.DefaultBootstrap
+		_c.mutation.SetBootstrap(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := platformadmin.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -128,6 +146,9 @@ func (_c *PlatformAdminCreate) check() error {
 		if err := platformadmin.UserIDValidator(v); err != nil {
 			return &ValidationError{Name: "user_id", err: fmt.Errorf(`ent: validator failed for field "PlatformAdmin.user_id": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.Bootstrap(); !ok {
+		return &ValidationError{Name: "bootstrap", err: errors.New(`ent: missing required field "PlatformAdmin.bootstrap"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "PlatformAdmin.created_at"`)}
@@ -174,6 +195,10 @@ func (_c *PlatformAdminCreate) createSpec() (*PlatformAdmin, *sqlgraph.CreateSpe
 	if id, ok := _c.mutation.ID(); ok {
 		_node.ID = id
 		_spec.ID.Value = id
+	}
+	if value, ok := _c.mutation.Bootstrap(); ok {
+		_spec.SetField(platformadmin.FieldBootstrap, field.TypeBool, value)
+		_node.Bootstrap = value
 	}
 	if value, ok := _c.mutation.GrantedBy(); ok {
 		_spec.SetField(platformadmin.FieldGrantedBy, field.TypeString, value)

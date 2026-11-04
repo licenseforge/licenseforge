@@ -672,6 +672,7 @@ var (
 	// PlatformAdminsColumns holds the columns for the "platform_admins" table.
 	PlatformAdminsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "bootstrap", Type: field.TypeBool, Default: false},
 		{Name: "granted_by", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "user_id", Type: field.TypeString, Unique: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -684,16 +685,9 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "platform_admins_users_platform_admin",
-				Columns:    []*schema.Column{PlatformAdminsColumns[3]},
+				Columns:    []*schema.Column{PlatformAdminsColumns[4]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
-			},
-		},
-		Indexes: []*schema.Index{
-			{
-				Name:    "platformadmin_user_id",
-				Unique:  true,
-				Columns: []*schema.Column{PlatformAdminsColumns[3]},
 			},
 		},
 	}
@@ -1013,6 +1007,7 @@ func init() {
 	PlatformAdminsTable.ForeignKeys[0].RefTable = UsersTable
 	PlatformAdminsTable.Annotation = &entsql.Annotation{}
 	PlatformAdminsTable.Annotation.Checks = map[string]string{
+		"platform_admins_grant":     "(bootstrap AND granted_by IS NULL) OR (NOT bootstrap AND granted_by IS NOT NULL AND (granted_by)::text ~ '^usr_[a-z2-7]{26}$'::text)",
 		"platform_admins_id_format": "id ~ '^pad_[a-z2-7]{26}$'",
 	}
 	ProductsTable.ForeignKeys[0].RefTable = TenantsTable

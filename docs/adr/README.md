@@ -34,3 +34,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0028](0028-postgresql-17-minimum.md) | PostgreSQL 17 minimum | accepted |
 | [ADR-0029](0029-identity-tables-and-tenancy.md) | Identity tables and tenancy | accepted |
 | [ADR-0030](0030-server-uses-the-go-sdk-module-in-tree.md) | Server uses the Go SDK module in-tree | accepted |
+| [ADR-0031](0031-platform-admin-lifecycle.md) | Platform admin lifecycle | accepted |

@@ -70,6 +70,11 @@ func UserID(v string) predicate.PlatformAdmin {
 	return predicate.PlatformAdmin(sql.FieldEQ(FieldUserID, v))
 }
 
+// Bootstrap applies equality check predicate on the "bootstrap" field. It's identical to BootstrapEQ.
+func Bootstrap(v bool) predicate.PlatformAdmin {
+	return predicate.PlatformAdmin(sql.FieldEQ(FieldBootstrap, v))
+}
+
 // GrantedBy applies equality check predicate on the "granted_by" field. It's identical to GrantedByEQ.
 func GrantedBy(v string) predicate.PlatformAdmin {
 	return predicate.PlatformAdmin(sql.FieldEQ(FieldGrantedBy, v))
@@ -143,6 +148,16 @@ func UserIDEqualFold(v string) predicate.PlatformAdmin {
 // UserIDContainsFold applies the ContainsFold predicate on the "user_id" field.
 func UserIDContainsFold(v string) predicate.PlatformAdmin {
 	return predicate.PlatformAdmin(sql.FieldContainsFold(FieldUserID, v))
+}
+
+// BootstrapEQ applies the EQ predicate on the "bootstrap" field.
+func BootstrapEQ(v bool) predicate.PlatformAdmin {
+	return predicate.PlatformAdmin(sql.FieldEQ(FieldBootstrap, v))
+}
+
+// BootstrapNEQ applies the NEQ predicate on the "bootstrap" field.
+func BootstrapNEQ(v bool) predicate.PlatformAdmin {
+	return predicate.PlatformAdmin(sql.FieldNEQ(FieldBootstrap, v))
 }
 
 // GrantedByEQ applies the EQ predicate on the "granted_by" field.

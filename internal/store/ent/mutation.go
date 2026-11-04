@@ -14605,6 +14605,7 @@ type PlatformAdminMutation struct {
 	op            Op
 	typ           string
 	id            *string
+	bootstrap     *bool
 	granted_by    *string
 	created_at    *time.Time
 	clearedFields map[string]struct{}
@@ -14755,6 +14756,42 @@ func (m *PlatformAdminMutation) ResetUserID() {
 	m.user = nil
 }
 
+// SetBootstrap sets the "bootstrap" field.
+func (m *PlatformAdminMutation) SetBootstrap(b bool) {
+	m.bootstrap = &b
+}
+
+// Bootstrap returns the value of the "bootstrap" field in the mutation.
+func (m *PlatformAdminMutation) Bootstrap() (r bool, exists bool) {
+	v := m.bootstrap
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBootstrap returns the old "bootstrap" field's value of the PlatformAdmin entity.
+// If the PlatformAdmin object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlatformAdminMutation) OldBootstrap(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBootstrap is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBootstrap requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBootstrap: %w", err)
+	}
+	return oldValue.Bootstrap, nil
+}
+
+// ResetBootstrap resets all changes to the "bootstrap" field.
+func (m *PlatformAdminMutation) ResetBootstrap() {
+	m.bootstrap = nil
+}
+
 // SetGrantedBy sets the "granted_by" field.
 func (m *PlatformAdminMutation) SetGrantedBy(s string) {
 	m.granted_by = &s
@@ -14901,9 +14938,12 @@ func (m *PlatformAdminMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PlatformAdminMutation) Fields() []string {
-	fields := make([]string, 0, 3)
+	fields := make([]string, 0, 4)
 	if m.user != nil {
 		fields = append(fields, platformadmin.FieldUserID)
+	}
+	if m.bootstrap != nil {
+		fields = append(fields, platformadmin.FieldBootstrap)
 	}
 	if m.granted_by != nil {
 		fields = append(fields, platformadmin.FieldGrantedBy)
@@ -14921,6 +14961,8 @@ func (m *PlatformAdminMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case platformadmin.FieldUserID:
 		return m.UserID()
+	case platformadmin.FieldBootstrap:
+		return m.Bootstrap()
 	case platformadmin.FieldGrantedBy:
 		return m.GrantedBy()
 	case platformadmin.FieldCreatedAt:
@@ -14936,6 +14978,8 @@ func (m *PlatformAdminMutation) OldField(ctx context.Context, name string) (ent.
 	switch name {
 	case platformadmin.FieldUserID:
 		return m.OldUserID(ctx)
+	case platformadmin.FieldBootstrap:
+		return m.OldBootstrap(ctx)
 	case platformadmin.FieldGrantedBy:
 		return m.OldGrantedBy(ctx)
 	case platformadmin.FieldCreatedAt:
@@ -14955,6 +14999,13 @@ func (m *PlatformAdminMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUserID(v)
+		return nil
+	case platformadmin.FieldBootstrap:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBootstrap(v)
 		return nil
 	case platformadmin.FieldGrantedBy:
 		v, ok := value.(string)
@@ -15030,6 +15081,9 @@ func (m *PlatformAdminMutation) ResetField(name string) error {
 	switch name {
 	case platformadmin.FieldUserID:
 		m.ResetUserID()
+		return nil
+	case platformadmin.FieldBootstrap:
+		m.ResetBootstrap()
 		return nil
 	case platformadmin.FieldGrantedBy:
 		m.ResetGrantedBy()
