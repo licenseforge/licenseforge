@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
@@ -21,7 +23,8 @@ type identityFixture struct {
 	d                    *DB
 	a, b                 string // tenant IDs
 	prodA, prodA2, prodB string
-	ownerA, ownerB       string // user IDs
+	ownerA, ownerB       string            // user IDs
+	tokens               map[string]string // invitation ID -> invite link token
 }
 
 func newIdentityFixture(t *testing.T) identityFixture {
@@ -32,7 +35,7 @@ func newIdentityFixture(t *testing.T) identityFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	f := identityFixture{d: d}
+	f := identityFixture{d: d, tokens: map[string]string{}}
 	err = d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []*string{&f.a, &f.b} {
 			t, err := tx.Tenant.Create().SetSlug("t-" + strings.ToLower(ids.New("x")[2:12])).SetName("T").Save(ctx)
@@ -68,28 +71,25 @@ func newIdentityFixture(t *testing.T) identityFixture {
 		tenant, email string
 		id            *string
 	}{{f.a, "owner-a@example.com", &f.ownerA}, {f.b, "owner-b@example.com", &f.ownerB}} {
-		var inv *ent.Invitation
+		tok := newToken()
 		if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
-			var err error
-			inv, err = tx.Invitation.Create().SetTenantID(o.tenant).SetEmail(o.email).SetRole(invitation.RoleOwner).
-				SetScopeAll(true).SetTokenHash(token()).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+			_, err := tx.Invitation.Create().SetTenantID(o.tenant).SetEmail(o.email).SetRole(invitation.RoleOwner).
+				SetScopeAll(true).SetTokenHash(InvitationTokenHash(tok)).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
 		*o.id = f.newUser(t, o.email, true)
-		if err := f.accept(inv, *o.id, acceptOpts{}); err != nil {
+		if _, err := d.AcceptInvitation(ctx, tok, *o.id, nil); err != nil {
 			t.Fatalf("bootstrap owner of %s: %v", o.tenant, err)
 		}
 	}
 	return f
 }
 
-func token() []byte {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return b
-}
+// newToken returns an invite link token (the real format is up to the
+// handler; the database only sees its SHA-256).
+func newToken() string { return rand.Text() }
 
 // newUser logs a user in (identity pool).
 func (f identityFixture) newUser(t *testing.T, email string, verified bool) string {
@@ -121,8 +121,9 @@ func (f identityFixture) invite(t *testing.T, tenant, inviter string, o inviteOp
 	t.Helper()
 	var inv *ent.Invitation
 	err := f.d.WithTenant(context.Background(), tenant, func(tx *ent.Tx) error {
+		tok := newToken()
 		c := tx.Invitation.Create().SetTenantID(tenant).SetEmail(o.email).SetRole(o.role).SetScopeAll(o.products == nil).
-			SetInvitedBy(inviter).SetTokenHash(token()).SetExpiresAt(time.Now().Add(7 * 24 * time.Hour))
+			SetInvitedBy(inviter).SetTokenHash(InvitationTokenHash(tok)).SetExpiresAt(time.Now().Add(7 * 24 * time.Hour))
 		if o.issuer != "" {
 			c.SetIssuer(o.issuer)
 		}
@@ -130,6 +131,7 @@ func (f identityFixture) invite(t *testing.T, tenant, inviter string, o inviteOp
 		if inv, err = c.Save(context.Background()); err != nil {
 			return err
 		}
+		f.tokens[inv.ID] = tok
 		for _, p := range o.products {
 			if _, err := tx.InvitationProduct.Create().SetTenantID(tenant).SetInvitationID(inv.ID).SetProductID(p).Save(context.Background()); err != nil {
 				return err
@@ -144,14 +146,16 @@ func (f identityFixture) invite(t *testing.T, tenant, inviter string, o inviteOp
 }
 
 type acceptOpts struct {
-	tenant   string // app.tenant_id; default the invitation's
+	token    *string // app.invite_token; default the invitation's token
+	tenant   string  // app.tenant_id; default the invitation's
 	role     membership.Role
 	scopeAll *bool
 	products []string
 }
 
-// accept runs the acceptance as the login path would: membership (and its
-// products) first, then mark the invitation accepted, in one transaction.
+// accept writes an acceptance directly, bypassing AcceptInvitation, so tests
+// can probe what the database itself allows (wrong role, scope, tenant...):
+// membership and products first, then the mark, in one transaction.
 func (f identityFixture) accept(inv *ent.Invitation, userID string, o acceptOpts) error {
 	ctx := context.Background()
 	if o.tenant == "" {
@@ -164,7 +168,14 @@ func (f identityFixture) accept(inv *ent.Invitation, userID string, o acceptOpts
 	if o.scopeAll != nil {
 		scopeAll = *o.scopeAll
 	}
+	tok := f.tokens[inv.ID]
+	if o.token != nil {
+		tok = *o.token
+	}
 	return f.d.WithIdentity(ctx, o.tenant, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.invite_token', $1, true)`, tok); err != nil {
+			return err
+		}
 		m, err := tx.Membership.Create().SetTenantID(inv.TenantID).SetUserID(userID).SetRole(o.role).
 			SetScopeAll(scopeAll).SetInvitationID(inv.ID).Save(ctx)
 		if err != nil {
@@ -230,6 +241,8 @@ func TestAcceptanceRefusals(t *testing.T) {
 		accept   acceptOpts
 		prepare  func(*ent.Invitation)
 	}{
+		"no token":      {inviteOpts{email: "a@example.com", role: invitation.RoleViewer}, "a@example.com", true, acceptOpts{token: ptrTo("")}, nil},
+		"wrong token":   {inviteOpts{email: "a@example.com", role: invitation.RoleViewer}, "a@example.com", true, acceptOpts{token: ptrTo("not-the-token")}, nil},
 		"other tenant":  {inviteOpts{email: "a@example.com", role: invitation.RoleViewer}, "a@example.com", true, acceptOpts{tenant: "B"}, nil},
 		"higher role":   {inviteOpts{email: "a@example.com", role: invitation.RoleViewer}, "a@example.com", true, acceptOpts{role: membership.RoleOwner}, nil},
 		"wider scope":   {inviteOpts{email: "a@example.com", role: invitation.RoleSupport, products: []string{"A"}}, "a@example.com", true, acceptOpts{scopeAll: ptrTo(true)}, nil},
@@ -266,8 +279,8 @@ func TestAcceptanceRefusals(t *testing.T) {
 			if c.prepare != nil {
 				c.prepare(inv)
 			}
-			if err := f.accept(inv, u, c.accept); err == nil {
-				t.Fatal("accepted")
+			if err := f.accept(inv, u, c.accept); err == nil || !strings.Contains(err.Error(), "row-level security") {
+				t.Fatalf("accept = %v, want a row-level security refusal", err)
 			}
 			if f.sees(t, f.a, u) {
 				t.Error("the user became visible to the tenant")
@@ -361,10 +374,14 @@ func TestTenantPoolCantAddMembers(t *testing.T) {
 
 func TestInviterMustBeMember(t *testing.T) {
 	f := newIdentityFixture(t)
-	for name, inviter := range map[string]string{"another tenant's owner": f.ownerB, "unknown user": ids.User()} {
+	for name, inviter := range map[string]string{"another tenant's owner": f.ownerB, "no inviter": ""} {
 		err := f.d.WithTenant(context.Background(), f.a, func(tx *ent.Tx) error {
-			_, err := tx.Invitation.Create().SetTenantID(f.a).SetEmail("z@example.com").SetRole(invitation.RoleViewer).SetScopeAll(true).
-				SetInvitedBy(inviter).SetTokenHash(token()).SetExpiresAt(time.Now().Add(time.Hour)).Save(context.Background())
+			c := tx.Invitation.Create().SetTenantID(f.a).SetEmail("z@example.com").SetRole(invitation.RoleViewer).SetScopeAll(true).
+				SetTokenHash(InvitationTokenHash(newToken())).SetExpiresAt(time.Now().Add(time.Hour))
+			if inviter != "" {
+				c.SetInvitedBy(inviter)
+			}
+			_, err := c.Save(context.Background())
 			return err
 		})
 		if err == nil {
@@ -415,6 +432,175 @@ func TestMemberRolesMatchAuthz(t *testing.T) {
 			if (valid == nil) != r.ForMembership() {
 				t.Errorf("%s role %q: valid=%v, authz ForMembership=%v", name, r, valid == nil, r.ForMembership())
 			}
+		}
+	}
+}
+
+func TestAcceptInvitation(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "s@example.com", role: invitation.RoleSupport, products: []string{f.prodA, f.prodA2}})
+	u := f.newUser(t, "s@example.com", true)
+	// record runs in the acceptance's transaction: its error undoes the membership.
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, func(*ent.Tx, *ent.Membership) error { return context.Canceled }); err == nil || f.sees(t, f.a, u) {
+		t.Fatalf("a failed record left the membership: %v", err)
+	}
+	if _, err := f.d.AcceptInvitation(ctx, "not-the-token", u, nil); !errors.Is(err, ErrInvitation) {
+		t.Errorf("wrong token: %v", err)
+	}
+	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Role != membership.RoleSupport || m.ScopeAll || m.TenantID != f.a {
+		t.Errorf("membership = %+v", m)
+	}
+	var n int
+	if err := f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		var err error
+		n, err = tx.MembershipProduct.Query().Where(membershipproduct.MembershipID(m.ID)).Count(ctx)
+		return err
+	}); err != nil || n != 2 {
+		t.Errorf("copied products = %d, %v", n, err)
+	}
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], f.newUser(t, "s@example.com", true), nil); !errors.Is(err, ErrInvitation) {
+		t.Errorf("second use: %v", err)
+	}
+}
+
+// A revoke holding the invitation's row lock makes a concurrent accept wait,
+// then refuse; it never leaves a membership on a revoked invitation.
+func TestAcceptWaitsForConcurrentRevoke(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "r@example.com", role: invitation.RoleViewer})
+	u := f.newUser(t, "r@example.com", true)
+	locked, done := make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if err := tx.Invitation.UpdateOneID(inv.ID).SetRevokedAt(time.Now()).Exec(ctx); err != nil {
+				return err
+			}
+			close(locked)
+			time.Sleep(500 * time.Millisecond)
+			return nil
+		})
+	}()
+	<-locked
+	if _, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil); !errors.Is(err, ErrInvitation) {
+		t.Errorf("accept during revoke: %v, want ErrInvitation", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if f.sees(t, f.a, u) {
+		t.Error("membership on a revoked invitation")
+	}
+}
+
+// After acceptance, the identity pool can't re-add a product an admin removed.
+func TestScopeCantBeReaddedAfterAcceptance(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "q@example.com", role: invitation.RoleSupport, products: []string{f.prodA, f.prodA2}})
+	u := f.newUser(t, "q@example.com", true)
+	m, err := f.d.AcceptInvitation(ctx, f.tokens[inv.ID], u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		_, err := tx.MembershipProduct.Delete().Where(membershipproduct.MembershipID(m.ID), membershipproduct.ProductID(f.prodA2)).Exec(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = f.d.WithIdentity(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.invite_token', $1, true)`, f.tokens[inv.ID]); err != nil {
+			return err
+		}
+		_, err := tx.MembershipProduct.Create().SetTenantID(f.a).SetMembershipID(m.ID).SetProductID(f.prodA2).Save(ctx)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "row-level security") {
+		t.Errorf("re-added product: %v", err)
+	}
+}
+
+// The tenant pool creates open invitations and revokes them; nothing else.
+func TestTenantPoolInvitationRights(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.a, f.ownerA, inviteOpts{email: "w@example.com", role: invitation.RoleViewer})
+	tenantExec := func(q string, args ...any) error {
+		return f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error { _, err := tx.ExecContext(ctx, q, args...); return err })
+	}
+	for name, q := range map[string]string{
+		"pre-accepted": `INSERT INTO invitations (id, tenant_id, email, role, scope_all, invited_by, token_hash, expires_at, created_at, updated_at, accepted_at, accepted_by) VALUES ('` + ids.Invitation() + `', $1, 'p@example.com', 'owner', true, $2, $3, now() + interval '1 day', now(), now(), now(), $2)`,
+		"change role":  `UPDATE invitations SET role = 'owner' WHERE tenant_id = $1 AND invited_by = $2 AND token_hash <> $3`,
+		"change email": `UPDATE invitations SET email = 'evil@example.com' WHERE tenant_id = $1 AND invited_by = $2 AND token_hash <> $3`,
+	} {
+		if err := tenantExec(q, f.a, f.ownerA, InvitationTokenHash(newToken())); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("%s: %v, want permission denied", name, err)
+		}
+	}
+	if err := tenantExec(`UPDATE invitations SET revoked_at = now() WHERE id = $1`, inv.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	// Un-revoking matches no row (revoke_only hides revoked invitations from UPDATE).
+	if err := tenantExec(`UPDATE invitations SET revoked_at = NULL WHERE id = $1`, inv.ID); err != nil {
+		t.Fatal(err)
+	}
+	var revoked int
+	if err := f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		var err error
+		revoked, err = tx.Invitation.Query().Where(invitation.ID(inv.ID), invitation.RevokedAtNotNil()).Count(ctx)
+		return err
+	}); err != nil || revoked != 1 {
+		t.Errorf("un-revoke took effect: %d, %v", revoked, err)
+	}
+}
+
+// Grants are part of the design (column grants carry most of the identity
+// rules); pin the ones that matter.
+func TestIdentityGrants(t *testing.T) {
+	owner, err := openPool(env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	for _, g := range []struct {
+		role, table, column, priv string
+		want                      bool
+	}{
+		{AppRole, "users", "id", "SELECT", true},
+		{AppRole, "users", "issuer", "SELECT", false},
+		{AppRole, "users", "email", "UPDATE", false},
+		{AppRole, "memberships", "id", "INSERT", false},
+		{AppRole, "memberships", "role", "UPDATE", true},
+		{AppRole, "memberships", "user_id", "UPDATE", false},
+		{AppRole, "invitations", "accepted_at", "INSERT", false},
+		{AppRole, "invitations", "accepted_by", "INSERT", false},
+		{AppRole, "invitations", "revoked_at", "INSERT", false},
+		{AppRole, "invitations", "role", "UPDATE", false},
+		{AppRole, "invitations", "revoked_at", "UPDATE", true},
+		{IdentityRole, "users", "disabled_at", "UPDATE", false},
+		{IdentityRole, "users", "issuer", "UPDATE", false},
+		{IdentityRole, "users", "disabled_at", "INSERT", false},
+		{IdentityRole, "users", "email", "UPDATE", true},
+		{IdentityRole, "invitations", "role", "UPDATE", false},
+		{IdentityRole, "invitations", "accepted_at", "UPDATE", true},
+		{IdentityRole, "invitations", "id", "INSERT", false},
+		{IdentityRole, "memberships", "role", "UPDATE", false},
+		{IdentityRole, "tenants", "slug", "SELECT", true},
+		{IdentityRole, "tenants", "created_at", "SELECT", false},
+		{IdentityRole, "audit_events", "id", "UPDATE", false},
+	} {
+		var got bool
+		if err := owner.QueryRow(`SELECT has_column_privilege($1, $2, $3, $4)`, g.role, g.table, g.column, g.priv).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != g.want {
+			t.Errorf("%s %s on %s.%s = %v, want %v", g.role, g.priv, g.table, g.column, got, g.want)
 		}
 	}
 }

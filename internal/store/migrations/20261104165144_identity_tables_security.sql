@@ -55,7 +55,10 @@ CREATE POLICY migrator_all ON "users" TO CURRENT_USER USING (true) WITH CHECK (t
 -- invitations: tenant admins create and revoke; identity marks one accepted
 -- after inserting its membership (identity_mark_accepted). Never deleted by
 -- serving roles; role, scope, email and token never change.
-GRANT SELECT, INSERT ON "invitations" TO licenseforge_app;
+GRANT SELECT ON "invitations" TO licenseforge_app;
+-- Not accepted_at, accepted_by or revoked_at: an invitation starts open.
+GRANT INSERT ("id", "tenant_id", "email", "role", "scope_all", "issuer", "invited_by", "token_hash", "expires_at", "created_at", "updated_at")
+  ON "invitations" TO licenseforge_app;
 GRANT UPDATE ("revoked_at", "updated_at") ON "invitations" TO licenseforge_app;
 GRANT SELECT ON "invitations" TO licenseforge_identity;
 GRANT UPDATE ("accepted_at", "accepted_by", "updated_at") ON "invitations" TO licenseforge_identity;
@@ -68,6 +71,9 @@ CREATE POLICY tenant_isolation ON "invitations" TO licenseforge_app
 -- which user IDs exist through the foreign key.
 CREATE POLICY inviter_is_member ON "invitations" AS RESTRICTIVE FOR INSERT TO licenseforge_app
   WITH CHECK (EXISTS (SELECT 1 FROM "memberships" m WHERE m."tenant_id" = "invitations"."tenant_id" AND m."user_id" = "invitations"."invited_by"));
+-- The tenant pool only revokes open invitations; it never un-revokes.
+CREATE POLICY revoke_only ON "invitations" AS RESTRICTIVE FOR UPDATE TO licenseforge_app
+  USING ("revoked_at" IS NULL AND "accepted_at" IS NULL) WITH CHECK ("revoked_at" IS NOT NULL);
 CREATE POLICY identity_read ON "invitations" FOR SELECT TO licenseforge_identity USING (true);
 CREATE POLICY identity_mark_accepted ON "invitations" FOR UPDATE TO licenseforge_identity
   USING ("accepted_at" IS NULL AND "revoked_at" IS NULL AND "expires_at" > clock_timestamp())
@@ -91,7 +97,11 @@ CREATE POLICY migrator_all ON "invitation_products" TO CURRENT_USER USING (true)
 -- one (identity_accept), in the invitation's tenant, with its role and scope,
 -- for a user whose verified email matches (NFC, case-insensitive, the same
 -- function on both sides) and, if the invitation is bound to an issuer, from
--- that issuer. invitation_id is unique: an invitation is used once.
+-- that issuer, presenting the invite link's token (app.invite_token, set by
+-- DB.AcceptInvitation; its SHA-256 must match). invitation_id is unique: an
+-- invitation is used once. Note: NFC is canonical equivalence, so e.g. the
+-- Kelvin sign compares equal to K; only an IdP that verifies such an address
+-- could use that, and the token is still needed.
 GRANT SELECT, DELETE ON "memberships" TO licenseforge_app;
 GRANT UPDATE ("role", "scope_all", "updated_at") ON "memberships" TO licenseforge_app;
 GRANT SELECT, INSERT ON "memberships" TO licenseforge_identity;
@@ -108,11 +118,14 @@ CREATE POLICY identity_accept ON "memberships" FOR INSERT TO licenseforge_identi
       AND i."accepted_at" IS NULL AND i."revoked_at" IS NULL AND i."expires_at" > clock_timestamp()
       AND u."email_verified" AND u."disabled_at" IS NULL
       AND lower(normalize(u."email", NFC)) = lower(normalize(i."email", NFC))
-      AND (i."issuer" IS NULL OR i."issuer" = u."issuer")));
+      AND (i."issuer" IS NULL OR i."issuer" = u."issuer")
+      AND i."token_hash" = sha256(convert_to(current_setting('app.invite_token', true), 'UTF8'))));
 CREATE POLICY platform_all ON "memberships" TO licenseforge_platform USING (true) WITH CHECK (true);
 CREATE POLICY migrator_all ON "memberships" TO CURRENT_USER USING (true) WITH CHECK (true);
 
--- membership_products: identity copies exactly the invitation's products.
+-- membership_products: identity copies exactly the invitation's products, and
+-- only during the acceptance (the invitation is still open): it can't re-add a
+-- product an admin removed later.
 GRANT SELECT, INSERT, DELETE ON "membership_products" TO licenseforge_app;
 GRANT SELECT, INSERT ON "membership_products" TO licenseforge_identity;
 GRANT SELECT, INSERT, DELETE ON "membership_products" TO licenseforge_platform;
@@ -123,13 +136,17 @@ CREATE POLICY tenant_isolation ON "membership_products" TO licenseforge_app
 CREATE POLICY identity_read ON "membership_products" FOR SELECT TO licenseforge_identity USING (true);
 CREATE POLICY identity_copy_scope ON "membership_products" FOR INSERT TO licenseforge_identity
   WITH CHECK ("tenant_id" = app_tenant_id() AND EXISTS (SELECT 1 FROM "memberships" m
+    JOIN "invitations" i ON i."id" = m."invitation_id"
     JOIN "invitation_products" ip ON ip."invitation_id" = m."invitation_id" AND ip."tenant_id" = m."tenant_id"
-    WHERE m."id" = "membership_products"."membership_id" AND ip."product_id" = "membership_products"."product_id"));
+    WHERE m."id" = "membership_products"."membership_id" AND ip."product_id" = "membership_products"."product_id"
+      AND i."accepted_at" IS NULL AND i."revoked_at" IS NULL));
 CREATE POLICY platform_all ON "membership_products" TO licenseforge_platform USING (true) WITH CHECK (true);
 CREATE POLICY migrator_all ON "membership_products" TO CURRENT_USER USING (true) WITH CHECK (true);
 
 -- audit_events: identity records an acceptance in the invitation's tenant, in
--- the same transaction (ADR-0027). audit.Record reads the chain head.
+-- the same transaction (ADR-0027). audit.Record reads the chain head, so
+-- identity can read the audit chain of the tenant it sets (accepted: the
+-- login path sees audit data, not licensing tables).
 -- ponytail: exclude the reserved platform tenant here once it exists.
 GRANT SELECT, INSERT ON "audit_events" TO licenseforge_identity;
 CREATE POLICY identity_audit ON "audit_events" TO licenseforge_identity

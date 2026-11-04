@@ -378,17 +378,18 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
+			"revoke_only (restrictive)":       `UPDATE licenseforge_app ((revoked_at IS NULL) AND (accepted_at IS NULL)) (revoked_at IS NOT NULL)`,
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
 		"invitation_products": {
 			"identity_read": `SELECT licenseforge_identity true`,
 		},
 		"memberships": {
-			"identity_accept": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (invitations i JOIN users u ON (((u.id)::text = (memberships.user_id)::text))) WHERE (((i.id)::text = (memberships.invitation_id)::text) AND ((i.tenant_id)::text = (memberships.tenant_id)::text) AND ((i.role)::text = (memberships.role)::text) AND (i.scope_all = memberships.scope_all) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL) AND (i.expires_at > clock_timestamp()) AND u.email_verified AND (u.disabled_at IS NULL) AND (lower(NORMALIZE(u.email, NFC)) = lower(NORMALIZE(i.email, NFC))) AND ((i.issuer IS NULL) OR ((i.issuer)::text = (u.issuer)::text))))))`,
+			"identity_accept": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (invitations i JOIN users u ON (((u.id)::text = (memberships.user_id)::text))) WHERE (((i.id)::text = (memberships.invitation_id)::text) AND ((i.tenant_id)::text = (memberships.tenant_id)::text) AND ((i.role)::text = (memberships.role)::text) AND (i.scope_all = memberships.scope_all) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL) AND (i.expires_at > clock_timestamp()) AND u.email_verified AND (u.disabled_at IS NULL) AND (lower(NORMALIZE(u.email, NFC)) = lower(NORMALIZE(i.email, NFC))) AND ((i.issuer IS NULL) OR ((i.issuer)::text = (u.issuer)::text)) AND (i.token_hash = sha256(convert_to(current_setting('app.invite_token'::text, true), 'UTF8'::name)))))))`,
 			"identity_read":   `SELECT licenseforge_identity true`,
 		},
 		"membership_products": {
-			"identity_copy_scope": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM (memberships m JOIN invitation_products ip ON ((((ip.invitation_id)::text = (m.invitation_id)::text) AND ((ip.tenant_id)::text = (m.tenant_id)::text)))) WHERE (((m.id)::text = (membership_products.membership_id)::text) AND ((ip.product_id)::text = (membership_products.product_id)::text)))))`,
+			"identity_copy_scope": `INSERT licenseforge_identity (((tenant_id)::text = app_tenant_id()) AND (EXISTS ( SELECT 1 FROM ((memberships m JOIN invitations i ON (((i.id)::text = (m.invitation_id)::text))) JOIN invitation_products ip ON ((((ip.invitation_id)::text = (m.invitation_id)::text) AND ((ip.tenant_id)::text = (m.tenant_id)::text)))) WHERE (((m.id)::text = (membership_products.membership_id)::text) AND ((ip.product_id)::text = (membership_products.product_id)::text) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL)))))`,
 			"identity_read":       `SELECT licenseforge_identity true`,
 		},
 	}
