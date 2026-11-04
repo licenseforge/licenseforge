@@ -57,6 +57,30 @@ func TestInstrumentLabelsByRoutePattern(t *testing.T) {
 	}
 }
 
+// A nested mux (the API) reports its finer pattern; without one the mount counts.
+func TestSetRoute(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("GET /api/v1/things/{id}", func(http.ResponseWriter, *http.Request) {})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+		if _, p := inner.Handler(r); p != "" {
+			SetRoute(r.Context(), p)
+		}
+		inner.ServeHTTP(w, r)
+	})
+	h := Instrument(mux)
+	for _, p := range []string{"/api/v1/things/thg_secret", "/api/v1/other"} {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, p, nil))
+	}
+	if n := testutil.ToFloat64(requests.WithLabelValues("GET /api/v1/things/{id}", "2xx")); n != 1 {
+		t.Errorf("inner pattern = %v", n)
+	}
+	if n := testutil.ToFloat64(requests.WithLabelValues("/api/v1/", "4xx")); n != 1 {
+		t.Errorf("mount for an unrouted API path = %v", n)
+	}
+	SetRoute(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "x") // outside Instrument: no-op
+}
+
 func TestCounters(t *testing.T) {
 	before := testutil.ToFloat64(Logins.v.WithLabelValues("denied"))
 	Logins.Inc(Denied)

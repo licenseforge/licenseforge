@@ -22,7 +22,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: pass it with `secretKeyRef`, never as a literal |
 | `LICENSEFORGE_OIDC_REDIRECT_URL` | with the issuer | – | `https://<public host>/auth/callback`. Its origin is the only trusted origin for unsafe requests (CSRF) |
 
-`LICENSEFORGE_BOOTSTRAP_ADMIN` (first platform admin, ADR-0029) isn't read by the server yet.
+`LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 
 ## Database logins
 

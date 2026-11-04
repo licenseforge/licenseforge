@@ -9,6 +9,7 @@
 package metrics
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
@@ -78,19 +79,37 @@ func Handler() http.Handler { return promhttp.HandlerFor(Registry, promhttp.Hand
 
 // Instrument counts requests to mux by the pattern that matched ("GET
 // /healthz"), never the raw path; requests no pattern matched count as
-// "unmatched".
+// "unmatched". A subtree with its own mux (the API) reports its finer
+// pattern with SetRoute.
 func Instrument(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
-		mux.ServeHTTP(sw, r) // sets r.Pattern
-		route := r.Pattern
+		// Routed up front: a nested mux handed the same request would overwrite r.Pattern.
+		_, route := mux.Handler(r)
+		var inner string
+		r = r.WithContext(context.WithValue(r.Context(), routeKey{}, &inner))
+		mux.ServeHTTP(sw, r)
+		if inner != "" {
+			route = inner
+		}
 		if route == "" {
 			route = "unmatched"
 		}
 		requests.WithLabelValues(route, strconv.Itoa(sw.code/100)+"xx").Inc()
 		duration.WithLabelValues(route).Observe(time.Since(start).Seconds())
 	})
+}
+
+type routeKey struct{}
+
+// SetRoute reports the pattern a nested mux matched for this request (e.g.
+// "GET /api/v1/tenants/{tenant}/api-tokens"); Instrument labels the request
+// with it instead of the outer mount. Patterns only, never a raw path.
+func SetRoute(ctx context.Context, pattern string) {
+	if p, ok := ctx.Value(routeKey{}).(*string); ok && pattern != "" {
+		*p = pattern
+	}
 }
 
 type statusWriter struct {

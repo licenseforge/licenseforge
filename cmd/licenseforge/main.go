@@ -16,6 +16,8 @@
 //	LICENSEFORGE_OIDC_CLIENT_ID         OIDC client registration, required with the issuer
 //	LICENSEFORGE_OIDC_CLIENT_SECRET     empty for a public client (PKCE only)
 //	LICENSEFORGE_OIDC_REDIRECT_URL      https://<host>/auth/callback
+//	LICENSEFORGE_API_HOST               API-only host (api.example.com): tokens only there, sessions only elsewhere; unset = both
+//	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -35,6 +37,8 @@ import (
 	"syscall"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/api"
+	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
@@ -153,6 +157,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		return db.Ping(ctx)
 	}
 	mux := newMux(ready, log)
+	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		login, err := weblogin.New(discoverCtx, weblogin.Config{
@@ -160,15 +165,21 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 			ClientID:     os.Getenv("LICENSEFORGE_OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
+			// Read only here, at start: a later change needs a restart.
+			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
 		}, identity.Service{DB: db}, log)
 		cancel()
 		if err != nil {
 			return err
 		}
 		login.Register(mux)
+		sessions = login.Sessions()
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
+	// API tokens need only the tenant pool (hashes, no keyring).
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Identity: identity.Service{DB: db},
+		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}

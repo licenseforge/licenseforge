@@ -38,9 +38,9 @@ fmt:
 run:
 	go run ./cmd/licenseforge
 
-# Code generation (ent). CI fails if generated code is stale.
+# Code generation (ent, oapi-codegen). CI fails if generated code is stale.
 generate:
-	go generate ./internal/store
+	go generate ./internal/store ./internal/api/apigen
 
 # Throwaway PostgreSQL for tests and migration generation.
 DEV_DB_IMAGE := postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
