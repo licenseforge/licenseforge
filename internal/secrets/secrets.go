@@ -43,7 +43,10 @@ var (
 type Purpose string
 
 // Purposes in use.
-const PurposeLicenseKey Purpose = "license_key"
+const (
+	PurposeLicenseKey          Purpose = "license_key"
+	PurposeIdempotencyResponse Purpose = "idempotency_response" // stored response bodies (internal/idempotency)
+)
 
 // Binding is what a ciphertext belongs to. Decrypt needs the same binding as
 // Encrypt, so a ciphertext copied to another row, tenant or purpose fails.

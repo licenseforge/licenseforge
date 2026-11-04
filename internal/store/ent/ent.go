@@ -18,6 +18,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/invitationproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
@@ -97,6 +98,7 @@ func checkColumn(t, c string) error {
 			auditevent.Table:        auditevent.ValidColumn,
 			customer.Table:          customer.ValidColumn,
 			feature.Table:           feature.ValidColumn,
+			idempotencykey.Table:    idempotencykey.ValidColumn,
 			invitation.Table:        invitation.ValidColumn,
 			invitationproduct.Table: invitationproduct.ValidColumn,
 			license.Table:           license.ValidColumn,
