@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Release workflow (ADR-0005, ADR-0021, ADR-0024) on `v*` tags: multi-arch (amd64, arm64) standard and `-fips` images on `ghcr.io/licenseforge/licenseforge`, Helm chart on `oci://ghcr.io/licenseforge/charts`, linux server binaries with `SHA256SUMS`; all signed keyless with cosign, with SPDX SBOM and SLSA provenance attestations (`actions/attest`). Built with a read-only token, published by separate jobs; PRs touching the release inputs run the build as a dry run. The image build cross-compiles instead of emulating arm64. How to verify: `docs/verifying-releases.md`.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0031 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.
