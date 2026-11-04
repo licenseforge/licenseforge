@@ -17,30 +17,57 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for MemberRole.
+const (
+	MemberRoleAdmin   MemberRole = "admin"
+	MemberRoleManager MemberRole = "manager"
+	MemberRoleOwner   MemberRole = "owner"
+	MemberRoleSupport MemberRole = "support"
+	MemberRoleViewer  MemberRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the MemberRole enum.
+func (e MemberRole) Valid() bool {
+	switch e {
+	case MemberRoleAdmin:
+		return true
+	case MemberRoleManager:
+		return true
+	case MemberRoleOwner:
+		return true
+	case MemberRoleSupport:
+		return true
+	case MemberRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
-	Admin   Role = "admin"
-	Manager Role = "manager"
-	Owner   Role = "owner"
-	Sdk     Role = "sdk"
-	Support Role = "support"
-	Viewer  Role = "viewer"
+	RoleAdmin   Role = "admin"
+	RoleManager Role = "manager"
+	RoleOwner   Role = "owner"
+	RoleSdk     Role = "sdk"
+	RoleSupport Role = "support"
+	RoleViewer  Role = "viewer"
 )
 
 // Valid indicates whether the value is a known member of the Role enum.
 func (e Role) Valid() bool {
 	switch e {
-	case Admin:
+	case RoleAdmin:
 		return true
-	case Manager:
+	case RoleManager:
 		return true
-	case Owner:
+	case RoleOwner:
 		return true
-	case Sdk:
+	case RoleSdk:
 		return true
-	case Support:
+	case RoleSupport:
 		return true
-	case Viewer:
+	case RoleViewer:
 		return true
 	default:
 		return false
@@ -119,6 +146,42 @@ type ApiTokenPage struct {
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
+// Member defines model for Member.
+type Member struct {
+	AllProducts bool      `json:"all_products"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// Email Verified email
+	Email *string `json:"email"`
+
+	// Id Example: mem_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id         string     `json:"id"`
+	Name       *string    `json:"name"`
+	ProductIds []string   `json:"product_ids"`
+	Role       MemberRole `json:"role"`
+	UserId     string     `json:"user_id"`
+}
+
+// MemberPage defines model for MemberPage.
+type MemberPage struct {
+	Items []Member `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// MemberPatch Absent fields stay; none is nullable (null answers 422).
+type MemberPatch struct {
+	AllProducts *bool `json:"all_products,omitempty"`
+
+	// ProductIds Replaces the product scope; with all_products absent or false.
+	ProductIds *[]string   `json:"product_ids,omitempty"`
+	Role       *MemberRole `json:"role,omitempty"`
+}
+
+// MemberRole defines model for MemberRole.
+type MemberRole string
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Stable; clients switch on it. New codes may be added.
@@ -159,8 +222,25 @@ type ListApiTokensParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// ListMembersParams defines parameters for ListMembers.
+type ListMembersParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// RemoveMemberParams defines parameters for RemoveMember.
+type RemoveMemberParams struct {
+	// RevokeTokens Also revoke every active API token the member created, each audited.
+	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+}
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
+
+// UpdateMemberApplicationMergePatchPlusJSONRequestBody defines body for UpdateMember for application/merge-patch+json ContentType.
+type UpdateMemberApplicationMergePatchPlusJSONRequestBody = MemberPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -173,6 +253,15 @@ type ServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
+	// ListMembers List the tenant's members, newest first.
+	// (GET /tenants/{tenant}/members)
+	ListMembers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListMembersParams)
+	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// (DELETE /tenants/{tenant}/members/{id})
+	RemoveMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params RemoveMemberParams)
+	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
+	// (PATCH /tenants/{tenant}/members/{id})
+	UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -291,6 +380,147 @@ func (siw *ServerInterfaceWrapper) RevokeApiToken(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeApiToken(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMembersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMembers(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RemoveMemberParams
+
+	// ------------- Optional query parameter "revoke_tokens" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_tokens", r.URL.Query(), &params.RevokeTokens, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_tokens"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_tokens", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveMember(w, r, tenant, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMember operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMember(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -423,6 +653,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.ListApiTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.CreateApiToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens/{id}/revoke", wrapper.RevokeApiToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/members", wrapper.ListMembers)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tenants/{tenant}/members/{id}", wrapper.RemoveMember)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/members/{id}", wrapper.UpdateMember)
 
 	return m
 }
@@ -826,6 +1059,440 @@ func (response RevokeApiToken404ApplicationProblemPlusJSONResponse) VisitRevokeA
 	return err
 }
 
+type ListMembersRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListMembersParams
+}
+
+type ListMembersResponseObject interface {
+	VisitListMembersResponse(w http.ResponseWriter) error
+}
+
+type ListMembers200JSONResponse MemberPage
+
+func (response ListMembers200JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListMembers400ApplicationProblemPlusJSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListMembers401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListMembers401ResponseHeaders
+}
+
+func (response ListMembers401ApplicationProblemPlusJSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListMembers403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListMembers403ResponseHeaders
+}
+
+func (response ListMembers403ApplicationProblemPlusJSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListMembers404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListMembers404ResponseHeaders
+}
+
+func (response ListMembers404ApplicationProblemPlusJSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMemberRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     string `json:"id"`
+	Params RemoveMemberParams
+}
+
+type RemoveMemberResponseObject interface {
+	VisitRemoveMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveMember204Response struct {
+}
+
+func (response RemoveMember204Response) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveMember400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveMember400ApplicationProblemPlusJSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RemoveMember401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RemoveMember401ResponseHeaders
+}
+
+func (response RemoveMember401ApplicationProblemPlusJSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RemoveMember403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RemoveMember403ResponseHeaders
+}
+
+func (response RemoveMember403ApplicationProblemPlusJSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RemoveMember404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RemoveMember404ResponseHeaders
+}
+
+func (response RemoveMember404ApplicationProblemPlusJSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RemoveMember409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RemoveMember409ResponseHeaders
+}
+
+func (response RemoveMember409ApplicationProblemPlusJSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMemberRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     string `json:"id"`
+	Body   *UpdateMemberApplicationMergePatchPlusJSONRequestBody
+}
+
+type UpdateMemberResponseObject interface {
+	VisitUpdateMemberResponse(w http.ResponseWriter) error
+}
+
+type UpdateMember200JSONResponse Member
+
+func (response UpdateMember200JSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMember400ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember401ResponseHeaders
+}
+
+func (response UpdateMember401ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember403ResponseHeaders
+}
+
+func (response UpdateMember403ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember404ResponseHeaders
+}
+
+func (response UpdateMember404ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember409ResponseHeaders
+}
+
+func (response UpdateMember409ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember413ResponseHeaders
+}
+
+func (response UpdateMember413ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMember422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateMember422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateMember422ResponseHeaders
+}
+
+func (response UpdateMember422ApplicationProblemPlusJSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
@@ -837,6 +1504,15 @@ type StrictServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(ctx context.Context, request RevokeApiTokenRequestObject) (RevokeApiTokenResponseObject, error)
+	// ListMembers List the tenant's members, newest first.
+	// (GET /tenants/{tenant}/members)
+	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
+	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// (DELETE /tenants/{tenant}/members/{id})
+	RemoveMember(ctx context.Context, request RemoveMemberRequestObject) (RemoveMemberResponseObject, error)
+	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
+	// (PATCH /tenants/{tenant}/members/{id})
+	UpdateMember(ctx context.Context, request UpdateMemberRequestObject) (UpdateMemberResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -958,6 +1634,95 @@ func (sh *strictHandler) RevokeApiToken(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeApiTokenResponseObject); ok {
 		if err := validResponse.VisitRevokeApiTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMembers operation middleware
+func (sh *strictHandler) ListMembers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListMembersParams) {
+	var request ListMembersRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMembers(ctx, request.(ListMembersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMembers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMembersResponseObject); ok {
+		if err := validResponse.VisitListMembersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMember operation middleware
+func (sh *strictHandler) RemoveMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params RemoveMemberParams) {
+	var request RemoveMemberRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMember(ctx, request.(RemoveMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMember operation middleware
+func (sh *strictHandler) UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string) {
+	var request UpdateMemberRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	var body UpdateMemberApplicationMergePatchPlusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMember(ctx, request.(UpdateMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMemberResponseObject); ok {
+		if err := validResponse.VisitUpdateMemberResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

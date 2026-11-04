@@ -82,6 +82,74 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/members:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listMembers
+      summary: List the tenant's members, newest first.
+      description: Needs member:read on every product; a product-scoped caller sees none.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/members/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, example: mem_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    patch:
+      operationId: updateMember
+      summary: Change a member's role or product scope (JSON Merge Patch).
+      description: |
+        Dashboard sessions with member:write on every product. The caller may
+        only give or take away a role it holds itself; the last owner can't
+        be demoted (409).
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/MemberPatch" }
+      responses:
+        "200":
+          description: The changed member.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: removeMember
+      summary: Remove a member, by default revoking the API tokens they created (ADR-0029).
+      description: Their access ends at once. The last owner can't be removed (409).
+      parameters:
+        - name: revoke_tokens
+          in: query
+          description: Also revoke every active API token the member created, each audited.
+          schema: { type: boolean, default: true }
+      responses:
+        "204": { description: Removed. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     apiToken:
@@ -162,6 +230,37 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time, nullable: true }
         revoked_at: { type: string, format: date-time, nullable: true }
+    MemberRole:
+      type: string
+      enum: [owner, admin, manager, support, viewer]
+    Member:
+      type: object
+      required: [id, user_id, email, name, role, all_products, product_ids, created_at]
+      properties:
+        id: { type: string, example: mem_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        user_id: { type: string }
+        email: { type: string, nullable: true, description: Verified email, if any. }
+        name: { type: string, nullable: true }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+    MemberPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Member" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    MemberPatch:
+      type: object
+      description: Absent fields stay; none is nullable (null answers 422).
+      properties:
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids:
+          type: array
+          items: { type: string }
+          description: Replaces the product scope; with all_products absent or false.
     ApiTokenPage:
       type: object
       required: [items]

@@ -38,6 +38,7 @@ import (
 	"licenseforge.io/licenseforge/internal/api"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
@@ -165,7 +166,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
 	// API tokens need only the tenant pool (hashes, no keyring).
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Identity: identity.Service{DB: db},
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Identity: identity.Service{DB: db},
 		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	srv := &http.Server{
 		Handler:           mux,
