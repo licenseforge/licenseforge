@@ -53,6 +53,7 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
 	if flag.NArg() > 1 {
 		flag.Usage()
@@ -96,8 +97,8 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
 	}
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
-	if err != nil {
-		return fmt.Errorf("LICENSEFORGE_DRAIN: %w", err)
+	if err != nil || drain < 0 {
+		return fmt.Errorf("LICENSEFORGE_DRAIN: want a duration like 5s, got %q", os.Getenv("LICENSEFORGE_DRAIN"))
 	}
 	tenantDSN, err := mustEnv("LICENSEFORGE_DATABASE_URL")
 	if err != nil {
@@ -150,12 +151,15 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	// Fail readiness first and keep serving while load balancers stop
 	// routing here, so a rolling update drops no requests.
 	draining.Store(true)
-	log.Info("draining", "for", drain)
+	log.Info("draining", "for", drain.String())
 	time.Sleep(drain)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	if err := <-errc; !errors.Is(err, http.ErrServerClosed) { // Serve failed during the drain
 		return err
 	}
 	return nil
