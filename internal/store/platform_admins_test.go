@@ -41,7 +41,8 @@ func (f identityFixture) waitAdvisoryWaiters(t *testing.T, n int) {
 	for {
 		var waiting int
 		if err := f.d.platformDB.QueryRowContext(context.Background(),
-			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&waiting); err != nil {
+			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			   AND ((classid::bigint << 32) | objid::bigint) = $1`, int64(platformAdminLock)).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting >= n {
@@ -126,10 +127,18 @@ func TestPlatformAdminGrantsAndRemoval(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	// Only an admin grants; a bootstrap-shaped grant isn't possible any more.
-	if err := f.d.GrantPlatformAdmin(ctx, f.ownerB, ids.User(), noAudit); err == nil || !strings.Contains(err.Error(), "grant_shape") {
+	if err := f.d.GrantPlatformAdmin(ctx, f.ownerB, ids.User(), noAudit); !errors.Is(err, ErrNotPlatformAdmin) {
 		t.Errorf("grant by a non-admin: %v", err)
 	}
+	// The database refuses it too (grant_shape), bypassing the function.
 	err := f.d.WithPlatform(ctx, func(tx *ent.Tx) error {
+		_, err := tx.PlatformAdmin.Create().SetUserID(f.ownerB).SetGrantedBy(ids.User()).Save(ctx)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "grant_shape") {
+		t.Errorf("raw grant by a non-admin: %v", err)
+	}
+	err = f.d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		_, err := tx.PlatformAdmin.Create().SetUserID(f.ownerB).SetBootstrap(true).Save(ctx)
 		return err
 	})
@@ -158,10 +167,66 @@ func TestPlatformAdminGrantsAndRemoval(t *testing.T) {
 	if ok != 1 || last != 1 || f.admins(t) != 1 {
 		t.Errorf("ok=%d last=%d admins=%d, want 1 1 1", ok, last, f.admins(t))
 	}
-	// The database refuses removing the last one even without the function.
+	// The database refuses removing the last one in a single-row statement
+	// even without the function (keep_one backstop).
 	f.platform(t, `DELETE FROM platform_admins`)
 	if f.admins(t) != 1 {
 		t.Error("the last admin was deleted on the platform pool")
+	}
+	// Removing someone who isn't an admin is an error, and isn't recorded.
+	recorded := false
+	if err := f.d.RemovePlatformAdmin(ctx, f.newUser(t, "nobody@example.com", true), func(*ent.Tx) error { recorded = true; return nil }); !errors.Is(err, ErrNotPlatformAdmin) || recorded {
+		t.Errorf("remove a non-admin: %v recorded=%v", err, recorded)
+	}
+}
+
+func TestPlatformAdminGrantChecks(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	emptyAdmins(t, f)
+	if ok, err := f.d.BootstrapPlatformAdmin(ctx, f.ownerA, noAudit); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	disabled := f.newUser(t, "off@example.com", true)
+	f.platform(t, `UPDATE users SET disabled_at = now() WHERE id = $1`, disabled)
+	if err := f.d.GrantPlatformAdmin(ctx, disabled, f.ownerA, noAudit); !errors.Is(err, ErrNotPlatformAdmin) {
+		t.Errorf("grant to a disabled user: %v", err)
+	}
+	if err := f.d.GrantPlatformAdmin(ctx, f.ownerB, f.ownerA, noAudit); err != nil {
+		t.Fatal(err)
+	}
+	f.platform(t, `UPDATE users SET disabled_at = now() WHERE id = $1`, f.ownerB)
+	if err := f.d.GrantPlatformAdmin(ctx, f.newUser(t, "x2@example.com", true), f.ownerB, noAudit); !errors.Is(err, ErrNotPlatformAdmin) {
+		t.Errorf("grant by a disabled admin: %v", err)
+	}
+	// At most one bootstrap row ever: a multi-row insert on an empty table
+	// passes the snapshot-reading policy, but not the unique index.
+	f.owner(t, `DELETE FROM platform_admins`)
+	err := f.d.WithPlatform(ctx, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO platform_admins (id, user_id, bootstrap, created_at) VALUES
+			('pad_aaaaaaaaaaaaaaaaaaaaaaaaaa', $1, true, now()), ('pad_bbbbbbbbbbbbbbbbbbbbbbbbbb', $2, true, now())`, f.ownerA, f.ownerB)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "platformadmin_bootstrap") {
+		t.Errorf("two bootstrap rows: %v", err)
+	}
+}
+
+// Documented residual (ADR-0031): one multi-row statement on the platform
+// pool can pass the keep_one backstop; the store functions are the rule.
+func TestKeepOneIsASingleStatementBackstop(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	emptyAdmins(t, f)
+	if ok, err := f.d.BootstrapPlatformAdmin(ctx, f.ownerA, noAudit); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if err := f.d.GrantPlatformAdmin(ctx, f.ownerB, f.ownerA, noAudit); err != nil {
+		t.Fatal(err)
+	}
+	f.platform(t, `DELETE FROM platform_admins`)
+	if n := f.admins(t); n != 0 {
+		t.Logf("keep_one now also covers multi-row deletes (%d left): update ADR-0031 and this test", n)
 	}
 }
 

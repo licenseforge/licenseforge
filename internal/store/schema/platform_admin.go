@@ -8,6 +8,7 @@ import (
 	"entgo.io/ent/schema"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
+	"entgo.io/ent/schema/index"
 
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
@@ -43,4 +44,9 @@ func (PlatformAdmin) Annotations() []schema.Annotation {
 		"platform_admins_id_format": `id ~ '^pad_` + idChars + `$'`,
 		"platform_admins_grant":     `(bootstrap AND granted_by IS NULL) OR (NOT bootstrap AND granted_by IS NOT NULL AND (granted_by)::text ~ '^usr_` + idChars + `$'::text)`,
 	}}}
+}
+
+func (PlatformAdmin) Indexes() []ent.Index {
+	// At most one bootstrap grant, ever: no snapshot race can add a second.
+	return []ent.Index{index.Fields("bootstrap").Unique().Annotations(entsql.IndexWhere("bootstrap"))}
 }

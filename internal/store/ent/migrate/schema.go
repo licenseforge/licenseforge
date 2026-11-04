@@ -690,6 +690,16 @@ var (
 				OnDelete:   schema.NoAction,
 			},
 		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "platformadmin_bootstrap",
+				Unique:  true,
+				Columns: []*schema.Column{PlatformAdminsColumns[1]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "bootstrap",
+				},
+			},
+		},
 	}
 	// ProductsColumns holds the columns for the "products" table.
 	ProductsColumns = []*schema.Column{
