@@ -242,25 +242,46 @@
               {
                 "uuid": "224ce3fa-4bd2-580b-af15-35e18aa6bdae",
                 "control-id": "ac-8",
-                "description": "A configurable login banner.",
+                "description": "LICENSEFORGE_LOGIN_BANNER sets a plain-text system use notification (at most 4 KB; control, format and separator characters refused at start). GET /auth/config serves it without authentication; /login shows it as text and enables the login button only after an explicit agreement. With a banner set, /auth/login starts a login only with the banner's ID, which travels in the login flow cookie; the callback refuses a login whose acknowledged ID isn't the current banner's, and every completed login logs the user and the acknowledged banner ID.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "implemented"
                   }
                 ],
-                "remarks": "Not implemented (Roadmap v0.1: configurable login banner, AC-8)."
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestBannerGate"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestAuthConfig"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/banner_test.go",
+                    "rel": "reference",
+                    "text": "TestCheckBanner"
+                  }
+                ],
+                "remarks": "The acknowledgement is recorded in the application log (with the user and banner ID), not in the audit chain; it reaches a SIEM with the log export."
               },
               {
                 "uuid": "43bef5f6-ef1a-5f0b-a734-c292fb862d84",
                 "control-id": "ac-12",
-                "description": "Dashboard sessions are server-side. A session ends after about 1 hour without a request (activity is recorded at most once a minute) and 12 hours after login, by the database clock. The database caps a session at 1 day. Suspending a user deletes their sessions.",
+                "description": "Dashboard sessions are server-side. A session ends after the idle timeout without a request (LICENSEFORGE_SESSION_IDLE_TIMEOUT, default 1 hour; activity is recorded at most once a minute) and at its max age after login (LICENSEFORGE_SESSION_MAX_AGE, default 12 hours), by the database clock. The server refuses to start outside the bounds (idle at least 5 minutes and at most the max age; max age 1 to 24 hours). The database caps a session at 1 day. The session cookie's Max-Age follows the max age. Suspending a user deletes their sessions.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "partial"
+                    "value": "implemented"
                   }
                 ],
                 "links": [
@@ -274,11 +295,20 @@
                     "text": "TestSessions"
                   },
                   {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestConfiguredSessionTimeouts"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestCheckSessionTimeouts"
+                  },
+                  {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/migrations/20261104201448_sessions_security.sql",
                     "rel": "reference"
                   }
-                ],
-                "remarks": "The timeouts are fixed in code; ADR-0024 requires them to be configurable."
+                ]
               },
               {
                 "uuid": "e5ee76f3-3f91-52b6-b03d-6f4e2583c119",
@@ -793,12 +823,12 @@
               {
                 "uuid": "2ca84393-a009-5014-b7dc-9b13a56ca9a8",
                 "control-id": "ia-11",
-                "description": "Sessions end at most 12 hours after login, and a new login always starts a new session.",
+                "description": "Sessions end at most their configured max age after login (LICENSEFORGE_SESSION_MAX_AGE, default 12 hours, at most 24), and a new login always starts a new session.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "partial"
+                    "value": "implemented"
                   }
                 ],
                 "links": [
@@ -808,12 +838,16 @@
                     "text": "TestSessions"
                   },
                   {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/sessions_test.go",
+                    "rel": "reference",
+                    "text": "TestConfiguredSessionTimeouts"
+                  },
+                  {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
                     "rel": "reference",
                     "text": "TestLogin"
                   }
-                ],
-                "remarks": "The lifetime is fixed in code, not configurable (see AC-12)."
+                ]
               },
               {
                 "uuid": "aed4451d-0066-565a-b2dc-1bf8dd12a6a6",

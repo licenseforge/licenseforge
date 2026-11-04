@@ -92,7 +92,9 @@ func TestBannerGate(t *testing.T) {
 
 	// The callback wants the acknowledged banner in the flow cookie to be the
 	// current one: a flow that agreed to none, or to another banner (a
-	// rolling update), gets no session and agrees again.
+	// rolling update), gets no session and agrees again. The refusal comes
+	// before the token is verified, so it is logged, never chained (ADR-0033).
+	before := f.head(t)
 	for _, acked := range []string{"", "other-banner-id", cfg["banner_id"] + "x"} {
 		f.client.Jar.SetCookies(mustURL(t, f.app.URL), []*http.Cookie{{Name: SessionCookie, Value: "", MaxAge: -1}})
 		q := f.start(t)
@@ -101,6 +103,12 @@ func TestBannerGate(t *testing.T) {
 			f.last.Header.Get("Location") != "/login?banner_changed=1" || f.session(t) != "" {
 			t.Errorf("flow acknowledging %q: %d %q, session %q", acked, code, f.last.Header.Get("Location"), f.session(t))
 		}
+	}
+	if es := f.entries(t, before); len(es) != 0 {
+		t.Errorf("banner refusals reached the audit chain: %d entries", len(es))
+	}
+	if !strings.Contains(f.logs.String(), `reason="banner not acknowledged"`) {
+		t.Error("banner refusal not logged")
 	}
 	// A pre-banner flow cookie (three parts) is refused too.
 	q = f.start(t)

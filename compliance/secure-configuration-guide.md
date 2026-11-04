@@ -21,6 +21,9 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_OIDC_CLIENT_ID` | with the issuer | – | Also the required audience of ID tokens |
 | `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: pass it with `secretKeyRef`, never as a literal |
 | `LICENSEFORGE_OIDC_REDIRECT_URL` | with the issuer | – | `https://<public host>/auth/callback`. Its origin is the only trusted origin for unsafe requests (CSRF) |
+| `LICENSEFORGE_SESSION_IDLE_TIMEOUT` | no | `1h` | Dashboard session idle timeout (AC-12): at least `5m`, at most the max age. Out of bounds stops the server |
+| `LICENSEFORGE_SESSION_MAX_AGE` | no | `12h` | Dashboard session lifetime after login (AC-12, IA-11): `1h` to `24h` (the database cap) |
+| `LICENSEFORGE_LOGIN_BANNER` | no | unset = no banner | System use notification shown on `/login` before sign-in (AC-8): plain text, at most 4 KB, newlines and tabs allowed, no other control, format or separator characters. Users must agree before login starts |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 
@@ -76,7 +79,8 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 - The server verifies the ID token's signature, issuer, audience, `azp`, expiry and nonce, and bounds every IdP call to 10 s.
 - **Enforce MFA in the IdP**, phishing-resistant where required (passkeys, PIV/CAC). Per-tenant enforcement through `acr`/`amr` is *planned* (Roadmap v0.1).
 - An email counts only when the IdP sends `email_verified: true`, and invitations are accepted by verified email. A verified email is only as trustworthy as its IdP, so configure only IdPs that verify emails.
-- Sessions last about 1 hour idle (activity is recorded at most once a minute) and 12 hours at most; neither is configurable yet.
+- Sessions last 1 hour idle (activity is recorded at most once a minute) and 12 hours at most by default; set `LICENSEFORGE_SESSION_IDLE_TIMEOUT` and `LICENSEFORGE_SESSION_MAX_AGE` to your policy (for example `15m` idle). Changing them needs a restart.
+- Set `LICENSEFORGE_LOGIN_BANNER` where a system use notification is required (AC-8). Each completed login logs `login banner acknowledged` with the user and banner ID.
 - With the chart in `main`, pass the OIDC variables through `extraEnv`. `values.yaml` says `extraEnv` is not for secrets, meaning no literal secret values; give the client secret as a `valueFrom.secretKeyRef` entry. Also allow egress to the IdP: the chart's NetworkPolicy allows only DNS and the database ([NetworkPolicies](#networkpolicies)). Once PR #49 is merged, use its first-class `oidc.*` values instead (they add the IdP egress rule).
 
 ## FIPS image
