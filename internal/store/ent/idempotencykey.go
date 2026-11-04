@@ -27,8 +27,8 @@ type IdempotencyKey struct {
 	RequestHash []byte `json:"request_hash,omitempty"`
 	// nil only inside the claiming transaction
 	Status *int `json:"status,omitempty"`
-	// Body holds the value of the "body" field.
-	Body *[]byte `json:"body,omitempty"`
+	// encrypted (secrets.PurposeIdempotencyResponse)
+	Body *[]byte `json:"-"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	selectValues sql.SelectValues
@@ -164,10 +164,7 @@ func (_m *IdempotencyKey) String() string {
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
-	if v := _m.Body; v != nil {
-		builder.WriteString("body=")
-		builder.WriteString(fmt.Sprintf("%v", *v))
-	}
+	builder.WriteString("body=<sensitive>")
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

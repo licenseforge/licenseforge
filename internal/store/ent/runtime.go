@@ -561,13 +561,10 @@ func init() {
 			return nil
 		}
 	}()
-	idempotencykeyMixin := schema.IdempotencyKey{}.Mixin()
-	idempotencykeyMixinFields0 := idempotencykeyMixin[0].Fields()
-	_ = idempotencykeyMixinFields0
 	idempotencykeyFields := schema.IdempotencyKey{}.Fields()
 	_ = idempotencykeyFields
 	// idempotencykeyDescTenantID is the schema descriptor for tenant_id field.
-	idempotencykeyDescTenantID := idempotencykeyMixinFields0[0].Descriptor()
+	idempotencykeyDescTenantID := idempotencykeyFields[1].Descriptor()
 	// idempotencykey.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
 	idempotencykey.TenantIDValidator = func() func(string) error {
 		validators := idempotencykeyDescTenantID.Validators
@@ -585,11 +582,11 @@ func init() {
 		}
 	}()
 	// idempotencykeyDescCredential is the schema descriptor for credential field.
-	idempotencykeyDescCredential := idempotencykeyFields[1].Descriptor()
+	idempotencykeyDescCredential := idempotencykeyFields[2].Descriptor()
 	// idempotencykey.CredentialValidator is a validator for the "credential" field. It is called by the builders before save.
 	idempotencykey.CredentialValidator = idempotencykeyDescCredential.Validators[0].(func(string) error)
 	// idempotencykeyDescKey is the schema descriptor for key field.
-	idempotencykeyDescKey := idempotencykeyFields[2].Descriptor()
+	idempotencykeyDescKey := idempotencykeyFields[3].Descriptor()
 	// idempotencykey.KeyValidator is a validator for the "key" field. It is called by the builders before save.
 	idempotencykey.KeyValidator = func() func(string) error {
 		validators := idempotencykeyDescKey.Validators
@@ -607,7 +604,7 @@ func init() {
 		}
 	}()
 	// idempotencykeyDescRequestHash is the schema descriptor for request_hash field.
-	idempotencykeyDescRequestHash := idempotencykeyFields[3].Descriptor()
+	idempotencykeyDescRequestHash := idempotencykeyFields[4].Descriptor()
 	// idempotencykey.RequestHashValidator is a validator for the "request_hash" field. It is called by the builders before save.
 	idempotencykey.RequestHashValidator = idempotencykeyDescRequestHash.Validators[0].(func([]byte) error)
 	// idempotencykeyDescID is the schema descriptor for id field.

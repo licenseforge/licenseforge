@@ -297,11 +297,6 @@ var (
 		PrimaryKey: []*schema.Column{IdempotencyKeysColumns[0]},
 		Indexes: []*schema.Index{
 			{
-				Name:    "idempotencykey_tenant_id",
-				Unique:  false,
-				Columns: []*schema.Column{IdempotencyKeysColumns[1]},
-			},
-			{
 				Name:    "idempotencykey_tenant_id_credential_key",
 				Unique:  true,
 				Columns: []*schema.Column{IdempotencyKeysColumns[1], IdempotencyKeysColumns[2], IdempotencyKeysColumns[3]},

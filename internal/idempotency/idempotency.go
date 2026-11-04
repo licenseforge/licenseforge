@@ -12,13 +12,16 @@
 // How the API layer uses it (one wrapper per idempotent operation): after
 // authentication and tenant resolution (ADR-0032 steps 1-3), build a Request
 // from the resolved tenant ID, the credential (token ID or user ID), the
-// header and the operation ID with the raw body, and call Do with
+// header, the operation ID, the resolved path parameter IDs and the raw
+// body, and call Do with
 //   - recheck: the operation's object lookup and permission checks (steps
 //     4-5) for a replay. If they now refuse, that refusal is the answer and
 //     the stored outcome isn't sent;
 //   - op: the operation itself, in the transaction Do passes, returning the
 //     status and response body it answers with. It must not write anything
-//     it wouldn't keep when it answers 4xx (the transaction commits).
+//     it wouldn't keep when it answers 4xx (the transaction commits), and
+//     records its refusal audit entries in that same transaction rather
+//     than on a second pool connection.
 //
 // Errors map to 400 invalid_request (ErrInvalidKey), 422
 // idempotency_key_reused (ErrKeyReused) and 409 idempotency_in_progress
@@ -39,6 +42,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -65,17 +69,23 @@ var (
 	keyRE = regexp.MustCompile(`^[ -~]{1,255}$`)
 )
 
-// Store keeps idempotency keys in the tenant pool.
+// Store keeps idempotency keys in the tenant pool. Response bodies are
+// stored encrypted with Keys, bound to their key row (they can carry
+// secrets, such as a new license key). A replay reveals them again only to
+// the same credential: the same API token, or the same user in any session.
 type Store struct {
 	DB   *store.DB
+	Keys *secrets.Keyring
 	Wait time.Duration // 0: DefaultWait
 }
 
 // Request identifies a request. TenantID is the resolved tenant ID (not the
 // slug from the path), Credential the API token or user ID, Operation the
-// OpenAPI operation ID.
+// OpenAPI operation ID, Params the resolved path parameter IDs in route
+// order (e.g. the license ID of POST …/licenses/{id}/activations).
 type Request struct {
 	TenantID, Credential, Key, Operation string
+	Params                               []string
 	Body                                 []byte
 }
 
@@ -85,15 +95,24 @@ type Outcome struct {
 	Body   []byte
 }
 
-// Hash is the request hash: SHA-256 over the tenant ID, the operation and the
-// body, each length-prefixed so no two requests encode alike.
+// Hash is the request hash: SHA-256 over the tenant ID, the operation, each
+// path parameter and the body, each field length-prefixed so no two
+// requests encode alike.
 func (r Request) Hash() []byte {
 	h := sha256.New()
-	for _, f := range [][]byte{[]byte(r.TenantID), []byte(r.Operation), r.Body} {
+	fields := [][]byte{[]byte(r.TenantID), []byte(r.Operation)}
+	for _, p := range r.Params {
+		fields = append(fields, []byte(p))
+	}
+	for _, f := range append(fields, r.Body) {
 		h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(f))))
 		h.Write(f)
 	}
 	return h.Sum(nil)
+}
+
+func (r Request) binding(rowID string) secrets.Binding {
+	return secrets.Binding{Purpose: secrets.PurposeIdempotencyResponse, TenantID: r.TenantID, RowID: rowID}
 }
 
 // Do runs op at most once for r's key and returns its outcome; replayed is
@@ -116,7 +135,7 @@ func (s Store) Do(ctx context.Context, r Request, recheck func(context.Context, 
 			return err
 		}
 		if !claimed {
-			out, err = stored(ctx, tx, r, hash)
+			out, err = s.stored(ctx, tx, r, hash)
 			if err != nil {
 				return err
 			}
@@ -135,11 +154,11 @@ func (s Store) Do(ctx context.Context, r Request, recheck func(context.Context, 
 		case out.Status/100 != 2 && out.Status/100 != 4:
 			return fmt.Errorf("idempotency: status %d can't be stored", out.Status)
 		}
-		body := out.Body
-		if body == nil {
-			body = []byte{} // the outcome CHECK: a stored status has a body
+		body, err := s.Keys.Encrypt(out.Body, r.binding(id))
+		if err != nil {
+			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE idempotency_keys SET status = $2, body = $3 WHERE id = $1 AND status IS NULL`, id, out.Status, body)
+		res, err := tx.ExecContext(ctx, `UPDATE idempotency_keys SET status = $2, body = $3 WHERE id = $1 AND status IS NULL`, id, out.Status, []byte(body))
 		if err != nil {
 			return err
 		}
@@ -196,8 +215,8 @@ func inProgress(err error) error {
 }
 
 // stored returns the outcome stored for r's key, if r is the same request.
-func stored(ctx context.Context, tx *ent.Tx, r Request, hash []byte) (Outcome, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT request_hash, status, body FROM idempotency_keys WHERE tenant_id = $1 AND credential = $2 AND key = $3`,
+func (s Store) stored(ctx context.Context, tx *ent.Tx, r Request, hash []byte) (Outcome, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, request_hash, status, body FROM idempotency_keys WHERE tenant_id = $1 AND credential = $2 AND key = $3`,
 		r.TenantID, r.Credential, r.Key)
 	if err != nil {
 		return Outcome{}, err
@@ -206,10 +225,11 @@ func stored(ctx context.Context, tx *ent.Tx, r Request, hash []byte) (Outcome, e
 	if !rows.Next() {
 		return Outcome{}, errors.Join(ErrInProgress, rows.Err()) // removed meanwhile; the client retries
 	}
+	var id string
 	var got []byte
 	var status sql.NullInt64
 	var body []byte
-	if err := rows.Scan(&got, &status, &body); err != nil {
+	if err := rows.Scan(&id, &got, &status, &body); err != nil {
 		return Outcome{}, err
 	}
 	switch {
@@ -218,7 +238,11 @@ func stored(ctx context.Context, tx *ent.Tx, r Request, hash []byte) (Outcome, e
 	case !status.Valid:
 		return Outcome{}, errors.New("idempotency: committed key without an outcome")
 	}
-	return Outcome{Status: int(status.Int64), Body: body}, nil
+	pt, err := s.Keys.Decrypt(string(body), r.binding(id))
+	if err != nil {
+		return Outcome{}, fmt.Errorf("idempotency: stored response: %w", err)
+	}
+	return Outcome{Status: int(status.Int64), Body: pt}, nil
 }
 
 // Cleanup deletes keys older than TTL in every tenant, on the platform pool,

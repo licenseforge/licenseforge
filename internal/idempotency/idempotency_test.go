@@ -1,8 +1,10 @@
 package idempotency
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -43,7 +46,11 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = owner.Close() })
-	f := fixture{db: d, s: Store{DB: d, Wait: 300 * time.Millisecond}, owner: owner}
+	kr, err := secrets.ParseKeyring("k1=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fixture{db: d, s: Store{DB: d, Keys: kr, Wait: 300 * time.Millisecond}, owner: owner}
 	for _, tn := range []*string{&f.a, &f.b} {
 		if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 			x, err := tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(ctx)
@@ -142,8 +149,9 @@ func TestKeyReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, r := range map[string]Request{
-		"other body":      f.req(f.a, tok1, "k", `{"plan":"enterprise"}`),
-		"other operation": {TenantID: f.a, Credential: tok1, Key: "k", Operation: "createActivation", Body: []byte(`{"plan":"pro"}`)},
+		"other body":           f.req(f.a, tok1, "k", `{"plan":"enterprise"}`),
+		"other operation":      {TenantID: f.a, Credential: tok1, Key: "k", Operation: "createActivation", Body: []byte(`{"plan":"pro"}`)},
+		"other path parameter": {TenantID: f.a, Credential: tok1, Key: "k", Operation: "createLicense", Params: []string{"lic_other"}, Body: []byte(`{"plan":"pro"}`)},
 		// Fields are length-prefixed: moving a byte from operation to body is another request.
 		"shifted boundary": {TenantID: f.a, Credential: tok1, Key: "k", Operation: "createLicens", Body: []byte(`e{"plan":"pro"}`)},
 	} {
@@ -172,6 +180,16 @@ func TestScope(t *testing.T) {
 	}
 	if f.count(t, f.a, "idempotency_keys") != 2 || f.count(t, f.b, "idempotency_keys") != 1 {
 		t.Error("key rows")
+	}
+	// With both credentials' rows stored, each replays its own outcome.
+	runs := ca.runs.Load()
+	for cred, want := range map[string]string{tok1: "1", tok2: "2"} {
+		if out, replayed, err := f.s.Do(ctx, f.req(f.a, cred, "k", `{}`), noCheck, ca.op); err != nil || !replayed || string(out.Body) != want {
+			t.Errorf("replay for %s: %+v %v %v", cred, out, replayed, err)
+		}
+	}
+	if ca.runs.Load() != runs {
+		t.Errorf("replays ran the operation")
 	}
 	// Tenant b's pool can't see or delete tenant a's keys.
 	if err := f.db.WithTenant(ctx, f.b, func(tx *ent.Tx) error {
@@ -320,7 +338,7 @@ func TestExpiryAndCleanup(t *testing.T) {
 		"platform": func(fn func(*ent.Tx) error) error { return f.db.WithPlatform(ctx, fn) },
 	} {
 		if err := run(func(tx *ent.Tx) error {
-			res, err := tx.ExecContext(ctx, `DELETE FROM idempotency_keys WHERE key = 'fresh'`)
+			res, err := tx.ExecContext(ctx, `DELETE FROM idempotency_keys WHERE created_at > clock_timestamp() - interval '1 hour'`) // the live key
 			if err != nil {
 				return err
 			}
@@ -406,5 +424,78 @@ func TestOperationNotBoundByWait(t *testing.T) {
 	}
 	if out, _, err := f.s.Do(ctx, f.req(f.a, tok1, "k", `{}`), noCheck, op); err != nil || out.Status != 201 {
 		t.Errorf("Do = %+v, %v", out, err)
+	}
+}
+
+// Path parameters are part of the request: the same key on another object is
+// another request.
+func TestParams(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	c := &counter{status: 201, tenant: f.a}
+	r := f.req(f.a, tok1, "k", `{}`)
+	r.Params = []string{"lic_one"}
+	if _, _, err := f.s.Do(ctx, r, noCheck, c.op); err != nil {
+		t.Fatal(err)
+	}
+	for _, params := range [][]string{{"lic_two"}, nil, {"lic_one", ""}, {"lic_", "one"}} {
+		r.Params = params
+		if _, _, err := f.s.Do(ctx, r, noCheck, c.op); !errors.Is(err, ErrKeyReused) {
+			t.Errorf("params %q: %v", params, err)
+		}
+	}
+	r.Params = []string{"lic_one"}
+	if _, replayed, err := f.s.Do(ctx, r, noCheck, c.op); err != nil || !replayed {
+		t.Errorf("same params: %v %v", replayed, err)
+	}
+}
+
+// Response bodies are encrypted at rest, bound to their row, and the
+// platform pool sees neither requests nor responses.
+func TestEncryptedAtRest(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	secret := "LF-SECRET-LICENSE-KEY"
+	op := func(context.Context, *ent.Tx) (Outcome, error) {
+		return Outcome{Status: 201, Body: []byte(secret)}, nil
+	}
+	r := f.req(f.a, tok1, "k", `{}`)
+	if _, _, err := f.s.Do(ctx, r, noCheck, op); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	var body []byte
+	if err := f.owner.QueryRow(`SELECT id, body FROM idempotency_keys WHERE tenant_id = $1`, f.a).Scan(&id, &body); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte(secret)) || !bytes.HasPrefix(body, []byte("v1.k1.")) {
+		t.Fatalf("body stored as %q", body)
+	}
+	if out, replayed, err := f.s.Do(ctx, r, noCheck, op); err != nil || !replayed || string(out.Body) != secret {
+		t.Errorf("replay: %q %v %v", out.Body, replayed, err)
+	}
+	// A ciphertext moved to another row doesn't decrypt.
+	r2 := f.req(f.a, tok1, "k2", `{}`)
+	if _, _, err := f.s.Do(ctx, r2, noCheck, op); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.Exec(`UPDATE idempotency_keys SET body = $1 WHERE tenant_id = $2 AND key = 'k2'`, body, f.a); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.s.Do(ctx, r2, noCheck, op); !errors.Is(err, secrets.ErrDecrypt) {
+		t.Errorf("swapped ciphertext: %v", err)
+	}
+	// The platform pool may only see id and created_at.
+	for _, col := range []string{"body", "request_hash", "key", "credential"} {
+		err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+			rows, err := tx.QueryContext(ctx, `SELECT `+col+` FROM idempotency_keys LIMIT 1`)
+			if err == nil {
+				_ = rows.Close()
+			}
+			return err
+		})
+		if err == nil || !strings.Contains(err.Error(), "42501") {
+			t.Errorf("platform reads %s: %v", col, err)
+		}
 	}
 }

@@ -3,7 +3,9 @@
 -- completed (outcome set) in the operation's own transaction; a stored
 -- outcome never changes. Keys are deleted only after 24 hours: by the tenant
 -- pool when the same key is used again, by the platform pool's cleanup.
-GRANT SELECT ON "idempotency_keys" TO licenseforge_app, licenseforge_platform;
+GRANT SELECT ON "idempotency_keys" TO licenseforge_app;
+-- The platform pool only cleans up: it sees no requests or responses.
+GRANT SELECT ("id", "created_at") ON "idempotency_keys" TO licenseforge_platform;
 GRANT INSERT ("id", "tenant_id", "credential", "key", "request_hash", "created_at") ON "idempotency_keys" TO licenseforge_app;
 GRANT UPDATE ("status", "body") ON "idempotency_keys" TO licenseforge_app;
 GRANT DELETE ON "idempotency_keys" TO licenseforge_app, licenseforge_platform;

@@ -17,16 +17,17 @@ import (
 // outcome (2xx or 4xx; never 5xx). Kept 24 hours (internal/idempotency).
 type IdempotencyKey struct{ ent.Schema }
 
-func (IdempotencyKey) Mixin() []ent.Mixin { return []ent.Mixin{TenantScoped{}} }
-
+// No TenantScoped mixin: its tenant_id index would duplicate the prefix of
+// the unique (tenant_id, credential, key) index.
 func (IdempotencyKey) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.IdempotencyKey),
+		field.String("tenant_id").Immutable().NotEmpty().MaxLen(40).SchemaType(idType),
 		field.String("credential").Immutable().NotEmpty().SchemaType(idType).Comment("API token or user ID"),
 		field.String("key").Immutable().NotEmpty().MaxLen(255).SchemaType(map[string]string{"postgres": "varchar(255)"}),
 		field.Bytes("request_hash").Immutable().NotEmpty(),
 		field.Int("status").Optional().Nillable().Comment("nil only inside the claiming transaction"),
-		field.Bytes("body").Optional().Nillable(),
+		field.Bytes("body").Optional().Nillable().Sensitive().Comment("encrypted (secrets.PurposeIdempotencyResponse)"),
 		field.Time("created_at").Immutable(),
 	}
 }
