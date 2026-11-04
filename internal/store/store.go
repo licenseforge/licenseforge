@@ -23,11 +23,12 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Group roles (ADR-0009). The operator creates them once per cluster and makes
-// one login a member of each; see deploy/database-setup.sql.
+// Group roles (ADR-0009, ADR-0029). The operator creates them once per cluster
+// and makes one login a member of each; see deploy/database-setup.sql.
 const (
 	AppRole      = "licenseforge_app"
 	PlatformRole = "licenseforge_platform"
+	IdentityRole = "licenseforge_identity" // the login path: identity tables only
 )
 
 // minPostgres is the oldest supported server (server_version_num, ADR-0028).
@@ -40,41 +41,56 @@ const migrationLock = 0x4C46_4D49_4752 // "LFMIGR"
 // ErrUnsafeRole means a database login could bypass tenant isolation.
 var ErrUnsafeRole = errors.New("store: unsafe database role (ADR-0009)")
 
-// DB is LicenseForge's database access. Tenant work and platform work use
-// separate connection pools with separate logins, so tenant code can't reach
-// platform privileges even through a SQL bug.
+// DB is LicenseForge's database access. Tenant work, platform work and the
+// login path use separate connection pools with separate logins, so a SQL bug
+// in one can't reach the others' privileges.
 type DB struct {
-	tenant, platform     *ent.Client
-	tenantDB, platformDB *sql.DB
+	tenant, platform, identity       *ent.Client
+	tenantDB, platformDB, identityDB *sql.DB
 }
 
-// Open connects the tenant pool (a login in AppRole) and the platform pool (a
-// login in PlatformRole) and refuses logins that could bypass isolation.
-func Open(ctx context.Context, tenantDSN, platformDSN string) (*DB, error) {
-	tdb, err := openChecked(ctx, tenantDSN, AppRole)
-	if err != nil {
-		return nil, fmt.Errorf("tenant pool: %w", err)
+// Logins are the connection strings of the three serving logins.
+type Logins struct {
+	Tenant   string // member of AppRole: tenant requests
+	Platform string // member of PlatformRole: platform-admin work
+	Identity string // member of IdentityRole: login and invitations (ADR-0029)
+}
+
+// Open connects the three pools and refuses logins that could bypass
+// isolation.
+func Open(ctx context.Context, l Logins) (*DB, error) {
+	var dbs []*sql.DB
+	fail := func(pool string, err error) (*DB, error) {
+		for _, db := range dbs {
+			_ = db.Close()
+		}
+		return nil, fmt.Errorf("%s pool: %w", pool, err)
 	}
-	pdb, err := openChecked(ctx, platformDSN, PlatformRole)
-	if err != nil {
-		_ = tdb.Close()
-		return nil, fmt.Errorf("platform pool: %w", err)
+	for _, p := range []struct{ name, dsn, role string }{
+		{"tenant", l.Tenant, AppRole}, {"platform", l.Platform, PlatformRole}, {"identity", l.Identity, IdentityRole},
+	} {
+		db, err := openChecked(ctx, p.dsn, p.role)
+		if err != nil {
+			return fail(p.name, err)
+		}
+		dbs = append(dbs, db)
 	}
+	client := func(db *sql.DB) *ent.Client { return ent.NewClient(ent.Driver(entsql.OpenDB("postgres", db))) }
 	return &DB{
-		tenant:     ent.NewClient(ent.Driver(entsql.OpenDB("postgres", tdb))),
-		platform:   ent.NewClient(ent.Driver(entsql.OpenDB("postgres", pdb))),
-		tenantDB:   tdb,
-		platformDB: pdb,
+		tenant: client(dbs[0]), platform: client(dbs[1]), identity: client(dbs[2]),
+		tenantDB: dbs[0], platformDB: dbs[1], identityDB: dbs[2],
 	}, nil
 }
 
-// Ping checks that both pools can reach the database.
+// Ping checks that every pool can reach the database.
 func (d *DB) Ping(ctx context.Context) error {
-	return errors.Join(d.tenantDB.PingContext(ctx), d.platformDB.PingContext(ctx))
+	return errors.Join(d.tenantDB.PingContext(ctx), d.platformDB.PingContext(ctx), d.identityDB.PingContext(ctx))
 }
 
-// Close closes both pools.
-func (d *DB) Close() error { return errors.Join(d.tenantDB.Close(), d.platformDB.Close()) }
+// Close closes every pool.
+func (d *DB) Close() error {
+	return errors.Join(d.tenantDB.Close(), d.platformDB.Close(), d.identityDB.Close())
+}
 
 // openPool opens a serving pool on which no session state survives between
 // uses: statements run unnamed (QueryExecModeExec), so there are no cached

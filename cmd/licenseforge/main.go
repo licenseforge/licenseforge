@@ -6,6 +6,7 @@
 //
 //	LICENSEFORGE_DATABASE_URL           tenant pool login (licenseforge_api)
 //	LICENSEFORGE_PLATFORM_DATABASE_URL  platform pool login (licenseforge_admin)
+//	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
@@ -108,6 +109,10 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	identityDSN, err := mustEnv("LICENSEFORGE_IDENTITY_DATABASE_URL")
+	if err != nil {
+		return err
+	}
 	keys, err := mustEnv("LICENSEFORGE_MASTER_KEYS")
 	if err != nil {
 		return err
@@ -117,7 +122,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	}
 	// A database outage at start is a crash loop (Kubernetes retries), not "not ready".
 	openCtx, cancelOpen := context.WithTimeout(ctx, 30*time.Second)
-	db, err := store.Open(openCtx, tenantDSN, platformDSN)
+	db, err := store.Open(openCtx, store.Logins{Tenant: tenantDSN, Platform: platformDSN, Identity: identityDSN})
 	cancelOpen()
 	if err != nil {
 		return err

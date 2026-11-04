@@ -67,6 +67,7 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_DRAIN", "0s")
 	t.Setenv("LICENSEFORGE_DATABASE_URL", tenant)
 	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", platform)
+	t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
 }
 
@@ -137,20 +138,27 @@ func TestServe(t *testing.T) {
 
 func TestServeRefuses(t *testing.T) {
 	for name, c := range map[string]struct{ tenant, platform, keys, owner, want string }{
-		"no tenant URL":      {"", env.PlatformURL, testKeys, "", "LICENSEFORGE_DATABASE_URL is not set"},
-		"no platform URL":    {env.TenantURL, "", testKeys, "", "LICENSEFORGE_PLATFORM_DATABASE_URL is not set"},
-		"no keys":            {env.TenantURL, env.PlatformURL, "", "", "LICENSEFORGE_MASTER_KEYS is not set"},
-		"bad keys":           {env.TenantURL, env.PlatformURL, "k1=short", "", "LICENSEFORGE_MASTER_KEYS: secrets:"},
-		"owner as tenant":    {env.OwnerURL, env.PlatformURL, testKeys, "", "unsafe database role"},
-		"owner as platform":  {env.TenantURL, env.OwnerURL, testKeys, "", "unsafe database role"},
-		"pools swapped":      {env.PlatformURL, env.TenantURL, testKeys, "", "unsafe database role"},
-		"owner login in env": {env.TenantURL, env.PlatformURL, testKeys, env.OwnerURL, "must not hold the owner login"},
-		"negative drain":     {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_DRAIN"},
+		"no tenant URL":        {"", env.PlatformURL, testKeys, "", "LICENSEFORGE_DATABASE_URL is not set"},
+		"no platform URL":      {env.TenantURL, "", testKeys, "", "LICENSEFORGE_PLATFORM_DATABASE_URL is not set"},
+		"no keys":              {env.TenantURL, env.PlatformURL, "", "", "LICENSEFORGE_MASTER_KEYS is not set"},
+		"bad keys":             {env.TenantURL, env.PlatformURL, "k1=short", "", "LICENSEFORGE_MASTER_KEYS: secrets:"},
+		"owner as tenant":      {env.OwnerURL, env.PlatformURL, testKeys, "", "unsafe database role"},
+		"owner as platform":    {env.TenantURL, env.OwnerURL, testKeys, "", "unsafe database role"},
+		"pools swapped":        {env.PlatformURL, env.TenantURL, testKeys, "", "unsafe database role"},
+		"owner login in env":   {env.TenantURL, env.PlatformURL, testKeys, env.OwnerURL, "must not hold the owner login"},
+		"negative drain":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_DRAIN"},
+		"no identity URL":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_IDENTITY_DATABASE_URL is not set"},
+		"platform as identity": {env.TenantURL, env.PlatformURL, testKeys, "", "identity pool"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
-		if name == "negative drain" {
+		switch name {
+		case "negative drain":
 			t.Setenv("LICENSEFORGE_DRAIN", "-1s")
+		case "no identity URL":
+			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", "")
+		case "platform as identity":
+			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.PlatformURL)
 		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
