@@ -192,7 +192,7 @@ func TestIssueCopiesPlanAndKey(t *testing.T) {
 	req.Type, req.ExternalRefs = license.TypeTrial, map[string]string{"order": "SO-1"}
 	req.Overrides = map[string]Override{"seats": {Limit: ptr[int64](25)}, "sso": {Remove: true}, "export": {}}
 	var dbBefore time.Time
-	f.tx(t, f.a.id, func(tx *ent.Tx) (err error) { dbBefore, err = dbNow(ctx, tx); return })
+	f.tx(t, f.a.id, func(tx *ent.Tx) (err error) { dbBefore, err = DBNow(ctx, tx); return })
 	got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), req)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestIssueCopiesPlanAndKey(t *testing.T) {
 		*l.DurationMonths != 12 || l.DurationSeconds != nil || *l.MaxActivations != 3 || *l.MaxRehosts != 2 ||
 		l.BindType != license.BindTypeMachine || !l.OfflineAllowed || l.LeaseSeconds != 3600 || *l.MaxOfflineSeconds != 7200 ||
 		l.GraceSeconds != 60 || !reflect.DeepEqual(l.Entitlements, want) || l.ExternalRefs["order"] != "SO-1" ||
-		l.IssuedAt.Before(dbBefore) || l.IssuedAt.After(dbBefore.Add(time.Minute)) || !l.ExpiresAt.Equal(*expiry(l.IssuedAt, ptr(12), nil)) {
+		l.IssuedAt.Before(dbBefore) || l.IssuedAt.After(dbBefore.Add(time.Minute)) || !l.ExpiresAt.Equal(*Expiry(l.IssuedAt, ptr(12), nil)) {
 		t.Errorf("license = %+v, entitlements %+v", l, l.Entitlements)
 	}
 
@@ -498,7 +498,7 @@ func TestCalendarMonths(t *testing.T) {
 		{d(2028, 2, 29), 12, d(2029, 2, 28)},
 		{d(2026, 5, 31), 1200, d(2126, 5, 31)},
 	} {
-		if got := expiry(tc.start, &tc.months, nil); !got.Equal(tc.want) {
+		if got := Expiry(tc.start, &tc.months, nil); !got.Equal(tc.want) {
 			t.Errorf("%v + %d months = %v, want %v", tc.start, tc.months, got, tc.want)
 		}
 	}
