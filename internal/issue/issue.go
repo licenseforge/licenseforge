@@ -134,6 +134,23 @@ func (i Issuer) check(ctx context.Context, tx *ent.Tx, licenseID string, now tim
 	return offlineClaims(l, now)
 }
 
+// Sign encodes c and signs it with tenantID's active key, as OfflineFile
+// does. It checks no principal: callers must have authenticated the request
+// for this license first and checked that it may be issued (online leases:
+// internal/activations, by license key), and record it themselves. The
+// claims must name tenantID, so one tenant's caller can't get another
+// tenant's key to sign.
+func (i Issuer) Sign(ctx context.Context, tenantID string, c licensefile.Claims) (file, kid string, err error) {
+	if c.Tenant != tenantID {
+		return "", "", fmt.Errorf("issue: claims name tenant %q, not the signing tenant", c.Tenant)
+	}
+	payload, err := licensefile.Encode(c)
+	if err != nil {
+		return "", "", err
+	}
+	return i.sign(ctx, tenantID, payload)
+}
+
 // sign signs payload with the tenant's active key, reading the kid again once
 // if a rotation retired it in between (signing.Signer). The signature is
 // verified before the file is used, so a faulty signer (KMS) can't hand out

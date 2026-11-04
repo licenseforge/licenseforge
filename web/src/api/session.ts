@@ -40,3 +40,29 @@ export async function logout(): Promise<void> {
     throw e;
   }
 }
+
+/** Login page settings, served before sign-in. banner_id is "" without a banner. */
+export type AuthConfig = { banner: string; banner_id: string };
+
+/** The login page's settings; no login configured (404) means no banner. */
+export async function getAuthConfig(): Promise<AuthConfig> {
+  try {
+    return (await (await request("/auth/config")).json()) as AuthConfig;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return { banner: "", banner_id: "" };
+    throw e;
+  }
+}
+
+export const authConfigQuery = queryOptions({ queryKey: ["auth-config"], queryFn: getAuthConfig, staleTime: 60_000 });
+
+/**
+ * Where the login button goes, or null while it must stay disabled: a
+ * banner (AC-8) needs an explicit agreement, sent back as its ID (the
+ * server refuses a login without it).
+ */
+export function loginHref(config: AuthConfig | undefined, agreed: boolean): string | null {
+  if (!config) return null;
+  if (!config.banner_id) return "/auth/login";
+  return agreed ? `/auth/login?banner=${encodeURIComponent(config.banner_id)}` : null;
+}
