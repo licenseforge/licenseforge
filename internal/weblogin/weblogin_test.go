@@ -118,12 +118,20 @@ type fixture struct {
 	ids    identity.Service
 	db     *store.DB
 	client *http.Client
+	h      *Handler
+	ack    string         // ?banner= sent to /auth/login
+	last   *http.Response // the last callback's response (body closed)
 }
 
-func setup(t *testing.T, opts ...func(*idp)) *fixture { return setupAdmin(t, "", opts...) }
+func setup(t *testing.T, opts ...func(*idp)) *fixture { return setupWith(t, nil, opts...) }
 
 // setupAdmin is setup with LICENSEFORGE_BOOTSTRAP_ADMIN set to admin.
 func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
+	return setupWith(t, func(c *Config, _ *identity.Service) { c.BootstrapAdmin = admin }, opts...)
+}
+
+// setupWith lets cfg change the handler's configuration and identity service.
+func setupWith(t *testing.T, cfg func(*Config, *identity.Service), opts ...func(*idp)) *fixture {
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
@@ -139,11 +147,15 @@ func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
 	f.app = httptest.NewUnstartedServer(mux)
 	f.app.StartTLS()
 	t.Cleanup(f.app.Close)
-	h, err := New(ctx, Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback", BootstrapAdmin: admin},
-		f.ids, slog.New(slog.NewTextHandler(f.logs, nil)))
+	c := Config{Issuer: f.idp.srv.URL, ClientID: "lf", ClientSecret: "s", RedirectURL: f.app.URL + "/auth/callback"}
+	if cfg != nil {
+		cfg(&c, &f.ids)
+	}
+	h, err := New(ctx, c, f.ids, slog.New(slog.NewTextHandler(f.logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.h = h
 	h.Register(mux)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "home") })
 	jar, _ := cookiejar.New(nil)
@@ -155,7 +167,7 @@ func setupAdmin(t *testing.T, admin string, opts ...func(*idp)) *fixture {
 
 // start runs /auth/login and returns the authorize request's parameters.
 func (f *fixture) start(t *testing.T) url.Values {
-	resp, err := f.client.Get(f.app.URL + "/auth/login")
+	resp, err := f.client.Get(f.app.URL + "/auth/login?banner=" + url.QueryEscape(f.ack))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +191,7 @@ func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
+	f.last = resp
 	return resp.StatusCode
 }
 

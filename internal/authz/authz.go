@@ -248,15 +248,15 @@ func CanAssign(ctx context.Context, kind PrincipalKind, from, to *Grant) error {
 		if !g.Role.Valid() || !g.Scope.valid() || (kind == User && !g.Role.ForMembership()) {
 			return ErrDenied
 		}
-		if g.Role != SDK && !g.Role.within(p.Role) {
+		if g.Role != SDK && !g.Role.Within(p.Role) {
 			return ErrDenied
 		}
 	}
 	return nil
 }
 
-// within reports whether every permission of r is also one of g's.
-func (r Role) within(g Role) bool {
+// Within reports whether every permission of r is also one of g's.
+func (r Role) Within(g Role) bool {
 	for _, perm := range permissions[r] {
 		if !g.Can(perm) {
 			return false
