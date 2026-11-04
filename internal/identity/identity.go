@@ -49,6 +49,16 @@ func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
+	u, err := s.login(ctx, c)
+	if ent.IsConstraintError(err) {
+		// Two first logins raced (two tabs, a double redirect): the other one
+		// created the user; this attempt now takes the refresh path.
+		u, err = s.login(ctx, c)
+	}
+	return u, err
+}
+
+func (s Service) login(ctx context.Context, c Claims) (*ent.User, error) {
 	name := clean(c.Name, 200)
 	var u *ent.User
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
@@ -95,11 +105,13 @@ type TenantMembership struct {
 	ScopeAll                         bool
 }
 
-// Memberships lists the tenants userID belongs to, by slug.
+// Memberships lists the tenants userID belongs to, sorted by slug. Call it
+// after Login, which refuses disabled users.
 func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMembership, error) {
 	var out []TenantMembership
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		ms, err := tx.Membership.Query().Where(membership.UserID(userID)).
+			Order(membership.ByTenantField(tenant.FieldSlug)).
 			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).All(ctx)
 		if err != nil {
 			return err
@@ -114,8 +126,12 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 }
 
 // BootstrapMatches reports whether u is LICENSEFORGE_BOOTSTRAP_ADMIN
-// (ADR-0003): "issuer|subject" (recommended), or an email that the IdP
-// verified. An empty setting matches nobody.
+// (ADR-0003): "issuer|subject" (recommended; the issuer exactly as in the ID
+// token's iss, trailing slash included; the subject may itself contain '|',
+// as Auth0's do), or an email that the IdP verified, compared
+// case-insensitively in ASCII only (no Unicode look-alike folding, such as
+// the long s or the Kelvin sign, for the highest-privilege grant). An empty
+// setting matches nobody.
 func BootstrapMatches(setting string, u *ent.User) bool {
 	setting = strings.TrimSpace(setting)
 	if setting == "" || u == nil {
@@ -124,7 +140,16 @@ func BootstrapMatches(setting string, u *ent.User) bool {
 	if iss, sub, ok := strings.Cut(setting, "|"); ok {
 		return iss == u.Issuer && sub == u.Subject
 	}
-	return u.EmailVerified && u.Email != nil && strings.EqualFold(*u.Email, setting)
+	return u.EmailVerified && u.Email != nil && isASCII(*u.Email) && isASCII(setting) && strings.EqualFold(*u.Email, setting)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 func (c Claims) check() error {
@@ -134,10 +159,19 @@ func (c Claims) check() error {
 	if !ok(c.Issuer, 500) || !ok(c.Subject, 255) || strings.TrimSpace(c.Issuer) == "" || strings.TrimSpace(c.Subject) == "" {
 		return ErrInvalidClaims
 	}
-	if c.EmailVerified && (!ok(c.Email, 320) || strings.TrimSpace(c.Email) == "" || !strings.Contains(c.Email, "@")) {
-		return ErrInvalidClaims
+	if c.EmailVerified && (!ok(c.Email, 320) || !strings.Contains(c.Email, "@") || !graphic(c.Email)) {
+		return ErrInvalidClaims // a verified email is shown in member lists: no invisible or spoofing characters
 	}
 	return nil
+}
+
+func graphic(s string) bool {
+	for _, r := range s {
+		if !unicode.IsGraphic(r) || unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // clean keeps a display name storable: valid UTF-8, graphic characters only,
