@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -398,6 +399,12 @@ func TestTokenEndpoints(t *testing.T) {
 		f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":true}`+trailing, owner).problem(t, 400, "invalid_request")
 	}
 	f.do(t, "POST", p, `{"NAME":"x","role":"viewer","all_products":true}`, owner).problem(t, 400, "invalid_request")
+	for _, body := range []string{"null", " null ", "[]", `"x"`, ""} {
+		f.do(t, "POST", p, body, owner).problem(t, 400, "invalid_request")
+	}
+	if got := f.do(t, "POST", p, `{"name":"x","role":"viewer","all_products":false,"product_ids":[""]}`, owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(got["errors"]), "/product_ids") {
+		t.Errorf("empty product ID: %v", got)
+	}
 	f.do(t, "POST", p, `{"name":"x","Role":"viewer","all_products":true}`, owner).problem(t, 400, "invalid_request")
 	f.do(t, "POST", p, `{"name":1}`, owner).problem(t, 400, "invalid_request")
 }
@@ -553,8 +560,48 @@ func TestPanics(t *testing.T) {
 		}()
 		f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/abort", "", tok)
 	}()
-	// After the response started, no problem body is appended.
-	if r := f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/late", "", tok); r.code != 200 || r.raw != "partial" {
-		t.Errorf("late panic: %d %q", r.code, r.raw)
+	// After the response started, no problem body is appended and the
+	// response is aborted, so it can't pass for a complete 200.
+	func() {
+		rec := httptest.NewRecorder()
+		defer func() {
+			if v := recover(); v != http.ErrAbortHandler || strings.Contains(rec.Body.String(), "internal") { //nolint:errorlint // sentinel panic value
+				t.Errorf("late panic: recovered %v, body %q", v, rec.Body)
+			}
+		}()
+		r := httptest.NewRequest("GET", Prefix+"/tenants/"+f.a.Slug+"/late", nil)
+		tok(r)
+		f.srv.ServeHTTP(rec, r)
+	}()
+}
+
+func TestExactKeys(t *testing.T) {
+	type inner struct {
+		A string `json:"a"`
+	}
+	type outer struct {
+		In   inner            `json:"in"`
+		Ptr  *inner           `json:"ptr"`
+		List []inner          `json:"list"`
+		Map  map[string]inner `json:"map"`
+		T    time.Time        `json:"t"`
+		Raw  []byte           `json:"raw"`
+	}
+	typ := reflect.TypeFor[outer]()
+	for raw, want := range map[string]bool{
+		`{}`: true,
+		`{"in":{"a":"x"},"ptr":{"a":"x"},"list":[{"a":"x"}],"map":{"k":{"a":"x"}},"t":"2026-01-01T00:00:00Z","raw":"eA=="}`: true,
+		`{"ptr":null,"list":null}`:       true,
+		`null`:                           false,
+		`{"In":{}}`:                      false,
+		`{"in":{"A":"x"}}`:               false,
+		`{"ptr":{"A":"x"}}`:              false,
+		`{"list":[{"a":"x"},{"A":"x"}]}`: false,
+		`{"map":{"k":{"A":"x"}}}`:        false,
+		`{"in":{"a":"x","b":1}}`:         false,
+	} {
+		if got := exactKeys([]byte(raw), typ); got != want {
+			t.Errorf("exactKeys(%s) = %v", raw, got)
+		}
 	}
 }

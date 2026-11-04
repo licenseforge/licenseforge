@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,8 @@ func (s *server) CreateApiToken(ctx context.Context, req apigen.CreateApiTokenRe
 	}
 	if b.AllProducts == (len(products) > 0) {
 		bad = append(bad, fieldError{"/product_ids", "give product IDs exactly when all_products is false"})
+	} else if slices.ContainsFunc(products, func(p string) bool { return !ids.Valid("prd", p) }) {
+		bad = append(bad, fieldError{"/product_ids", "must be product IDs (prd_…)"})
 	}
 	if b.TtlSeconds != nil {
 		if sec := *b.TtlSeconds; sec < int(apitokens.MinTTL/time.Second) || sec > int(apitokens.MaxTTL/time.Second) {
