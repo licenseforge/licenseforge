@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
 
 // Cookie names. The __Host- prefix makes the browser refuse them unless
@@ -47,6 +49,9 @@ type Config struct {
 	ClientSecret string // empty for a public client (PKCE only)
 	RedirectURL  string // https://<host>/auth/callback
 	Banner       string // system use notification (AC-8), plain text; empty = none
+	// BootstrapAdmin is LICENSEFORGE_BOOTSTRAP_ADMIN (ADR-0003): the user it
+	// names becomes platform admin at login while there is none. Empty: off.
+	BootstrapAdmin string
 }
 
 // MaxBannerLen bounds the login banner (bytes).
@@ -79,6 +84,7 @@ type Handler struct {
 	id               identity.Service
 	log              *slog.Logger
 	cross            *http.CrossOriginProtection // trusts the redirect URL's origin
+	admin            string                      // Config.BootstrapAdmin
 	banner, bannerID string                      // bannerID: hash the login page sends back as acknowledgement
 }
 
@@ -157,6 +163,7 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 		id:       id,
 		log:      log,
 		cross:    cross,
+		admin:    c.BootstrapAdmin,
 		banner:   c.Banner,
 		bannerID: bannerID,
 	}, nil
@@ -232,6 +239,28 @@ func (h *Handler) fail(w http.ResponseWriter, code int, reason string, err error
 	http.Error(w, http.StatusText(code), code)
 }
 
+// source is the request's origin for audit entries: the connection's address
+// (no proxy header is trusted yet).
+func source(r *http.Request) identity.Source {
+	src := identity.Source{UserAgent: r.UserAgent()}
+	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+		src.IP = ap.Addr().WithZone("").String()
+	}
+	return src
+}
+
+// refuse records a refused login that got as far as a verified ID token on
+// the platform chain (ADR-0027), then fails like fail. Earlier failures (no
+// flow cookie, state, code exchange, token signature) are only logged: anyone
+// can cause them without an IdP account, and the chain serializes writers.
+// The login is refused either way, so a record that fails is only logged.
+func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, code int, userID string, outcome auditevent.Outcome, reason string, err error) {
+	if rerr := h.id.RecordLogin(r.Context(), userID, outcome, reason, source(r)); rerr != nil {
+		h.log.Error("audit login refusal", "err", rerr)
+	}
+	h.fail(w, code, reason, err)
+}
+
 // callback finishes the login whose state matches the flow cookie. A request
 // without that state (a stray or cross-site link) leaves the login in
 // progress alone. ponytail: one login per browser at a time; a second tab's
@@ -276,7 +305,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !equal(idt.Nonce, nonce) {
-		h.fail(w, http.StatusUnauthorized, "nonce mismatch", nil)
+		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "nonce_mismatch", nil)
 		return
 	}
 	var claims struct {
@@ -286,11 +315,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		Name            string   `json:"name"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		h.fail(w, http.StatusUnauthorized, "id token claims", err)
+		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "invalid_claims", err)
 		return
 	}
 	if claims.AuthorizedParty != "" && claims.AuthorizedParty != h.oauth.ClientID { // OIDC Core 3.1.3.7
-		h.fail(w, http.StatusUnauthorized, "id token for another client (azp)", nil)
+		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "wrong_azp", nil)
 		return
 	}
 	u, err := h.id.Login(ctx, identity.Claims{
@@ -299,14 +328,20 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, identity.ErrDisabled):
-		h.fail(w, http.StatusForbidden, "user disabled", err)
+		h.refuse(w, r, http.StatusForbidden, u.ID, auditevent.OutcomeDenied, "user_disabled", err)
 		return
 	case errors.Is(err, identity.ErrInvalidClaims):
-		h.fail(w, http.StatusUnauthorized, "invalid claims", err)
+		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "invalid_claims", err)
 		return
 	case err != nil:
 		h.fail(w, http.StatusInternalServerError, "login", err)
 		return
+	}
+	// Bootstrap never fails the login: the user signs in either way.
+	if granted, err := h.id.Bootstrap(ctx, h.admin, u, source(r)); err != nil {
+		h.log.Error("bootstrap platform admin", "user", u.ID, "err", err)
+	} else if granted {
+		h.log.Info("bootstrap platform admin granted", "user", u.ID)
 	}
 	// A fresh session on every login (no fixation); end the one presented.
 	if old, err := r.Cookie(SessionCookie); err == nil {
@@ -317,11 +352,16 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie, err := h.id.NewSession(ctx, u.ID)
 	if errors.Is(err, identity.ErrDisabled) { // disabled since Login
-		h.fail(w, http.StatusForbidden, "user disabled", err)
+		h.refuse(w, r, http.StatusForbidden, u.ID, auditevent.OutcomeDenied, "user_disabled", err)
 		return
 	}
 	if err != nil {
 		h.fail(w, http.StatusInternalServerError, "new session", err)
+		return
+	}
+	// No session without its record (AU-5, fail closed).
+	if err := h.id.RecordLogin(ctx, u.ID, auditevent.OutcomeSuccess, "", source(r)); err != nil {
+		h.fail(w, http.StatusInternalServerError, "audit login", errors.Join(err, h.id.EndSession(ctx, cookie)))
 		return
 	}
 	// AC-8 evidence: the banner this user agreed to, from their flow cookie

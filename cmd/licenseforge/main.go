@@ -18,6 +18,7 @@
 //	LICENSEFORGE_SESSION_IDLE_TIMEOUT   dashboard session idle timeout, default 1h (5m to 24h, AC-12)
 //	LICENSEFORGE_SESSION_MAX_AGE        dashboard session lifetime, default 12h (1h to 24h, at least the idle timeout)
 //	LICENSEFORGE_LOGIN_BANNER           system use notification shown before login (AC-8), plain text up to 4 KB
+//	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -159,6 +160,8 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
 			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
+			// Read only here, at start: a later change needs a restart.
+			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
 		}, ids, log)
 		cancel()
 		if err != nil {
