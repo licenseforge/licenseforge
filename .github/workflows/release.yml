@@ -33,15 +33,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version-file: go.mod }
+        with: { go-version-file: go.mod, cache: false } # release builds never restore a cache written elsewhere
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.3.1 }
       - name: Version from the tag (one semver for server, images and chart, ADR-0023)
         id: version
         run: |
-          v=0.0.0-dryrun
+          v=0.0.0-rc.0 # dry run (pull requests)
           if [ "$GITHUB_EVENT_NAME" = push ]; then v=${GITHUB_REF_NAME#v}; fi
-          echo "$v" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' || { echo "tag is not vX.Y.Z[-pre]: $GITHUB_REF_NAME"; exit 1; }
+          # vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N; "fips" can't appear, so the
+          # standard image never lands on a -fips tag.
+          echo "$v" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?' || { echo "tag is not vX.Y.Z[-(alpha|beta|rc).N]: $GITHUB_REF_NAME"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Server binaries and checksums
         env:
@@ -120,6 +122,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # A published version is never moved (a re-run would re-sign new digests).
+          if skopeo inspect --raw "docker://$IMAGE:$VERSION$SUFFIX" >/dev/null 2>&1; then
+            echo "$IMAGE:$VERSION$SUFFIX already exists"; exit 1
+          fi
           skopeo copy --all --preserve-digests --digestfile digest \
             "oci-archive:out/oci/image$SUFFIX.tar" "docker://$IMAGE:$VERSION$SUFFIX"
           echo "digest=$(cat digest)" >> "$GITHUB_OUTPUT"
@@ -168,6 +174,9 @@ jobs:
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if skopeo inspect --raw "docker://$CHART:$VERSION" >/dev/null 2>&1; then
+            echo "$CHART:$VERSION already exists"; exit 1
+          fi
           helm push "out/chart/licenseforge-$VERSION.tgz" "oci://${CHART%/*}" | tee push.log
           digest=$(awk '/^Digest:/ {print $2}' push.log)
           echo "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' || { echo "no digest from helm push"; exit 1; }
