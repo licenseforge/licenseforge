@@ -7,27 +7,32 @@
 
 ## Decision
 ### Retention
-- **Anchor**: `audit_anchors(tenant_id, seq, hash, cut_at)` holds the seq and hash of the last deleted entry; `Verify` starts after the anchor (or at seq 1 without one).
-- **One prune transaction** takes the chain's lock, deletes the prefix, moves the anchor and appends a chained `audit.retention` entry naming the cut (`through_seq`, `through_hash`), so the cut itself is tamper-evident and exported.
-- **Policy**: per-tenant `audit_retention_days`, unset = keep everything (ADR-0027's default). The database refuses deleting entries younger than **365 days** (restrictive DELETE policy), whatever the job asks.
-- **Never prune unexported entries**: with a sink configured, the cut stops at the lowest export cursor for that chain.
-- **Who**: a `licenseforge audit prune` CronJob with a **fifth database login** (`licenseforge_retention`: DELETE on `audit_events`, writes on `audit_anchors` only). Serving pods keep no DELETE right.
+- **Anchors**: `audit_anchors(tenant_id, seq, hash, cut_at)` is **insert-only**, keyed `(tenant_id, seq)`; the effective anchor is the highest seq. `Verify` requires the lowest surviving entry to be exactly `anchor.seq + 1` with `prev_hash = anchor.hash`, and fails if any entry at or below `anchor.seq` remains. Serving logins may only read anchors.
+- **The cut** is the prefix before the first entry whose `occurred_at` is within the retention period (seq order, not timestamps, defines the prefix, so a clock step can't open a hole), capped by the export gate below.
+- **Prune in batches** (at most 10,000 entries per transaction, so the chain's lock is held briefly; ADR-0033 puts every login on the platform chain): each batch inserts the new anchor, deletes the prefix, checks the deleted count equals the anchor advance (else rolls back), and appends a chained `audit.retention` entry (`through_seq`, `through_hash`), so every cut is itself tamper-evident and exported.
+- **Policy**: per-tenant `audit_retention_days` (unset = keep everything, ADR-0027's default; changing it needs `audit:retention`, owner-only, and is audited); the platform chain's retention is an install setting (`LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS`). Both are bounded below by a **365-day floor enforced by the database**: the retention login's restrictive DELETE policy allows only entries older than 365 days **and** at or below the newest anchor, so the database refuses anything but an anchored, old prefix (rows outside the policy are invisible to DELETE, which the count check above turns into a rollback). The 365 days cover active storage; long-term retention (e.g. OMB M-21-31's further 18 months) is the SIEM's.
+- **Never prune unexported entries**: with sinks configured, the cut stops at the lowest cursor for that chain; a chain without a cursor row counts as cursor 0. A sink added later starts at the current anchor. Removing a sink from configuration removes its cursor, which is stated in the operator docs (its unexported entries become prunable).
+- **Who**: a `licenseforge audit prune` CronJob with a **fifth database login** (`licenseforge_retention`): SELECT and DELETE on `audit_events`; INSERT on `audit_events` only for `action = 'audit.retention'` by actor `system` (WITH CHECK); INSERT on `audit_anchors`; SELECT on the cursors and the retention settings. `store.Open`'s login checks apply to it, the isolation test pins its exact policy set, and `serve` refuses to start if its DSN is set (like the owner DSN). Serving pods keep no DELETE right.
+- **Offboarding** ([ADR-0027 Audit log](0027-audit-log.md)): `tenant purge` still refuses a tenant whose chain isn't exported and past the floor; after that, retention removes the chain.
 
 ### Verification
-- `Verify` reads in keyset pages (1,000 entries, one short transaction each), carrying the previous hash, resumable from the anchor or a previously verified head, so a periodic check costs O(new entries).
+- `Verify` reads in keyset pages (1,000 entries, one short transaction each), carrying the previous hash. A link break at a page boundary re-reads the anchor and restarts from it if a prune moved it past the page.
+- It resumes from a previously verified head **held by the caller** (the periodic job), never from a table a serving login can write, so an incremental check costs O(new entries); a full verify from the anchor still runs on a longer schedule (weekly). Each run logs and exports the verified head (`audit.checkpoint`), so the SIEM can compare it with what it holds.
 
 ### Export
-- **Push**: syslog (RFC 5424 over TLS, RFC 5425 framing, optional mTLS) and OTLP logs over HTTP. A pull API is for tenant self-export with the REST API, not the SIEM path.
-- **Cursor per sink and chain** (`audit_export_cursors`): a replica claims a chain's cursor `FOR UPDATE SKIP LOCKED`, sends a batch, waits for the sink's acknowledgement, then advances. **At-least-once**; the SIEM deduplicates on entry ID. No leader election. Per-chain cursors, not a global sequence, because commit order isn't sequence order.
-- **Payload**: every AU-3 field plus `seq`, `prev_hash` and `hash`, so the SIEM holds the external anchor (AU-9(3)).
+- **Push**: OTLP logs over HTTP and syslog (RFC 5424 over TLS, RFC 5425 framing, optional mTLS), from the platform pool (the only serving login that reads every chain). A pull API is for tenant self-export with the REST API, not the SIEM path. Sinks are install-wide; per-tenant SIEM delivery on a hosted install is out of scope (tenants self-export).
+- **Cursor per sink and chain** (`audit_export_cursors`): a replica leases a chain's cursor in a short transaction (`claimed_by`, `claimed_until`, taken with `SKIP LOCKED`), sends the batch outside any transaction, then advances conditionally (`WHERE claimed_by = me AND seq = old`). Per-chain seq is gap-free in commit order (`Record` holds the chain's lock until commit), unlike a global sequence. No leader election.
+- **Delivery**: OTLP advances only on 2xx with no rejected records, so it is at-least-once (the SIEM deduplicates on entry ID). Syslog has no application acknowledgement (RFC 5425): the cursor advances after a flush and a clean TLS close of the batch's connection, best effort; any loss shows in the SIEM's continuity check. RELP can follow if a customer needs guaranteed syslog delivery.
+- **Payload**: every AU-3 field plus `seq`, `prev_hash` and `hash`. **The SIEM is the verifier of record**: the docs ship a correlation rule (per chain, alert when seq isn't the previous + 1 or `prev_hash` isn't the previous `hash`) and the exported checkpoints let it compare heads. That catches deletion or rewrite after export, including a cursor advanced by mistake.
 
 ### Audit failure
 - Audit writes keep **failing closed**: an action whose entry can't be written is rolled back (AU-5).
-- Metrics without tenant labels: write failures per chain, export failures and export lag per sink, verify failures; the chart ships an optional `PrometheusRule`.
-- **A SIEM outage never blocks actions**: entries are delayed, not lost (lag plus the prune gate). An opt-in fail-closed-on-export setting can follow if a customer needs AU-5(2).
+- Metrics without tenant labels: write failures per chain, export failures and export lag per sink, verify failures. The chart's alert rules are on by default when the Prometheus Operator CRDs exist; the Secure Configuration Guide says who must receive them (AU-5). Export lag also guards storage capacity (AU-4): an outage grows the table until the SIEM is back.
+- **A SIEM outage never blocks actions**: entries are delayed, not lost (lag plus the prune gate). AU-5(1) and (2) are High-baseline; an opt-in fail-closed-on-export setting can follow if a customer needs them.
+- **Compliance claim**: the hash chain, the separate retention login and the SIEM anchor with its continuity check support AU-9, AU-9(2) and AU-9(4) at Moderate. AU-9(3) (keyed protection, High) would need a periodic **signed** checkpoint (Ed25519 from the ADR-0026 keyring); added if an assessor requires it.
 
 ## Consequences
-- A fifth login for self-hosters to create (one more Secret key); the database setup script and chart gain it.
+- A fifth login for self-hosters to create (one more Secret key); the database setup script and chart gain it; the isolation test pins its policies and `serve` refuses its DSN.
 - New tables (`audit_anchors`, `audit_export_cursors`) and migrations; PRs land in order: paging + write-failure metric, export core + syslog, OTLP, retention, periodic verify + alert rules, tenant self-export.
 - OTLP uses the protobuf types only (`go.opentelemetry.io/proto/otlp`) or hand-written JSON, not the OTel SDK.
 
@@ -36,3 +41,5 @@
 - **Rewriting the first entry after a cut**: breaks every exported hash.
 - **Blocking actions while the SIEM is down**: turns one external system into an outage for every tenant.
 - **Serving pods prune**: puts DELETE on audit entries into the internet-facing process.
+- **A SECURITY DEFINER prune function owned by the owner login**: enforces everything in one place without a fifth login, but lets serving processes trigger a prune.
+- **One global export sequence**: commit order isn't sequence order, so a reader can skip rows.
