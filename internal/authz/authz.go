@@ -106,7 +106,7 @@ type Scope struct {
 }
 
 func (s Scope) covers(product string) bool {
-	return s.All || (product != "" && slices.Contains(s.Products, product))
+	return s.All || slices.Contains(s.Products, product) // valid scopes contain no ""
 }
 
 // valid reports whether s is well formed: All, or a list of product IDs.
@@ -132,16 +132,18 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	return context.WithValue(ctx, ctxKey{}, p)
 }
 
-// FromContext returns the principal in ctx, if any.
+// FromContext returns a copy of the principal in ctx, if any; changing it
+// doesn't change the context.
 func FromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(ctxKey{}).(Principal)
+	p.Scope.Products = slices.Clone(p.Scope.Products)
 	return p, ok
 }
 
 // principal returns ctx's principal if it is well formed and has perm.
 func principal(ctx context.Context, perm Permission) (Principal, error) {
 	p, ok := FromContext(ctx)
-	if !ok || p.ID == "" || p.TenantID == "" || !p.Role.Can(perm) {
+	if !ok || p.ID == "" || p.TenantID == "" || !p.Scope.valid() || !p.Role.Can(perm) {
 		return Principal{}, ErrDenied
 	}
 	switch p.Kind {
@@ -180,8 +182,10 @@ func Require(ctx context.Context, perm Permission, product string) error {
 	return nil
 }
 
-// Products is for list queries: it returns all=true if ctx's principal has
-// perm on every product, else the product IDs to filter by.
+// Products is for list queries over product-owned resources (licenses,
+// plans, ...): it returns all=true if ctx's principal has perm on every
+// product, else the non-empty list of product IDs to filter by. Lists of
+// tenant-wide resources (customers, webhooks) use Require(ctx, perm, "").
 func Products(ctx context.Context, perm Permission) (all bool, ids []string, err error) {
 	p, err := principal(ctx, perm)
 	if err != nil {
@@ -190,7 +194,7 @@ func Products(ctx context.Context, perm Permission) (all bool, ids []string, err
 	if p.Scope.All {
 		return true, nil, nil
 	}
-	return false, slices.Clone(p.Scope.Products), nil
+	return false, p.Scope.Products, nil // FromContext copied it
 }
 
 // Grant is a role and scope held by a member or API token.
@@ -201,9 +205,18 @@ type Grant struct {
 
 // CanAssign checks that ctx's principal may change a member's (kind User) or
 // API token's (kind Token) grant from from to to: from nil creates it, to nil
-// removes it. The principal needs member:write or token:write and every
-// product (scoped principals can't manage access); only owners grant, change
-// or remove owner; members can't get the sdk role; to must have a valid scope.
+// removes it.
+//
+// from must be the current grant, read FOR UPDATE in the same transaction as
+// the write, and creating must be a plain INSERT that fails if the member or
+// token exists (never an upsert); otherwise an existing owner could be
+// overwritten as if it were new.
+//
+// Rules: the principal is a user (API tokens can't manage access) with
+// member:write or token:write and every product (scoped principals can't
+// manage access); it may only give or take away a role whose permissions it
+// has itself (so only owners touch owner), except that sdk tokens are always
+// assignable; members can't get sdk; grants must be well formed.
 func CanAssign(ctx context.Context, kind PrincipalKind, from, to *Grant) error {
 	perm := MemberWrite
 	switch kind {
@@ -214,16 +227,29 @@ func CanAssign(ctx context.Context, kind PrincipalKind, from, to *Grant) error {
 		return ErrDenied
 	}
 	p, err := principal(ctx, perm)
-	if err != nil || !p.Scope.All || (from == nil && to == nil) {
+	if err != nil || p.Kind != User || !p.Scope.All || (from == nil && to == nil) {
 		return ErrDenied
 	}
 	for _, g := range []*Grant{from, to} {
-		if g != nil && g.Role == Owner && p.Role != Owner {
+		if g == nil {
+			continue
+		}
+		if !g.Role.Valid() || !g.Scope.valid() || (kind == User && !g.Role.ForMembership()) {
+			return ErrDenied
+		}
+		if g.Role != SDK && !g.Role.within(p.Role) {
 			return ErrDenied
 		}
 	}
-	if to != nil && (!to.Role.Valid() || !to.Scope.valid() || (kind == User && !to.Role.ForMembership())) {
-		return ErrDenied
-	}
 	return nil
+}
+
+// within reports whether every permission of r is also one of g's.
+func (r Role) within(g Role) bool {
+	for _, perm := range permissions[r] {
+		if !g.Can(perm) {
+			return false
+		}
+	}
+	return true
 }

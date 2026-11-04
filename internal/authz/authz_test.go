@@ -69,6 +69,26 @@ var all = Scope{All: true}
 
 func ctxWith(p Principal) context.Context { return WithPrincipal(context.Background(), p) }
 
+// Every role pair: an assigner may give a role only if it holds all of that
+// role's permissions (sdk tokens excepted), whatever the role set looks like.
+func TestCanAssignSubset(t *testing.T) {
+	for _, a := range roles {
+		ctx := ctxWith(Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: a, Scope: all})
+		for _, r := range roles {
+			if r == SDK {
+				continue
+			}
+			want := a.Can(MemberWrite)
+			for _, perm := range permissions[r] {
+				want = want && a.Can(perm)
+			}
+			if got := CanAssign(ctx, User, nil, &Grant{Role: r, Scope: all}) == nil; got != want {
+				t.Errorf("%s assigns %s: %v, want %v", a, r, got, want)
+			}
+		}
+	}
+}
+
 func TestRequire(t *testing.T) {
 	base := Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: Manager, Scope: all}
 	with := func(f func(*Principal)) *Principal { p := base; f(&p); return &p }
@@ -93,6 +113,7 @@ func TestRequire(t *testing.T) {
 		{"scope: own product", scoped, LicenseIssue, "prd_a", true},
 		{"scope: other product", scoped, LicenseIssue, "prd_b", false},
 		{"scope: tenant-wide", scoped, CustomerRead, "", false},
+		{"scope: all and products", with(func(p *Principal) { p.Scope = Scope{All: true, Products: []string{"prd_a"}} }), LicenseIssue, "prd_z", false},
 		{"scope: empty product ID", with(func(p *Principal) { p.Scope = Scope{Products: []string{""}} }), CustomerRead, "", false},
 		{"scoped token", with(func(p *Principal) { p.Kind = Token; p.Scope = Scope{Products: []string{"prd_a"}} }), LicenseIssue, "prd_a", true},
 		{"sdk token", with(func(p *Principal) { p.Kind = Token; p.Role = SDK }), ActivationClient, "prd_a", true},
@@ -109,12 +130,22 @@ func TestRequire(t *testing.T) {
 	}
 }
 
-func TestWithPrincipalCopiesScope(t *testing.T) {
+func TestScopeIsCopied(t *testing.T) {
 	ids := []string{"prd_a"}
 	ctx := ctxWith(Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: Viewer, Scope: Scope{Products: ids}})
 	ids[0] = "prd_b"
 	if Require(ctx, LicenseRead, "prd_b") == nil {
 		t.Error("scope changed after WithPrincipal")
+	}
+	p, _ := FromContext(ctx)
+	p.Scope.Products[0] = "prd_c"
+	if Require(ctx, LicenseRead, "prd_c") == nil {
+		t.Error("scope changed through FromContext")
+	}
+	_, got, _ := Products(ctx, LicenseRead)
+	got[0] = "prd_d"
+	if Require(ctx, LicenseRead, "prd_d") == nil {
+		t.Error("scope changed through Products")
 	}
 }
 
@@ -130,8 +161,8 @@ func TestProductsAndTenantID(t *testing.T) {
 	if _, _, err := Products(ctxWith(p), LicenseIssue); err == nil {
 		t.Error("Products without the permission")
 	}
-	if _, _, err := Products(ctxWith(Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: Viewer}), LicenseRead); err != nil {
-		t.Error(err) // zero scope: no error, filter by no products
+	if _, _, err := Products(ctxWith(Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: Viewer}), LicenseRead); err == nil {
+		t.Error("zero scope: Products must deny, not return an empty filter")
 	}
 	if id, err := TenantID(ctxWith(p)); err != nil || id != "ten_1" {
 		t.Errorf("TenantID = %q, %v", id, err)
@@ -151,6 +182,7 @@ func TestCanAssign(t *testing.T) {
 		return ctxWith(Principal{Kind: User, ID: "usr_1", TenantID: "ten_1", Role: r, Scope: s})
 	}
 	owner, admin := who(Owner, all), who(Admin, all)
+	adminToken := ctxWith(Principal{Kind: Token, ID: "tok_1", TenantID: "ten_1", Role: Admin, Scope: all})
 	for _, c := range []struct {
 		name     string
 		ctx      context.Context
@@ -178,6 +210,10 @@ func TestCanAssign(t *testing.T) {
 		{"empty product ID", owner, User, nil, &Grant{Role: Viewer, Scope: Scope{Products: []string{""}}}, false},
 		{"product scope", owner, User, nil, &Grant{Role: Support, Scope: Scope{Products: []string{"prd_a"}}}, true},
 		{"nothing to do", owner, User, nil, nil, false},
+		{"zero from", admin, User, &Grant{}, g(Viewer), false},
+		{"owner token by owner", owner, Token, nil, g(Owner), true},
+		{"token invites member", adminToken, User, nil, g(Viewer), false},
+		{"token creates token", adminToken, Token, nil, g(SDK), false},
 		{"unknown kind", owner, "platform", nil, g(Viewer), false},
 		{"no principal", context.Background(), User, nil, g(Viewer), false},
 	} {
