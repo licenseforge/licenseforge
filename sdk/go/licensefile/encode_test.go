@@ -38,11 +38,12 @@ func ptr[T any](v T) *T { return &v }
 
 // The exact bytes are pinned: field order, no HTML escaping, durations.
 func TestEncodeExact(t *testing.T) {
-	iat := time.Date(2026, 11, 2, 10, 0, 0, 0, time.FixedZone("CET", 3600)) // written as UTC
+	cet := time.FixedZone("CET", 3600) // every time is written as UTC
+	at := func(m time.Month, d, h int) *time.Time { return ptr(time.Date(2026, m, d, h, 0, 0, 0, cet)) }
 	out, err := Encode(Claims{
 		LicenseID: "lic_1", Tenant: "tnt_1", Product: "acme-db", Plan: "pro",
-		CustomerID: "cus_1", IssuedAt: iat,
-		Expires:    ptr(time.Date(2026, 12, 2, 9, 0, 0, 0, time.UTC)),
+		CustomerID: "cus_1", CustomerName: "Contoso", IssuedAt: *at(11, 2, 10),
+		NotBefore: at(11, 2, 11), Expires: at(12, 2, 10), RefreshAfter: at(11, 3, 10), UpdatesUntil: at(12, 31, 1),
 		Grace:      7*24*time.Hour + 90*time.Minute,
 		MaxOffline: ptr(time.Duration(0)),
 		Binding:    Binding{Type: BindMachine, Fingerprint: "sha256:<&>"},
@@ -51,8 +52,9 @@ func TestEncodeExact(t *testing.T) {
 			Limits:   map[string]int64{"users": 10, "nodes": Unlimited},
 		},
 	})
-	want := `{"v":1,"lid":"lic_1","tenant":"tnt_1","product":"acme-db","plan":"pro","customer":{"id":"cus_1"},` +
-		`"iat":"2026-11-02T09:00:00Z","exp":"2026-12-02T09:00:00Z","grace":"P7DT1H30M","max_offline":"PT0S",` +
+	want := `{"v":1,"lid":"lic_1","tenant":"tnt_1","product":"acme-db","plan":"pro","customer":{"id":"cus_1","name":"Contoso"},` +
+		`"iat":"2026-11-02T09:00:00Z","nbf":"2026-11-02T10:00:00Z","exp":"2026-12-02T09:00:00Z","grace":"P7DT1H30M","max_offline":"PT0S",` +
+		`"refresh_after":"2026-11-03T09:00:00Z","updates_until":"2026-12-31T00:00:00Z",` +
 		`"bind":{"type":"machine","fp":"sha256:<&>"},"entitlements":{"features":["sso"],"limits":{"nodes":-1,"users":10}}}`
 	if err != nil || string(out) != want {
 		t.Errorf("Encode = %s, %v\nwant %s", out, err, want)

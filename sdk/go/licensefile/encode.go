@@ -62,6 +62,7 @@ func Encode(c Claims) ([]byte, error) {
 	if c.CustomerID != "" || c.CustomerName != "" {
 		p.Customer = &customer{c.CustomerID, c.CustomerName}
 	}
+	// A fingerprint without a type is written too, so the parser reports it.
 	if c.Binding.Type != "" && c.Binding.Type != BindNone || c.Binding.Fingerprint != "" {
 		p.Bind = &bind{string(c.Binding.Type), c.Binding.Fingerprint}
 	}
@@ -82,7 +83,7 @@ func Encode(c Claims) ([]byte, error) {
 		return nil, err
 	}
 	if want := normalized(c); !reflect.DeepEqual(*got, want) {
-		return nil, fmt.Errorf("%w: claims don't survive encoding (empty required field, empty fingerprint, or an invalid value)", ErrMalformed)
+		return nil, fmt.Errorf("%w: claims don't survive encoding (sub-second time or duration, invalid UTF-8, or an out-of-range value)", ErrMalformed)
 	}
 	return out, nil
 }
