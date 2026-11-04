@@ -26,5 +26,5 @@ spec:
   selector: {{- include "licenseforge.serverSelectorLabels" . | nindent 4 }}
   ports:
     - name: metrics
-      port: {{ .Values.metrics.port }}
+      port: {{ include "licenseforge.metricsPort" . }}
       targetPort: metrics

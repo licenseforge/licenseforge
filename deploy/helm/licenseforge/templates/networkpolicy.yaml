@@ -16,8 +16,8 @@ spec:
       from: {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- /* Metrics have no auth: only the scrapers, never "any" (no from at all). */}}
-    {{- with .Values.metrics.scrapeFrom }}
-    - ports: [{port: {{ $.Values.metrics.port }}, protocol: TCP}]
+    {{- with dig "scrapeFrom" list (.Values.metrics | default dict) }}
+    - ports: [{port: {{ include "licenseforge.metricsPort" $ }}, protocol: TCP}]
       from: {{- toYaml . | nindent 8 }}
     {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}

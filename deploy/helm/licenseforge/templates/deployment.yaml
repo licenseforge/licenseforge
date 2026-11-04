@@ -41,7 +41,7 @@ spec:
             - name: http
               containerPort: 8080
             - name: metrics
-              containerPort: {{ .Values.metrics.port }}
+              containerPort: {{ include "licenseforge.metricsPort" . }}
           env:
             # Explicit keys, never envFrom: the owner login must not reach serving pods.
             - name: LICENSEFORGE_DATABASE_URL
@@ -55,7 +55,7 @@ spec:
             - name: LICENSEFORGE_DRAIN
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
-              value: {{ printf ":%d" (int .Values.metrics.port) | quote }}
+              value: {{ printf ":%s" (include "licenseforge.metricsPort" .) | quote }}
             {{- if $oidc.enabled }}
             - name: LICENSEFORGE_OIDC_ISSUER
               value: {{ $oidc.issuer | quote }}

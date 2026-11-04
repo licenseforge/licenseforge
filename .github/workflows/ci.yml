@@ -107,6 +107,10 @@ jobs:
           if helm template t . $s $o --set oidc.egress=null >/dev/null 2>&1; then echo "IdP egress without a port"; exit 1; fi
           # Values of a release from before oidc.* (reused on upgrade) still render.
           helm template t . $s --set oidc=null >/dev/null
+          # Same for metrics.*: the server's default port, and the scrape port stays closed.
+          n=$(helm template t . $s --set metrics=null)
+          grep -qF 'containerPort: 9090' <<<"$n" || { echo "metrics=null: no metrics port"; exit 1; }
+          if grep -qF 'port: 9090, protocol' <<<"$n"; then echo "metrics=null: scrape port open"; exit 1; fi
           # Default IdP egress: port 443 only, no `to` (any destination, portable across CNIs).
           n=$(helm template t . $s $o --show-only templates/networkpolicy.yaml)
           grep -A1 -F -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" | grep -q 'to:' && { echo "default IdP egress has a to"; exit 1; }
