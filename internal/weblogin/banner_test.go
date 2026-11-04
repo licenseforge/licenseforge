@@ -36,10 +36,24 @@ func TestAuthConfig(t *testing.T) {
 		t.Errorf("config = %d %q", resp.StatusCode, body)
 	}
 	for k, v := range map[string]string{
-		"Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=60",
+		"Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache",
+		"ETag": `"` + body["banner_id"] + `"`,
 	} {
 		if got := resp.Header.Get(k); got != v {
 			t.Errorf("%s = %q, want %q", k, got, v)
+		}
+	}
+	// Revalidation: the same banner answers 304, another ETag the full body.
+	for etag, want := range map[string]int{resp.Header.Get("ETag"): http.StatusNotModified, `"old"`: http.StatusOK} {
+		req, _ := http.NewRequest("GET", f.app.URL+"/auth/config", nil)
+		req.Header.Set("If-None-Match", etag)
+		r, err := f.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != want {
+			t.Errorf("If-None-Match %s = %d, want %d", etag, r.StatusCode, want)
 		}
 	}
 
@@ -53,13 +67,13 @@ func TestAuthConfig(t *testing.T) {
 func TestBannerGate(t *testing.T) {
 	f := setupWith(t, withBanner)
 	_, cfg := getConfig(t, f)
-	for _, ack := range []string{"", "wrong", cfg["banner_id"] + "x"} {
+	for ack, loc := range map[string]string{"": "/login", "wrong": "/login?banner_changed=1", cfg["banner_id"] + "x": "/login?banner_changed=1"} {
 		resp, err := f.client.Get(f.app.URL + "/auth/login?banner=" + ack)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" || len(resp.Cookies()) != 0 {
+		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != loc || len(resp.Cookies()) != 0 {
 			t.Errorf("login with banner=%q: %d %q, cookies %v", ack, resp.StatusCode, resp.Header.Get("Location"), resp.Cookies())
 		}
 	}
@@ -74,6 +88,25 @@ func TestBannerGate(t *testing.T) {
 	}
 	if logs := f.logs.String(); !strings.Contains(logs, `msg="login banner acknowledged" user=`+u.ID+` banner_id=`+cfg["banner_id"]) {
 		t.Errorf("no acknowledgement logged:\n%s", logs)
+	}
+
+	// The callback wants the acknowledged banner in the flow cookie to be the
+	// current one: a flow that agreed to none, or to another banner (a
+	// rolling update), gets no session and agrees again.
+	for _, acked := range []string{"", "other-banner-id", cfg["banner_id"] + "x"} {
+		f.client.Jar.SetCookies(mustURL(t, f.app.URL), []*http.Cookie{{Name: SessionCookie, Value: "", MaxAge: -1}})
+		q := f.start(t)
+		forgeFlowAck(t, f, acked)
+		if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther ||
+			f.last.Header.Get("Location") != "/login?banner_changed=1" || f.session(t) != "" {
+			t.Errorf("flow acknowledging %q: %d %q, session %q", acked, code, f.last.Header.Get("Location"), f.session(t))
+		}
+	}
+	// A pre-banner flow cookie (three parts) is refused too.
+	q = f.start(t)
+	forgeFlowAck(t, f, "\x00drop")
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusBadRequest || f.session(t) != "" {
+		t.Errorf("three-part flow cookie: %d", code)
 	}
 
 	// Without a banner nothing is asked or logged.
@@ -95,6 +128,11 @@ func TestCheckBanner(t *testing.T) {
 		"escape \x1b[31m":                       false,
 		"lone \r return":                        false,
 		"next line \u0085":                      false,
+		"bidi \u202eoverride":                   false,
+		"zero\u200bwidth":                       false,
+		"line\u2028separator":                   false,
+		"para\u2029separator":                   false,
+		"bom \ufeff":                            false,
 	} {
 		if err := checkBanner(b); (err == nil) != ok {
 			t.Errorf("checkBanner(%.20q) = %v, want ok=%v", b, err, ok)
@@ -125,7 +163,31 @@ func TestCookieFollowsMaxAge(t *testing.T) {
 
 func TestNewRefusesBadBanner(t *testing.T) {
 	c := Config{Issuer: "https://idp.example", ClientID: "lf", RedirectURL: "https://app.example/auth/callback", Banner: "a\x00"}
-	if _, err := New(t.Context(), c, identity.Service{}, nil); err == nil || !strings.Contains(err.Error(), "control character") {
+	if _, err := New(t.Context(), c, identity.Service{}, nil); err == nil || !strings.Contains(err.Error(), "control or format character") {
 		t.Errorf("New with a bad banner = %v", err)
 	}
+}
+
+// forgeFlowAck rewrites the acknowledged banner in the jar's flow cookie
+// ("\x00drop" removes the part).
+func forgeFlowAck(t *testing.T, f *fixture, acked string) {
+	t.Helper()
+	u := mustURL(t, f.app.URL)
+	for _, c := range f.client.Jar.Cookies(u) {
+		if c.Name != flowCookie {
+			continue
+		}
+		parts := strings.Split(c.Value, ".")
+		if len(parts) != 4 {
+			t.Fatalf("flow cookie has %d parts", len(parts))
+		}
+		if acked == "\x00drop" {
+			parts = parts[:3]
+		} else {
+			parts[3] = acked
+		}
+		f.client.Jar.SetCookies(u, []*http.Cookie{{Name: flowCookie, Value: strings.Join(parts, "."), Path: "/", Secure: true, HttpOnly: true}})
+		return
+	}
+	t.Fatal("no flow cookie")
 }

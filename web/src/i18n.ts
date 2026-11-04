@@ -7,6 +7,7 @@ const en = {
   "login.button": "Continue to sign in",
   "login.bannerTitle": "System use notification",
   "login.agree": "I have read and agree to this notice",
+  "login.bannerChanged": "The notice changed. Please read and agree to it again.",
   "nav.skip": "Skip to content",
   "tenant.label": "Tenant",
   "tenant.none": "You are not a member of any tenant yet.",

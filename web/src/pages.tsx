@@ -13,6 +13,12 @@ export function LoginPage() {
     <main className="mx-auto flex min-h-svh max-w-xl flex-col justify-center gap-4 p-6">
       <h1 className="text-2xl font-semibold">{t("login.title")}</h1>
       <p className="text-muted-foreground">{t("login.body")}</p>
+      {/* Set by the server when the banner changed after the user agreed. */}
+      {new URLSearchParams(window.location.search).has("banner_changed") && (
+        <p role="alert" className="text-sm font-medium">
+          {t("login.bannerChanged")}
+        </p>
+      )}
       {config.data?.banner && (
         <section aria-labelledby="banner-title" className="rounded-md border p-4">
           <h2 id="banner-title" className="mb-2 font-semibold">
