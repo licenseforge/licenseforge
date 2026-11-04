@@ -7,10 +7,12 @@ import { getAuthConfig, getSession, loginHref, logout, requireSession } from "./
 const session = { user: { id: "usr_1", email: "a@example.com", name: "Ada" }, csrf_token: "tok" };
 
 function serve(status: number, body: unknown = {}) {
-  const f = vi.fn(async () => new Response(status === 204 ? null : JSON.stringify(body), { status }));
+  const f = vi.fn<(req: Request) => Promise<Response>>(async () => new Response(status === 204 ? null : JSON.stringify(body), { status }));
   vi.stubGlobal("fetch", f);
   return f;
 }
+
+const sent = (f: ReturnType<typeof serve>) => f.mock.calls[0]![0];
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,7 +20,8 @@ describe("getSession", () => {
   it("loads the session with same-origin cookies", async () => {
     const f = serve(200, session);
     expect(await getSession()).toEqual(session);
-    expect(f).toHaveBeenCalledWith("/auth/session", expect.objectContaining({ credentials: "same-origin" }));
+    expect(sent(f).url).toBe(`${window.location.origin}/auth/session`);
+    expect(sent(f).credentials).toBe("same-origin");
   });
   it("is null without a session", async () => {
     serve(401);
@@ -44,21 +47,22 @@ describe("requireSession", () => {
 });
 
 describe("logout", () => {
-  it("posts with the CSRF token and same-origin cookies", async () => {
+  it("posts with the session's CSRF token and same-origin cookies", async () => {
+    serve(200, session);
+    await getSession(); // remembers the token
     const f = serve(204);
-    await logout("tok");
-    expect(f).toHaveBeenCalledWith(
-      "/auth/logout",
-      expect.objectContaining({ method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": "tok" } }),
-    );
+    await logout();
+    expect(sent(f).method).toBe("POST");
+    expect(sent(f).credentials).toBe("same-origin");
+    expect(sent(f).headers.get("X-CSRF-Token")).toBe("tok");
   });
   it("treats 401 as already logged out", async () => {
     serve(401);
-    await expect(logout("tok")).resolves.toBeUndefined();
+    await expect(logout()).resolves.toBeUndefined();
   });
   it("throws on other errors", async () => {
     serve(403);
-    await expect(logout("tok")).rejects.toMatchObject({ status: 403 });
+    await expect(logout()).rejects.toMatchObject({ status: 403 });
   });
 });
 

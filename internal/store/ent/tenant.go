@@ -47,9 +47,11 @@ type TenantEdges struct {
 	Memberships []*Membership `json:"memberships,omitempty"`
 	// APITokens holds the value of the api_tokens edge.
 	APITokens []*APIToken `json:"api_tokens,omitempty"`
+	// IdempotencyKeys holds the value of the idempotency_keys edge.
+	IdempotencyKeys []*IdempotencyKey `json:"idempotency_keys,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [7]bool
+	loadedTypes [8]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -113,6 +115,15 @@ func (e TenantEdges) APITokensOrErr() ([]*APIToken, error) {
 		return e.APITokens, nil
 	}
 	return nil, &NotLoadedError{edge: "api_tokens"}
+}
+
+// IdempotencyKeysOrErr returns the IdempotencyKeys value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) IdempotencyKeysOrErr() ([]*IdempotencyKey, error) {
+	if e.loadedTypes[7] {
+		return e.IdempotencyKeys, nil
+	}
+	return nil, &NotLoadedError{edge: "idempotency_keys"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -215,6 +226,11 @@ func (_m *Tenant) QueryMemberships() *MembershipQuery {
 // QueryAPITokens queries the "api_tokens" edge of the Tenant entity.
 func (_m *Tenant) QueryAPITokens() *APITokenQuery {
 	return NewTenantClient(_m.config).QueryAPITokens(_m)
+}
+
+// QueryIdempotencyKeys queries the "idempotency_keys" edge of the Tenant entity.
+func (_m *Tenant) QueryIdempotencyKeys() *IdempotencyKeyQuery {
+	return NewTenantClient(_m.config).QueryIdempotencyKeys(_m)
 }
 
 // Update returns a builder for updating this Tenant.

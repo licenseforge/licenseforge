@@ -16,6 +16,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
+	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -27,18 +28,19 @@ import (
 // TenantQuery is the builder for querying Tenant entities.
 type TenantQuery struct {
 	config
-	ctx             *QueryContext
-	order           []tenant.OrderOption
-	inters          []Interceptor
-	predicates      []predicate.Tenant
-	withProducts    *ProductQuery
-	withCustomers   *CustomerQuery
-	withSigningKeys *SigningKeyQuery
-	withAuditEvents *AuditEventQuery
-	withInvitations *InvitationQuery
-	withMemberships *MembershipQuery
-	withAPITokens   *APITokenQuery
-	modifiers       []func(*sql.Selector)
+	ctx                 *QueryContext
+	order               []tenant.OrderOption
+	inters              []Interceptor
+	predicates          []predicate.Tenant
+	withProducts        *ProductQuery
+	withCustomers       *CustomerQuery
+	withSigningKeys     *SigningKeyQuery
+	withAuditEvents     *AuditEventQuery
+	withInvitations     *InvitationQuery
+	withMemberships     *MembershipQuery
+	withAPITokens       *APITokenQuery
+	withIdempotencyKeys *IdempotencyKeyQuery
+	modifiers           []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -222,6 +224,28 @@ func (_q *TenantQuery) QueryAPITokens() *APITokenQuery {
 			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
 			sqlgraph.To(apitoken.Table, apitoken.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, tenant.APITokensTable, tenant.APITokensColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryIdempotencyKeys chains the current query on the "idempotency_keys" edge.
+func (_q *TenantQuery) QueryIdempotencyKeys() *IdempotencyKeyQuery {
+	query := (&IdempotencyKeyClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(idempotencykey.Table, idempotencykey.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.IdempotencyKeysTable, tenant.IdempotencyKeysColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -416,18 +440,19 @@ func (_q *TenantQuery) Clone() *TenantQuery {
 		return nil
 	}
 	return &TenantQuery{
-		config:          _q.config,
-		ctx:             _q.ctx.Clone(),
-		order:           append([]tenant.OrderOption{}, _q.order...),
-		inters:          append([]Interceptor{}, _q.inters...),
-		predicates:      append([]predicate.Tenant{}, _q.predicates...),
-		withProducts:    _q.withProducts.Clone(),
-		withCustomers:   _q.withCustomers.Clone(),
-		withSigningKeys: _q.withSigningKeys.Clone(),
-		withAuditEvents: _q.withAuditEvents.Clone(),
-		withInvitations: _q.withInvitations.Clone(),
-		withMemberships: _q.withMemberships.Clone(),
-		withAPITokens:   _q.withAPITokens.Clone(),
+		config:              _q.config,
+		ctx:                 _q.ctx.Clone(),
+		order:               append([]tenant.OrderOption{}, _q.order...),
+		inters:              append([]Interceptor{}, _q.inters...),
+		predicates:          append([]predicate.Tenant{}, _q.predicates...),
+		withProducts:        _q.withProducts.Clone(),
+		withCustomers:       _q.withCustomers.Clone(),
+		withSigningKeys:     _q.withSigningKeys.Clone(),
+		withAuditEvents:     _q.withAuditEvents.Clone(),
+		withInvitations:     _q.withInvitations.Clone(),
+		withMemberships:     _q.withMemberships.Clone(),
+		withAPITokens:       _q.withAPITokens.Clone(),
+		withIdempotencyKeys: _q.withIdempotencyKeys.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -511,6 +536,17 @@ func (_q *TenantQuery) WithAPITokens(opts ...func(*APITokenQuery)) *TenantQuery 
 	return _q
 }
 
+// WithIdempotencyKeys tells the query-builder to eager-load the nodes that are connected to
+// the "idempotency_keys" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithIdempotencyKeys(opts ...func(*IdempotencyKeyQuery)) *TenantQuery {
+	query := (&IdempotencyKeyClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withIdempotencyKeys = query
+	return _q
+}
+
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
 //
@@ -589,7 +625,7 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 	var (
 		nodes       = []*Tenant{}
 		_spec       = _q.querySpec()
-		loadedTypes = [7]bool{
+		loadedTypes = [8]bool{
 			_q.withProducts != nil,
 			_q.withCustomers != nil,
 			_q.withSigningKeys != nil,
@@ -597,6 +633,7 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 			_q.withInvitations != nil,
 			_q.withMemberships != nil,
 			_q.withAPITokens != nil,
+			_q.withIdempotencyKeys != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -666,6 +703,13 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 		if err := _q.loadAPITokens(ctx, query, nodes,
 			func(n *Tenant) { n.Edges.APITokens = []*APIToken{} },
 			func(n *Tenant, e *APIToken) { n.Edges.APITokens = append(n.Edges.APITokens, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withIdempotencyKeys; query != nil {
+		if err := _q.loadIdempotencyKeys(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.IdempotencyKeys = []*IdempotencyKey{} },
+			func(n *Tenant, e *IdempotencyKey) { n.Edges.IdempotencyKeys = append(n.Edges.IdempotencyKeys, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -867,6 +911,36 @@ func (_q *TenantQuery) loadAPITokens(ctx context.Context, query *APITokenQuery, 
 	}
 	query.Where(predicate.APIToken(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(tenant.APITokensColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadIdempotencyKeys(ctx context.Context, query *IdempotencyKeyQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *IdempotencyKey)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(idempotencykey.FieldTenantID)
+	}
+	query.Where(predicate.IdempotencyKey(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.IdempotencyKeysColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {
