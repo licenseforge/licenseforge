@@ -85,6 +85,17 @@ func TestAPITokenCreation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "expiry_from_now") {
 		t.Errorf("forward-dated created_at: %v", err)
 	}
+	// Even within the year, the recorded creation time is the database's.
+	err = f.d.WithTenant(context.Background(), f.a, func(tx *ent.Tx) error {
+		tok := tokens.New()
+		_, err := tx.APIToken.Create().SetTenantID(f.a).SetName("x").SetRole(apitoken.RoleSdk).SetScopeAll(true).
+			SetTokenHash(tokens.Hash(tok)).SetDisplay(tokens.Display(tok)).SetCreatedBy(f.ownerA).
+			SetCreatedAt(time.Now().AddDate(0, 6, 0)).SetExpiresAt(time.Now().AddDate(0, 11, 0)).Save(context.Background())
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "expiry_from_now") {
+		t.Errorf("created_at six months ahead: %v", err)
+	}
 
 }
 
@@ -154,9 +165,22 @@ func TestAPITokenScope(t *testing.T) {
 			return err
 		})
 	}
-	if err := add(all.ID, f.prodA); err == nil || !strings.Contains(err.Error(), "new_token") && !strings.Contains(err.Error(), "api_token_products_token_same_tenant") {
+	// In the creating transaction (so new_token allows it), only the
+	// scope_all key refuses a product on an all-products token.
+	err = f.d.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		tok := tokens.New()
+		tk, err := tx.APIToken.Create().SetTenantID(f.a).SetName("x").SetRole(apitoken.RoleSdk).SetScopeAll(true).
+			SetTokenHash(tokens.Hash(tok)).SetDisplay(tokens.Display(tok)).SetCreatedBy(f.ownerA).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.APITokenProduct.Create().SetTenantID(f.a).SetAPITokenID(tk.ID).SetProductID(f.prodA).Save(ctx)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_token_products_token_same_tenant") {
 		t.Errorf("product on an all-products token: %v", err)
 	}
+	_ = all
 	used, err := f.createToken(tokenOpts{creator: f.ownerA, tenant: f.a, products: []string{f.prodA}})
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +301,18 @@ func TestAPITokenScopeFixedAtCreation(t *testing.T) {
 	if err := exec(`UPDATE api_tokens SET last_used_at = NULL WHERE id = $1`, tk.ID); err == nil || !strings.Contains(err.Error(), "not_revoked") {
 		t.Errorf("use hidden by resetting last_used_at: %v", err)
 	}
+	for name, q := range map[string]string{
+		"backdated use":         `UPDATE api_tokens SET last_used_at = '2000-01-01' WHERE id = $1`,
+		"use cleared on revoke": `UPDATE api_tokens SET revoked_at = now(), last_used_at = NULL WHERE id = $1`,
+		"use moved back a bit":  `UPDATE api_tokens SET last_used_at = last_used_at - interval '4 minutes' WHERE id = $1`,
+	} {
+		if err := exec(q, tk.ID); err == nil || !strings.Contains(err.Error(), "use_moves_forward") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := exec(`UPDATE api_tokens SET revoked_at = '1970-01-01' WHERE id = $1`, tk.ID); err == nil || !strings.Contains(err.Error(), "not_revoked") {
+		t.Errorf("backdated revocation: %v", err)
+	}
 	if err := exec(`UPDATE api_tokens SET last_used_at = now() + interval '1 day' WHERE id = $1`, tk.ID); err == nil || !strings.Contains(err.Error(), "not_revoked") {
 		t.Errorf("future-dated use: %v", err)
 	}
@@ -285,8 +321,10 @@ func TestAPITokenScopeFixedAtCreation(t *testing.T) {
 	}
 	// A use can't be recorded after expiry.
 	f.owner(t, `UPDATE api_tokens SET created_at = now() - interval '2 days', expires_at = now() - interval '1 day' WHERE id = $1`, tk.ID)
-	if err := exec(`UPDATE api_tokens SET last_used_at = now() WHERE id = $1`, tk.ID); err == nil || !strings.Contains(err.Error(), "not_revoked") {
-		t.Errorf("use recorded on an expired token: %v", err)
+	for _, q := range []string{`UPDATE api_tokens SET last_used_at = now() WHERE id = $1`, `UPDATE api_tokens SET last_used_at = expires_at WHERE id = $1`} {
+		if err := exec(q, tk.ID); err == nil {
+			t.Errorf("use recorded on an expired token: %s", q)
+		}
 	}
 	// The platform can't un-revoke either (a fresh token).
 	tk, err = f.createToken(tokenOpts{creator: f.ownerA, tenant: f.a})
