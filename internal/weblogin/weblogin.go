@@ -98,6 +98,8 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
+	mux.Handle("GET /auth/session", h.RequireSession(http.HandlerFunc(h.session)))
+	mux.Handle("POST /auth/logout", h.RequireSession(http.HandlerFunc(h.logout)))
 }
 
 func setCookie(w http.ResponseWriter, name, value string, maxAge int) {
