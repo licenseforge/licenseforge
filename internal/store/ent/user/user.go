@@ -38,6 +38,8 @@ const (
 	EdgeInvitationsSent = "invitations_sent"
 	// EdgeInvitationsAccepted holds the string denoting the invitations_accepted edge name in mutations.
 	EdgeInvitationsAccepted = "invitations_accepted"
+	// EdgeAPITokens holds the string denoting the api_tokens edge name in mutations.
+	EdgeAPITokens = "api_tokens"
 	// Table holds the table name of the user in the database.
 	Table = "users"
 	// MembershipsTable is the table that holds the memberships relation/edge.
@@ -61,6 +63,13 @@ const (
 	InvitationsAcceptedInverseTable = "invitations"
 	// InvitationsAcceptedColumn is the table column denoting the invitations_accepted relation/edge.
 	InvitationsAcceptedColumn = "accepted_by"
+	// APITokensTable is the table that holds the api_tokens relation/edge.
+	APITokensTable = "api_tokens"
+	// APITokensInverseTable is the table name for the APIToken entity.
+	// It exists in this package in order to avoid circular dependency with the "apitoken" package.
+	APITokensInverseTable = "api_tokens"
+	// APITokensColumn is the table column denoting the api_tokens relation/edge.
+	APITokensColumn = "created_by"
 )
 
 // Columns holds all SQL columns for user fields.
@@ -204,6 +213,20 @@ func ByInvitationsAccepted(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOpti
 		sqlgraph.OrderByNeighborTerms(s, newInvitationsAcceptedStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByAPITokensCount orders the results by api_tokens count.
+func ByAPITokensCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAPITokensStep(), opts...)
+	}
+}
+
+// ByAPITokens orders the results by api_tokens terms.
+func ByAPITokens(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAPITokensStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newMembershipsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -223,5 +246,12 @@ func newInvitationsAcceptedStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(InvitationsAcceptedInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, InvitationsAcceptedTable, InvitationsAcceptedColumn),
+	)
+}
+func newAPITokensStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(APITokensInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, APITokensTable, APITokensColumn),
 	)
 }

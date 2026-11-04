@@ -34,6 +34,8 @@ const (
 	EdgeInvitations = "invitations"
 	// EdgeMemberships holds the string denoting the memberships edge name in mutations.
 	EdgeMemberships = "memberships"
+	// EdgeAPITokens holds the string denoting the api_tokens edge name in mutations.
+	EdgeAPITokens = "api_tokens"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -78,6 +80,13 @@ const (
 	MembershipsInverseTable = "memberships"
 	// MembershipsColumn is the table column denoting the memberships relation/edge.
 	MembershipsColumn = "tenant_id"
+	// APITokensTable is the table that holds the api_tokens relation/edge.
+	APITokensTable = "api_tokens"
+	// APITokensInverseTable is the table name for the APIToken entity.
+	// It exists in this package in order to avoid circular dependency with the "apitoken" package.
+	APITokensInverseTable = "api_tokens"
+	// APITokensColumn is the table column denoting the api_tokens relation/edge.
+	APITokensColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -227,6 +236,20 @@ func ByMemberships(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newMembershipsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByAPITokensCount orders the results by api_tokens count.
+func ByAPITokensCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAPITokensStep(), opts...)
+	}
+}
+
+// ByAPITokens orders the results by api_tokens terms.
+func ByAPITokens(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAPITokensStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -267,5 +290,12 @@ func newMembershipsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(MembershipsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, MembershipsTable, MembershipsColumn),
+	)
+}
+func newAPITokensStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(APITokensInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, APITokensTable, APITokensColumn),
 	)
 }

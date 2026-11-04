@@ -43,4 +43,6 @@ func Invitation() string        { return New("inv") }
 func InvitationProduct() string { return New("ivp") }
 func Membership() string        { return New("mem") }
 func MembershipProduct() string { return New("mbp") }
+func APIToken() string          { return New("tok") }
+func APITokenProduct() string   { return New("tkp") }
 func AuditEvent() string        { return New("aud") }

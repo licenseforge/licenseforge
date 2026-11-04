@@ -49,9 +49,11 @@ type UserEdges struct {
 	InvitationsSent []*Invitation `json:"invitations_sent,omitempty"`
 	// InvitationsAccepted holds the value of the invitations_accepted edge.
 	InvitationsAccepted []*Invitation `json:"invitations_accepted,omitempty"`
+	// APITokens holds the value of the api_tokens edge.
+	APITokens []*APIToken `json:"api_tokens,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [3]bool
+	loadedTypes [4]bool
 }
 
 // MembershipsOrErr returns the Memberships value or an error if the edge
@@ -79,6 +81,15 @@ func (e UserEdges) InvitationsAcceptedOrErr() ([]*Invitation, error) {
 		return e.InvitationsAccepted, nil
 	}
 	return nil, &NotLoadedError{edge: "invitations_accepted"}
+}
+
+// APITokensOrErr returns the APITokens value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) APITokensOrErr() ([]*APIToken, error) {
+	if e.loadedTypes[3] {
+		return e.APITokens, nil
+	}
+	return nil, &NotLoadedError{edge: "api_tokens"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -197,6 +208,11 @@ func (_m *User) QueryInvitationsSent() *InvitationQuery {
 // QueryInvitationsAccepted queries the "invitations_accepted" edge of the User entity.
 func (_m *User) QueryInvitationsAccepted() *InvitationQuery {
 	return NewUserClient(_m.config).QueryInvitationsAccepted(_m)
+}
+
+// QueryAPITokens queries the "api_tokens" edge of the User entity.
+func (_m *User) QueryAPITokens() *APITokenQuery {
+	return NewUserClient(_m.config).QueryAPITokens(_m)
 }
 
 // Update returns a builder for updating this User.

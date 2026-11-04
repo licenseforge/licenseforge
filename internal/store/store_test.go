@@ -381,6 +381,13 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"revoke_only (restrictive)":       `UPDATE licenseforge_app ((revoked_at IS NULL) AND (accepted_at IS NULL)) (revoked_at IS NOT NULL)`,
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
+		"api_tokens": {
+			"creator_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (api_tokens.tenant_id)::text) AND ((m.user_id)::text = (api_tokens.created_by)::text))))`,
+			"not_revoked (restrictive)":       `UPDATE licenseforge_app (revoked_at IS NULL) true`,
+		},
+		"api_token_products": {
+			"new_token (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM api_tokens t WHERE (((t.id)::text = (api_token_products.api_token_id)::text) AND (t.last_used_at IS NULL) AND (t.revoked_at IS NULL))))`,
+		},
 		"invitation_products": {
 			"identity_read":                 `SELECT licenseforge_identity true`,
 			"open_invitation (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM invitations i WHERE (((i.id)::text = (invitation_products.invitation_id)::text) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL))))`,
