@@ -68,6 +68,11 @@ func Open(ctx context.Context, tenantDSN, platformDSN string) (*DB, error) {
 	}, nil
 }
 
+// Ping checks that both pools can reach the database.
+func (d *DB) Ping(ctx context.Context) error {
+	return errors.Join(d.tenantDB.PingContext(ctx), d.platformDB.PingContext(ctx))
+}
+
 // Close closes both pools.
 func (d *DB) Close() error { return errors.Join(d.tenantDB.Close(), d.platformDB.Close()) }
 

@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0028 and the `lf1` license file format draft.
-- Minimal server with `/healthz` and `/readyz`.
+- Server with `/healthz` (liveness) and `/readyz` (fails while the database is unreachable); `licenseforge migrate` applies migrations as the schema owner. Configured by `LICENSEFORGE_DATABASE_URL`, `LICENSEFORGE_PLATFORM_DATABASE_URL`, `LICENSEFORGE_OWNER_DATABASE_URL` (migrate only) and `LICENSEFORGE_MASTER_KEYS`; the server refuses to start without them or with unsafe database logins.
 - `Merge gate` check: fails while a PR has the `do-not-merge` label.
 - Server data layer foundation (`internal/store`): ent with PostgreSQL, prefixed IDs, versioned migrations with a built-in runner (checksums, per-file transactions, advisory lock), a three-login role model (owner, tenant pool, platform pool) with forced row-level security and release-blocking isolation tests, and `deploy/database-setup.sql`; tenants and products tables.
 - `internal/secrets` (ADR-0025): keyring of master keys from `LICENSEFORGE_MASTER_KEYS` (generate one with `openssl rand -base64 32`), AES-256-GCM encryption bound to its row, HMAC lookup hashes that survive key rotation.
