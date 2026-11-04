@@ -5,15 +5,17 @@ The general rules (Code of Conduct, DCO sign-off, pull request process, security
 ## Prerequisites
 - Go 1.26+
 - [golangci-lint](https://golangci-lint.run/) for `make lint`
-- Docker (integration tests with PostgreSQL, once they exist)
+- Docker (PostgreSQL for tests, and the dev stack)
 
 ## Common tasks
 ```
+make dev-db   # throwaway PostgreSQL 17 for tests; prints the variables to export
 make test     # go test -race ./...
 make lint     # go vet + golangci-lint
 make build    # bin/licenseforge
-make run      # run the server on :8080
+docker compose up --build   # server + PostgreSQL with the production logins, on 127.0.0.1:8080
 ```
+`make run` runs the server directly; it needs the `LICENSEFORGE_*` variables listed in `cmd/licenseforge/main.go`.
 
 ## Design changes
 Read the [ADRs](docs/adr/README.md) first. A change that contradicts an accepted ADR needs a new ADR in the same pull request.
