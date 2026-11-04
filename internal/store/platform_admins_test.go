@@ -148,11 +148,23 @@ func TestPlatformAdminGrantsAndRemoval(t *testing.T) {
 	if err := f.d.GrantPlatformAdmin(ctx, f.ownerB, f.ownerA, noAudit); err != nil {
 		t.Fatal(err)
 	}
-	// Two admins removing each other at once: one removal wins.
+	// Two admins removing each other at once: the first holds its removal
+	// open until the second waits on the lock; one removal wins.
+	inside, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) }) // never leave the removal open on failure
 	errs := make(chan error, 2)
-	for _, u := range []string{f.ownerA, f.ownerB} {
-		go func() { errs <- f.d.RemovePlatformAdmin(ctx, u, noAudit) }()
+	go func() {
+		errs <- f.d.RemovePlatformAdmin(ctx, f.ownerA, func(*ent.Tx) error { close(inside); <-release; return nil })
+	}()
+	select {
+	case <-inside:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first removal didn't start")
 	}
+	go func() { errs <- f.d.RemovePlatformAdmin(ctx, f.ownerB, noAudit) }()
+	f.waitAdvisoryWaiters(t, 1)
+	once.Do(func() { close(release) })
 	var ok, last int
 	for range 2 {
 		switch err := <-errs; {
@@ -199,7 +211,7 @@ func TestPlatformAdminGrantChecks(t *testing.T) {
 	if err := f.d.GrantPlatformAdmin(ctx, f.newUser(t, "x2@example.com", true), f.ownerB, noAudit); !errors.Is(err, ErrNotPlatformAdmin) {
 		t.Errorf("grant by a disabled admin: %v", err)
 	}
-	// At most one bootstrap row ever: a multi-row insert on an empty table
+	// At most one bootstrap row at a time: a multi-row insert on an empty table
 	// passes the snapshot-reading policy, but not the unique index.
 	f.owner(t, `DELETE FROM platform_admins`)
 	err := f.d.WithPlatform(ctx, func(tx *ent.Tx) error {
@@ -226,7 +238,7 @@ func TestKeepOneIsASingleStatementBackstop(t *testing.T) {
 	}
 	f.platform(t, `DELETE FROM platform_admins`)
 	if n := f.admins(t); n != 0 {
-		t.Logf("keep_one now also covers multi-row deletes (%d left): update ADR-0031 and this test", n)
+		t.Fatalf("residual changed (%d admins left): keep_one now covers multi-row deletes; update ADR-0031 and this test", n)
 	}
 }
 

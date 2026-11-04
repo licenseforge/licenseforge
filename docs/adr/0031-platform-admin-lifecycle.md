@@ -7,9 +7,10 @@
 
 ## Decision
 - **The last platform admin can't be removed**: removal (`RemovePlatformAdmin`) locks the admin set and refuses if none would remain, like the last tenant owner. Bootstrap, grant and removal all serialize on that one lock.
-- **Grants record how they were made**: `bootstrap` (only while there are no admins, `granted_by` NULL) or a grant by an existing, enabled admin (`granted_by` that admin). The database enforces the shape of each row (CHECK) and **at most one bootstrap row, ever** (partial unique index).
+- **Grants record how they were made**: `bootstrap` (only while there are no admins, `granted_by` NULL) or a grant by an existing, enabled admin (`granted_by` that admin). The database enforces the shape of each row (CHECK) and **at most one bootstrap row at a time** (partial unique index). Bootstrap reopens only if the table is emptied: by an operator on the owner login, or through the backstop residual below.
 - **Database backstops are partial, by choice**: restrictive policies refuse a single-row removal of the last admin and a single-row grant of the wrong shape, but they read a snapshot, so a multi-row statement or two racing raw statements on the platform pool can pass them. Closing that needs a trigger, which [ADR-0009 Multi-tenancy](0009-multi-tenancy.md) refuses; the platform pool is the most privileged serving login (all tenants) anyway, so the store functions are the rule.
-- **Bootstrap and grants** never involve a disabled or unknown user (target or granter).
+- **Bootstrap and grants** never involve a disabled or unknown user (target or granter) at the time of the check. Disabling a user is not under the admin-set lock, so a grant can race a concurrent disable (minor; the disabled user can't log in anyway).
+- Disabled admins still count: if every admin is disabled, the table isn't empty, bootstrap stays closed and recovery is the owner-login command.
 - **Erasure** (`licenseforge user erase`) removes the user's `platform_admins` row first and refuses while they are the last admin (hand over first), as it refuses a tenant's last owner.
 - **Recovery** when no admin can log in is an explicit operator action on the owner login (a `licenseforge admin` command, to be built with the CLI), never an empty table reopening bootstrap. The erase command (ADR-0029) is also still to be built; it must follow this ADR.
 

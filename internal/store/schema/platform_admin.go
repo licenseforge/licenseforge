@@ -47,6 +47,6 @@ func (PlatformAdmin) Annotations() []schema.Annotation {
 }
 
 func (PlatformAdmin) Indexes() []ent.Index {
-	// At most one bootstrap grant, ever: no snapshot race can add a second.
+	// At most one bootstrap row at a time: no snapshot race can add a second.
 	return []ent.Index{index.Fields("bootstrap").Unique().Annotations(entsql.IndexWhere("bootstrap"))}
 }
