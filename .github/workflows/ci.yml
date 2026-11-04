@@ -70,7 +70,7 @@ jobs:
           helm template t . --set secrets.server=s --set migrate.enabled=false --set networkPolicy.enabled=false --set podDisruptionBudget.enabled=false >/dev/null
           helm template t . $s --set 'networkPolicy.databaseTo[0].ipBlock.cidr=10.0.0.0/8' --set 'networkPolicy.dns.ports={53,5353}' --set podLabels.team=a --set 'extraEnv[0].name=X' --set 'extraEnv[0].value=y' >/dev/null
           # Bad values fail the render instead of producing a broken release.
-          for bad in drainSeconds=5s terminationGracePeriodSeconds=20; do
+          for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}'; do
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi

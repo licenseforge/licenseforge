@@ -69,7 +69,7 @@ networkPolicy:
     to: []
 
 podAnnotations: {}
-podLabels: {}   # app.kubernetes.io/{name,instance,component} are reserved
+podLabels: {}   # the chart's app.kubernetes.io/* and helm.sh/chart labels are reserved
 nodeSelector: {}
 tolerations: []
 affinity: {}

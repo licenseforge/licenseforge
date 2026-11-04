@@ -17,7 +17,7 @@ spec:
       labels:
         {{- include "licenseforge.labels" . | nindent 8 }}
         app.kubernetes.io/component: server
-        {{- with omit .Values.podLabels "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" }}{{ toYaml . | nindent 8 }}{{ end }}
+        {{- with omit (.Values.podLabels | default dict) "app.kubernetes.io/name" "app.kubernetes.io/instance" "app.kubernetes.io/component" "app.kubernetes.io/version" "app.kubernetes.io/managed-by" "helm.sh/chart" }}{{ toYaml . | nindent 8 }}{{ end }}
       {{- with .Values.podAnnotations }}
       annotations: {{- toYaml . | nindent 8 }}
       {{- end }}
