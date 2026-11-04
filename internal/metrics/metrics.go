@@ -52,8 +52,8 @@ func outcomeCounter(name, help string) OutcomeCounter {
 var (
 	// Logins counts dashboard logins (weblogin callback).
 	Logins = outcomeCounter("licenseforge_logins_total", "Dashboard logins by outcome.")
-	// Activations, LeaseRefreshes and UnknownLicenseKeys are for the
-	// activation API (ADR-0034); nothing calls them until it lands.
+	// Activations, LeaseRefreshes and UnknownLicenseKeys count the
+	// activation API (internal/activations, ADR-0034).
 	Activations        = outcomeCounter("licenseforge_activations_total", "License activations by outcome.")
 	LeaseRefreshes     = outcomeCounter("licenseforge_lease_refreshes_total", "Online lease refreshes by outcome.")
 	UnknownLicenseKeys = prometheus.NewCounter(prometheus.CounterOpts{
