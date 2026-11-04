@@ -1,0 +1,562 @@
+package licenses
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"errors"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"licenseforge.io/licenseforge/internal/audit"
+	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/licensekey"
+	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/ent/plan"
+	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/schema"
+	"licenseforge.io/licenseforge/internal/store/storetest"
+)
+
+var env storetest.Env
+
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, store.Migrate)) }
+
+// tenantData is one tenant's catalog: product P with plan "pro" (12 months,
+// sso, seats=10), a second product Q with its own plan, and a customer.
+type tenantData struct {
+	id, prodP, prodQ string
+	pro, planQ       *ent.Plan
+	customer         string
+	seats, sso       string // plan feature IDs on pro
+}
+
+type fixture struct {
+	db   *store.DB
+	kr   *secrets.Keyring
+	s    Service
+	a, b tenantData
+}
+
+func setup(t *testing.T) fixture {
+	t.Helper()
+	ctx := context.Background()
+	d, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	kr, err := secrets.ParseKeyring("k1=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fixture{db: d, kr: kr, s: Service{DB: d, Keys: kr}}
+	for _, td := range []*tenantData{&f.a, &f.b} {
+		if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
+			tn, err := tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(ctx)
+			if err == nil {
+				td.id = tn.ID
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.WithTenant(ctx, td.id, func(tx *ent.Tx) error {
+			p, err := tx.Product.Create().SetTenantID(td.id).SetSlug("db").SetName("DB").Save(ctx)
+			if err != nil {
+				return err
+			}
+			q, err := tx.Product.Create().SetTenantID(td.id).SetSlug("other").SetName("Other").Save(ctx)
+			if err != nil {
+				return err
+			}
+			td.prodP, td.prodQ = p.ID, q.ID
+			if td.pro, err = tx.Plan.Create().SetTenantID(td.id).SetProductID(p.ID).SetSlug("pro").SetName("Pro").
+				SetDurationMonths(12).SetMaxActivations(3).SetMaxRehosts(2).SetOfflineAllowed(true).
+				SetLeaseSeconds(3600).SetMaxOfflineSeconds(7200).SetGraceSeconds(60).Save(ctx); err != nil {
+				return err
+			}
+			if td.planQ, err = tx.Plan.Create().SetTenantID(td.id).SetProductID(q.ID).SetSlug("q").SetName("Q").Save(ctx); err != nil {
+				return err
+			}
+			for _, ft := range []struct {
+				key   string
+				typ   feature.Type
+				limit *int64
+				id    *string
+			}{{"sso", feature.TypeBoolean, nil, &td.sso}, {"seats", feature.TypeLimit, ptr[int64](10), &td.seats}, {"export", feature.TypeBoolean, nil, nil}, {"nodes", feature.TypeLimit, nil, nil}} {
+				fe, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey(ft.key).SetName(ft.key).SetType(ft.typ).Save(ctx)
+				if err != nil {
+					return err
+				}
+				if ft.id == nil {
+					continue
+				}
+				pf, err := tx.PlanFeature.Create().SetTenantID(td.id).SetProductID(p.ID).SetPlanID(td.pro.ID).SetFeatureID(fe.ID).
+					SetFeatureType(planfeature.FeatureType(ft.typ)).SetNillableLimitValue(ft.limit).Save(ctx)
+				if err != nil {
+					return err
+				}
+				*ft.id = pf.ID
+			}
+			// Features of other states, for override checks.
+			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey("legacy").SetName("Legacy").
+				SetType(feature.TypeBoolean).SetArchivedAt(time.Now()).Save(ctx); err != nil {
+				return err
+			}
+			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(q.ID).SetKey("q_only").SetName("Q only").
+				SetType(feature.TypeBoolean).Save(ctx); err != nil {
+				return err
+			}
+			c, err := tx.Customer.Create().SetTenantID(td.id).SetName("Contoso").Save(ctx)
+			td.customer = c.ID
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func as(tenant string, role authz.Role, scope authz.Scope) authz.Principal {
+	return authz.Principal{Kind: authz.User, ID: "usr_test", TenantID: tenant, Role: role, Scope: scope}
+}
+
+var all = authz.Scope{All: true}
+
+func (f fixture) req(td tenantData) IssueRequest {
+	return IssueRequest{ProductID: td.prodP, PlanID: td.pro.ID, CustomerID: td.customer}
+}
+
+func (f fixture) tx(t *testing.T, tenant string, fn func(tx *ent.Tx) error) {
+	t.Helper()
+	if err := f.db.WithTenant(context.Background(), tenant, fn); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// lastEvent returns the newest audit entry of the tenant and checks the chain.
+func (f fixture) lastEvent(t *testing.T, tenant string) *ent.AuditEvent {
+	t.Helper()
+	var e *ent.AuditEvent
+	f.tx(t, tenant, func(tx *ent.Tx) error {
+		if _, err := audit.Verify(context.Background(), tx, tenant); err != nil {
+			return err
+		}
+		var err error
+		e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+		return err
+	})
+	return e
+}
+
+func (f fixture) count(t *testing.T, tenant string) (licenses, events int) {
+	t.Helper()
+	f.tx(t, tenant, func(tx *ent.Tx) error {
+		var err error
+		if licenses, err = tx.License.Query().Count(context.Background()); err != nil {
+			return err
+		}
+		events, err = tx.AuditEvent.Query().Count(context.Background())
+		return err
+	})
+	return
+}
+
+func (f fixture) get(t *testing.T, tenant, id string) *ent.License {
+	t.Helper()
+	var l *ent.License
+	f.tx(t, tenant, func(tx *ent.Tx) (err error) { l, err = tx.License.Get(context.Background(), id); return })
+	return l
+}
+
+func TestIssueCopiesPlanAndKey(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	now := time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)
+	f.s.Now = func() time.Time { return now }
+	req := f.req(f.a)
+	req.Type, req.ExternalRefs = license.TypeTrial, map[string]string{"order": "SO-1"}
+	got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := f.get(t, f.a.id, got.License.ID)
+	want := schema.LicenseEntitlements{Features: []string{"sso"}, Limits: map[string]int64{"seats": 10}}
+	if l.ProductID != f.a.prodP || l.PlanID != f.a.pro.ID || l.PlanSlug != "pro" || l.CustomerID != f.a.customer ||
+		l.Type != license.TypeTrial || l.Status != license.StatusActive || l.ExpiryBasis != license.ExpiryBasisFromIssue ||
+		*l.DurationMonths != 12 || l.DurationSeconds != nil || *l.MaxActivations != 3 || *l.MaxRehosts != 2 ||
+		l.BindType != license.BindTypeMachine || !l.OfflineAllowed || l.LeaseSeconds != 3600 || *l.MaxOfflineSeconds != 7200 ||
+		l.GraceSeconds != 60 || !reflect.DeepEqual(l.Entitlements, want) || l.ExternalRefs["order"] != "SO-1" ||
+		!l.IssuedAt.Equal(now) || !l.ExpiresAt.Equal(time.Date(2027, 1, 31, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("license = %+v, entitlements %+v", l, l.Entitlements)
+	}
+
+	// The key: canonical, returned once, stored only encrypted with its lookup hash and hint.
+	if k, err := licensekey.Normalize(got.Key); err != nil || k != got.Key {
+		t.Fatalf("key %q not canonical: %v", got.Key, err)
+	}
+	pt, err := f.kr.Decrypt(l.KeyCiphertext, secrets.Binding{Purpose: secrets.PurposeLicenseKey, TenantID: f.a.id, RowID: l.ID})
+	if err != nil || string(pt) != got.Key {
+		t.Errorf("ciphertext decrypts to %q, %v", pt, err)
+	}
+	if h, _ := f.kr.LookupHash(secrets.PurposeLicenseKey, []byte(got.Key)); l.KeyLookup != h || l.KeyHint != got.Key[len(got.Key)-6:] {
+		t.Errorf("lookup %s hint %s", l.KeyLookup, l.KeyHint)
+	}
+	var row string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT row_to_json(l)::text FROM licenses l WHERE id = $1`, l.ID)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		rows.Next()
+		return rows.Scan(&row)
+	})
+	body := strings.ReplaceAll(strings.TrimPrefix(got.Key, "LF-"), "-", "")
+	if row == "" || strings.Contains(row, got.Key) || strings.Contains(row, body) || strings.Contains(row, body[:20]) {
+		t.Errorf("plaintext key stored: %s", row)
+	}
+
+	e := f.lastEvent(t, f.a.id)
+	if e.Action != "license.issue" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != l.ID || *e.ActorID != "usr_test" ||
+		strings.Contains(e.Details, body[:20]) || !strings.Contains(e.Details, `"plan_id":"`+f.a.pro.ID) {
+		t.Errorf("audit = %+v", e)
+	}
+}
+
+func TestPlanEditsDontTouchSoldLicenses(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := f.get(t, f.a.id, got.License.ID)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		if err := tx.Plan.UpdateOneID(f.a.pro.ID).SetDurationMonths(1).SetMaxActivations(99).SetLeaseSeconds(10).
+			SetOfflineAllowed(false).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation).Exec(ctx); err != nil {
+			return err
+		}
+		if err := tx.PlanFeature.UpdateOneID(f.a.seats).SetLimitValue(500).Exec(ctx); err != nil {
+			return err
+		}
+		return tx.PlanFeature.DeleteOneID(f.a.sso).Exec(ctx)
+	})
+	after := f.get(t, f.a.id, got.License.ID)
+	if before.String() != after.String() || before.KeyCiphertext != after.KeyCiphertext { // String has every other field
+		t.Errorf("license changed by a plan edit:\n%+v\n%+v", before, after)
+	}
+	// A new license gets the edited plan.
+	got2, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := got2.License; *l.MaxActivations != 99 || len(l.Entitlements.Features) != 0 || l.Entitlements.Limits["seats"] != 500 {
+		t.Errorf("new license = %+v %+v", l, l.Entitlements)
+	}
+}
+
+func TestOverrides(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	p := as(f.a.id, authz.Manager, all)
+	req := f.req(f.a)
+	req.Overrides = map[string]Override{"sso": {Remove: true}, "export": {}, "seats": {Limit: ptr[int64](-1)}, "nodes": {Limit: ptr[int64](1<<53 - 1)}}
+	got, err := f.s.Issue(ctx, p, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := schema.LicenseEntitlements{Features: []string{"export"}, Limits: map[string]int64{"seats": -1, "nodes": 1<<53 - 1}}
+	if l := f.get(t, f.a.id, got.License.ID); !reflect.DeepEqual(l.Entitlements, want) {
+		t.Errorf("entitlements = %+v", l.Entitlements)
+	}
+	if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"overrides":["export","nodes","seats","sso"]`) {
+		t.Errorf("details = %s", e.Details)
+	}
+
+	for name, o := range map[string]map[string]Override{
+		"unknown feature":          {"nope": {}},
+		"another product's":        {"q_only": {}},
+		"limit on a boolean":       {"sso": {Limit: ptr[int64](1)}},
+		"limit feature, no limit":  {"seats": {}},
+		"limit below -1":           {"seats": {Limit: ptr[int64](-2)}},
+		"limit above 2^53-1":       {"seats": {Limit: ptr[int64](1 << 53)}},
+		"remove with a limit":      {"seats": {Remove: true, Limit: ptr[int64](1)}},
+		"archived feature granted": {"legacy": {}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lic, ev := f.count(t, f.a.id)
+			req := f.req(f.a)
+			req.Overrides = o
+			if _, err := f.s.Issue(ctx, p, req); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v", err)
+			}
+			lic2, ev2 := f.count(t, f.a.id)
+			e := f.lastEvent(t, f.a.id)
+			if lic2 != lic || ev2 != ev+1 || e.Action != "license.issue" || e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil {
+				t.Errorf("licenses %d→%d, events %d→%d, last %+v", lic, lic2, ev, ev2, e)
+			}
+		})
+	}
+	// Removing an archived feature is allowed (it isn't granted).
+	req.Overrides = map[string]Override{"legacy": {Remove: true}}
+	if _, err := f.s.Issue(ctx, p, req); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestIssueRefusals(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	var archivedPlan, archivedCustomer string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		pl, err := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug("old").SetName("Old").SetArchivedAt(time.Now()).Save(ctx)
+		if err != nil {
+			return err
+		}
+		c, err := tx.Customer.Create().SetTenantID(f.a.id).SetName("Gone").SetArchivedAt(time.Now()).Save(ctx)
+		archivedPlan, archivedCustomer = pl.ID, c.ID
+		return err
+	})
+	for _, tc := range []struct {
+		name    string
+		p       authz.Principal
+		change  func(*IssueRequest)
+		want    error
+		outcome auditevent.Outcome
+	}{
+		{"another tenant's plan", mgr, func(r *IssueRequest) { r.PlanID = f.b.pro.ID }, ErrInvalid, auditevent.OutcomeFailure},
+		{"another tenant's customer", mgr, func(r *IssueRequest) { r.CustomerID = f.b.customer }, ErrInvalid, auditevent.OutcomeFailure},
+		{"another tenant's product", mgr, func(r *IssueRequest) { r.ProductID = f.b.prodP }, ErrInvalid, auditevent.OutcomeFailure},
+		{"another tenant's product and plan", mgr, func(r *IssueRequest) { r.ProductID, r.PlanID = f.b.prodP, f.b.pro.ID }, ErrInvalid, auditevent.OutcomeFailure},
+		{"plan of another product", mgr, func(r *IssueRequest) { r.PlanID = f.a.planQ.ID }, ErrInvalid, auditevent.OutcomeFailure},
+		{"archived plan", mgr, func(r *IssueRequest) { r.PlanID = archivedPlan }, ErrInvalid, auditevent.OutcomeFailure},
+		{"archived customer", mgr, func(r *IssueRequest) { r.CustomerID = archivedCustomer }, ErrInvalid, auditevent.OutcomeFailure},
+		{"malformed plan ID", mgr, func(r *IssueRequest) { r.PlanID = "pln_x" }, ErrInvalid, auditevent.OutcomeFailure},
+		{"unknown type", mgr, func(r *IssueRequest) { r.Type = "gold" }, ErrInvalid, auditevent.OutcomeFailure},
+		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), nil, ErrNotFound, auditevent.OutcomeDenied},
+		{"malformed product ID", mgr, func(r *IssueRequest) { r.ProductID = "x" }, ErrNotFound, auditevent.OutcomeDenied},
+		{"support", as(f.a.id, authz.Support, all), nil, authz.ErrDenied, auditevent.OutcomeDenied},
+		{"viewer", as(f.a.id, authz.Viewer, all), nil, authz.ErrDenied, auditevent.OutcomeDenied},
+		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, nil, authz.ErrDenied, auditevent.OutcomeDenied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := f.req(f.a)
+			if tc.change != nil {
+				tc.change(&req)
+			}
+			lic, ev := f.count(t, f.a.id)
+			_, err := f.s.Issue(ctx, tc.p, req)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			lic2, ev2 := f.count(t, f.a.id)
+			e := f.lastEvent(t, f.a.id)
+			if lic2 != lic || ev2 != ev+1 || e.Action != "license.issue" || e.Outcome != tc.outcome || e.ObjectID != nil || *e.ActorID != tc.p.ID {
+				t.Errorf("licenses %d→%d, events %d→%d, last %+v", lic, lic2, ev, ev2, e)
+			}
+		})
+	}
+	// Nothing reached tenant B.
+	if lic, ev := f.count(t, f.b.id); lic != 0 || ev != 0 {
+		t.Errorf("tenant B: %d licenses, %d events", lic, ev)
+	}
+	// Every role that may issue can, within its scope.
+	for _, p := range []authz.Principal{as(f.a.id, authz.Owner, all), as(f.a.id, authz.Admin, all), as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodP}})} {
+		if _, err := f.s.Issue(ctx, p, f.req(f.a)); err != nil {
+			t.Errorf("%s: %v", p.Role, err)
+		}
+	}
+	// A malformed principal gets no tenant: refused, nothing recorded anywhere.
+	if _, err := f.s.Issue(ctx, authz.Principal{Kind: authz.User, ID: "usr_x", TenantID: f.a.id, Role: authz.Manager}, f.req(f.a)); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("zero scope: %v", err)
+	}
+}
+
+func TestExpiryBasis(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	f.s.Now = func() time.Time { return now }
+	var firstAct, perpetual, secs string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		mk := func(slug string, c func(*ent.PlanCreate)) string {
+			pc := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug(slug).SetName(slug)
+			c(pc)
+			pl, err := pc.Save(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pl.ID
+		}
+		firstAct = mk("presold", func(c *ent.PlanCreate) {
+			c.SetDurationMonths(12).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation)
+		})
+		perpetual = mk("forever", func(*ent.PlanCreate) {})
+		secs = mk("trial", func(c *ent.PlanCreate) { c.SetDurationSeconds(14 * 86400) })
+		return nil
+	})
+	for planID, want := range map[string]*time.Time{firstAct: nil, perpetual: nil, secs: ptr(now.Add(14 * 24 * time.Hour))} {
+		got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), IssueRequest{ProductID: f.a.prodP, PlanID: planID, CustomerID: f.a.customer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l := got.License; (want == nil) != (l.ExpiresAt == nil) || want != nil && !want.Equal(*l.ExpiresAt) {
+			t.Errorf("plan %s: expires %v, want %v (basis %s)", planID, l.ExpiresAt, want, l.ExpiryBasis)
+		}
+	}
+}
+
+func TestCalendarMonths(t *testing.T) {
+	d := func(y int, m time.Month, day int) time.Time { return time.Date(y, m, day, 9, 30, 0, 0, time.UTC) }
+	for _, tc := range []struct {
+		start  time.Time
+		months int
+		want   time.Time
+	}{
+		{d(2026, 1, 31), 1, d(2026, 2, 28)},
+		{d(2028, 1, 31), 1, d(2028, 2, 29)},
+		{d(2026, 1, 15), 1, d(2026, 2, 15)},
+		{d(2026, 3, 31), 1, d(2026, 4, 30)},
+		{d(2026, 11, 30), 3, d(2027, 2, 28)},
+		{d(2028, 2, 29), 12, d(2029, 2, 28)},
+		{d(2026, 5, 31), 1200, d(2126, 5, 31)},
+	} {
+		if got := expiry(tc.start, &tc.months, nil); !got.Equal(tc.want) {
+			t.Errorf("%v + %d months = %v, want %v", tc.start, tc.months, got, tc.want)
+		}
+	}
+}
+
+func TestStateMachine(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	p := as(f.a.id, authz.Manager, all)
+	got, err := f.s.Issue(ctx, p, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := got.License.ID
+	type op func(context.Context, authz.Principal, string) (*ent.License, error)
+	steps := []struct {
+		name   string
+		op     op
+		action string
+		want   license.Status // "" = refused with ErrState, status unchanged
+	}{
+		{"reinstate active", f.s.Reinstate, "license.reinstate", ""},
+		{"suspend", f.s.Suspend, "license.suspend", license.StatusSuspended},
+		{"suspend twice", f.s.Suspend, "license.suspend", ""},
+		{"reinstate", f.s.Reinstate, "license.reinstate", license.StatusActive},
+		{"reinstate twice", f.s.Reinstate, "license.reinstate", ""},
+		{"suspend again", f.s.Suspend, "license.suspend", license.StatusSuspended},
+		{"revoke suspended", f.s.Revoke, "license.revoke", license.StatusRevoked},
+		{"reinstate revoked", f.s.Reinstate, "license.reinstate", ""},
+		{"suspend revoked", f.s.Suspend, "license.suspend", ""},
+		{"revoke twice", f.s.Revoke, "license.revoke", ""},
+	}
+	status := license.StatusActive
+	for _, st := range steps {
+		l, err := st.op(ctx, p, id)
+		e := f.lastEvent(t, f.a.id)
+		row := f.get(t, f.a.id, id)
+		if st.want == "" {
+			if !errors.Is(err, ErrState) || l != nil || e.Outcome != auditevent.OutcomeFailure || row.Status != status {
+				t.Errorf("%s: err %v, license %v, event %+v, status %s", st.name, err, l, e, row.Status)
+			}
+		} else {
+			status = st.want
+			if err != nil || l.Status != st.want || e.Outcome != auditevent.OutcomeSuccess ||
+				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want {
+				t.Errorf("%s: err %v, license %v, event %+v", st.name, err, l, e)
+			}
+		}
+		if e.Action != st.action || e.ObjectID == nil || *e.ObjectID != id {
+			t.Errorf("%s: event %+v", st.name, e)
+		}
+		if (row.Status == license.StatusSuspended) != (row.SuspendedAt != nil) || (row.Status == license.StatusRevoked) != (row.RevokedAt != nil) {
+			t.Errorf("%s: times %+v", st.name, row)
+		}
+	}
+	// Revoking an active license works too.
+	got2, err := f.s.Issue(ctx, p, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, err := f.s.Revoke(ctx, p, got2.License.ID); err != nil || l.Status != license.StatusRevoked {
+		t.Errorf("revoke active: %v %v", l, err)
+	}
+}
+
+func TestTransitionRefusals(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mine, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := f.s.Issue(ctx, as(f.b.id, authz.Manager, all), f.req(f.b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		p        authz.Principal
+		id       string
+		want     error
+		outcome  auditevent.Outcome
+		objectID bool
+	}{
+		{"another tenant's license", as(f.a.id, authz.Manager, all), theirs.License.ID, ErrNotFound, auditevent.OutcomeFailure, false},
+		{"unknown license", as(f.a.id, authz.Manager, all), "lic_00000000000000000000000000", ErrNotFound, auditevent.OutcomeFailure, false},
+		{"malformed ID", as(f.a.id, authz.Manager, all), "lic_'; --", ErrNotFound, auditevent.OutcomeFailure, false},
+		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), mine.License.ID, ErrNotFound, auditevent.OutcomeDenied, false},
+		{"support", as(f.a.id, authz.Support, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
+		{"viewer", as(f.a.id, authz.Viewer, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
+		// The role is checked before the lookup: no probing which IDs exist.
+		{"viewer, unknown license", as(f.a.id, authz.Viewer, all), "lic_00000000000000000000000000", authz.ErrDenied, auditevent.OutcomeDenied, false},
+		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
+	} {
+		for name, op := range map[string]func(context.Context, authz.Principal, string) (*ent.License, error){
+			"suspend": f.s.Suspend, "reinstate": f.s.Reinstate, "revoke": f.s.Revoke,
+		} {
+			t.Run(tc.name+"/"+name, func(t *testing.T) {
+				if _, err := op(ctx, tc.p, tc.id); !errors.Is(err, tc.want) {
+					t.Fatalf("err = %v, want %v", err, tc.want)
+				}
+				e := f.lastEvent(t, f.a.id)
+				if e.Action != "license."+name || e.Outcome != tc.outcome || (e.ObjectID != nil) != tc.objectID {
+					t.Errorf("event %+v", e)
+				}
+			})
+		}
+	}
+	// Both licenses are untouched; tenant B's log has only its own issue.
+	if a, b := f.get(t, f.a.id, mine.License.ID), f.get(t, f.b.id, theirs.License.ID); a.Status != license.StatusActive || b.Status != license.StatusActive {
+		t.Errorf("statuses %s %s", a.Status, b.Status)
+	}
+	if _, ev := f.count(t, f.b.id); ev != 1 {
+		t.Errorf("tenant B has %d events", ev)
+	}
+	// Admins and owners may change licenses; a manager scoped to the product too.
+	for _, p := range []authz.Principal{as(f.a.id, authz.Owner, all), as(f.a.id, authz.Admin, all), as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodP}})} {
+		if _, err := f.s.Suspend(ctx, p, mine.License.ID); err != nil {
+			t.Errorf("%s suspend: %v", p.Role, err)
+		}
+		if _, err := f.s.Reinstate(ctx, p, mine.License.ID); err != nil {
+			t.Errorf("%s reinstate: %v", p.Role, err)
+		}
+	}
+}
