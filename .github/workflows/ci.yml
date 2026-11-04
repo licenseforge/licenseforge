@@ -73,7 +73,8 @@ jobs:
           helm template t . $s --set 'networkPolicy.databaseTo[0].ipBlock.cidr=10.0.0.0/8' --set 'networkPolicy.dns.ports={53,5353}' --set podLabels.team=a --set 'extraEnv[0].name=X' --set 'extraEnv[0].value=y' >/dev/null
           # Bad values fail the render instead of producing a broken release.
           for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}' \
-            metrics.port=8080 metrics.port=null 'metrics.scrapeFrom[0].ports[0].port=1' metrics.serviceMonitor.interval=soon; do
+            metrics.port=8080 metrics.port=null 'metrics.scrapeFrom[0].ports[0].port=1' metrics.serviceMonitor.interval=soon \
+            oidc.enabled=true oidc.egress.port=0 oidc.egress.port=null oidc.clientId=typo 'oidc.egress.to[0].ports[0].port=1'; do
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi
@@ -92,3 +93,26 @@ jobs:
           if helm template t . $s --set metrics.scrapeFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: 9090'; then echo "metrics open without scrapers"; exit 1; fi
           if helm template t . $s --show-only templates/servicemonitor.yaml >/dev/null 2>&1; then echo "ServiceMonitor while off"; exit 1; fi
           helm template t . $s --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.labels.release=kps --show-only templates/servicemonitor.yaml | grep -qF 'release: kps' || { echo "no ServiceMonitor"; exit 1; }
+          # OIDC: env from values, client secret only by reference, IdP egress only when on.
+          o="--set oidc.enabled=true --set oidc.issuer=https://idp.example --set oidc.clientID=lf --set oidc.redirectURL=https://lf.example/auth/callback"
+          helm lint --strict . $s $o --set oidc.clientSecret.secretName=idp
+          d=$(helm template t . $s $o --set oidc.clientSecret.secretName=idp --show-only templates/deployment.yaml)
+          for want in 'LICENSEFORGE_OIDC_ISSUER|value: "https://idp.example"' 'LICENSEFORGE_OIDC_CLIENT_ID|value: "lf"' \
+            'LICENSEFORGE_OIDC_REDIRECT_URL|value: "https://lf.example/auth/callback"' \
+            'LICENSEFORGE_OIDC_CLIENT_SECRET|valueFrom: {secretKeyRef: {name: "idp", key: "client-secret"}}'; do
+            grep -A1 -F -- "- name: ${want%%|*}" <<<"$d" | grep -qF -- "${want#*|}" || { echo "OIDC Deployment: wrong ${want%%|*}"; exit 1; }
+          done
+          if helm template t . $s $o --show-only templates/deployment.yaml | grep -q LICENSEFORGE_OIDC_CLIENT_SECRET; then echo "client secret without a Secret"; exit 1; fi
+          if helm template t . $s $o --set oidc.clientSecret.secretName=idp --set oidc.clientSecret.key=null >/dev/null 2>&1; then echo "client secret without a key"; exit 1; fi
+          if helm template t . $s $o --set oidc.egress=null >/dev/null 2>&1; then echo "IdP egress without a port"; exit 1; fi
+          # Values of a release from before oidc.* (reused on upgrade) still render.
+          helm template t . $s --set oidc=null >/dev/null
+          # Default IdP egress: port 443 only, no `to` (any destination, portable across CNIs).
+          n=$(helm template t . $s $o --show-only templates/networkpolicy.yaml)
+          grep -A1 -F -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" | grep -q 'to:' && { echo "default IdP egress has a to"; exit 1; }
+          grep -qF -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" || { echo "no default IdP egress"; exit 1; }
+          grep -qF '0.0.0.0/0' <<<"$n" && { echo "0.0.0.0/0 in the policy"; exit 1; }
+          n=$(helm template t . $s $o --set oidc.egress.port=8443 --set 'oidc.egress.to[0].ipBlock.cidr=203.0.113.0/24' --show-only templates/networkpolicy.yaml)
+          for want in 'cidr: 203.0.113.0/24' '{port: 8443, protocol: TCP}'; do grep -qF "$want" <<<"$n" || { echo "IdP egress not narrowed: $want"; exit 1; }; done
+          grep -qE '0\.0\.0\.0/0|port: 443\b' <<<"$n" && { echo "narrowed IdP egress still open"; exit 1; }
+          if helm template t . $s --show-only templates/networkpolicy.yaml --show-only templates/deployment.yaml | grep -qE 'port: 443\b|LICENSEFORGE_OIDC'; then echo "OIDC egress or env while off"; exit 1; fi

@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 # Server pods: ingress on 8080, and on the metrics port from the scrapers only;
-# egress to DNS and the database only.
+# egress to DNS and the database only, plus the OIDC provider when login is on.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -21,6 +21,15 @@ spec:
       from: {{- toYaml . | nindent 8 }}
     {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}
+    {{- $oidc := .Values.oidc | default dict }}
+    {{- if $oidc.enabled }}
+    {{- /* A rule without a port would allow every port. */}}
+    - ports: [{port: {{ required "oidc.egress.port is required" (dig "egress" "port" nil $oidc) }}, protocol: TCP}]
+      {{- /* Empty: no `to`, any destination (portable; Cilium's 0.0.0.0/0 doesn't match pods). */}}
+      {{- with dig "egress" "to" list $oidc }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
 {{- if .Values.migrate.enabled }}
 ---
 # The migration Job runs as a pre-install/pre-upgrade hook, before normal

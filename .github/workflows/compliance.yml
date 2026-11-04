@@ -1,0 +1,26 @@
+name: Compliance
+# Validates compliance/ (ADR-0024): the OSCAL component definition against the
+# vendored OSCAL 1.2.3 schema, cited evidence, links, and matrix/OSCAL sync.
+# Runs on every PR, since moving or renaming code can break cited evidence.
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  oscal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: compliance/go.mod
+          cache-dependency-path: compliance/go.sum
+      - name: Validate compliance documents
+        working-directory: compliance
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -count=1 -v ./...
