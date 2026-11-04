@@ -98,7 +98,18 @@ func (_u *IdempotencyKeyUpdate) ExecX(ctx context.Context) {
 	}
 }
 
+// check runs all checks and user-defined validators on the builder.
+func (_u *IdempotencyKeyUpdate) check() error {
+	if _u.mutation.TenantCleared() && len(_u.mutation.TenantIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "IdempotencyKey.tenant"`)
+	}
+	return nil
+}
+
 func (_u *IdempotencyKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
+	if err := _u.check(); err != nil {
+		return _node, err
+	}
 	_spec := sqlgraph.NewUpdateSpec(idempotencykey.Table, idempotencykey.Columns, sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString))
 	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
@@ -226,7 +237,18 @@ func (_u *IdempotencyKeyUpdateOne) ExecX(ctx context.Context) {
 	}
 }
 
+// check runs all checks and user-defined validators on the builder.
+func (_u *IdempotencyKeyUpdateOne) check() error {
+	if _u.mutation.TenantCleared() && len(_u.mutation.TenantIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "IdempotencyKey.tenant"`)
+	}
+	return nil
+}
+
 func (_u *IdempotencyKeyUpdateOne) sqlSave(ctx context.Context) (_node *IdempotencyKey, err error) {
+	if err := _u.check(); err != nil {
+		return _node, err
+	}
 	_spec := sqlgraph.NewUpdateSpec(idempotencykey.Table, idempotencykey.Columns, sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString))
 	id, ok := _u.mutation.ID()
 	if !ok {

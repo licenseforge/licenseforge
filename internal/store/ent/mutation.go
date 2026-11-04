@@ -6046,7 +6046,6 @@ type IdempotencyKeyMutation struct {
 	op            Op
 	typ           string
 	id            *string
-	tenant_id     *string
 	credential    *string
 	key           *string
 	request_hash  *[]byte
@@ -6055,6 +6054,8 @@ type IdempotencyKeyMutation struct {
 	body          *[]byte
 	created_at    *time.Time
 	clearedFields map[string]struct{}
+	tenant        *string
+	clearedtenant bool
 	done          bool
 	oldValue      func(context.Context) (*IdempotencyKey, error)
 	predicates    []predicate.IdempotencyKey
@@ -6166,12 +6167,12 @@ func (m *IdempotencyKeyMutation) IDs(ctx context.Context) ([]string, error) {
 
 // SetTenantID sets the "tenant_id" field.
 func (m *IdempotencyKeyMutation) SetTenantID(s string) {
-	m.tenant_id = &s
+	m.tenant = &s
 }
 
 // TenantID returns the value of the "tenant_id" field in the mutation.
 func (m *IdempotencyKeyMutation) TenantID() (r string, exists bool) {
-	v := m.tenant_id
+	v := m.tenant
 	if v == nil {
 		return
 	}
@@ -6197,7 +6198,7 @@ func (m *IdempotencyKeyMutation) OldTenantID(ctx context.Context) (v string, err
 
 // ResetTenantID resets all changes to the "tenant_id" field.
 func (m *IdempotencyKeyMutation) ResetTenantID() {
-	m.tenant_id = nil
+	m.tenant = nil
 }
 
 // SetCredential sets the "credential" field.
@@ -6463,6 +6464,33 @@ func (m *IdempotencyKeyMutation) ResetCreatedAt() {
 	m.created_at = nil
 }
 
+// ClearTenant clears the "tenant" edge to the Tenant entity.
+func (m *IdempotencyKeyMutation) ClearTenant() {
+	m.clearedtenant = true
+	m.clearedFields[idempotencykey.FieldTenantID] = struct{}{}
+}
+
+// TenantCleared reports if the "tenant" edge to the Tenant entity was cleared.
+func (m *IdempotencyKeyMutation) TenantCleared() bool {
+	return m.clearedtenant
+}
+
+// TenantIDs returns the "tenant" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// TenantID instead. It exists only for internal usage by the builders.
+func (m *IdempotencyKeyMutation) TenantIDs() (ids []string) {
+	if id := m.tenant; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetTenant resets all changes to the "tenant" edge.
+func (m *IdempotencyKeyMutation) ResetTenant() {
+	m.tenant = nil
+	m.clearedtenant = false
+}
+
 // Where appends a list predicates to the IdempotencyKeyMutation builder.
 func (m *IdempotencyKeyMutation) Where(ps ...predicate.IdempotencyKey) {
 	m.predicates = append(m.predicates, ps...)
@@ -6498,7 +6526,7 @@ func (m *IdempotencyKeyMutation) Type() string {
 // AddedFields().
 func (m *IdempotencyKeyMutation) Fields() []string {
 	fields := make([]string, 0, 7)
-	if m.tenant_id != nil {
+	if m.tenant != nil {
 		fields = append(fields, idempotencykey.FieldTenantID)
 	}
 	if m.credential != nil {
@@ -6728,19 +6756,28 @@ func (m *IdempotencyKeyMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *IdempotencyKeyMutation) AddedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
+	if m.tenant != nil {
+		edges = append(edges, idempotencykey.EdgeTenant)
+	}
 	return edges
 }
 
 // AddedIDs returns all IDs (to other nodes) that were added for the given edge
 // name in this mutation.
 func (m *IdempotencyKeyMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case idempotencykey.EdgeTenant:
+		if id := m.tenant; id != nil {
+			return []ent.Value{*id}
+		}
+	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *IdempotencyKeyMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
 	return edges
 }
 
@@ -6752,25 +6789,42 @@ func (m *IdempotencyKeyMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *IdempotencyKeyMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
+	if m.clearedtenant {
+		edges = append(edges, idempotencykey.EdgeTenant)
+	}
 	return edges
 }
 
 // EdgeCleared returns a boolean which indicates if the edge with the given name
 // was cleared in this mutation.
 func (m *IdempotencyKeyMutation) EdgeCleared(name string) bool {
+	switch name {
+	case idempotencykey.EdgeTenant:
+		return m.clearedtenant
+	}
 	return false
 }
 
 // ClearEdge clears the value of the edge with the given name. It returns an error
 // if that edge is not defined in the schema.
 func (m *IdempotencyKeyMutation) ClearEdge(name string) error {
+	switch name {
+	case idempotencykey.EdgeTenant:
+		m.ClearTenant()
+		return nil
+	}
 	return fmt.Errorf("unknown IdempotencyKey unique edge %s", name)
 }
 
 // ResetEdge resets all changes to the edge with the given name in this mutation.
 // It returns an error if the edge is not defined in the schema.
 func (m *IdempotencyKeyMutation) ResetEdge(name string) error {
+	switch name {
+	case idempotencykey.EdgeTenant:
+		m.ResetTenant()
+		return nil
+	}
 	return fmt.Errorf("unknown IdempotencyKey edge %s", name)
 }
 
@@ -18243,38 +18297,41 @@ func (m *SigningKeyMutation) ResetEdge(name string) error {
 // TenantMutation represents an operation that mutates the Tenant nodes in the graph.
 type TenantMutation struct {
 	config
-	op                  Op
-	typ                 string
-	id                  *string
-	created_at          *time.Time
-	updated_at          *time.Time
-	slug                *string
-	name                *string
-	clearedFields       map[string]struct{}
-	products            map[string]struct{}
-	removedproducts     map[string]struct{}
-	clearedproducts     bool
-	customers           map[string]struct{}
-	removedcustomers    map[string]struct{}
-	clearedcustomers    bool
-	signing_keys        map[string]struct{}
-	removedsigning_keys map[string]struct{}
-	clearedsigning_keys bool
-	audit_events        map[string]struct{}
-	removedaudit_events map[string]struct{}
-	clearedaudit_events bool
-	invitations         map[string]struct{}
-	removedinvitations  map[string]struct{}
-	clearedinvitations  bool
-	memberships         map[string]struct{}
-	removedmemberships  map[string]struct{}
-	clearedmemberships  bool
-	api_tokens          map[string]struct{}
-	removedapi_tokens   map[string]struct{}
-	clearedapi_tokens   bool
-	done                bool
-	oldValue            func(context.Context) (*Tenant, error)
-	predicates          []predicate.Tenant
+	op                      Op
+	typ                     string
+	id                      *string
+	created_at              *time.Time
+	updated_at              *time.Time
+	slug                    *string
+	name                    *string
+	clearedFields           map[string]struct{}
+	products                map[string]struct{}
+	removedproducts         map[string]struct{}
+	clearedproducts         bool
+	customers               map[string]struct{}
+	removedcustomers        map[string]struct{}
+	clearedcustomers        bool
+	signing_keys            map[string]struct{}
+	removedsigning_keys     map[string]struct{}
+	clearedsigning_keys     bool
+	audit_events            map[string]struct{}
+	removedaudit_events     map[string]struct{}
+	clearedaudit_events     bool
+	invitations             map[string]struct{}
+	removedinvitations      map[string]struct{}
+	clearedinvitations      bool
+	memberships             map[string]struct{}
+	removedmemberships      map[string]struct{}
+	clearedmemberships      bool
+	api_tokens              map[string]struct{}
+	removedapi_tokens       map[string]struct{}
+	clearedapi_tokens       bool
+	idempotency_keys        map[string]struct{}
+	removedidempotency_keys map[string]struct{}
+	clearedidempotency_keys bool
+	done                    bool
+	oldValue                func(context.Context) (*Tenant, error)
+	predicates              []predicate.Tenant
 }
 
 var _ ent.Mutation = (*TenantMutation)(nil)
@@ -18903,6 +18960,60 @@ func (m *TenantMutation) ResetAPITokens() {
 	m.removedapi_tokens = nil
 }
 
+// AddIdempotencyKeyIDs adds the "idempotency_keys" edge to the IdempotencyKey entity by ids.
+func (m *TenantMutation) AddIdempotencyKeyIDs(ids ...string) {
+	if m.idempotency_keys == nil {
+		m.idempotency_keys = make(map[string]struct{})
+	}
+	for i := range ids {
+		m.idempotency_keys[ids[i]] = struct{}{}
+	}
+}
+
+// ClearIdempotencyKeys clears the "idempotency_keys" edge to the IdempotencyKey entity.
+func (m *TenantMutation) ClearIdempotencyKeys() {
+	m.clearedidempotency_keys = true
+}
+
+// IdempotencyKeysCleared reports if the "idempotency_keys" edge to the IdempotencyKey entity was cleared.
+func (m *TenantMutation) IdempotencyKeysCleared() bool {
+	return m.clearedidempotency_keys
+}
+
+// RemoveIdempotencyKeyIDs removes the "idempotency_keys" edge to the IdempotencyKey entity by IDs.
+func (m *TenantMutation) RemoveIdempotencyKeyIDs(ids ...string) {
+	if m.removedidempotency_keys == nil {
+		m.removedidempotency_keys = make(map[string]struct{})
+	}
+	for i := range ids {
+		delete(m.idempotency_keys, ids[i])
+		m.removedidempotency_keys[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedIdempotencyKeys returns the removed IDs of the "idempotency_keys" edge to the IdempotencyKey entity.
+func (m *TenantMutation) RemovedIdempotencyKeysIDs() (ids []string) {
+	for id := range m.removedidempotency_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// IdempotencyKeysIDs returns the "idempotency_keys" edge IDs in the mutation.
+func (m *TenantMutation) IdempotencyKeysIDs() (ids []string) {
+	for id := range m.idempotency_keys {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetIdempotencyKeys resets all changes to the "idempotency_keys" edge.
+func (m *TenantMutation) ResetIdempotencyKeys() {
+	m.idempotency_keys = nil
+	m.clearedidempotency_keys = false
+	m.removedidempotency_keys = nil
+}
+
 // Where appends a list predicates to the TenantMutation builder.
 func (m *TenantMutation) Where(ps ...predicate.Tenant) {
 	m.predicates = append(m.predicates, ps...)
@@ -19087,7 +19198,7 @@ func (m *TenantMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *TenantMutation) AddedEdges() []string {
-	edges := make([]string, 0, 7)
+	edges := make([]string, 0, 8)
 	if m.products != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19108,6 +19219,9 @@ func (m *TenantMutation) AddedEdges() []string {
 	}
 	if m.api_tokens != nil {
 		edges = append(edges, tenant.EdgeAPITokens)
+	}
+	if m.idempotency_keys != nil {
+		edges = append(edges, tenant.EdgeIdempotencyKeys)
 	}
 	return edges
 }
@@ -19158,13 +19272,19 @@ func (m *TenantMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeIdempotencyKeys:
+		ids := make([]ent.Value, 0, len(m.idempotency_keys))
+		for id := range m.idempotency_keys {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *TenantMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 7)
+	edges := make([]string, 0, 8)
 	if m.removedproducts != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19185,6 +19305,9 @@ func (m *TenantMutation) RemovedEdges() []string {
 	}
 	if m.removedapi_tokens != nil {
 		edges = append(edges, tenant.EdgeAPITokens)
+	}
+	if m.removedidempotency_keys != nil {
+		edges = append(edges, tenant.EdgeIdempotencyKeys)
 	}
 	return edges
 }
@@ -19235,13 +19358,19 @@ func (m *TenantMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeIdempotencyKeys:
+		ids := make([]ent.Value, 0, len(m.removedidempotency_keys))
+		for id := range m.removedidempotency_keys {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *TenantMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 7)
+	edges := make([]string, 0, 8)
 	if m.clearedproducts {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19262,6 +19391,9 @@ func (m *TenantMutation) ClearedEdges() []string {
 	}
 	if m.clearedapi_tokens {
 		edges = append(edges, tenant.EdgeAPITokens)
+	}
+	if m.clearedidempotency_keys {
+		edges = append(edges, tenant.EdgeIdempotencyKeys)
 	}
 	return edges
 }
@@ -19284,6 +19416,8 @@ func (m *TenantMutation) EdgeCleared(name string) bool {
 		return m.clearedmemberships
 	case tenant.EdgeAPITokens:
 		return m.clearedapi_tokens
+	case tenant.EdgeIdempotencyKeys:
+		return m.clearedidempotency_keys
 	}
 	return false
 }
@@ -19320,6 +19454,9 @@ func (m *TenantMutation) ResetEdge(name string) error {
 		return nil
 	case tenant.EdgeAPITokens:
 		m.ResetAPITokens()
+		return nil
+	case tenant.EdgeIdempotencyKeys:
+		m.ResetIdempotencyKeys()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant edge %s", name)

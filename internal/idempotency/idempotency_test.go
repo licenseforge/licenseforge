@@ -485,8 +485,36 @@ func TestEncryptedAtRest(t *testing.T) {
 	if _, _, err := f.s.Do(ctx, r2, noCheck, op); !errors.Is(err, secrets.ErrDecrypt) {
 		t.Errorf("swapped ciphertext: %v", err)
 	}
+	// After a rotation, rows under the retired key replay while it stays in
+	// the keyring, and fail once it is removed.
+	k := func(b byte) string {
+		return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{b}, secrets.KeySize))
+	}
+	rotated, err := secrets.ParseKeyring("k2=" + k(8) + ",k1=" + k(7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := Store{DB: f.db, Keys: rotated}
+	if out, replayed, err := s2.Do(ctx, r, noCheck, op); err != nil || !replayed || string(out.Body) != secret {
+		t.Errorf("replay after rotation: %q %v %v", out.Body, replayed, err)
+	}
+	r3 := f.req(f.a, tok1, "k3", `{}`)
+	if _, _, err := s2.Do(ctx, r3, noCheck, op); err != nil {
+		t.Fatal(err)
+	}
+	var body3 []byte
+	if err := f.owner.QueryRow(`SELECT body FROM idempotency_keys WHERE tenant_id = $1 AND key = 'k3'`, f.a).Scan(&body3); err != nil || !bytes.HasPrefix(body3, []byte("v1.k2.")) {
+		t.Errorf("new row under %q, %v", body3, err)
+	}
+	onlyNew, err := secrets.ParseKeyring("k2=" + k(8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := (Store{DB: f.db, Keys: onlyNew}).Do(ctx, r, noCheck, op); !errors.Is(err, secrets.ErrUnknownKey) {
+		t.Errorf("retired key removed: %v", err)
+	}
 	// The platform pool may only see id and created_at.
-	for _, col := range []string{"body", "request_hash", "key", "credential"} {
+	for _, col := range []string{"body", "request_hash", "key", "credential", "tenant_id", "status", "*"} {
 		err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
 			rows, err := tx.QueryContext(ctx, `SELECT `+col+` FROM idempotency_keys LIMIT 1`)
 			if err == nil {

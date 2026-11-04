@@ -4,6 +4,7 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema"
+	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 
@@ -29,6 +30,12 @@ func (IdempotencyKey) Fields() []ent.Field {
 		field.Int("status").Optional().Nillable().Comment("nil only inside the claiming transaction"),
 		field.Bytes("body").Optional().Nillable().Sensitive().Comment("encrypted (secrets.PurposeIdempotencyResponse)"),
 		field.Time("created_at").Immutable(),
+	}
+}
+
+func (IdempotencyKey) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.From("tenant", Tenant.Type).Ref("idempotency_keys").Field("tenant_id").Unique().Required().Immutable(),
 	}
 }
 

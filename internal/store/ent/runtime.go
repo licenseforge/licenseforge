@@ -572,9 +572,9 @@ func init() {
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
 		}
-		return func(tenant_id string) error {
+		return func(tenant string) error {
 			for _, fn := range fns {
-				if err := fn(tenant_id); err != nil {
+				if err := fn(tenant); err != nil {
 					return err
 				}
 			}

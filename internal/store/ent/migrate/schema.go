@@ -282,29 +282,37 @@ var (
 	// IdempotencyKeysColumns holds the columns for the "idempotency_keys" table.
 	IdempotencyKeysColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
-		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "credential", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "key", Type: field.TypeString, Size: 255, SchemaType: map[string]string{"postgres": "varchar(255)"}},
 		{Name: "request_hash", Type: field.TypeBytes},
 		{Name: "status", Type: field.TypeInt, Nullable: true},
 		{Name: "body", Type: field.TypeBytes, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// IdempotencyKeysTable holds the schema information for the "idempotency_keys" table.
 	IdempotencyKeysTable = &schema.Table{
 		Name:       "idempotency_keys",
 		Columns:    IdempotencyKeysColumns,
 		PrimaryKey: []*schema.Column{IdempotencyKeysColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "idempotency_keys_tenants_idempotency_keys",
+				Columns:    []*schema.Column{IdempotencyKeysColumns[7]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "idempotencykey_tenant_id_credential_key",
 				Unique:  true,
-				Columns: []*schema.Column{IdempotencyKeysColumns[1], IdempotencyKeysColumns[2], IdempotencyKeysColumns[3]},
+				Columns: []*schema.Column{IdempotencyKeysColumns[7], IdempotencyKeysColumns[1], IdempotencyKeysColumns[2]},
 			},
 			{
 				Name:    "idempotencykey_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{IdempotencyKeysColumns[7]},
+				Columns: []*schema.Column{IdempotencyKeysColumns[6]},
 			},
 		},
 	}
@@ -979,6 +987,7 @@ func init() {
 		"features_type_valid":     "(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
 		"features_unit_set":       "unit IS NULL OR btrim(unit) <> ''",
 	}
+	IdempotencyKeysTable.ForeignKeys[0].RefTable = TenantsTable
 	IdempotencyKeysTable.Annotation = &entsql.Annotation{}
 	IdempotencyKeysTable.Annotation.Checks = map[string]string{
 		"idempotency_keys_credential": "credential ~ '^(tok|usr)_[a-z2-7]{26}$'",

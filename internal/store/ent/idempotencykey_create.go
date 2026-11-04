@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
+	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
 
 // IdempotencyKeyCreate is the builder for creating a IdempotencyKey entity.
@@ -82,6 +83,11 @@ func (_c *IdempotencyKeyCreate) SetNillableID(v *string) *IdempotencyKeyCreate {
 		_c.SetID(*v)
 	}
 	return _c
+}
+
+// SetTenant sets the "tenant" edge to the Tenant entity.
+func (_c *IdempotencyKeyCreate) SetTenant(v *Tenant) *IdempotencyKeyCreate {
+	return _c.SetTenantID(v.ID)
 }
 
 // Mutation returns the IdempotencyKeyMutation object of the builder.
@@ -167,6 +173,9 @@ func (_c *IdempotencyKeyCreate) check() error {
 			return &ValidationError{Name: "id", err: fmt.Errorf(`ent: validator failed for field "IdempotencyKey.id": %w`, err)}
 		}
 	}
+	if len(_c.mutation.TenantIDs()) == 0 {
+		return &ValidationError{Name: "tenant", err: errors.New(`ent: missing required edge "IdempotencyKey.tenant"`)}
+	}
 	return nil
 }
 
@@ -202,10 +211,6 @@ func (_c *IdempotencyKeyCreate) createSpec() (*IdempotencyKey, *sqlgraph.CreateS
 		_node.ID = id
 		_spec.ID.Value = id
 	}
-	if value, ok := _c.mutation.TenantID(); ok {
-		_spec.SetField(idempotencykey.FieldTenantID, field.TypeString, value)
-		_node.TenantID = value
-	}
 	if value, ok := _c.mutation.Credential(); ok {
 		_spec.SetField(idempotencykey.FieldCredential, field.TypeString, value)
 		_node.Credential = value
@@ -229,6 +234,23 @@ func (_c *IdempotencyKeyCreate) createSpec() (*IdempotencyKey, *sqlgraph.CreateS
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(idempotencykey.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
+	}
+	if nodes := _c.mutation.TenantIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   idempotencykey.TenantTable,
+			Columns: []string{idempotencykey.TenantColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(tenant.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.TenantID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	return _node, _spec
 }

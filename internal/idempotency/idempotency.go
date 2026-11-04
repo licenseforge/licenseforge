@@ -73,6 +73,11 @@ var (
 // stored encrypted with Keys, bound to their key row (they can carry
 // secrets, such as a new license key). A replay reveals them again only to
 // the same credential: the same API token, or the same user in any session.
+//
+// Master key rotation: keep a retired key in the keyring for at least TTL
+// (24 hours) after it stops being active, or replays of rows encrypted under
+// it fail with secrets.ErrUnknownKey (answered as a server error, so the
+// client retries and, once the row expires, runs the request anew).
 type Store struct {
 	DB   *store.DB
 	Keys *secrets.Keyring

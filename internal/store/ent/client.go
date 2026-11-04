@@ -1431,6 +1431,22 @@ func (c *IdempotencyKeyClient) GetX(ctx context.Context, id string) *Idempotency
 	return obj
 }
 
+// QueryTenant queries the tenant edge of a IdempotencyKey.
+func (c *IdempotencyKeyClient) QueryTenant(_m *IdempotencyKey) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(idempotencykey.Table, idempotencykey.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, idempotencykey.TenantTable, idempotencykey.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *IdempotencyKeyClient) Hooks() []Hook {
 	return c.hooks.IdempotencyKey
@@ -3532,6 +3548,22 @@ func (c *TenantClient) QueryAPITokens(_m *Tenant) *APITokenQuery {
 			sqlgraph.From(tenant.Table, tenant.FieldID, id),
 			sqlgraph.To(apitoken.Table, apitoken.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, tenant.APITokensTable, tenant.APITokensColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryIdempotencyKeys queries the idempotency_keys edge of a Tenant.
+func (c *TenantClient) QueryIdempotencyKeys(_m *Tenant) *IdempotencyKeyQuery {
+	query := (&IdempotencyKeyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(idempotencykey.Table, idempotencykey.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.IdempotencyKeysTable, tenant.IdempotencyKeysColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
