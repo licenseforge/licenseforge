@@ -14,6 +14,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
+	"licenseforge.io/licenseforge/internal/store/ent/session"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
 
@@ -206,6 +207,21 @@ func (_c *UserCreate) AddAPITokens(v ...*APIToken) *UserCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAPITokenIDs(ids...)
+}
+
+// AddSessionIDs adds the "sessions" edge to the Session entity by IDs.
+func (_c *UserCreate) AddSessionIDs(ids ...string) *UserCreate {
+	_c.mutation.AddSessionIDs(ids...)
+	return _c
+}
+
+// AddSessions adds the "sessions" edges to the Session entity.
+func (_c *UserCreate) AddSessions(v ...*Session) *UserCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddSessionIDs(ids...)
 }
 
 // SetPlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID.
@@ -450,6 +466,22 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.SessionsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.SessionsTable,
+			Columns: []string{user.SessionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(session.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

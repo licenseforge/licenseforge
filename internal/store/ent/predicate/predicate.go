@@ -51,6 +51,9 @@ type PlatformAdmin func(*sql.Selector)
 // Product is the predicate function for product builders.
 type Product func(*sql.Selector)
 
+// Session is the predicate function for session builders.
+type Session func(*sql.Selector)
+
 // SigningKey is the predicate function for signingkey builders.
 type SigningKey func(*sql.Selector)
 

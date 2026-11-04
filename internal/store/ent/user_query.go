@@ -18,6 +18,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
+	"licenseforge.io/licenseforge/internal/store/ent/session"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
 
@@ -32,6 +33,7 @@ type UserQuery struct {
 	withInvitationsSent     *InvitationQuery
 	withInvitationsAccepted *InvitationQuery
 	withAPITokens           *APITokenQuery
+	withSessions            *SessionQuery
 	withPlatformAdmin       *PlatformAdminQuery
 	modifiers               []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
@@ -151,6 +153,28 @@ func (_q *UserQuery) QueryAPITokens() *APITokenQuery {
 			sqlgraph.From(user.Table, user.FieldID, selector),
 			sqlgraph.To(apitoken.Table, apitoken.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, user.APITokensTable, user.APITokensColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QuerySessions chains the current query on the "sessions" edge.
+func (_q *UserQuery) QuerySessions() *SessionQuery {
+	query := (&SessionClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(session.Table, session.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.SessionsTable, user.SessionsColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -376,6 +400,7 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withInvitationsSent:     _q.withInvitationsSent.Clone(),
 		withInvitationsAccepted: _q.withInvitationsAccepted.Clone(),
 		withAPITokens:           _q.withAPITokens.Clone(),
+		withSessions:            _q.withSessions.Clone(),
 		withPlatformAdmin:       _q.withPlatformAdmin.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -424,6 +449,17 @@ func (_q *UserQuery) WithAPITokens(opts ...func(*APITokenQuery)) *UserQuery {
 		opt(query)
 	}
 	_q.withAPITokens = query
+	return _q
+}
+
+// WithSessions tells the query-builder to eager-load the nodes that are connected to
+// the "sessions" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithSessions(opts ...func(*SessionQuery)) *UserQuery {
+	query := (&SessionClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withSessions = query
 	return _q
 }
 
@@ -516,11 +552,12 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [5]bool{
+		loadedTypes = [6]bool{
 			_q.withMemberships != nil,
 			_q.withInvitationsSent != nil,
 			_q.withInvitationsAccepted != nil,
 			_q.withAPITokens != nil,
+			_q.withSessions != nil,
 			_q.withPlatformAdmin != nil,
 		}
 	)
@@ -570,6 +607,13 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadAPITokens(ctx, query, nodes,
 			func(n *User) { n.Edges.APITokens = []*APIToken{} },
 			func(n *User, e *APIToken) { n.Edges.APITokens = append(n.Edges.APITokens, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withSessions; query != nil {
+		if err := _q.loadSessions(ctx, query, nodes,
+			func(n *User) { n.Edges.Sessions = []*Session{} },
+			func(n *User, e *Session) { n.Edges.Sessions = append(n.Edges.Sessions, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -706,6 +750,36 @@ func (_q *UserQuery) loadAPITokens(ctx context.Context, query *APITokenQuery, no
 		node, ok := nodeids[*fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "created_by" returned %v for node %v`, *fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadSessions(ctx context.Context, query *SessionQuery, nodes []*User, init func(*User), assign func(*User, *Session)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(session.FieldUserID)
+	}
+	query.Where(predicate.Session(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.SessionsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.UserID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "user_id" returned %v for node %v`, fk, n.ID)
 		}
 		assign(node, n)
 	}
