@@ -2,8 +2,10 @@ package weblogin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -65,15 +67,19 @@ func TestSessionAndLogout(t *testing.T) {
 	}
 	// Behind a proxy that rewrites Host, the configured public origin is
 	// still same-origin (browsers that send only Origin).
-	req, _ := http.NewRequest("GET", f.app.URL+"/auth/session", nil)
+	// It may fail later (wrong token), but not at the origin check.
+	req, _ := http.NewRequest("POST", f.app.URL+"/auth/logout", nil)
 	req.Host = "licenseforge.internal:8080"
 	req.Header.Set("Origin", f.app.URL)
-	req.Method = "POST" // an unsafe method, so the origin check runs
-	req.URL.Path = "/auth/session"
-	if resp, err := f.client.Do(req); err != nil || resp.StatusCode == http.StatusForbidden {
-		t.Errorf("own origin behind a proxy: %v %v", resp.StatusCode, err)
-	} else {
-		_ = resp.Body.Close()
+	req.Header.Set(CSRFHeader, "wrong")
+	resp, err := f.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	why, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if strings.Contains(string(why), "cross-origin") {
+		t.Errorf("own origin behind a proxy refused by the origin check: %d %s", resp.StatusCode, why)
 	}
 	cookie := f.session(t)
 	// No Fetch metadata and no Origin: a non-browser client with the token.
