@@ -194,6 +194,7 @@ func TestAuthenticateRefusals(t *testing.T) {
 		"revoked":          {f.a, revoked.Token},
 		"expired":          {f.a, expired.Token},
 		"bad tenant ID":    {"tnt_x", other.Token},
+		"unknown tenant":   {ids.Tenant(), other.Token},
 	} {
 		if _, err := f.s.Authenticate(ctx, c.tenant, c.token); !errors.Is(err, ErrUnauthenticated) {
 			t.Errorf("%s: %v", name, err)
@@ -275,5 +276,98 @@ func TestRevoke(t *testing.T) {
 		return err
 	}); err != nil || n != 1 {
 		t.Errorf("tenant B's token was revoked: %d %v", n, err)
+	}
+}
+
+func TestCreateInputRefusals(t *testing.T) {
+	f := setup(t)
+	owner := f.as(f.a, f.ownerA, authz.Owner)
+	var prodB string
+	if err := f.db.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		p, err := tx.Product.Create().SetTenantID(f.b).SetSlug("db").SetName("DB").Save(context.Background())
+		prodB = p.ID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		name     string
+		ttl      time.Duration
+		products []string
+	}{
+		"blank name":               {"   ", 0, nil},
+		"NUL in name":              {"a\x00b", 0, nil},
+		"invalid UTF-8":            {"\xff", 0, nil},
+		"name too long":            {strings.Repeat("x", 201), 0, nil},
+		"lifetime under 1m":        {"CI", time.Second, nil},
+		"malformed product":        {"CI", 0, []string{"prd_x"}},
+		"duplicate products":       {"CI", 0, []string{f.prodA, f.prodA}},
+		"another tenant's product": {"CI", 0, []string{prodB}},
+	} {
+		scope := all
+		if c.products != nil {
+			scope = authz.Scope{Products: c.products}
+		}
+		if _, err := f.s.Create(owner, c.name, authz.Support, scope, c.ttl); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v, want ErrInvalid", name, err)
+			continue
+		}
+		if e := f.lastEvent(t, f.a); e.Action != "api_token.create" || e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil {
+			t.Errorf("%s: audit = %+v", name, e)
+		}
+	}
+	if _, err := f.s.Create(owner, "longest", authz.SDK, all, MaxTTL); err != nil {
+		t.Errorf("MaxTTL refused: %v", err)
+	}
+}
+
+// The database's creator_is_member check backs a stale principal: the
+// context says owner, the membership says viewer (or there is none).
+func TestCreateWithStalePrincipal(t *testing.T) {
+	f := setup(t)
+	outsider := f.join(t, f.b, invitation.RoleViewer, f.ownerB) // member of B only
+	for name, user := range map[string]string{"demoted to viewer": f.viewerA, "not a member": outsider} {
+		if _, err := f.s.Create(f.as(f.a, user, authz.Owner), "CI", authz.SDK, all, 0); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("%s: %v, want ErrDenied", name, err)
+			continue
+		}
+		if e := f.lastEvent(t, f.a); e.Action != "api_token.create" || e.Outcome != auditevent.OutcomeDenied {
+			t.Errorf("%s: audit = %+v", name, e)
+		}
+	}
+}
+
+func TestRevokeAuditAndRights(t *testing.T) {
+	f := setup(t)
+	owner, admin := f.as(f.a, f.ownerA, authz.Owner), f.as(f.a, f.adminA, authz.Admin)
+	adminTok, err := f.s.Create(owner, "ops", authz.Admin, all, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerTok, err := f.s.Create(owner, "root", authz.Owner, all, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Revoke(admin, ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Fatalf("admin revokes owner token: %v", err)
+	}
+	if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeDenied {
+		t.Errorf("denied revoke audit = %+v", e)
+	}
+	if err := f.s.Revoke(admin, adminTok.Row.ID); err != nil {
+		t.Errorf("admin revokes admin token: %v", err)
+	}
+	if err := f.s.Revoke(owner, ids.APIToken()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown token: %v", err)
+	}
+	if e := f.lastEvent(t, f.a); e.Action != "api_token.revoke" || e.Outcome != auditevent.OutcomeFailure {
+		t.Errorf("not-found revoke audit = %+v", e)
+	}
+	// Without token:write, existing and unknown IDs look the same.
+	viewer := f.as(f.a, f.viewerA, authz.Viewer)
+	for _, id := range []string{ownerTok.Row.ID, ids.APIToken()} {
+		if err := f.s.Revoke(viewer, id); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("viewer revoke %s: %v, want ErrDenied", id, err)
+		}
 	}
 }

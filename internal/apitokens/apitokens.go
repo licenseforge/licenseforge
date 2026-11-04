@@ -8,9 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"entgo.io/ent/dialect/sql"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/audit"
@@ -26,6 +31,10 @@ import (
 const (
 	DefaultTTL = 90 * 24 * time.Hour
 	MaxTTL     = 365 * 24 * time.Hour
+	MinTTL     = time.Minute
+	// skew keeps the longest token inside the database's "at most a year from
+	// its clock" rule when this host's clock runs a little ahead.
+	skew = 5 * time.Minute
 )
 
 var (
@@ -58,28 +67,31 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	}
 	p, _ := authz.FromContext(ctx)
 	ev := event(p, "api_token.create", "")
-	if ttl == 0 {
-		ttl = DefaultTTL
-	}
-	if name == "" || len(name) > 200 || ttl < 0 || ttl > MaxTTL {
-		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name 1-200 characters, lifetime up to a year", ErrInvalid))
-	}
+	// Authorization first: a caller who may not create tokens learns nothing
+	// about its input.
 	if err := authz.CanAssign(ctx, authz.Token, nil, &authz.Grant{Role: role, Scope: scope}); err != nil {
 		return Created{}, s.refused(ctx, tenantID, ev, err)
 	}
+	if ttl == 0 {
+		ttl = DefaultTTL
+	}
+	if err := validName(name); err != nil || ttl < MinTTL || ttl > MaxTTL || !validProducts(scope.Products) {
+		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name of 1-200 printable characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid))
+	}
+	expires := time.Now().Add(min(ttl, MaxTTL-skew))
 	tok := apitoken.New()
 	var row *ent.APIToken
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error
 		row, err = tx.APIToken.Create().SetTenantID(tenantID).SetName(name).SetRole(entapitoken.Role(role)).
 			SetScopeAll(scope.All).SetTokenHash(apitoken.Hash(tok)).SetDisplay(apitoken.Display(tok)).
-			SetCreatedBy(p.ID).SetExpiresAt(time.Now().Add(ttl)).Save(ctx)
+			SetCreatedBy(p.ID).SetExpiresAt(expires).Save(ctx)
 		if err != nil {
-			return err
+			return dbRefusal(err)
 		}
 		for _, product := range scope.Products {
 			if _, err := tx.APITokenProduct.Create().SetTenantID(tenantID).SetAPITokenID(row.ID).SetProductID(product).Save(ctx); err != nil {
-				return err
+				return dbRefusal(err)
 			}
 		}
 		ev.ObjectID = row.ID
@@ -89,9 +101,53 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 		return err
 	})
 	if err != nil {
-		return Created{}, err
+		ev.ObjectID, ev.Details = "", nil
+		return Created{}, s.refused(ctx, tenantID, ev, err)
 	}
 	return Created{Token: tok, Row: row}, nil
+}
+
+// validName: 1-200 printable characters (no control characters), not blank.
+func validName(name string) error {
+	if strings.TrimSpace(name) == "" || len(name) > 200 || !utf8.ValidString(name) {
+		return ErrInvalid
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
+// validProducts: well-formed, distinct product IDs (whether they exist in
+// the tenant is checked by the database: same-tenant key).
+func validProducts(products []string) bool {
+	seen := map[string]bool{}
+	for _, p := range products {
+		if !ids.Valid("prd", p) || seen[p] {
+			return false
+		}
+		seen[p] = true
+	}
+	return true
+}
+
+// dbRefusal maps the database's refusals of a client request to the
+// service's errors: row-level security (the creator isn't, or is no longer,
+// allowed: a stale principal) to authz.ErrDenied, a missing referenced row
+// (an unknown or another tenant's product) to ErrInvalid. Others stay.
+func dbRefusal(err error) error {
+	var pe *pgconn.PgError
+	switch {
+	case !errors.As(err, &pe):
+		return err
+	case pe.Code == "42501" && strings.Contains(pe.Message, "row-level security"):
+		return fmt.Errorf("%w (database refused: %s)", authz.ErrDenied, pe.ConstraintName)
+	case pe.Code == "23503":
+		return fmt.Errorf("%w: unknown product", ErrInvalid)
+	}
+	return err
 }
 
 // Authenticate returns the principal for token in tenantID (the tenant from
@@ -123,13 +179,18 @@ func (s Service) Authenticate(ctx context.Context, tenantID, token string) (auth
 	if err != nil {
 		return authz.Principal{}, err
 	}
-	_ = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		// One DB-side statement: the database clock, never moving the value
-		// back, throttled; the api_tokens policies refuse anything else.
-		_, err := tx.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = GREATEST(coalesce(last_used_at, '-infinity'), clock_timestamp()), updated_at = clock_timestamp()
-			WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < clock_timestamp() - interval '1 minute')`, row.ID)
-		return err
-	})
+	if row.LastUsedAt == nil || time.Since(*row.LastUsedAt) > time.Minute { // skip the write when clearly throttled
+		err := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+			// One DB-side statement: the database clock, never moving the value
+			// back, throttled; the api_tokens policies refuse anything else.
+			_, err := tx.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = GREATEST(coalesce(last_used_at, '-infinity'), clock_timestamp()), updated_at = clock_timestamp()
+				WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < clock_timestamp() - interval '1 minute')`, row.ID)
+			return err
+		})
+		if err != nil && !errors.Is(dbRefusal(err), authz.ErrDenied) { // a policy refusal (e.g. at expiry) is expected
+			slog.WarnContext(ctx, "api token use not recorded", "token", row.ID, "err", err)
+		}
+	}
 	return authz.Principal{Kind: authz.Token, ID: row.ID, TenantID: tenantID, Role: authz.Role(row.Role),
 		Scope: authz.Scope{All: row.ScopeAll, Products: products}}, nil
 }
@@ -143,6 +204,11 @@ func (s Service) Revoke(ctx context.Context, tokenID string) error {
 	}
 	p, _ := authz.FromContext(ctx)
 	ev := event(p, "api_token.revoke", "")
+	// Authorization first (token:write, as a user with every product), so a
+	// caller who may not revoke can't probe which IDs exist.
+	if err := authz.CanAssign(ctx, authz.Token, &authz.Grant{Role: authz.SDK, Scope: authz.Scope{All: true}}, nil); err != nil {
+		return s.refused(ctx, tenantID, ev, err)
+	}
 	if !ids.Valid("tok", tokenID) {
 		return s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
@@ -163,14 +229,15 @@ func (s Service) Revoke(ctx context.Context, tokenID string) error {
 		if err := authz.CanAssign(ctx, authz.Token, from, nil); err != nil {
 			return err
 		}
-		// ent's UpdateOneID hides a zero-row update (a concurrent revoke): count it.
-		n, err := tx.APIToken.Update().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).
-			SetRevokedAt(time.Now()).Save(ctx)
+		// The database clock (the policies bound revoked_at to it), and count
+		// the row: ent's UpdateOneID would hide a zero-row update.
+		res, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+			WHERE id = $1 AND revoked_at IS NULL`, tokenID)
 		if err != nil {
-			return err
+			return dbRefusal(err)
 		}
-		if n != 1 { // revoked concurrently since the query: not ours to record
-			return ErrNotFound
+		if n, err := res.RowsAffected(); err != nil || n != 1 { // revoked concurrently since the query: not ours to record
+			return errors.Join(ErrNotFound, err)
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
 		_, err = audit.Record(ctx, tx, tenantID, ev)
