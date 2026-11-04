@@ -5,13 +5,14 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
-- Architecture Decision Records 0001–0027 and the `lf1` license file format draft.
+- Architecture Decision Records 0001–0028 and the `lf1` license file format draft.
 - Minimal server with `/healthz` and `/readyz`.
 - `Merge gate` check: fails while a PR has the `do-not-merge` label.
 - Server data layer foundation (`internal/store`): ent with PostgreSQL, prefixed IDs, versioned migrations with a built-in runner (checksums, per-file transactions, advisory lock), a three-login role model (owner, tenant pool, platform pool) with forced row-level security and release-blocking isolation tests, and `deploy/database-setup.sql`; tenants and products tables.
 - `internal/secrets` (ADR-0025): keyring of master keys from `LICENSEFORGE_MASTER_KEYS` (generate one with `openssl rand -base64 32`), AES-256-GCM encryption bound to its row, HMAC lookup hashes that survive key rotation.
 - `internal/licensekey`: license keys `LF-` + 128 random bits in grouped base32, normalised input with one canonical spelling.
 - `internal/authz` (ADR-0019): built-in roles owner/admin/manager/support/viewer and the token-only sdk role, mapped to fixed permissions; `Require` per handler, explicit product scope (zero scope denies), `Products` for list filters, `CanAssign` for member and token changes; scoped principals can't manage access; only owners grant, change or remove owner; tenant settings are owner-only.
+- `internal/apitoken`: API tokens `lf_live_` + 256 random bits + CRC-32 checksum (secret-scanner friendly), offline format check, SHA-256 lookup hash and a display prefix.
 - Audit log: one hash-chained, append-only chain per tenant, written in the action's transaction and serialized per tenant; `Verify` detects changed, removed or reordered entries (ADR-0027).
 - Per-tenant Ed25519 signing keys with a pending → active → retired lifecycle; private keys encrypted with the master keyring and erased from the live table on retirement; `Signer` interface with a local implementation (ADR-0026).
 - License invariants: term licenses always have an expiry, site licenses start at issue with no activation limit, limits are fraction-free integers with key-format names.
@@ -27,4 +28,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - Go SDK `fingerprint` package: default machine/cluster fingerprints (vendor override, opt-in `LICENSEFORGE_FINGERPRINT`, Kubernetes kube-system UID with retries, Linux machine-id with tmpfs and container safeguards, Windows MachineGuid, macOS IOPlatformUUID), hashed per tenant and product.
 
 ### Changed
-- PostgreSQL 17 or newer is required (ADR-0009); `store.Open` and `store.Migrate` refuse older versions.
+- PostgreSQL 17 or newer is required (ADR-0028); `store.Open` and `store.Migrate` refuse older versions.

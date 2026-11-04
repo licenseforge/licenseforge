@@ -30,7 +30,7 @@ const (
 	PlatformRole = "licenseforge_platform"
 )
 
-// minPostgres is the oldest supported server (server_version_num, ADR-0009).
+// minPostgres is the oldest supported server (server_version_num, ADR-0028).
 var minPostgres = 170000 // var so tests can raise it
 
 // migrationLock is the pg_advisory_lock key serializing migrations, so
