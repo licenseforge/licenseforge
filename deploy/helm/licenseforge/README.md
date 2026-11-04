@@ -7,7 +7,7 @@ Pods meet the Pod Security Standard **restricted**.
 
 ## Before installing
 
-1. PostgreSQL 17 or newer with the three logins from
+1. PostgreSQL 17 or newer with the four logins from
    [`deploy/database-setup.sql`](../../database-setup.sql) (ADR-0009).
 2. Two Secrets, created by you or by External Secrets (never in values):
 
@@ -15,6 +15,7 @@ Pods meet the Pod Security Standard **restricted**.
    kubectl create secret generic licenseforge-server \
      --from-literal=database-url='postgres://licenseforge_api:…@db:5432/licenseforge?sslmode=verify-full' \
      --from-literal=platform-database-url='postgres://licenseforge_admin:…@db:5432/licenseforge?sslmode=verify-full' \
+     --from-literal=identity-database-url='postgres://licenseforge_login:…@db:5432/licenseforge?sslmode=verify-full' \
      --from-literal=master-keys="k1=$(openssl rand -base64 32)"
    kubectl create secret generic licenseforge-migrate \
      --from-literal=owner-database-url='postgres://licenseforge_owner:…@db:5432/licenseforge?sslmode=verify-full'

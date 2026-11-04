@@ -24,7 +24,7 @@ func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, store.Migrate)) }
 
 func openDB(t *testing.T) *store.DB {
 	t.Helper()
-	d, err := store.Open(context.Background(), env.TenantURL, env.PlatformURL)
+	d, err := store.Open(context.Background(), store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
 		t.Fatal(err)
 	}

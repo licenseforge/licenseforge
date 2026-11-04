@@ -43,7 +43,7 @@ type fixture struct {
 func setup(t *testing.T) fixture {
 	t.Helper()
 	ctx := context.Background()
-	d, err := store.Open(ctx, env.TenantURL, env.PlatformURL)
+	d, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
 		t.Fatal(err)
 	}

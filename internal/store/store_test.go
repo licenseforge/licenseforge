@@ -24,7 +24,7 @@ func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, Migrate)) }
 
 func openDB(t *testing.T) *DB {
 	t.Helper()
-	d, err := Open(context.Background(), env.TenantURL, env.PlatformURL)
+	d, err := Open(context.Background(), testLogins())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +41,8 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 	s := storetest.Suffix()
 	ownerRole := "lf_own_" + strings.TrimPrefix(env.Name, "lf_test_")
 	creator, byp, member := "lf_cr_"+s, "lf_byp_"+s, "lf_mem_"+s
-	inOwner, inProgram, temp, creates := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s
-	logins := []string{creator, member, inOwner, inProgram, temp, creates}
+	inOwner, inProgram, temp, creates, twoGroups := "lf_io_"+s, "lf_ip_"+s, "lf_tmp_"+s, "lf_cs_"+s, "lf_2g_"+s
+	logins := []string{creator, member, inOwner, inProgram, temp, creates, twoGroups}
 	for _, r := range append(logins, byp) {
 		storetest.AddCleanup(fmt.Sprintf(`DROP ROLE IF EXISTS %s`, r))
 	}
@@ -56,6 +56,7 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 		fmt.Sprintf(`GRANT TEMPORARY ON DATABASE %s TO %s`, env.Name, temp),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, creates),
 		fmt.Sprintf(`GRANT CREATE ON DATABASE %s TO %s`, env.Name, creates),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app, licenseforge_identity`, twoGroups),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, env.Name, strings.Join(logins, ", ")),
 	); err != nil {
 		t.Fatal(err)
@@ -76,14 +77,40 @@ func TestOpenRefusesUnsafeRoles(t *testing.T) {
 		"superuser switched too":              strings.Replace(env.AdminURL, "/postgres?", "/"+env.Name+"?role="+tenantUser+"&", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Open(context.Background(), dsn, env.PlatformURL); !errors.Is(err, ErrUnsafeRole) {
+			l := testLogins()
+			l.Tenant = dsn
+			if _, err := Open(context.Background(), l); !errors.Is(err, ErrUnsafeRole) {
 				t.Fatalf("got %v, want ErrUnsafeRole", err)
 			}
 		})
 	}
-	if _, err := Open(context.Background(), env.TenantURL, env.TenantURL); !errors.Is(err, ErrUnsafeRole) {
-		t.Fatalf("tenant login as platform pool: got %v, want ErrUnsafeRole", err)
+	// A login in two groups is refused by both pools.
+	twoGroupsURL := storetest.UserURL(env.AdminURL, twoGroups, env.Name)
+	for name, l := range map[string]Logins{
+		"two groups as tenant pool":   {Tenant: twoGroupsURL, Platform: env.PlatformURL, Identity: env.IdentityURL},
+		"two groups as identity pool": {Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: twoGroupsURL},
+	} {
+		if _, err := Open(context.Background(), l); !errors.Is(err, ErrUnsafeRole) {
+			t.Errorf("%s: got %v, want ErrUnsafeRole", name, err)
+		}
 	}
+	// Every pool refuses the other pools' logins (ADR-0009, ADR-0029).
+	for name, l := range map[string]Logins{
+		"tenant login as platform pool":   {Tenant: env.TenantURL, Platform: env.TenantURL, Identity: env.IdentityURL},
+		"tenant login as identity pool":   {Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.TenantURL},
+		"platform login as identity pool": {Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.PlatformURL},
+		"identity login as tenant pool":   {Tenant: env.IdentityURL, Platform: env.PlatformURL, Identity: env.IdentityURL},
+		"identity login as platform pool": {Tenant: env.TenantURL, Platform: env.IdentityURL, Identity: env.IdentityURL},
+		"owner login as identity pool":    {Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.OwnerURL},
+	} {
+		if _, err := Open(context.Background(), l); !errors.Is(err, ErrUnsafeRole) {
+			t.Errorf("%s: got %v, want ErrUnsafeRole", name, err)
+		}
+	}
+}
+
+func testLogins() Logins {
+	return Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL}
 }
 
 func TestMigrate(t *testing.T) {
@@ -545,10 +572,25 @@ func TestCheckVersion(t *testing.T) {
 	if err := Migrate(ctx, env.OwnerURL); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Errorf("Migrate: %v", err)
 	}
-	if d, err := Open(ctx, env.TenantURL, env.PlatformURL); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if d, err := Open(ctx, testLogins()); err == nil || !strings.Contains(err.Error(), "not supported") {
 		if d != nil {
 			_ = d.Close()
 		}
 		t.Errorf("Open: %v", err)
+	}
+}
+
+// Ping fails when any pool is unusable (/readyz).
+func TestPingChecksEveryPool(t *testing.T) {
+	for _, pool := range []string{"tenant", "platform", "identity"} {
+		d, err := Open(context.Background(), testLogins())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = map[string]*sql.DB{"tenant": d.tenantDB, "platform": d.platformDB, "identity": d.identityDB}[pool].Close()
+		if err := d.Ping(context.Background()); err == nil {
+			t.Errorf("Ping with the %s pool closed = nil", pool)
+		}
+		_ = d.Close()
 	}
 }

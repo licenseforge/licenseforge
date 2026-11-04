@@ -1,4 +1,4 @@
-{{- if not .Values.secrets.server }}{{ fail "secrets.server is required: a Secret with database-url, platform-database-url and master-keys" }}{{ end }}
+{{- if not .Values.secrets.server }}{{ fail "secrets.server is required: a Secret with database-url, platform-database-url, identity-database-url and master-keys" }}{{ end }}
 {{- if not (regexMatch "^[0-9]+$" (toString .Values.drainSeconds)) }}{{ fail "drainSeconds must be whole seconds, e.g. 5" }}{{ end }}
 {{- if le (int .Values.terminationGracePeriodSeconds) (add (int .Values.drainSeconds) 15) }}{{ fail "terminationGracePeriodSeconds must exceed drainSeconds + 15" }}{{ end }}
 apiVersion: apps/v1
@@ -43,6 +43,8 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: database-url}}
             - name: LICENSEFORGE_PLATFORM_DATABASE_URL
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: platform-database-url}}
+            - name: LICENSEFORGE_IDENTITY_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: identity-database-url}}
             - name: LICENSEFORGE_MASTER_KEYS
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: master-keys}}
             - name: LICENSEFORGE_DRAIN

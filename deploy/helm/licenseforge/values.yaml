@@ -12,7 +12,8 @@ replicaCount: 2
 # External Secrets. The server Secret must NOT contain the owner login.
 secrets:
   # Keys: database-url (licenseforge_api), platform-database-url
-  # (licenseforge_admin), master-keys (LICENSEFORGE_MASTER_KEYS).
+  # (licenseforge_admin), identity-database-url (licenseforge_login),
+  # master-keys (LICENSEFORGE_MASTER_KEYS).
   server: ""
   # Key: owner-database-url (licenseforge_owner). Only the migration Job reads it.
   migrate: ""

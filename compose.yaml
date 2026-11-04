@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_PASSWORD: dev
     volumes:
-      # Creates the three logins and the database, as an operator would (ADR-0009).
+      # Creates the four logins and the database, as an operator would (ADR-0009, ADR-0029).
       - ./deploy/database-setup.sql:/docker-entrypoint-initdb.d/setup.sql:ro
     healthcheck:
       # Over TCP: during init, Postgres listens on the socket only, so a socket
@@ -34,6 +34,7 @@ services:
     environment:
       LICENSEFORGE_DATABASE_URL: postgres://licenseforge_api:change-me-api@db:5432/licenseforge?sslmode=disable
       LICENSEFORGE_PLATFORM_DATABASE_URL: postgres://licenseforge_admin:change-me-admin@db:5432/licenseforge?sslmode=disable
+      LICENSEFORGE_IDENTITY_DATABASE_URL: postgres://licenseforge_login:change-me-login@db:5432/licenseforge?sslmode=disable
       LICENSEFORGE_MASTER_KEYS: dev=ZGV2LW9ubHktbWFzdGVyLWtleS1kby1ub3QtdXNlISE=
     ports: ["127.0.0.1:8080:8080"]
     read_only: true
