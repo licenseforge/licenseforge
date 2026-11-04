@@ -1,0 +1,26 @@
+{{- if .Values.networkPolicy.enabled }}
+# Server and migration pods: ingress on 8080 only; egress to DNS and the database only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "licenseforge.fullname" . }}
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "licenseforge.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{port: 8080, protocol: TCP}]
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from: {{- toYaml . | nindent 8 }}
+      {{- end }}
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - ports: [{port: {{ .Values.networkPolicy.databasePort }}, protocol: TCP}]
+      {{- with .Values.networkPolicy.databaseCIDRs }}
+      to:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      {{- end }}
+{{- end }}

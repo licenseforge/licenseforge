@@ -1,0 +1,11 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "licenseforge.fullname" . }}
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "licenseforge.serverSelectorLabels" . | nindent 6 }}
+{{- end }}

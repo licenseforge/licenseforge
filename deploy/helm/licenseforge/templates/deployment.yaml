@@ -1,0 +1,70 @@
+{{- if not .Values.secrets.server }}{{ fail "secrets.server is required: a Secret with database-url, platform-database-url and master-keys" }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "licenseforge.fullname" . }}
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "licenseforge.serverSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "licenseforge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "licenseforge.fullname" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext: {{- include "licenseforge.podSecurityContext" . | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "licenseforge.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "licenseforge.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Explicit keys, never envFrom: the owner login must not reach serving pods.
+            - name: LICENSEFORGE_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server }}, key: database-url}}
+            - name: LICENSEFORGE_PLATFORM_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server }}, key: platform-database-url}}
+            - name: LICENSEFORGE_MASTER_KEYS
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server }}, key: master-keys}}
+            - name: LICENSEFORGE_DRAIN
+              value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
+            {{- with .Values.extraEnv }}{{ toYaml . | nindent 12 }}{{ end }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
