@@ -12,11 +12,13 @@ import (
 
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	entapitoken "licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -344,6 +346,62 @@ func TestCreateWithStalePrincipal(t *testing.T) {
 		}
 		if e := f.lastEvent(t, f.a); e.Action != "api_token.create" || e.Outcome != auditevent.OutcomeDenied {
 			t.Errorf("%s: audit = %+v", name, e)
+		}
+	}
+}
+
+// The principal is re-checked in the transaction: an owner demoted to admin
+// can't create an admin token on the old principal, though the database's
+// creator_is_member policy would let an admin do so.
+func TestCreateRechecksPrincipal(t *testing.T) {
+	f := setup(t)
+	if _, err := f.s.Create(f.as(f.a, f.adminA, authz.Owner), "CI", authz.Admin, all, 0); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("stale owner principal: %v", err)
+	}
+	if _, err := f.s.Create(f.as(f.a, f.adminA, authz.Admin), "CI", authz.Admin, all, 0); err != nil {
+		t.Errorf("current principal: %v", err)
+	}
+}
+
+// A token created while its creator is being removed doesn't survive the
+// removal: the removal waits for the creation and then revokes the token.
+func TestCreateRacesRemoval(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var memberID string
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		var err error
+		memberID, err = tx.Membership.Query().Where(membership.UserID(f.adminA)).OnlyID(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	removed := make(chan error, 1)
+	t.Cleanup(func() { testHookCreated = nil })
+	testHookCreated = func() { // the token is inserted, not committed
+		testHookCreated = nil
+		go func() {
+			_, err := members.Service{DB: f.db}.Remove(f.as(f.a, f.ownerA, authz.Owner), memberID, true)
+			removed <- err
+		}()
+		select { // give a removal that doesn't wait the chance to finish first
+		case err := <-removed:
+			removed <- err
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	c, err := f.s.Create(f.as(f.a, f.adminA, authz.Admin), "CI", authz.Viewer, all, 0)
+	select {
+	case rerr := <-removed:
+		if rerr != nil {
+			t.Fatalf("remove: %v", rerr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("removal didn't finish")
+	}
+	if err == nil {
+		if _, err := f.s.Authenticate(ctx, f.a, c.Token); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("token survived its creator's removal: %v", err)
 		}
 	}
 }

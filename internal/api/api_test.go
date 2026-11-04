@@ -23,6 +23,7 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -43,6 +44,7 @@ type fixture struct {
 	prodA                           string
 	ownerA, adminA, viewerA, scoped string // members of a; scoped: admin of prodA only
 	ownerB, outsider                string
+	mem                             map[string]string // user ID -> membership ID
 }
 
 func setup(t *testing.T) *fixture {
@@ -57,8 +59,8 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{db: d, tokens: apitokens.Service{DB: d}}
-	f.srv = New(Config{Tokens: f.tokens, Identity: identity.Service{DB: d}, Sessions: sessions,
+	f := &fixture{db: d, tokens: apitokens.Service{DB: d}, mem: map[string]string{}}
+	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
@@ -121,9 +123,11 @@ func (f *fixture) join(t *testing.T, tenant string, role invitation.Role, invite
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.AcceptInvitation(ctx, tok, uid, func(*ent.Tx, *ent.Membership) error { return nil }); err != nil {
+	m, err := f.db.AcceptInvitation(ctx, tok, uid, func(*ent.Tx, *ent.Membership) error { return nil })
+	if err != nil {
 		t.Fatal(err)
 	}
+	f.mem[uid] = m.ID
 	return uid
 }
 
@@ -604,4 +608,128 @@ func TestExactKeys(t *testing.T) {
 			t.Errorf("exactKeys(%s) = %v", raw, got)
 		}
 	}
+}
+
+func membersPath(tenant string) string { return Prefix + "/tenants/" + tenant + "/members" }
+
+func TestMemberEndpoints(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	p := membersPath(f.a.Slug)
+	patch := func(id, body string, o opt) resp {
+		return f.do(t, "PATCH", p+"/"+id, body, o, header("Content-Type", "application/merge-patch+json"))
+	}
+	// List: newest first, paginated, with the user's email; nothing of tenant b.
+	r1 := f.do(t, "GET", p+"?limit=2", "", owner)
+	items, _ := r1.body["items"].([]any)
+	next, _ := r1.body["next_cursor"].(string)
+	if r1.code != 200 || len(items) != 2 || next == "" || items[0].(map[string]any)["id"] != f.mem[f.scoped] ||
+		!reflect.DeepEqual(items[0].(map[string]any)["product_ids"], []any{f.prodA}) || items[0].(map[string]any)["email"] == nil {
+		t.Fatalf("page 1: %s", r1.raw)
+	}
+	r2 := f.do(t, "GET", p+"?limit=2&cursor="+next, "", owner)
+	if items, _ := r2.body["items"].([]any); r2.code != 200 || len(items) != 2 || strings.Contains(r1.raw+r2.raw, f.mem[f.outsider]) {
+		t.Fatalf("page 2: %s", r2.raw)
+	}
+	// PATCH (merge patch): role and scope.
+	if r := patch(f.mem[f.viewerA], `{"role":"manager","product_ids":["`+f.prodA+`"]}`, owner); r.code != 200 ||
+		r.body["role"] != "manager" || r.body["all_products"] != false {
+		t.Errorf("patch: %d %s", r.code, r.raw)
+	}
+	if r := patch(f.mem[f.viewerA], `{"all_products":true}`, owner); r.code != 200 || r.body["role"] != "manager" || r.body["all_products"] != true {
+		t.Errorf("patch scope only: %d %s", r.code, r.raw)
+	}
+	// Hidden and missing members: the same 404.
+	missing := patch(ids.Membership(), `{"role":"viewer"}`, owner).problem(t, 404, "not_found")
+	for name, c := range map[string]struct {
+		id string
+		o  opt
+	}{
+		"another tenant's": {f.mem[f.outsider], owner},
+		"malformed":        {"x", owner},
+		"scoped caller":    {f.mem[f.viewerA], f.session(t, f.scoped, true)},
+		"viewer, missing":  {ids.Membership(), f.session(t, f.viewerA, true)},
+	} {
+		if got := patch(c.id, `{"role":"viewer"}`, c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	// Rights before values.
+	admin := f.session(t, f.adminA, true)
+	patch(f.mem[f.viewerA], `{"role":"owner"}`, admin).problem(t, 403, "forbidden")
+	patch(f.mem[f.ownerA], `{"role":"viewer"}`, admin).problem(t, 403, "forbidden")
+	patch(f.mem[f.adminA], `{"role":"root"}`, f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	adminTok := f.token(t, f.a.ID, f.ownerA, authz.Admin)
+	patch(f.mem[f.viewerA], `{"role":"viewer"}`, bearer(adminTok.Token)).problem(t, 403, "forbidden") // tokens can't manage access
+	// Values: 422 with the field; null on a non-nullable field is invalid; malformed is 400.
+	for body, field := range map[string]string{
+		`{"role":"root"}`:      "/role",
+		`{"role":null}`:        "/role",
+		`{"product_ids":null}`: "/product_ids",
+		`{"all_products":null,"product_ids":["` + f.prodA + `"]}`: "/all_products",
+		`{"all_products":true,"product_ids":null}`:                "/product_ids",
+		`{"all_products":false}`:                                  "/product_ids",
+		`{"product_ids":["` + ids.Product() + `"]}`:               "/product_ids",
+	} {
+		got := patch(f.mem[f.viewerA], body, owner).problem(t, 422, "validation_failed")
+		if errs, _ := got["errors"].([]any); len(errs) != 1 || errs[0].(map[string]any)["field"] != field {
+			t.Errorf("%s: %v", body, got)
+		}
+	}
+	patch(f.mem[f.viewerA], `{"Role":"viewer"}`, owner).problem(t, 400, "invalid_request")
+	patch(f.mem[f.viewerA], `{"role":1}`, owner).problem(t, 400, "invalid_request")
+	// The last owner stays.
+	patch(f.mem[f.ownerA], `{"role":"admin"}`, owner).problem(t, 409, "last_owner")
+	f.do(t, "DELETE", p+"/"+f.mem[f.ownerA], "", owner).problem(t, 409, "last_owner")
+	// DELETE revokes the member's tokens by default and ends their access at once.
+	createdByAdmin, err := f.tokens.Create(authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.adminA,
+		TenantID: f.a.ID, Role: authz.Admin, Scope: authz.Scope{All: true}}), "CI", authz.Viewer, authz.Scope{All: true}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.do(t, "DELETE", p+"/"+f.mem[f.adminA]+"?revoke_tokens=maybe", "", owner).problem(t, 400, "invalid_request")
+	if r := f.do(t, "DELETE", p+"/"+f.mem[f.adminA], "", owner); r.code != 204 || r.raw != "" || r.h.Get("X-Revoked-Token-Ids") != createdByAdmin.Row.ID {
+		t.Fatalf("delete: %d %s", r.code, r.raw)
+	}
+	f.do(t, "GET", p, "", admin).problem(t, 404, "not_found")
+	f.do(t, "GET", p, "", bearer(createdByAdmin.Token)).problem(t, 401, "unauthenticated")
+	f.do(t, "DELETE", p+"/"+f.mem[f.adminA], "", owner).problem(t, 404, "not_found")
+	// revoke_tokens=false is accepted (what it keeps: members.TestRemove).
+	kept := f.token(t, f.a.ID, f.ownerA, authz.Viewer)
+	if r := f.do(t, "DELETE", p+"/"+f.mem[f.viewerA]+"?revoke_tokens=false", "", owner); r.code != 204 {
+		t.Fatalf("delete keeping tokens: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "GET", p, "", bearer(kept.Token)); r.code != 200 {
+		t.Errorf("unrelated token: %d", r.code)
+	}
+}
+
+// PATCH caps the member's tokens by default (ADR-0035); revoke_tokens=false keeps them.
+func TestMemberPatchCapsTokens(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	mk := func() apitokens.Created {
+		c, err := f.tokens.Create(authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.adminA,
+			TenantID: f.a.ID, Role: authz.Admin, Scope: authz.Scope{All: true}}), "CI", authz.Admin, authz.Scope{All: true}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	p := membersPath(f.a.Slug) + "/" + f.mem[f.adminA]
+	c := mk()
+	kept := c.Token
+	if r := f.do(t, "PATCH", p+"?revoke_tokens=false", `{"role":"manager"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_token_ids"]) != "[]" {
+		t.Fatalf("patch keeping tokens: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)); r.code != 200 {
+		t.Errorf("kept token: %d", r.code)
+	}
+	if r := f.do(t, "PATCH", p, `{"role":"admin"}`, owner); r.code != 200 {
+		t.Fatalf("promote back: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", p, `{"role":"manager"}`, owner); r.code != 200 || !reflect.DeepEqual(r.body["revoked_token_ids"], []any{c.Row.ID}) {
+		t.Fatalf("patch: %d %s", r.code, r.raw)
+	}
+	f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)).problem(t, 401, "unauthenticated")
 }

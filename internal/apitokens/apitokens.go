@@ -48,6 +48,9 @@ var (
 	ErrInvalid = errors.New("apitokens: invalid request")
 )
 
+// testHookCreated runs inside Create's transaction (tests only).
+var testHookCreated func()
+
 // Service works on the tenant pool.
 type Service struct{ DB *store.DB }
 
@@ -82,6 +85,12 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	tok := apitoken.New()
 	var row *ent.APIToken
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The creator still holds the grant checked above, and keeps it until
+		// commit: a concurrent removal waits and then sees (and revokes) this
+		// token; a concurrent demotion makes this fail.
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
 		var err error
 		row, err = tx.APIToken.Create().SetTenantID(tenantID).SetName(name).SetRole(entapitoken.Role(role)).
 			SetScopeAll(scope.All).SetTokenHash(apitoken.Hash(tok)).SetDisplay(apitoken.Display(tok)).
@@ -93,6 +102,9 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 			if _, err := tx.APITokenProduct.Create().SetTenantID(tenantID).SetAPITokenID(row.ID).SetProductID(product).Save(ctx); err != nil {
 				return dbRefusal(err)
 			}
+		}
+		if testHookCreated != nil {
+			testHookCreated()
 		}
 		ev.ObjectID = row.ID
 		ev.Outcome = auditevent.OutcomeSuccess
