@@ -5,8 +5,12 @@ go 1.26.4
 require (
 	ariga.io/atlas v1.3.0
 	entgo.io/ent v0.14.6
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/jackc/pgx/v5 v5.12.0
+	golang.org/x/oauth2 v0.37.0
 )
+
+require github.com/go-jose/go-jose/v4 v4.1.4
 
 require (
 	github.com/agext/levenshtein v1.2.3 // indirect

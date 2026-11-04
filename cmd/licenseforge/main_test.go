@@ -149,6 +149,7 @@ func TestServeRefuses(t *testing.T) {
 		"negative drain":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_DRAIN"},
 		"no identity URL":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_IDENTITY_DATABASE_URL is not set"},
 		"platform as identity": {env.TenantURL, env.PlatformURL, testKeys, "", "identity pool"},
+		"OIDC without client":  {env.TenantURL, env.PlatformURL, testKeys, "", "client ID"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -159,6 +160,8 @@ func TestServeRefuses(t *testing.T) {
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", "")
 		case "platform as identity":
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.PlatformURL)
+		case "OIDC without client":
+			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
 		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
