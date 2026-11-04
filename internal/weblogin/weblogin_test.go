@@ -174,6 +174,17 @@ func (f *fixture) start(t *testing.T) url.Values {
 // finish registers a code at the IdP with claims (merged over valid ones)
 // and calls back with state; it returns the callback response status.
 func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[string]any) int {
+	resp, err := f.client.Get(f.callbackURL(q, state, override))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// callbackURL registers a code at the IdP (as finish) and returns the
+// callback URL to call with it. Safe outside the test goroutine.
+func (f *fixture) callbackURL(q url.Values, state string, override map[string]any) string {
 	claims := map[string]any{
 		"iss": f.idp.srv.URL, "aud": "lf", "sub": ids.New("sub"), "nonce": q.Get("nonce"),
 		"iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(),
@@ -186,12 +197,7 @@ func (f *fixture) finish(t *testing.T, q url.Values, state string, override map[
 	f.idp.mu.Lock()
 	f.idp.code[code] = grant{challenge: q.Get("code_challenge"), claims: claims}
 	f.idp.mu.Unlock()
-	resp, err := f.client.Get(f.app.URL + "/auth/callback?" + url.Values{"code": {code}, "state": {state}}.Encode())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode
+	return f.app.URL + "/auth/callback?" + url.Values{"code": {code}, "state": {state}}.Encode()
 }
 
 func (f *fixture) session(t *testing.T) string {

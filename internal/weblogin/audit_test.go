@@ -218,11 +218,25 @@ func TestDisabledBeforeSessionIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := f.start(t)
-	done := make(chan int, 1)
-	go func() { done <- f.finish(t, q, q.Get("state"), map[string]any{"sub": sub, "email": email}) }()
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, 1)
+	callback := f.callbackURL(q, q.Get("state"), map[string]any{"sub": sub, "email": email})
+	go func() { // no t.Fatal here: report back to the test goroutine
+		resp, err := f.client.Get(callback)
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		_ = resp.Body.Close()
+		done <- result{code: resp.StatusCode}
+	}()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var waiting int
 		if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
 			AND ((classid::bigint << 32) | objid::bigint) = $1`, int64(adminLock)).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
@@ -239,8 +253,13 @@ func TestDisabledBeforeSessionIsRefused(t *testing.T) {
 	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, adminLock); err != nil {
 		t.Fatal(err)
 	}
-	if code := <-done; code != http.StatusForbidden {
-		t.Errorf("callback: %d, want 403", code)
+	select {
+	case r := <-done:
+		if r.err != nil || r.code != http.StatusForbidden {
+			t.Errorf("callback: %d %v, want 403", r.code, r.err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("callback didn't return")
 	}
 	if f.session(t) != "" || len(f.admins(t)) != 0 {
 		t.Error("disabled user got a session or the admin role")
