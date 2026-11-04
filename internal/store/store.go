@@ -210,6 +210,20 @@ func (d *DB) WithPlatform(ctx context.Context, fn func(*ent.Tx) error) error {
 	return inTx(ctx, d.platform, fn)
 }
 
+// WithIdentity runs fn on the identity pool, the login path (ADR-0029): it
+// reads identity data of every tenant and touches no licensing table.
+// tenantID is the tenant an invitation is being accepted into ("" for plain
+// login work); the database lets a membership and its audit entry be written
+// only there.
+func (d *DB) WithIdentity(ctx context.Context, tenantID string, fn func(*ent.Tx) error) error {
+	return inTx(ctx, d.identity, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
 func inTx(ctx context.Context, client *ent.Client, fn func(*ent.Tx) error) (err error) {
 	tx, err := client.Tx(ctx)
 	if err != nil {

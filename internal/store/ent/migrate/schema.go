@@ -187,6 +187,110 @@ var (
 			},
 		},
 	}
+	// InvitationsColumns holds the columns for the "invitations" table.
+	InvitationsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "email", Type: field.TypeString, Size: 320, SchemaType: map[string]string{"postgres": "varchar(320)"}},
+		{Name: "role", Type: field.TypeEnum, Enums: []string{"owner", "admin", "manager", "support", "viewer"}},
+		{Name: "scope_all", Type: field.TypeBool},
+		{Name: "issuer", Type: field.TypeString, Nullable: true, Size: 500, SchemaType: map[string]string{"postgres": "varchar(500)"}},
+		{Name: "token_hash", Type: field.TypeBytes},
+		{Name: "expires_at", Type: field.TypeTime},
+		{Name: "accepted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "invited_by", Type: field.TypeString, Nullable: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "accepted_by", Type: field.TypeString, Nullable: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// InvitationsTable holds the schema information for the "invitations" table.
+	InvitationsTable = &schema.Table{
+		Name:       "invitations",
+		Columns:    InvitationsColumns,
+		PrimaryKey: []*schema.Column{InvitationsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "invitations_tenants_invitations",
+				Columns:    []*schema.Column{InvitationsColumns[11]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "invitations_users_invitations_sent",
+				Columns:    []*schema.Column{InvitationsColumns[12]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "invitations_users_invitations_accepted",
+				Columns:    []*schema.Column{InvitationsColumns[13]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "invitation_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{InvitationsColumns[11]},
+			},
+			{
+				Name:    "invitation_token_hash",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationsColumns[7]},
+			},
+			{
+				Name:    "invitation_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationsColumns[11], InvitationsColumns[0]},
+			},
+			{
+				Name:    "invitation_tenant_id_id_scope_all",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationsColumns[11], InvitationsColumns[0], InvitationsColumns[5]},
+			},
+			{
+				Name:    "invitation_tenant_id_id_accepted_by",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationsColumns[11], InvitationsColumns[0], InvitationsColumns[13]},
+			},
+		},
+	}
+	// InvitationProductsColumns holds the columns for the "invitation_products" table.
+	InvitationProductsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "product_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "scope_all", Type: field.TypeBool, Default: false},
+		{Name: "invitation_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// InvitationProductsTable holds the schema information for the "invitation_products" table.
+	InvitationProductsTable = &schema.Table{
+		Name:       "invitation_products",
+		Columns:    InvitationProductsColumns,
+		PrimaryKey: []*schema.Column{InvitationProductsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "invitation_products_invitations_products",
+				Columns:    []*schema.Column{InvitationProductsColumns[4]},
+				RefColumns: []*schema.Column{InvitationsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "invitationproduct_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{InvitationProductsColumns[1]},
+			},
+			{
+				Name:    "invitationproduct_invitation_id_product_id",
+				Unique:  true,
+				Columns: []*schema.Column{InvitationProductsColumns[4], InvitationProductsColumns[2]},
+			},
+		},
+	}
 	// LicensesColumns holds the columns for the "licenses" table.
 	LicensesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -272,6 +376,98 @@ var (
 				Name:    "license_tenant_id_customer_id",
 				Unique:  false,
 				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[29]},
+			},
+		},
+	}
+	// MembershipsColumns holds the columns for the "memberships" table.
+	MembershipsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "role", Type: field.TypeEnum, Enums: []string{"owner", "admin", "manager", "support", "viewer"}},
+		{Name: "scope_all", Type: field.TypeBool},
+		{Name: "invitation_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "user_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// MembershipsTable holds the schema information for the "memberships" table.
+	MembershipsTable = &schema.Table{
+		Name:       "memberships",
+		Columns:    MembershipsColumns,
+		PrimaryKey: []*schema.Column{MembershipsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "memberships_tenants_memberships",
+				Columns:    []*schema.Column{MembershipsColumns[6]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "memberships_users_memberships",
+				Columns:    []*schema.Column{MembershipsColumns[7]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "membership_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{MembershipsColumns[6]},
+			},
+			{
+				Name:    "membership_tenant_id_user_id",
+				Unique:  true,
+				Columns: []*schema.Column{MembershipsColumns[6], MembershipsColumns[7]},
+			},
+			{
+				Name:    "membership_invitation_id",
+				Unique:  true,
+				Columns: []*schema.Column{MembershipsColumns[5]},
+			},
+			{
+				Name:    "membership_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{MembershipsColumns[6], MembershipsColumns[0]},
+			},
+			{
+				Name:    "membership_tenant_id_id_scope_all",
+				Unique:  true,
+				Columns: []*schema.Column{MembershipsColumns[6], MembershipsColumns[0], MembershipsColumns[4]},
+			},
+		},
+	}
+	// MembershipProductsColumns holds the columns for the "membership_products" table.
+	MembershipProductsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "product_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "scope_all", Type: field.TypeBool, Default: false},
+		{Name: "membership_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// MembershipProductsTable holds the schema information for the "membership_products" table.
+	MembershipProductsTable = &schema.Table{
+		Name:       "membership_products",
+		Columns:    MembershipProductsColumns,
+		PrimaryKey: []*schema.Column{MembershipProductsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "membership_products_memberships_products",
+				Columns:    []*schema.Column{MembershipProductsColumns[4]},
+				RefColumns: []*schema.Column{MembershipsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "membershipproduct_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{MembershipProductsColumns[1]},
+			},
+			{
+				Name:    "membershipproduct_membership_id_product_id",
+				Unique:  true,
+				Columns: []*schema.Column{MembershipProductsColumns[4], MembershipProductsColumns[2]},
 			},
 		},
 	}
@@ -482,18 +678,49 @@ var (
 		Columns:    TenantsColumns,
 		PrimaryKey: []*schema.Column{TenantsColumns[0]},
 	}
+	// UsersColumns holds the columns for the "users" table.
+	UsersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "issuer", Type: field.TypeString, Size: 500, SchemaType: map[string]string{"postgres": "varchar(500)"}},
+		{Name: "subject", Type: field.TypeString, Size: 255, SchemaType: map[string]string{"postgres": "varchar(255)"}},
+		{Name: "email", Type: field.TypeString, Nullable: true, Size: 320, SchemaType: map[string]string{"postgres": "varchar(320)"}},
+		{Name: "email_verified", Type: field.TypeBool, Default: false},
+		{Name: "name", Type: field.TypeString, Nullable: true, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "last_login_at", Type: field.TypeTime, Nullable: true},
+		{Name: "disabled_at", Type: field.TypeTime, Nullable: true},
+	}
+	// UsersTable holds the schema information for the "users" table.
+	UsersTable = &schema.Table{
+		Name:       "users",
+		Columns:    UsersColumns,
+		PrimaryKey: []*schema.Column{UsersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "user_issuer_subject",
+				Unique:  true,
+				Columns: []*schema.Column{UsersColumns[3], UsersColumns[4]},
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		ActivationsTable,
 		AuditEventsTable,
 		CustomersTable,
 		FeaturesTable,
+		InvitationsTable,
+		InvitationProductsTable,
 		LicensesTable,
+		MembershipsTable,
+		MembershipProductsTable,
 		PlansTable,
 		PlanFeaturesTable,
 		ProductsTable,
 		SigningKeysTable,
 		TenantsTable,
+		UsersTable,
 	}
 )
 
@@ -542,6 +769,25 @@ func init() {
 		"features_type_valid":     "(type)::text = ANY (ARRAY['boolean'::text, 'limit'::text])",
 		"features_unit_set":       "unit IS NULL OR btrim(unit) <> ''",
 	}
+	InvitationsTable.ForeignKeys[0].RefTable = TenantsTable
+	InvitationsTable.ForeignKeys[1].RefTable = UsersTable
+	InvitationsTable.ForeignKeys[2].RefTable = UsersTable
+	InvitationsTable.Annotation = &entsql.Annotation{}
+	InvitationsTable.Annotation.Checks = map[string]string{
+		"invitations_accepted":    "(accepted_at IS NULL) = (accepted_by IS NULL)",
+		"invitations_expiry":      "expires_at > created_at",
+		"invitations_id_format":   "id ~ '^inv_[a-z2-7]{26}$'",
+		"invitations_no_empty":    "btrim((email)::text) <> ''::text AND (issuer IS NULL OR btrim((issuer)::text) <> ''::text)",
+		"invitations_one_outcome": "accepted_at IS NULL OR revoked_at IS NULL",
+		"invitations_role_valid":  "(role)::text = ANY (ARRAY['owner'::text, 'admin'::text, 'manager'::text, 'support'::text, 'viewer'::text])",
+		"invitations_token_len":   "length(token_hash) = 32",
+	}
+	InvitationProductsTable.ForeignKeys[0].RefTable = InvitationsTable
+	InvitationProductsTable.Annotation = &entsql.Annotation{}
+	InvitationProductsTable.Annotation.Checks = map[string]string{
+		"invitation_products_id_format": "id ~ '^ivp_[a-z2-7]{26}$'",
+		"invitation_products_scoped":    "NOT scope_all",
+	}
 	LicensesTable.ForeignKeys[0].RefTable = CustomersTable
 	LicensesTable.ForeignKeys[1].RefTable = PlansTable
 	LicensesTable.ForeignKeys[2].RefTable = ProductsTable
@@ -582,6 +828,19 @@ func init() {
 		"licenses_suspended_at":           "(status = 'suspended') = (suspended_at IS NOT NULL)",
 		"licenses_type_valid":             "(type)::text = ANY (ARRAY['dev'::text, 'trial'::text, 'paid'::text, 'community'::text])",
 		"licenses_unstarted_no_expiry":    "(expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NOT NULL OR expires_at IS NULL",
+	}
+	MembershipsTable.ForeignKeys[0].RefTable = TenantsTable
+	MembershipsTable.ForeignKeys[1].RefTable = UsersTable
+	MembershipsTable.Annotation = &entsql.Annotation{}
+	MembershipsTable.Annotation.Checks = map[string]string{
+		"memberships_id_format":  "id ~ '^mem_[a-z2-7]{26}$'",
+		"memberships_role_valid": "(role)::text = ANY (ARRAY['owner'::text, 'admin'::text, 'manager'::text, 'support'::text, 'viewer'::text])",
+	}
+	MembershipProductsTable.ForeignKeys[0].RefTable = MembershipsTable
+	MembershipProductsTable.Annotation = &entsql.Annotation{}
+	MembershipProductsTable.Annotation.Checks = map[string]string{
+		"membership_products_id_format": "id ~ '^mbp_[a-z2-7]{26}$'",
+		"membership_products_scoped":    "NOT scope_all",
 	}
 	PlansTable.ForeignKeys[0].RefTable = ProductsTable
 	PlansTable.Annotation = &entsql.Annotation{}
@@ -635,5 +894,11 @@ func init() {
 		"tenants_id_format":      "id ~ '^tnt_[a-z2-7]{26}$'",
 		"tenants_name_not_blank": "btrim(name) <> ''",
 		"tenants_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+	}
+	UsersTable.Annotation = &entsql.Annotation{}
+	UsersTable.Annotation.Checks = map[string]string{
+		"users_id_format":      "id ~ '^usr_[a-z2-7]{26}$'",
+		"users_no_empty":       "btrim((issuer)::text) <> ''::text AND btrim((subject)::text) <> ''::text AND (email IS NULL OR btrim((email)::text) <> ''::text) AND (name IS NULL OR btrim((name)::text) <> ''::text)",
+		"users_verified_email": "email IS NOT NULL OR NOT email_verified",
 	}
 }

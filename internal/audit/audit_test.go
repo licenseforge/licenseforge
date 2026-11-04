@@ -396,3 +396,23 @@ func TestRecordRefusesStaleSnapshot(t *testing.T) {
 		t.Fatalf("Record in REPEATABLE READ: %v", err)
 	}
 }
+
+// The identity pool (login path, ADR-0029) records an invitation's acceptance
+// in that tenant's chain, and can't write into another tenant's.
+func TestIdentityRecordsOnlyInItsTenant(t *testing.T) {
+	d := openDB(t)
+	a, b := newTenant(t, d), newTenant(t, d)
+	ev := Event{ActorType: auditevent.ActorTypeUser, ActorID: "usr_x", Action: "invitation.accept", Outcome: auditevent.OutcomeSuccess}
+	if err := d.WithIdentity(context.Background(), a, func(tx *ent.Tx) error {
+		_, err := Record(context.Background(), tx, a, ev)
+		return err
+	}); err != nil {
+		t.Fatalf("identity records in its tenant: %v", err)
+	}
+	if err := d.WithIdentity(context.Background(), a, func(tx *ent.Tx) error {
+		_, err := Record(context.Background(), tx, b, ev)
+		return err
+	}); err == nil {
+		t.Error("identity wrote into another tenant's chain")
+	}
+}

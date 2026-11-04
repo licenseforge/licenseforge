@@ -41,9 +41,13 @@ type TenantEdges struct {
 	SigningKeys []*SigningKey `json:"signing_keys,omitempty"`
 	// AuditEvents holds the value of the audit_events edge.
 	AuditEvents []*AuditEvent `json:"audit_events,omitempty"`
+	// Invitations holds the value of the invitations edge.
+	Invitations []*Invitation `json:"invitations,omitempty"`
+	// Memberships holds the value of the memberships edge.
+	Memberships []*Membership `json:"memberships,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [4]bool
+	loadedTypes [6]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -80,6 +84,24 @@ func (e TenantEdges) AuditEventsOrErr() ([]*AuditEvent, error) {
 		return e.AuditEvents, nil
 	}
 	return nil, &NotLoadedError{edge: "audit_events"}
+}
+
+// InvitationsOrErr returns the Invitations value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) InvitationsOrErr() ([]*Invitation, error) {
+	if e.loadedTypes[4] {
+		return e.Invitations, nil
+	}
+	return nil, &NotLoadedError{edge: "invitations"}
+}
+
+// MembershipsOrErr returns the Memberships value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) MembershipsOrErr() ([]*Membership, error) {
+	if e.loadedTypes[5] {
+		return e.Memberships, nil
+	}
+	return nil, &NotLoadedError{edge: "memberships"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -167,6 +189,16 @@ func (_m *Tenant) QuerySigningKeys() *SigningKeyQuery {
 // QueryAuditEvents queries the "audit_events" edge of the Tenant entity.
 func (_m *Tenant) QueryAuditEvents() *AuditEventQuery {
 	return NewTenantClient(_m.config).QueryAuditEvents(_m)
+}
+
+// QueryInvitations queries the "invitations" edge of the Tenant entity.
+func (_m *Tenant) QueryInvitations() *InvitationQuery {
+	return NewTenantClient(_m.config).QueryInvitations(_m)
+}
+
+// QueryMemberships queries the "memberships" edge of the Tenant entity.
+func (_m *Tenant) QueryMemberships() *MembershipQuery {
+	return NewTenantClient(_m.config).QueryMemberships(_m)
 }
 
 // Update returns a builder for updating this Tenant.

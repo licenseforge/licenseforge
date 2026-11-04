@@ -29,13 +29,18 @@ func Valid(prefix, id string) bool {
 }
 
 // Generators for each entity, used as ent default functions.
-func Tenant() string      { return New("tnt") }
-func Product() string     { return New("prd") }
-func Feature() string     { return New("ftr") }
-func Plan() string        { return New("pln") }
-func PlanFeature() string { return New("plf") }
-func Customer() string    { return New("cus") }
-func License() string     { return New("lic") }
-func Activation() string  { return New("act") }
-func SigningKey() string  { return New("sk") }
-func AuditEvent() string  { return New("aud") }
+func Tenant() string            { return New("tnt") }
+func Product() string           { return New("prd") }
+func Feature() string           { return New("ftr") }
+func Plan() string              { return New("pln") }
+func PlanFeature() string       { return New("plf") }
+func Customer() string          { return New("cus") }
+func License() string           { return New("lic") }
+func Activation() string        { return New("act") }
+func SigningKey() string        { return New("sk") }
+func User() string              { return New("usr") }
+func Invitation() string        { return New("inv") }
+func InvitationProduct() string { return New("ivp") }
+func Membership() string        { return New("mem") }
+func MembershipProduct() string { return New("mbp") }
+func AuditEvent() string        { return New("aud") }

@@ -16,12 +16,17 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/invitationproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
 
 // ent aliases to avoid import conflicts in user's code.
@@ -82,16 +87,21 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			activation.Table:  activation.ValidColumn,
-			auditevent.Table:  auditevent.ValidColumn,
-			customer.Table:    customer.ValidColumn,
-			feature.Table:     feature.ValidColumn,
-			license.Table:     license.ValidColumn,
-			plan.Table:        plan.ValidColumn,
-			planfeature.Table: planfeature.ValidColumn,
-			product.Table:     product.ValidColumn,
-			signingkey.Table:  signingkey.ValidColumn,
-			tenant.Table:      tenant.ValidColumn,
+			activation.Table:        activation.ValidColumn,
+			auditevent.Table:        auditevent.ValidColumn,
+			customer.Table:          customer.ValidColumn,
+			feature.Table:           feature.ValidColumn,
+			invitation.Table:        invitation.ValidColumn,
+			invitationproduct.Table: invitationproduct.ValidColumn,
+			license.Table:           license.ValidColumn,
+			membership.Table:        membership.ValidColumn,
+			membershipproduct.Table: membershipproduct.ValidColumn,
+			plan.Table:              plan.ValidColumn,
+			planfeature.Table:       planfeature.ValidColumn,
+			product.Table:           product.ValidColumn,
+			signingkey.Table:        signingkey.ValidColumn,
+			tenant.Table:            tenant.ValidColumn,
+			user.Table:              user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

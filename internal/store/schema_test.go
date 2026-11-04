@@ -104,7 +104,7 @@ func TestMigrationsMatchEntSchema(t *testing.T) {
 
 // TestCrossTableReferencesAreSameTenant: foreign key checks bypass row-level
 // security, so every plain foreign key between tenant tables (other than the
-// tenant_id key to tenants) must be covered by a *_same_tenant composite key on
+// tenant_id key to tenants, and keys to the global users table) must be covered by a *_same_tenant composite key on
 // the same table, into the same table, containing its column and tenant_id on
 // both sides. Every *_same_tenant key must itself pair tenant_id with
 // tenant_id. This also catches keys silently dropped with a column, or names
@@ -121,6 +121,7 @@ func TestCrossTableReferencesAreSameTenant(t *testing.T) {
 		WHERE f.contype = 'f' AND f.connamespace = 'public'::regnamespace
 		  AND f.conname NOT LIKE '%\_same\_tenant'
 		  AND f.confrelid <> 'tenants'::regclass
+		  AND f.confrelid <> 'users'::regclass -- users belong to no tenant (ADR-0029)
 		  AND NOT EXISTS (
 		      SELECT 1 FROM pg_constraint s
 		      WHERE s.contype = 'f' AND s.conrelid = f.conrelid AND s.confrelid = f.confrelid

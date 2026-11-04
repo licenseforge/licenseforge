@@ -22,8 +22,16 @@ type Tx struct {
 	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
 	Feature *FeatureClient
+	// Invitation is the client for interacting with the Invitation builders.
+	Invitation *InvitationClient
+	// InvitationProduct is the client for interacting with the InvitationProduct builders.
+	InvitationProduct *InvitationProductClient
 	// License is the client for interacting with the License builders.
 	License *LicenseClient
+	// Membership is the client for interacting with the Membership builders.
+	Membership *MembershipClient
+	// MembershipProduct is the client for interacting with the MembershipProduct builders.
+	MembershipProduct *MembershipProductClient
 	// Plan is the client for interacting with the Plan builders.
 	Plan *PlanClient
 	// PlanFeature is the client for interacting with the PlanFeature builders.
@@ -34,6 +42,8 @@ type Tx struct {
 	SigningKey *SigningKeyClient
 	// Tenant is the client for interacting with the Tenant builders.
 	Tenant *TenantClient
+	// User is the client for interacting with the User builders.
+	User *UserClient
 
 	// lazily loaded.
 	client     *Client
@@ -169,12 +179,17 @@ func (tx *Tx) init() {
 	tx.AuditEvent = NewAuditEventClient(tx.config)
 	tx.Customer = NewCustomerClient(tx.config)
 	tx.Feature = NewFeatureClient(tx.config)
+	tx.Invitation = NewInvitationClient(tx.config)
+	tx.InvitationProduct = NewInvitationProductClient(tx.config)
 	tx.License = NewLicenseClient(tx.config)
+	tx.Membership = NewMembershipClient(tx.config)
+	tx.MembershipProduct = NewMembershipProductClient(tx.config)
 	tx.Plan = NewPlanClient(tx.config)
 	tx.PlanFeature = NewPlanFeatureClient(tx.config)
 	tx.Product = NewProductClient(tx.config)
 	tx.SigningKey = NewSigningKeyClient(tx.config)
 	tx.Tenant = NewTenantClient(tx.config)
+	tx.User = NewUserClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.
