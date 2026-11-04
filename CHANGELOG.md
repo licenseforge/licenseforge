@@ -3,6 +3,9 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Signing keys: `signing.Local` `Create`, `Promote` and `Discard` now require `key:write` (owners, ADR-0019) on the whole tenant, in the tenant they act on; other roles, `sdk` and admin tokens, product-scoped principals, another tenant's principal and calls without a principal get `authz.ErrDenied` and change nothing.
+
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0032 and the `lf1` license file format draft.
