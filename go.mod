@@ -44,6 +44,9 @@ require (
 	golang.org/x/tools v0.48.0 // indirect
 	golang.org/x/tools/go/packages/packagestest v0.1.1-deprecated // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	licenseforge.io/licenseforge/sdk/go v0.0.0
 )
 
 tool entgo.io/ent/cmd/ent
+
+replace licenseforge.io/licenseforge/sdk/go => ./sdk/go
