@@ -88,9 +88,9 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 				panic(v)
 			}
 			p := &problem{status: http.StatusInternalServerError, code: "internal", err: fmt.Errorf("panic: %v\n%s", v, debug.Stack())}
-			if w.started { // too late for a problem body; log only
+			if w.started { // too late for a problem body: abort, so it can't pass for a success
 				s.Log.ErrorContext(r.Context(), "api panic after the response started", "request_id", ri.id, "err", p.err)
-				return
+				panic(http.ErrAbortHandler)
 			}
 			s.write(w, r, p)
 		}
@@ -257,19 +257,65 @@ func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc
 	}
 }
 
-// exactKeys reports whether every key of the JSON object raw is exactly a
-// json tag of struct t (encoding/json matches names case-insensitively).
+// exactKeys reports whether raw is a JSON object (not null) whose keys, at
+// every level, are exactly the json names of struct t's fields:
+// encoding/json matches names case-insensitively.
 func exactKeys(raw []byte, t reflect.Type) bool {
 	var m map[string]json.RawMessage
-	if json.Unmarshal(raw, &m) != nil {
-		return false
-	}
-	for k := range m {
-		if !slices.ContainsFunc(reflect.VisibleFields(t), func(f reflect.StructField) bool {
+	return json.Unmarshal(raw, &m) == nil && m != nil && keysOf(m, t)
+}
+
+func keysOf(m map[string]json.RawMessage, t reflect.Type) bool {
+	fields := reflect.VisibleFields(t)
+	for k, v := range m {
+		i := slices.IndexFunc(fields, func(f reflect.StructField) bool {
 			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 			return name == k
-		}) {
+		})
+		if i < 0 || !exactValue(v, fields[i].Type) {
 			return false
+		}
+	}
+	return true
+}
+
+var unmarshaler = reflect.TypeFor[json.Unmarshaler]()
+
+// exactValue checks the keys inside raw, a value of type t. Types with their
+// own JSON form (time.Time), []byte and null are left to the decoder.
+func exactValue(raw json.RawMessage, t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if string(raw) == "null" || reflect.PointerTo(t).Implements(unmarshaler) {
+		return true
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		var m map[string]json.RawMessage
+		return json.Unmarshal(raw, &m) == nil && keysOf(m, t)
+	case reflect.Slice, reflect.Array:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return true
+		}
+		var a []json.RawMessage
+		if json.Unmarshal(raw, &a) != nil {
+			return false
+		}
+		for _, e := range a {
+			if !exactValue(e, t.Elem()) {
+				return false
+			}
+		}
+	case reflect.Map:
+		var m map[string]json.RawMessage
+		if json.Unmarshal(raw, &m) != nil {
+			return false
+		}
+		for _, v := range m {
+			if !exactValue(v, t.Elem()) {
+				return false
+			}
 		}
 	}
 	return true
