@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check
+.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 # The dashboard (web/, needs Node) is embedded only with TAGS=webui:
@@ -58,3 +58,7 @@ dev-db-stop:
 # Fails if the ent schema needs a migration that isn't in internal/store/migrations.
 migrate-check:
 	go run ./internal/store/tools/migrate check
+
+# Validates compliance/ (OSCAL schema, cited evidence, links); its own module.
+compliance:
+	cd compliance && go test -count=1 ./...
