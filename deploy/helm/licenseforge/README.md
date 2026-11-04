@@ -33,15 +33,23 @@ helm install licenseforge deploy/helm/licenseforge \
 ```
 
 Upgrades run `licenseforge migrate` first; the rollout starts only if it
-succeeds. Set `image.digest` to pin the exact (signed) image, and
+succeeds. The Job's deadline (`migrate.activeDeadlineSeconds`, 280s) is below
+Helm's default `--timeout` of 5m; raise both together for long migrations. Set `image.digest` to pin the exact (signed) image, and
 `image.tag=<version>-fips` for the FIPS build.
 
 ## Notes
 
-- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only.
-  It needs a CNI that enforces policies; narrow `networkPolicy.ingressFrom` to
-  your ingress controller and `networkPolicy.databaseCIDRs` to the database.
+- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only,
+  for the server and (as a hook policy, so it applies from the first install)
+  the migration Job. It needs a CNI that enforces policies. Narrow
+  `networkPolicy.ingressFrom` to your ingress controller and
+  `networkPolicy.databaseTo` to the database (an `ipBlock`, or selectors for an
+  in-cluster database). On OpenShift set `networkPolicy.dns.ports: [5353]`.
+  The migration policy is a hook resource: `helm uninstall` leaves it behind
+  (it selects only migration pods); delete it with the release's namespace.
 - **Shutdown**: on SIGTERM the server fails readiness and keeps serving for
   `drainSeconds`, then shuts down gracefully (up to 15s). Keep
   `terminationGracePeriodSeconds` above the sum.
+- **Autoscaling**: turning `autoscaling.enabled` on in an upgrade briefly
+  drops the Deployment to one replica until the HPA scales it.
 - Not in the chart yet: Ingress, optional Keycloak and PostgreSQL subcharts.

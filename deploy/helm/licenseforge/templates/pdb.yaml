@@ -5,7 +5,7 @@ metadata:
   name: {{ include "licenseforge.fullname" . }}
   labels: {{- include "licenseforge.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels: {{- include "licenseforge.serverSelectorLabels" . | nindent 6 }}
 {{- end }}

@@ -34,7 +34,7 @@ spec:
           securityContext: {{- include "licenseforge.containerSecurityContext" . | nindent 12 }}
           env:
             - name: LICENSEFORGE_OWNER_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.migrate }}, key: owner-database-url}}
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.migrate | quote }}, key: owner-database-url}}
           resources: {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

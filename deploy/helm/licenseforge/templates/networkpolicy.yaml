@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# Server and migration pods: ingress on 8080 only; egress to DNS and the database only.
+# Server pods: ingress on 8080 only; egress to DNS and the database only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -7,20 +7,34 @@ metadata:
   labels: {{- include "licenseforge.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels: {{- include "licenseforge.selectorLabels" . | nindent 6 }}
+    matchLabels: {{- include "licenseforge.serverSelectorLabels" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - ports: [{port: 8080, protocol: TCP}]
       {{- with .Values.networkPolicy.ingressFrom }}
       from: {{- toYaml . | nindent 8 }}
       {{- end }}
-  egress:
-    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
-    - ports: [{port: {{ .Values.networkPolicy.databasePort }}, protocol: TCP}]
-      {{- with .Values.networkPolicy.databaseCIDRs }}
-      to:
-        {{- range . }}
-        - ipBlock: {cidr: {{ . }}}
-        {{- end }}
-      {{- end }}
+  egress: {{- include "licenseforge.egress" . | nindent 4 }}
+{{- if .Values.migrate.enabled }}
+---
+# The migration Job runs as a pre-install/pre-upgrade hook, before normal
+# resources exist or change, so its policy is a hook too: present on first
+# install, and with this release's rules on upgrade. No ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "licenseforge.fullname" . }}-migrate
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "licenseforge.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: migrate
+  policyTypes: [Ingress, Egress]
+  egress: {{- include "licenseforge.egress" . | nindent 4 }}
+{{- end }}
 {{- end }}
