@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -112,6 +113,10 @@ func setup(t *testing.T) fixture {
 				SetType(feature.TypeBoolean).SetArchivedAt(time.Now()).Save(ctx); err != nil {
 				return err
 			}
+			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey("legacy_seats").SetName("Legacy seats").
+				SetType(feature.TypeLimit).SetArchivedAt(time.Now()).Save(ctx); err != nil {
+				return err
+			}
 			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(q.ID).SetKey("q_only").SetName("Q only").
 				SetType(feature.TypeBoolean).Save(ctx); err != nil {
 				return err
@@ -183,22 +188,23 @@ func (f fixture) get(t *testing.T, tenant, id string) *ent.License {
 func TestIssueCopiesPlanAndKey(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	now := time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)
-	f.s.Now = func() time.Time { return now }
 	req := f.req(f.a)
 	req.Type, req.ExternalRefs = license.TypeTrial, map[string]string{"order": "SO-1"}
+	req.Overrides = map[string]Override{"seats": {Limit: ptr[int64](25)}, "sso": {Remove: true}, "export": {}}
+	var dbBefore time.Time
+	f.tx(t, f.a.id, func(tx *ent.Tx) (err error) { dbBefore, err = dbNow(ctx, tx); return })
 	got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	l := f.get(t, f.a.id, got.License.ID)
-	want := schema.LicenseEntitlements{Features: []string{"sso"}, Limits: map[string]int64{"seats": 10}}
+	want := schema.LicenseEntitlements{Features: []string{"export"}, Limits: map[string]int64{"seats": 25}}
 	if l.ProductID != f.a.prodP || l.PlanID != f.a.pro.ID || l.PlanSlug != "pro" || l.CustomerID != f.a.customer ||
 		l.Type != license.TypeTrial || l.Status != license.StatusActive || l.ExpiryBasis != license.ExpiryBasisFromIssue ||
 		*l.DurationMonths != 12 || l.DurationSeconds != nil || *l.MaxActivations != 3 || *l.MaxRehosts != 2 ||
 		l.BindType != license.BindTypeMachine || !l.OfflineAllowed || l.LeaseSeconds != 3600 || *l.MaxOfflineSeconds != 7200 ||
 		l.GraceSeconds != 60 || !reflect.DeepEqual(l.Entitlements, want) || l.ExternalRefs["order"] != "SO-1" ||
-		!l.IssuedAt.Equal(now) || !l.ExpiresAt.Equal(time.Date(2027, 1, 31, 10, 0, 0, 0, time.UTC)) {
+		l.IssuedAt.Before(dbBefore) || l.IssuedAt.After(dbBefore.Add(time.Minute)) || !l.ExpiresAt.Equal(*expiry(l.IssuedAt, ptr(12), nil)) {
 		t.Errorf("license = %+v, entitlements %+v", l, l.Entitlements)
 	}
 
@@ -230,8 +236,16 @@ func TestIssueCopiesPlanAndKey(t *testing.T) {
 
 	e := f.lastEvent(t, f.a.id)
 	if e.Action != "license.issue" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != l.ID || *e.ActorID != "usr_test" ||
-		strings.Contains(e.Details, body[:20]) || !strings.Contains(e.Details, `"plan_id":"`+f.a.pro.ID) {
+		strings.Contains(e.Details, body[:20]) || strings.Contains(e.Details, l.KeyHint) || strings.Contains(e.Details, l.KeyLookup) {
 		t.Errorf("audit = %+v", e)
+	}
+	// The entry records what was granted.
+	for _, w := range []string{`"plan_id":"` + f.a.pro.ID + `"`, `"plan_slug":"pro"`, `"customer_id":"` + f.a.customer + `"`,
+		`"type":"trial"`, `"expires_at":"` + l.ExpiresAt.UTC().Format(time.RFC3339Nano) + `"`,
+		`"overrides":{"export":"granted","seats":25,"sso":"removed"}`} {
+		if !strings.Contains(e.Details, w) {
+			t.Errorf("details %s lack %s", e.Details, w)
+		}
 	}
 }
 
@@ -281,7 +295,7 @@ func TestOverrides(t *testing.T) {
 	if l := f.get(t, f.a.id, got.License.ID); !reflect.DeepEqual(l.Entitlements, want) {
 		t.Errorf("entitlements = %+v", l.Entitlements)
 	}
-	if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"overrides":["export","nodes","seats","sso"]`) {
+	if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"overrides":{"export":"granted","nodes":9007199254740991,"seats":-1,"sso":"removed"}`) {
 		t.Errorf("details = %s", e.Details)
 	}
 
@@ -294,6 +308,7 @@ func TestOverrides(t *testing.T) {
 		"limit above 2^53-1":       {"seats": {Limit: ptr[int64](1 << 53)}},
 		"remove with a limit":      {"seats": {Remove: true, Limit: ptr[int64](1)}},
 		"archived feature granted": {"legacy": {}},
+		"archived limit changed":   {"legacy_seats": {Limit: ptr[int64](5)}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lic, ev := f.count(t, f.a.id)
@@ -309,7 +324,15 @@ func TestOverrides(t *testing.T) {
 			}
 		})
 	}
-	// Removing an archived feature is allowed (it isn't granted).
+	// Errors are deterministic: the first bad key in sorted order.
+	for range 5 {
+		req := f.req(f.a)
+		req.Overrides = map[string]Override{"zz_nope": {}, "aa_nope": {}, "mm_nope": {}}
+		if _, err := f.s.Issue(ctx, p, req); err == nil || !strings.Contains(err.Error(), `"aa_nope"`) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	// Removing an archived feature is allowed (a no-op: it isn't granted).
 	req.Overrides = map[string]Override{"legacy": {Remove: true}}
 	if _, err := f.s.Issue(ctx, p, req); err != nil {
 		t.Error(err)
@@ -346,11 +369,25 @@ func TestIssueRefusals(t *testing.T) {
 		{"archived customer", mgr, func(r *IssueRequest) { r.CustomerID = archivedCustomer }, ErrInvalid, auditevent.OutcomeFailure},
 		{"malformed plan ID", mgr, func(r *IssueRequest) { r.PlanID = "pln_x" }, ErrInvalid, auditevent.OutcomeFailure},
 		{"unknown type", mgr, func(r *IssueRequest) { r.Type = "gold" }, ErrInvalid, auditevent.OutcomeFailure},
-		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), nil, ErrNotFound, auditevent.OutcomeDenied},
-		{"malformed product ID", mgr, func(r *IssueRequest) { r.ProductID = "x" }, ErrNotFound, auditevent.OutcomeDenied},
+		{"unknown product", mgr, func(r *IssueRequest) { r.ProductID = "prd_00000000000000000000000000" }, ErrInvalid, auditevent.OutcomeFailure},
+		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), nil, ErrInvalid, auditevent.OutcomeDenied},
+		{"malformed product ID", mgr, func(r *IssueRequest) { r.ProductID = "x" }, ErrInvalid, auditevent.OutcomeFailure},
+		{"too many external refs", mgr, func(r *IssueRequest) {
+			r.ExternalRefs = map[string]string{}
+			for i := range 21 {
+				r.ExternalRefs[fmt.Sprint("k", i)] = "v"
+			}
+		}, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref key uppercase", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"Order": "1"} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref key empty", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"": "1"} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref key too long", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{strings.Repeat("k", 65): "1"} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref value too long", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"order": strings.Repeat("v", 256)} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref value NUL", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"order": "a\x00b"} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref value newline", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"order": "a\nb"} }, ErrInvalid, auditevent.OutcomeFailure},
+		{"external ref value not UTF-8", mgr, func(r *IssueRequest) { r.ExternalRefs = map[string]string{"order": "a\xffb"} }, ErrInvalid, auditevent.OutcomeFailure},
 		{"support", as(f.a.id, authz.Support, all), nil, authz.ErrDenied, auditevent.OutcomeDenied},
 		{"viewer", as(f.a.id, authz.Viewer, all), nil, authz.ErrDenied, auditevent.OutcomeDenied},
-		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, nil, authz.ErrDenied, auditevent.OutcomeDenied},
+		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, nil, ErrInvalid, auditevent.OutcomeDenied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := f.req(f.a)
@@ -368,6 +405,21 @@ func TestIssueRefusals(t *testing.T) {
 				t.Errorf("licenses %d→%d, events %d→%d, last %+v", lic, lic2, ev, ev2, e)
 			}
 		})
+	}
+	// A hidden product answers exactly like a missing one (ADR-0032).
+	hiddenReq, missingReq := f.req(f.a), f.req(f.a)
+	missingReq.ProductID = "prd_00000000000000000000000000"
+	_, errHidden := f.s.Issue(ctx, as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), hiddenReq)
+	_, errMissing := f.s.Issue(ctx, mgr, missingReq)
+	_, errOther := f.s.Issue(ctx, mgr, IssueRequest{ProductID: f.b.prodP, PlanID: f.b.pro.ID, CustomerID: f.b.customer})
+	if errHidden == nil || errHidden.Error() != errMissing.Error() || errOther.Error() != errMissing.Error() {
+		t.Errorf("hidden %v, missing %v, another tenant's %v", errHidden, errMissing, errOther)
+	}
+	// A valid external ref is stored.
+	okReq := f.req(f.a)
+	okReq.ExternalRefs = map[string]string{"crm.deal-id_1": strings.Repeat("é", 127)}
+	if _, err := f.s.Issue(ctx, mgr, okReq); err != nil {
+		t.Errorf("valid refs: %v", err)
 	}
 	// Nothing reached tenant B.
 	if lic, ev := f.count(t, f.b.id); lic != 0 || ev != 0 {
@@ -388,8 +440,6 @@ func TestIssueRefusals(t *testing.T) {
 func TestExpiryBasis(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	f.s.Now = func() time.Time { return now }
 	var firstAct, perpetual, secs string
 	f.tx(t, f.a.id, func(tx *ent.Tx) error {
 		mk := func(slug string, c func(*ent.PlanCreate)) string {
@@ -408,10 +458,14 @@ func TestExpiryBasis(t *testing.T) {
 		secs = mk("trial", func(c *ent.PlanCreate) { c.SetDurationSeconds(14 * 86400) })
 		return nil
 	})
-	for planID, want := range map[string]*time.Time{firstAct: nil, perpetual: nil, secs: ptr(now.Add(14 * 24 * time.Hour))} {
+	for planID, term := range map[string]time.Duration{firstAct: 0, perpetual: 0, secs: 14 * 24 * time.Hour} {
 		got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), IssueRequest{ProductID: f.a.prodP, PlanID: planID, CustomerID: f.a.customer})
 		if err != nil {
 			t.Fatal(err)
+		}
+		var want *time.Time
+		if term != 0 {
+			want = ptr(got.License.IssuedAt.Add(term))
 		}
 		if l := got.License; (want == nil) != (l.ExpiresAt == nil) || want != nil && !want.Equal(*l.ExpiresAt) {
 			t.Errorf("plan %s: expires %v, want %v (basis %s)", planID, l.ExpiresAt, want, l.ExpiryBasis)
@@ -522,12 +576,14 @@ func TestTransitionRefusals(t *testing.T) {
 		{"another tenant's license", as(f.a.id, authz.Manager, all), theirs.License.ID, ErrNotFound, auditevent.OutcomeFailure, false},
 		{"unknown license", as(f.a.id, authz.Manager, all), "lic_00000000000000000000000000", ErrNotFound, auditevent.OutcomeFailure, false},
 		{"malformed ID", as(f.a.id, authz.Manager, all), "lic_'; --", ErrNotFound, auditevent.OutcomeFailure, false},
-		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), mine.License.ID, ErrNotFound, auditevent.OutcomeDenied, false},
-		{"support", as(f.a.id, authz.Support, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
-		{"viewer", as(f.a.id, authz.Viewer, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
-		// The role is checked before the lookup: no probing which IDs exist.
-		{"viewer, unknown license", as(f.a.id, authz.Viewer, all), "lic_00000000000000000000000000", authz.ErrDenied, auditevent.OutcomeDenied, false},
-		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, false},
+		// Hidden: answered as not found, recorded as denied with the license ID.
+		{"outside product scope", as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), mine.License.ID, ErrNotFound, auditevent.OutcomeDenied, true},
+		// Visible but the role can't change it: denied after the lookup.
+		{"support", as(f.a.id, authz.Support, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, true},
+		{"viewer, visible license", as(f.a.id, authz.Viewer, all), mine.License.ID, authz.ErrDenied, auditevent.OutcomeDenied, true},
+		// The lookup comes first (ADR-0032): a missing license is not found for every role.
+		{"viewer, unknown license", as(f.a.id, authz.Viewer, all), "lic_00000000000000000000000000", ErrNotFound, auditevent.OutcomeFailure, false},
+		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, mine.License.ID, ErrNotFound, auditevent.OutcomeDenied, true},
 	} {
 		for name, op := range map[string]func(context.Context, authz.Principal, string) (*ent.License, error){
 			"suspend": f.s.Suspend, "reinstate": f.s.Reinstate, "revoke": f.s.Revoke,
@@ -537,7 +593,7 @@ func TestTransitionRefusals(t *testing.T) {
 					t.Fatalf("err = %v, want %v", err, tc.want)
 				}
 				e := f.lastEvent(t, f.a.id)
-				if e.Action != "license."+name || e.Outcome != tc.outcome || (e.ObjectID != nil) != tc.objectID {
+				if e.Action != "license."+name || e.Outcome != tc.outcome || (e.ObjectID != nil) != tc.objectID || tc.objectID && *e.ObjectID != tc.id {
 					t.Errorf("event %+v", e)
 				}
 			})

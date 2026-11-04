@@ -12,8 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
@@ -27,6 +31,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/schema"
 )
@@ -43,9 +48,16 @@ var (
 	// reinstating a revoked license; revocation is final).
 	ErrState = errors.New("licenses: not allowed in the license's status")
 
-	// errOutOfScope is recorded as denied and returned as ErrNotFound.
-	errOutOfScope = errors.New("licenses: outside the principal's product scope")
+	// errNoProduct answers a missing, hidden or malformed product_id alike
+	// (ADR-0032: a body reference).
+	errNoProduct = fmt.Errorf("%w: no such product", ErrInvalid)
 )
+
+// hidden is an object outside the principal's product scope: recorded as
+// denied, answered with visible, the same error as a missing object.
+type hidden struct{ visible error }
+
+func (h hidden) Error() string { return "licenses: outside the principal's product scope" }
 
 const maxLimit = 1<<53 - 1 // license format: limits are -1 … 2^53-1
 
@@ -53,11 +65,10 @@ const maxLimit = 1<<53 - 1 // license format: limits are -1 … 2^53-1
 type Service struct {
 	DB   *store.DB
 	Keys *secrets.Keyring
-	Now  func() time.Time // nil: time.Now
 }
 
 // Override changes one feature for one license (an enterprise deal): Remove
-// drops it; otherwise a boolean feature is granted, and a limit feature gets
+// drops it (a no-op if the plan doesn't grant it); otherwise a boolean feature is granted, and a limit feature gets
 // Limit (required, -1 = unlimited).
 type Override struct {
 	Remove bool
@@ -69,7 +80,7 @@ type IssueRequest struct {
 	ProductID, PlanID, CustomerID string
 	Type                          license.Type        // "" = paid
 	Overrides                     map[string]Override // by feature key
-	ExternalRefs                  map[string]string   // order, CRM, ERP IDs
+	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see validRefs
 }
 
 // Issued is a new license. Key is the plaintext license key: returned here
@@ -79,7 +90,10 @@ type Issued struct {
 	Key     string
 }
 
-// Issue issues a license for p's tenant. p needs license:issue on the product.
+// Issue issues a license for p's tenant. Order of checks (ADR-0032): the
+// request's format, the product (missing, hidden and malformed alike:
+// ErrInvalid), license:issue on it (authz.ErrDenied), then plan, customer
+// and overrides.
 func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest) (Issued, error) {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
@@ -87,23 +101,20 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 		return Issued{}, err
 	}
 	ev := event(p, "license.issue", "")
-	if err := require(ctx, authz.LicenseIssue, req.ProductID); err != nil {
-		return Issued{}, s.refused(ctx, tenantID, ev, err)
-	}
 	if req.Type == "" {
 		req.Type = license.TypePaid
-	}
-	if !ids.Valid("pln", req.PlanID) || !ids.Valid("cus", req.CustomerID) || license.TypeValidator(req.Type) != nil {
-		return Issued{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: plan, customer or type", ErrInvalid))
 	}
 	if req.ExternalRefs == nil {
 		req.ExternalRefs = map[string]string{}
 	}
-	now := time.Now()
-	if s.Now != nil {
-		now = s.Now()
+	switch {
+	case !ids.Valid("prd", req.ProductID):
+		return Issued{}, s.refused(ctx, tenantID, ev, errNoProduct)
+	case !ids.Valid("pln", req.PlanID) || !ids.Valid("cus", req.CustomerID) || license.TypeValidator(req.Type) != nil:
+		return Issued{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: plan, customer or type", ErrInvalid))
+	case !validRefs(req.ExternalRefs):
+		return Issued{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: external_refs: at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes of UTF-8 without control characters", ErrInvalid))
 	}
-	now = now.UTC().Truncate(time.Microsecond) // as stored; calendar months in UTC
 	id, key := ids.License(), licensekey.New() // New returns the canonical form, which Normalize gives at lookup
 	ct, err := s.Keys.Encrypt([]byte(key), secrets.Binding{Purpose: secrets.PurposeLicenseKey, TenantID: tenantID, RowID: id})
 	if err != nil {
@@ -115,16 +126,34 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 	}
 	var row *ent.License
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		// FOR SHARE: a plan edit that locks the plan row waits, so the terms
-		// and features copied below are from one version of the plan.
+		if authz.Require(ctx, authz.LicenseRead, req.ProductID) != nil {
+			return hidden{errNoProduct}
+		}
+		ok, err := tx.Product.Query().Where(product.ID(req.ProductID)).Exist(ctx) // another tenant's: not visible under RLS
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errNoProduct
+		}
+		if err := authz.Require(ctx, authz.LicenseIssue, req.ProductID); err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		// FOR SHARE: plan-feature writers lock the plan row FOR UPDATE first
+		// (schema.PlanFeature), so the terms and features copied below are
+		// from one version of the plan.
 		pl, err := tx.Plan.Query().Where(plan.ID(req.PlanID), plan.ArchivedAtIsNil()).ForShare().Only(ctx)
 		if ent.IsNotFound(err) || err == nil && pl.ProductID != req.ProductID {
-			return fmt.Errorf("%w: no such plan for the product", ErrInvalid) // another tenant's: not visible under RLS
+			return fmt.Errorf("%w: no such plan for the product", ErrInvalid)
 		}
 		if err != nil {
 			return err
 		}
-		ok, err := tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).Exist(ctx)
+		ok, err = tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).Exist(ctx)
 		if err != nil {
 			return err
 		}
@@ -153,8 +182,24 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 			return err
 		}
 		ev.ObjectID, ev.Outcome = row.ID, auditevent.OutcomeSuccess
-		ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "customer_id": row.CustomerID,
-			"type": string(row.Type), "overrides": slices.Sorted(maps.Keys(req.Overrides))}
+		// What was granted: no key material.
+		overrides := map[string]any{}
+		for k, o := range req.Overrides {
+			switch {
+			case o.Remove:
+				overrides[k] = "removed"
+			case o.Limit != nil:
+				overrides[k] = *o.Limit
+			default:
+				overrides[k] = "granted"
+			}
+		}
+		var expires any
+		if row.ExpiresAt != nil {
+			expires = row.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		}
+		ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug,
+			"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": expires, "overrides": overrides}
 		_, err = audit.Record(ctx, tx, tenantID, ev)
 		return err
 	})
@@ -190,8 +235,8 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 		for _, f := range catalog {
 			byKey[f.Key] = f
 		}
-		for k, o := range overrides {
-			f := byKey[k]
+		for _, k := range slices.Sorted(maps.Keys(overrides)) { // sorted: the same error for the same request
+			o, f := overrides[k], byKey[k]
 			switch {
 			case f == nil:
 				return schema.LicenseEntitlements{}, fmt.Errorf("%w: unknown feature %q", ErrInvalid, k)
@@ -272,10 +317,8 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		return nil, err
 	}
 	ev := event(p, t.action, "")
-	// The role first, so a caller who may not change licenses can't probe IDs.
-	if _, _, err := authz.Products(ctx, authz.LicenseWrite); err != nil {
-		return nil, s.refused(ctx, tenantID, ev, err)
-	}
+	// Order of checks (ADR-0032): ID format, lookup under the product scope
+	// (missing and hidden alike: ErrNotFound), then license:write.
 	if !ids.Valid("lic", licenseID) { // hostile input: not stored in the entry
 		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
@@ -289,10 +332,13 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		if err != nil {
 			return err
 		}
-		if err := require(ctx, authz.LicenseWrite, l.ProductID); err != nil {
+		ev.ObjectID = l.ID // recorded even when hidden; only the answer hides it
+		if authz.Require(ctx, authz.LicenseRead, l.ProductID) != nil {
+			return hidden{ErrNotFound}
+		}
+		if err := authz.Require(ctx, authz.LicenseWrite, l.ProductID); err != nil {
 			return err
 		}
-		ev.ObjectID = l.ID
 		if !slices.Contains(t.from, l.Status) {
 			return fmt.Errorf("%w: license is %s", ErrState, l.Status)
 		}
@@ -322,17 +368,39 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 	return row, nil
 }
 
-// require checks perm on product: no such permission is ErrDenied, a product
-// outside the principal's scope errOutOfScope (answered as not found).
-func require(ctx context.Context, perm authz.Permission, product string) error {
-	if _, _, err := authz.Products(ctx, perm); err != nil {
-		return err
+// dbNow is the database clock, as stored (microseconds), in UTC so calendar
+// months are counted in UTC.
+func dbNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT clock_timestamp()`)
+	if err != nil {
+		return time.Time{}, err
 	}
-	if !ids.Valid("prd", product) || authz.Require(ctx, perm, product) != nil {
-		return errOutOfScope
+	defer func() { _ = rows.Close() }()
+	var now time.Time
+	if !rows.Next() {
+		return time.Time{}, errors.Join(errors.New("licenses: clock query returned no row"), rows.Err())
 	}
-	return nil
+	if err := rows.Scan(&now); err != nil {
+		return time.Time{}, err
+	}
+	return now.UTC().Truncate(time.Microsecond), nil
 }
+
+// validRefs: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
+// of up to 255 bytes of valid UTF-8 without control characters (incl. NUL).
+func validRefs(refs map[string]string) bool {
+	if len(refs) > 20 {
+		return false
+	}
+	for k, v := range refs {
+		if !refKeyRE.MatchString(k) || len(v) > 255 || !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
+			return false
+		}
+	}
+	return true
+}
+
+var refKeyRE = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 
 func event(p authz.Principal, action, objectID string) audit.Event {
 	actor := auditevent.ActorTypeUser
@@ -346,9 +414,10 @@ func event(p authz.Principal, action, objectID string) audit.Event {
 // (ADR-0027) and returns the caller's error. Infrastructure errors aren't
 // attempts.
 func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
+	var h hidden
 	switch {
-	case errors.Is(err, errOutOfScope):
-		ev.Outcome, err = auditevent.OutcomeDenied, ErrNotFound
+	case errors.As(err, &h):
+		ev.Outcome, err = auditevent.OutcomeDenied, h.visible
 	case errors.Is(err, authz.ErrDenied):
 		ev.Outcome = auditevent.OutcomeDenied
 	case errors.Is(err, ErrInvalid), errors.Is(err, ErrNotFound), errors.Is(err, ErrState):
