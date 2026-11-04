@@ -95,6 +95,7 @@ func TestMount(t *testing.T) {
 	mux.HandleFunc("POST /auth/logout", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("PUT /things/{id}", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("DELETE /things/{id}", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("POST /api/v1/things", func(http.ResponseWriter, *http.Request) {})
 	Mount(mux)
 	for _, tc := range []struct {
 		method, path string
@@ -107,11 +108,21 @@ func TestMount(t *testing.T) {
 		{"GET", "/t/acme/", 200, ""},
 		{"HEAD", "/", 200, ""},
 		{"POST", "/t/acme/", 405, "GET, HEAD"}, // the mux's own 405
+		{"GET", "/api/v1/things", 405, "POST"},
 	} {
 		rec := get(mux, tc.method, tc.path)
 		if rec.Code != tc.code || rec.Header().Get("Allow") != tc.allow {
 			t.Errorf("%s %s = %d, Allow %q; want %d, %q", tc.method, tc.path, rec.Code, rec.Header().Get("Allow"), tc.code, tc.allow)
 		}
+	}
+	// Under /api/ the 405 is a problem, like the API's own (ADR-0032).
+	rec := get(mux, "GET", "/api/v1/things")
+	want := `{"type":"about:blank","title":"Method Not Allowed","status":405,"code":"method_not_allowed"}` + "\n"
+	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" || rec.Body.String() != want {
+		t.Errorf("GET /api/v1/things = %q %q", ct, rec.Body)
+	}
+	if rec := get(mux, "GET", "/auth/logout"); strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem") {
+		t.Error("problem JSON outside /api")
 	}
 }
 
@@ -135,6 +146,13 @@ func TestHeadAndETag(t *testing.T) {
 	}
 	if get(h, "GET", "/").Header().Get("ETag") == get(h, "GET", "/favicon.svg").Header().Get("ETag") {
 		t.Error("different files share an ETag")
+	}
+}
+
+func TestAPINotFoundBody(t *testing.T) {
+	want := `{"type":"about:blank","title":"Not Found","status":404,"code":"not_found"}` + "\n"
+	if rec := get(newHandler(bundle), "GET", "/api/v1/nope"); rec.Body.String() != want {
+		t.Errorf("GET /api/v1/nope body = %q", rec.Body)
 	}
 }
 
