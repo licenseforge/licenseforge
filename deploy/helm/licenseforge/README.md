@@ -42,17 +42,26 @@ Helm's default `--timeout` of 5m; raise both together for long migrations. Set `
 
 ```sh
 kubectl create secret generic licenseforge-oidc --from-literal=client-secret='…'   # omit for a public client
-helm upgrade licenseforge deploy/helm/licenseforge --reuse-values \
+helm upgrade licenseforge deploy/helm/licenseforge --reset-then-reuse-values \
   --set oidc.enabled=true --set oidc.issuer=https://idp.example/realms/acme \
   --set oidc.clientID=licenseforge --set oidc.redirectURL=https://licenseforge.example/auth/callback \
   --set oidc.clientSecret.secretName=licenseforge-oidc
 ```
 
+`--reset-then-reuse-values` (Helm 3.14+) keeps your values and takes this
+chart's defaults for keys your release doesn't have yet; plain `--reuse-values`
+would leave `oidc.*` without its defaults on a release installed before it.
+
 The server discovers the provider at start, so the NetworkPolicy then also
-allows egress to it on `oidc.egress.port` (443), to any address by default.
-Narrow `oidc.egress.to` to the provider's CIDRs, or to a namespace/pod selector
-for an in-cluster Keycloak. Rendering fails if OIDC is on without the issuer,
-client ID or redirect URL.
+allows egress to it on `oidc.egress.port` (443) and that port only. By default
+that is to any destination, like the DNS and database rules: an external IdP's
+addresses are rarely fixed, and a port-scoped rule keeps the rest of egress
+closed. Narrow `oidc.egress.to` to the provider's CIDRs, or to a
+namespace/pod selector for an in-cluster Keycloak. With a selector, the port
+is the provider's **pod** port, because policies apply after the Service's
+DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
+443. Rendering fails if OIDC is on without the issuer, client ID or redirect
+URL, or without a port.
 
 ## Notes
 

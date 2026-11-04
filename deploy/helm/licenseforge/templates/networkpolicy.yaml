@@ -16,9 +16,14 @@ spec:
       from: {{- toYaml . | nindent 8 }}
       {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}
-    {{- if .Values.oidc.enabled }}
-    - ports: [{port: {{ .Values.oidc.egress.port }}, protocol: TCP}]
-      to: {{- toYaml (.Values.oidc.egress.to | default (list (dict "ipBlock" (dict "cidr" "0.0.0.0/0")) (dict "ipBlock" (dict "cidr" "::/0")))) | nindent 8 }}
+    {{- $oidc := .Values.oidc | default dict }}
+    {{- if $oidc.enabled }}
+    {{- /* A rule without a port would allow every port. */}}
+    - ports: [{port: {{ required "oidc.egress.port is required" (dig "egress" "port" nil $oidc) }}, protocol: TCP}]
+      {{- /* Empty: no `to`, any destination (portable; Cilium's 0.0.0.0/0 doesn't match pods). */}}
+      {{- with dig "egress" "to" list $oidc }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
     {{- end }}
 {{- if .Values.migrate.enabled }}
 ---

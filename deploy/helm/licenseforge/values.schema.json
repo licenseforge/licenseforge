@@ -16,14 +16,24 @@
           "properties": {
             "secretName": {"type": "string"},
             "key": {"type": "string", "minLength": 1}
-          }
+          },
+          "if": {"required": ["secretName"], "properties": {"secretName": {"minLength": 1}}},
+          "then": {"required": ["key"]}
         },
         "egress": {
           "type": "object",
           "additionalProperties": false,
+          "required": ["port"],
           "properties": {
             "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "to": {"type": "array", "items": {"type": "object", "minProperties": 1}}
+            "to": {"type": "array", "items": {
+              "type": "object", "minProperties": 1, "additionalProperties": false,
+              "properties": {
+                "ipBlock": {"type": "object"},
+                "namespaceSelector": {"type": "object"},
+                "podSelector": {"type": "object"}
+              }
+            }}
           }
         }
       }
