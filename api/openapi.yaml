@@ -115,7 +115,14 @@ paths:
       description: |
         Dashboard sessions with member:write on every product. The caller may
         only give or take away a role it holds itself; the last owner can't
-        be demoted (409).
+        be demoted (409). A demotion or narrower scope also revokes the
+        member's tokens the new grant wouldn't allow (ADR-0035), unless
+        revoke_tokens=false.
+      parameters:
+        - name: revoke_tokens
+          in: query
+          description: Revoke the member's active API tokens above the new role or outside the new scope, each audited.
+          schema: { type: boolean, default: true }
       requestBody:
         required: true
         content:

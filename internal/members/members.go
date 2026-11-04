@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"licenseforge.io/licenseforge/internal/audit"
@@ -75,19 +76,30 @@ func withEdges(q *ent.MembershipQuery) *ent.MembershipQuery {
 	return q.WithProducts().WithUser(func(q *ent.UserQuery) { q.Select(user.FieldID, user.FieldEmail, user.FieldName) })
 }
 
-// Change is a merge-patch of a membership: nil fields stay.
+// Change is a merge-patch of a membership: nil fields stay. Null lists the
+// fields the patch set to null (none is nullable: refused as invalid, after
+// the rights checks).
 type Change struct {
 	Role  *authz.Role
 	Scope *authz.Scope
+	Null  []string
 }
 
 // Update changes a member's role or product scope. Order (ADR-0032): the
 // member must be visible (else ErrNotFound), the caller must be allowed to
 // change it at all (authz.ErrDenied), then the values must be valid
 // (InvalidError), within the caller's role, and leave an owner.
-func (s Service) Update(ctx context.Context, memberID string, c Change) (*ent.Membership, error) {
+//
+// capTokens (the default, ADR-0035) also revokes, in the same transaction
+// and with removal's rules, the member's active tokens the new grant
+// wouldn't allow: a role above the new one, or products outside the new
+// scope.
+func (s Service) Update(ctx context.Context, memberID string, c Change, capTokens bool) (*ent.Membership, error) {
 	var out *ent.Membership
 	err := s.change(ctx, "member.update", memberID, func(tx *ent.Tx, m *ent.Membership, from authz.Grant, owners int) (map[string]any, error) {
+		if len(c.Null) > 0 {
+			return nil, &InvalidError{"/" + c.Null[0], "can't be null"}
+		}
 		to := from
 		if c.Role != nil {
 			to.Role = *c.Role
@@ -103,6 +115,10 @@ func (s Service) Update(ctx context.Context, memberID string, c Change) (*ent.Me
 		}
 		if from.Role == authz.Owner && to.Role != authz.Owner && owners == 1 {
 			return nil, ErrLastOwner
+		}
+		revoked, _, err := revokeTokens(ctx, tx, m, "member.update", capTokens, func(g authz.Grant) bool { return !exceeds(g, to) })
+		if err != nil {
+			return nil, err
 		}
 		// Product rows first: they reference (membership, scope_all = false).
 		if c.Scope != nil {
@@ -120,30 +136,42 @@ func (s Service) Update(ctx context.Context, memberID string, c Change) (*ent.Me
 				}
 			}
 		}
-		var err error
 		out, err = withEdges(tx.Membership.Query()).Where(membership.ID(m.ID)).Only(ctx)
-		return map[string]any{"from_role": string(from.Role), "role": string(to.Role), "scope_all": to.Scope.All, "products": len(to.Scope.Products)}, err
+		return map[string]any{"from_role": string(from.Role), "from_scope_all": from.Scope.All, "from_products": len(from.Scope.Products),
+			"role": string(to.Role), "scope_all": to.Scope.All, "products": len(to.Scope.Products), "tokens_revoked": revoked}, err
 	})
 	return out, err
 }
 
-// Remove removes a member. revokeTokens (the default ADR-0029 asks for) also
+// exceeds reports whether a token's grant g goes beyond grant to: a role with
+// a permission to lacks (never sdk, which is always assignable, as in
+// authz.CanAssign), or a product outside to's scope.
+func exceeds(g, to authz.Grant) bool {
+	if g.Role != authz.SDK && !g.Role.Within(to.Role) {
+		return true
+	}
+	if to.Scope.All {
+		return false
+	}
+	return g.Scope.All || slices.ContainsFunc(g.Scope.Products, func(p string) bool { return !slices.Contains(to.Scope.Products, p) })
+}
+
+// Remove removes a member. revoke (the default ADR-0029 asks for) also
 // revokes every active API token the member created, each audited, in the
 // same transaction; if the caller may not revoke one of them, nothing
 // changes. Access through the member's sessions ends at once: every API
 // request re-reads the membership. It returns the number of tokens revoked.
-func (s Service) Remove(ctx context.Context, memberID string, revokeTokens bool) (int, error) {
+// Leaving a tenant (removing oneself) needs member:write too.
+func (s Service) Remove(ctx context.Context, memberID string, revoke bool) (int, error) {
 	var revoked int
 	err := s.change(ctx, "member.remove", memberID, func(tx *ent.Tx, m *ent.Membership, from authz.Grant, owners int) (map[string]any, error) {
 		if from.Role == authz.Owner && owners == 1 {
 			return nil, ErrLastOwner
 		}
-		if revokeTokens {
-			n, err := revokeCreatedBy(ctx, tx, m)
-			if err != nil {
-				return nil, err
-			}
-			revoked = n
+		var kept int
+		var err error
+		if revoked, kept, err = revokeTokens(ctx, tx, m, "member.remove", revoke, nil); err != nil {
+			return nil, err
 		}
 		if _, err := tx.MembershipProduct.Delete().Where(membershipproduct.MembershipID(m.ID)).Exec(ctx); err != nil {
 			return nil, err
@@ -151,45 +179,60 @@ func (s Service) Remove(ctx context.Context, memberID string, revokeTokens bool)
 		if err := tx.Membership.DeleteOne(m).Exec(ctx); err != nil {
 			return nil, err
 		}
-		return map[string]any{"role": string(from.Role), "user_id": m.UserID, "tokens_revoked": revoked}, nil
+		return map[string]any{"role": string(from.Role), "user_id": m.UserID, "revoke_tokens": revoke, "tokens_revoked": revoked, "tokens_kept": kept}, nil
 	})
 	return revoked, err
 }
 
-func revokeCreatedBy(ctx context.Context, tx *ent.Tx, m *ent.Membership) (int, error) {
+// revokeTokens revokes m's user's active, unexpired API tokens in this
+// tenant, except those keep accepts (nil: none), if revoke; it counts the
+// rest as kept. The caller must be allowed to revoke each one
+// (authz.CanAssign), else nothing is revoked: the error rolls back.
+func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason string, revoke bool, keep func(authz.Grant) bool) (revoked, kept int, err error) {
 	p, _ := authz.FromContext(ctx)
-	toks, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil()).
+	toks, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
 		Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	for _, t := range toks {
 		g := authz.Grant{Role: authz.Role(t.Role), Scope: authz.Scope{All: t.ScopeAll}}
 		for _, tp := range t.Edges.Products {
 			g.Scope.Products = append(g.Scope.Products, tp.ProductID)
 		}
+		if !revoke || (keep != nil && keep(g)) {
+			kept++
+			continue
+		}
 		if err := authz.CanAssign(ctx, authz.Token, &g, nil); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		// The database clock, as apitokens.Revoke (the policies bound it).
 		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
 			WHERE id = $1 AND revoked_at IS NULL`, t.ID); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		ev := event(p, "api_token.revoke", "api_token", t.ID)
-		ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": "member.remove", "member_id": m.ID}
+		ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": reason, "member_id": m.ID}
 		if _, err := audit.Record(ctx, tx, m.TenantID, ev); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
+		revoked++
 	}
-	return len(toks), nil
+	return revoked, kept, nil
+}
+
+// notExpired compares with the database clock, as the api_tokens policies do.
+func notExpired(s *entsql.Selector) {
+	s.Where(entsql.ExprP(s.C(entapitoken.FieldExpiresAt) + " > now()"))
 }
 
 type changeFunc func(tx *ent.Tx, m *ent.Membership, from authz.Grant, owners int) (map[string]any, error)
 
 // change runs fn on the locked member, after locking the tenant's owners in
 // ID order first (ADR-0029: concurrent demotions can't deadlock or leave no
-// owner), and records the outcome.
+// owner) and re-checking the caller's own membership, and records the
+// outcome.
 func (s Service) change(ctx context.Context, action, memberID string, fn changeFunc) error {
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
@@ -205,6 +248,11 @@ func (s Service) change(ctx context.Context, action, memberID string, fn changeF
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		owners, err := tx.Membership.Query().Where(membership.RoleEQ(membership.RoleOwner)).Order(ent.Asc(membership.FieldID)).ForUpdate().IDs(ctx)
 		if err != nil {
+			return err
+		}
+		// The caller was resolved before this transaction; a change made to
+		// its own membership meanwhile (it waited on the owners) denies.
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
 			return err
 		}
 		m, err := tx.Membership.Query().Where(membership.ID(memberID)).WithProducts().ForUpdate().Only(ctx)

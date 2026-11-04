@@ -663,11 +663,13 @@ func TestMemberEndpoints(t *testing.T) {
 	patch(f.mem[f.viewerA], `{"role":"viewer"}`, bearer(adminTok.Token)).problem(t, 403, "forbidden") // tokens can't manage access
 	// Values: 422 with the field; null on a non-nullable field is invalid; malformed is 400.
 	for body, field := range map[string]string{
-		`{"role":"root"}`:                           "/role",
-		`{"role":null}`:                             "/role",
-		`{"product_ids":null}`:                      "/product_ids",
-		`{"all_products":false}`:                    "/product_ids",
-		`{"product_ids":["` + ids.Product() + `"]}`: "/product_ids",
+		`{"role":"root"}`:      "/role",
+		`{"role":null}`:        "/role",
+		`{"product_ids":null}`: "/product_ids",
+		`{"all_products":null,"product_ids":["` + f.prodA + `"]}`: "/all_products",
+		`{"all_products":true,"product_ids":null}`:                "/product_ids",
+		`{"all_products":false}`:                                  "/product_ids",
+		`{"product_ids":["` + ids.Product() + `"]}`:               "/product_ids",
 	} {
 		got := patch(f.mem[f.viewerA], body, owner).problem(t, 422, "validation_failed")
 		if errs, _ := got["errors"].([]any); len(errs) != 1 || errs[0].(map[string]any)["field"] != field {
@@ -700,4 +702,33 @@ func TestMemberEndpoints(t *testing.T) {
 	if r := f.do(t, "GET", p, "", bearer(kept.Token)); r.code != 200 {
 		t.Errorf("unrelated token: %d", r.code)
 	}
+}
+
+// PATCH caps the member's tokens by default (ADR-0035); revoke_tokens=false keeps them.
+func TestMemberPatchCapsTokens(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	mk := func() string {
+		c, err := f.tokens.Create(authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.adminA,
+			TenantID: f.a.ID, Role: authz.Admin, Scope: authz.Scope{All: true}}), "CI", authz.Admin, authz.Scope{All: true}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.Token
+	}
+	p := membersPath(f.a.Slug) + "/" + f.mem[f.adminA]
+	kept := mk()
+	if r := f.do(t, "PATCH", p+"?revoke_tokens=false", `{"role":"manager"}`, owner); r.code != 200 {
+		t.Fatalf("patch keeping tokens: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)); r.code != 200 {
+		t.Errorf("kept token: %d", r.code)
+	}
+	if r := f.do(t, "PATCH", p, `{"role":"admin"}`, owner); r.code != 200 {
+		t.Fatalf("promote back: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", p, `{"role":"manager"}`, owner); r.code != 200 {
+		t.Fatalf("patch: %d %s", r.code, r.raw)
+	}
+	f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)).problem(t, 401, "unauthenticated")
 }

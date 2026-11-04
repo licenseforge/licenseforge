@@ -34,22 +34,24 @@ func (s *server) ListMembers(ctx context.Context, req apigen.ListMembersRequestO
 }
 
 func (s *server) UpdateMember(ctx context.Context, req apigen.UpdateMemberRequestObject) (apigen.UpdateMemberResponseObject, error) {
-	// Merge patch: absent stays. None of these fields is nullable, so a null
-	// becomes an invalid value, refused (422) after the lookup and rights.
+	// Merge patch: absent stays. None of these fields is nullable; a null
+	// (seen in the raw body, the generated type can't tell it from absent)
+	// is refused by the service as invalid (422), after the lookup and rights.
 	var raw map[string]json.RawMessage
 	body, _ := ctx.Value(bodyKey{}).([]byte)
 	_ = json.Unmarshal(body, &raw) // strictInput decoded it already
-	null := func(k string) bool { v, ok := raw[k]; return ok && string(v) == "null" }
 	b := req.Body
 	var c members.Change
-	if b.Role != nil || null("role") {
-		r := authz.Role("")
-		if b.Role != nil {
-			r = authz.Role(*b.Role)
+	for _, k := range []string{"role", "all_products", "product_ids"} {
+		if v, ok := raw[k]; ok && string(v) == "null" {
+			c.Null = append(c.Null, k)
 		}
+	}
+	if b.Role != nil {
+		r := authz.Role(*b.Role)
 		c.Role = &r
 	}
-	if b.AllProducts != nil || b.ProductIds != nil || null("all_products") || null("product_ids") {
+	if b.AllProducts != nil || b.ProductIds != nil {
 		c.Scope = &authz.Scope{}
 		if b.AllProducts != nil {
 			c.Scope.All = *b.AllProducts
@@ -58,7 +60,7 @@ func (s *server) UpdateMember(ctx context.Context, req apigen.UpdateMemberReques
 			c.Scope.Products = *b.ProductIds
 		}
 	}
-	m, err := s.Members.Update(ctx, req.Id, c)
+	m, err := s.Members.Update(ctx, req.Id, c, req.Params.RevokeTokens == nil || *req.Params.RevokeTokens)
 	if err != nil {
 		return nil, err
 	}

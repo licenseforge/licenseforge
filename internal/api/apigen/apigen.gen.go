@@ -236,6 +236,12 @@ type RemoveMemberParams struct {
 	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
 }
 
+// UpdateMemberParams defines parameters for UpdateMember.
+type UpdateMemberParams struct {
+	// RevokeTokens Revoke the member's active API tokens above the new role or outside the new scope, each audited.
+	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+}
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
 
@@ -261,7 +267,7 @@ type ServerInterface interface {
 	RemoveMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params RemoveMemberParams)
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
 	// (PATCH /tenants/{tenant}/members/{id})
-	UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
+	UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params UpdateMemberParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -519,8 +525,24 @@ func (siw *ServerInterfaceWrapper) UpdateMember(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateMemberParams
+
+	// ------------- Optional query parameter "revoke_tokens" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_tokens", r.URL.Query(), &params.RevokeTokens, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_tokens"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_tokens", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateMember(w, r, tenant, id)
+		siw.Handler.UpdateMember(w, r, tenant, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1309,6 +1331,7 @@ func (response RemoveMember409ApplicationProblemPlusJSONResponse) VisitRemoveMem
 type UpdateMemberRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Id     string `json:"id"`
+	Params UpdateMemberParams
 	Body   *UpdateMemberApplicationMergePatchPlusJSONRequestBody
 }
 
@@ -1697,11 +1720,12 @@ func (sh *strictHandler) RemoveMember(w http.ResponseWriter, r *http.Request, te
 }
 
 // UpdateMember operation middleware
-func (sh *strictHandler) UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string) {
+func (sh *strictHandler) UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params UpdateMemberParams) {
 	var request UpdateMemberRequestObject
 
 	request.Tenant = tenant
 	request.Id = id
+	request.Params = params
 
 	var body UpdateMemberApplicationMergePatchPlusJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
