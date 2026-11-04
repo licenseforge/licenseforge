@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- `compliance/` (ADR-0024): OSCAL 1.2.3 component definition of the server (NIST SP 800-53 Rev 5), control matrix, HIPAA §164.312 mapping, SSDF (SP 800-218) mapping, data inventory and Secure Configuration Guide; validated against the vendored official OSCAL schema, with cited files and tests checked, by the new `Compliance` workflow (`make compliance`). Repository `SECURITY.md` with the remediation targets. New test-only dependency in its own module: `github.com/santhosh-tekuri/jsonschema/v6`.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0031 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.

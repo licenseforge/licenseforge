@@ -3,6 +3,9 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /compliance # OSCAL schema validator (test-only module)
+    schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
