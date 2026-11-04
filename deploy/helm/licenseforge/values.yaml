@@ -47,7 +47,8 @@ oidc:
   # Server egress to the provider (discovery, keys, token), added to the
   # NetworkPolicy. port is the provider's pod port as the CNI sees it, after
   # the Service's DNAT: 443 for an external IdP, Keycloak's 8443 (or 8080) in
-  # the cluster. Empty `to`: any destination on that port only, as
+  # the cluster. Empty `to`: any destination on that port only (in-cluster
+  # pods, nodes and the API server included; narrow it in production), as
   # databaseTo and dns.to (no 0.0.0.0/0 ipBlock, which some CNIs such as
   # Cilium don't match for pods). Narrow it, e.g.
   # [{ipBlock: {cidr: 203.0.113.0/24}}] or a namespace/pod selector for an

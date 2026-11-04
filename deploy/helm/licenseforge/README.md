@@ -56,7 +56,8 @@ The server discovers the provider at start, so the NetworkPolicy then also
 allows egress to it on `oidc.egress.port` (443) and that port only. By default
 that is to any destination, like the DNS and database rules: an external IdP's
 addresses are rarely fixed, and a port-scoped rule keeps the rest of egress
-closed. Narrow `oidc.egress.to` to the provider's CIDRs, or to a
+closed. "Any destination" includes in-cluster pods, nodes and the Kubernetes
+API server on that port; in production narrow it. Narrow `oidc.egress.to` to the provider's CIDRs, or to a
 namespace/pod selector for an in-cluster Keycloak. With a selector, the port
 is the provider's **pod** port, because policies apply after the Service's
 DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
