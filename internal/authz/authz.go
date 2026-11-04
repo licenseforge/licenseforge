@@ -1,6 +1,10 @@
 // Package authz is the tenant-scoped role model (ADR-0019): a fixed set of
 // roles, each a fixed set of permissions, checked with one Require call per
 // handler. Row-level security (ADR-0009) is the backstop behind it.
+//
+// Invariant: the RLS tenant of a request is the principal's TenantID (use
+// TenantID), never a value read from the URL separately, so a principal
+// resolved for one tenant can't act in another.
 package authz
 
 import (
@@ -18,7 +22,7 @@ type Permission string
 
 const (
 	TenantRead   Permission = "tenant:read"
-	TenantWrite  Permission = "tenant:write" // settings
+	TenantWrite  Permission = "tenant:write" // settings, incl. audit retention: owner only
 	TenantDelete Permission = "tenant:delete"
 	BillingWrite Permission = "billing:write"
 
@@ -66,8 +70,8 @@ var (
 	viewer  = []Permission{TenantRead, KeyRead, CatalogRead, MemberRead, TokenRead, WebhookRead, CustomerRead, LicenseRead, ActivationRead}
 	support = append(slices.Clone(viewer), ActivationManage)
 	manager = append(slices.Clone(support), CustomerWrite, LicenseIssue, LicenseWrite, ActivationOffline)
-	admin   = append(slices.Clone(manager), TenantWrite, CatalogWrite, MemberWrite, TokenWrite, WebhookWrite, AuditRead)
-	owner   = append(slices.Clone(admin), TenantDelete, BillingWrite, KeyWrite)
+	admin   = append(slices.Clone(manager), CatalogWrite, MemberWrite, TokenWrite, WebhookWrite, AuditRead)
+	owner   = append(slices.Clone(admin), TenantWrite, TenantDelete, BillingWrite, KeyWrite)
 
 	permissions = map[Role][]Permission{
 		Owner: owner, Admin: admin, Manager: manager, Support: support, Viewer: viewer,
@@ -82,14 +86,6 @@ func (r Role) Valid() bool { _, ok := permissions[r]; return ok }
 // tokens only.
 func (r Role) ForMembership() bool { return r.Valid() && r != SDK }
 
-// CanGrant reports whether a principal with role g may give role r to a
-// member or API token, or change or remove a member or token that has r. Only
-// owners grant or touch owner, so an admin can't escalate to owner or demote
-// one.
-func (g Role) CanGrant(r Role) bool {
-	return g.Can(MemberWrite) && r.Valid() && (g == Owner || r != Owner)
-}
-
 // Can reports whether r grants p.
 func (r Role) Can(p Permission) bool { return slices.Contains(permissions[r], p) }
 
@@ -101,6 +97,23 @@ const (
 	Token PrincipalKind = "token"
 )
 
+// Scope is the products a membership or token covers: every product, or only
+// the listed ones. The zero value covers nothing, so a scope that failed to
+// load denies instead of widening to every product.
+type Scope struct {
+	All      bool
+	Products []string
+}
+
+func (s Scope) covers(product string) bool {
+	return s.All || (product != "" && slices.Contains(s.Products, product))
+}
+
+// valid reports whether s is well formed: All, or a list of product IDs.
+func (s Scope) valid() bool {
+	return s.All != (len(s.Products) > 0) && !slices.Contains(s.Products, "")
+}
+
 // Principal is who is acting in one tenant, resolved from the session or API
 // token after the membership check.
 type Principal struct {
@@ -108,13 +121,14 @@ type Principal struct {
 	ID       string // user or token ID
 	TenantID string
 	Role     Role
-	Products []string // product scope; empty means every product
+	Scope    Scope
 }
 
 type ctxKey struct{}
 
 // WithPrincipal returns ctx carrying p.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
+	p.Scope.Products = slices.Clone(p.Scope.Products) // the caller can't change it afterwards
 	return context.WithValue(ctx, ctxKey{}, p)
 }
 
@@ -124,19 +138,91 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
+// principal returns ctx's principal if it is well formed and has perm.
+func principal(ctx context.Context, perm Permission) (Principal, error) {
+	p, ok := FromContext(ctx)
+	if !ok || p.ID == "" || p.TenantID == "" || !p.Role.Can(perm) {
+		return Principal{}, ErrDenied
+	}
+	switch p.Kind {
+	case Token:
+	case User:
+		if !p.Role.ForMembership() {
+			return Principal{}, ErrDenied
+		}
+	default:
+		return Principal{}, ErrDenied
+	}
+	return p, nil
+}
+
+// TenantID returns the tenant ctx's principal acts in, for the RLS tenant.
+func TenantID(ctx context.Context) (string, error) {
+	p, ok := FromContext(ctx)
+	if !ok || p.TenantID == "" {
+		return "", ErrDenied
+	}
+	return p.TenantID, nil
+}
+
 // Require returns ErrDenied unless ctx's principal has perm for a resource of
 // product (the resource's product ID, or "" for a tenant-wide resource). A
-// principal scoped to products may only act on resources of those products,
-// never on tenant-wide ones. No principal is denied.
+// principal scoped to some products may only act on resources of those
+// products, never on tenant-wide ones. No principal is denied.
 func Require(ctx context.Context, perm Permission, product string) error {
-	p, ok := FromContext(ctx)
-	if !ok || p.TenantID == "" || !p.Role.Can(perm) {
+	p, err := principal(ctx, perm)
+	if err != nil {
+		return err
+	}
+	if !p.Scope.covers(product) {
 		return ErrDenied
 	}
-	if p.Kind == User && !p.Role.ForMembership() {
+	return nil
+}
+
+// Products is for list queries: it returns all=true if ctx's principal has
+// perm on every product, else the product IDs to filter by.
+func Products(ctx context.Context, perm Permission) (all bool, ids []string, err error) {
+	p, err := principal(ctx, perm)
+	if err != nil {
+		return false, nil, err
+	}
+	if p.Scope.All {
+		return true, nil, nil
+	}
+	return false, slices.Clone(p.Scope.Products), nil
+}
+
+// Grant is a role and scope held by a member or API token.
+type Grant struct {
+	Role  Role
+	Scope Scope
+}
+
+// CanAssign checks that ctx's principal may change a member's (kind User) or
+// API token's (kind Token) grant from from to to: from nil creates it, to nil
+// removes it. The principal needs member:write or token:write and every
+// product (scoped principals can't manage access); only owners grant, change
+// or remove owner; members can't get the sdk role; to must have a valid scope.
+func CanAssign(ctx context.Context, kind PrincipalKind, from, to *Grant) error {
+	perm := MemberWrite
+	switch kind {
+	case User:
+	case Token:
+		perm = TokenWrite
+	default:
 		return ErrDenied
 	}
-	if len(p.Products) > 0 && (product == "" || !slices.Contains(p.Products, product)) {
+	p, err := principal(ctx, perm)
+	if err != nil || !p.Scope.All || (from == nil && to == nil) {
+		return ErrDenied
+	}
+	for _, g := range []*Grant{from, to} {
+		if g != nil && g.Role == Owner && p.Role != Owner {
+			return ErrDenied
+		}
+	}
+	if to != nil && (!to.Role.Valid() || !to.Scope.valid() || (kind == User && !to.Role.ForMembership())) {
 		return ErrDenied
 	}
 	return nil
