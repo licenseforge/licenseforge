@@ -17,22 +17,27 @@
 ### Authentication: one of two, never both
 - **API token**: `Authorization: Bearer lf_live_…`. A Bearer value of another form answers 401; IdP client-credentials JWTs ([ADR-0003 Identity via generic OIDC, Keycloak as default](0003-identity-via-generic-oidc-keycloak-as-default.md)) are deferred to their own ADR.
 - **Dashboard session**: the session cookie plus `X-CSRF-Token` and the cross-origin check on unsafe methods ([ADR-0020 Admin dashboard](0020-admin-dashboard.md)).
-- **Hosts** (refines [ADR-0023 Repository structure](0023-repository-structure.md), Domains): when an API host is configured (`api.licenseforge.io`), sessions are refused there: the cookie's value is never used and a cookie alone answers 401. The dashboard calls `/api/v1` on its own origin, so **no CORS headers are sent anywhere**. With one hostname (typical self-hosting) both modes are accepted on it.
+- **Hosts** (refines [ADR-0023 Repository structure](0023-repository-structure.md), Domains): when an API host is configured (`api.licenseforge.io`), it accepts **only tokens** (a cookie's value is never used; a cookie alone answers 401) and the dashboard host accepts **only sessions** (a Bearer token answers 401 there), so integrations can't embed the dashboard host. The dashboard calls `/api/v1` on its own origin, so **no CORS headers are sent anywhere**. With one hostname (typical self-hosting) both modes are accepted on it.
+- Platform endpoints (`/api/v1/platform/…`) accept sessions only (tokens belong to tenants); a non-admin gets 404.
 - A request carrying both a Bearer token and the session cookie is refused (400); the cookie's presence is checked only to refuse it. With neither: 401.
 
 ### Order of checks
 Each step answers before the next runs, so later steps can't reveal what earlier ones hide:
-1. **Authenticate.** No or invalid credentials: 401, whatever the slug.
-2. **Token**: looked up by hash under the path's tenant ([ADR-0029 Identity tables and tenancy](0029-identity-tables-and-tenancy.md)): an unknown slug, a wrong-tenant token, an unknown, revoked or expired token all answer the **same 401 after the same work**. `sdk` tokens: 403 on the management API.
+0. **Rate limit** per client address (429), before anything else; per-credential limits come after step 1.
+1. **Authenticate**: both credentials, 400 `ambiguous_credentials`; missing or invalid credentials, 401 (always with `WWW-Authenticate: Bearer realm="licenseforge"`), whatever the slug; a session's unsafe method without a valid CSRF token or from another origin, 403 `csrf_failed`. All in problem+json, before any tenant lookup.
+2. **Token**: `{tenant}` (slug or ID, never the reserved platform tenant) is resolved on the identity pool; the token is looked up by hash under that tenant ([ADR-0029 Identity tables and tenancy](0029-identity-tables-and-tenancy.md)). If the tenant doesn't resolve, the lookup still runs under a fixed, well-formed, never-issued tenant ID, so an unknown slug, a wrong-tenant token and an unknown, revoked or expired token all answer the **same 401 after the same work**. `sdk` tokens: 403 on the management API.
 3. **Session**: an unknown slug and a tenant the user isn't a member of answer the same **404**.
-4. **Object lookup** under the caller's product scope: hidden and missing objects answer **byte-identical 404s**. A write that references an out-of-scope object (a license for an out-of-scope product) answers exactly as if it didn't exist.
+4. **Object lookup** under the caller's product scope: a missing or hidden **path** object answers 404 `not_found`; a missing or hidden **body reference** (a license for an out-of-scope `product_id`) answers 422 `validation_failed` with `field` pointing at it. Hidden and missing answers are identical apart from `request_id` / `X-Request-Id`; `detail` never names the object.
 5. **Permission**: 403, for a visible object the caller's role can't change.
-6. **Validation**: 400 for malformed requests (bad JSON, wrong types), 422 for well-formed but invalid values. Never before 4–5.
+6. **Validation**: 400 (malformed JSON, wrong types, bad parameter format, unknown parameters or body fields) depends only on the request and may answer at any point after step 3. 422 and any check that reads stored state never run before 4–5.
+
+Where each step lives: one handler wrapping the **whole** generated router (not oapi-codegen's per-operation middlewares, which run after parameter binding) does steps 0–3 and parses `{tenant}` from the path itself. Steps 4–5 go through one scoped store lookup per object that returns a single not-found error, rendered by one error mapper; a test per endpoint checks that hidden and missing answers are equal.
 
 Either credential yields an `authz.Principal` (role, product scope, tenant), checked with `authz.Require` ([ADR-0019 Authorization model](0019-authorization-model.md)).
 
 ### Errors
-- **RFC 9457** `application/problem+json` everywhere, including errors produced outside handlers: request-binding errors of the generated server, unknown routes, 405, 413 (bodies are size-limited) and panics. A test covers each.
+- **RFC 9457** `application/problem+json` everywhere, including errors produced outside handlers: request-binding errors of the generated server, unknown routes and 405 (keeping `Allow`), 413 (bodies are size-limited with `http.MaxBytesReader`; its error is mapped to 413, not 400), CSRF and cross-origin refusals, and panics. A test covers each.
+- `type` is `about:blank`; clients switch on `code`.
 - Fields: `type`, `title`, `status`, `detail`, a stable machine-readable **`code`** (`not_found`, `invalid_request`, `validation_failed`, `conflict`, …) and `request_id`. `detail` never carries internal errors; they go to logs with the request ID.
 - Validation errors list `errors: [{field, message}]`, `field` a JSON Pointer (RFC 6901). Messages never echo stored values, only the caller's own input.
 - Every response carries **`X-Request-Id`** (server-generated); an inbound value is logged only as a correlation field, length-limited and cleaned.
@@ -41,12 +46,13 @@ Either credential yields an `authz.Principal` (role, product scope, tenant), che
 - **Cursor pagination**: `?limit=` (default 50, max 200) and `?cursor=`; responses are `{"items": [...], "next_cursor": "…"}`, no `next_cursor` on the last page. No offsets (they skip or repeat rows under concurrent writes) and no total counts.
 - Order is fixed per endpoint: **newest first** by `created_at` (database clock), then ID. `?order=asc` at most; no `?sort=` in v1.
 - A cursor encodes only a position (`created_at`, `id`), base64url. Every page re-applies tenant, product scope and filters from the current request, never from the cursor, so a forged cursor moves only within what the caller may see. A malformed cursor answers 400 `invalid_cursor`.
-- Lists silently filter to the caller's product scope. Filters are named equality parameters (`?product_id=`, `?customer_id=`, `?status=`) plus `created_after` / `created_before`; a filter naming a hidden or missing object returns an empty list either way. Unknown parameters answer 400.
+- Lists silently filter to the caller's product scope. Filters are named equality parameters (`?product_id=`, `?customer_id=`, `?status=`) plus `created_after` / `created_before` (both exclusive); a filter naming a hidden or missing object returns an empty list either way. Unknown parameters answer 400.
 
 ### Writes
-- `POST` creates and answers **201** with the object. `PATCH` follows **JSON Merge Patch** (RFC 7396): absent = unchanged, `null` = clear (nullable fields only, else 422), and answers 200 with the full object. `DELETE` answers 204.
+- `POST` creates and answers **201** with the object. `PATCH` takes `application/merge-patch+json` (RFC 7396): absent = unchanged, `null` = clear (nullable fields only, else 422), and answers 200 with the full object; generated code tells absent from `null` with `nullable.Nullable[T]`. `DELETE` answers 204.
+- Unknown body fields answer 400 `invalid_request` (decoded strictly), so a misspelled PATCH field is never silently dropped.
 - State changes that are not edits are explicit sub-resources: `POST …/licenses/{id}/suspend`, `/revoke`, `/reinstate`; they answer 200 with the object and are audited operations, not field edits.
-- **`Idempotency-Key`** (modelled on the IETF httpapi idempotency-key draft): accepted on every non-idempotent POST, honoured at least on license and activation creation. A key is scoped to (tenant, credential: token ID or user ID), stored in a tenant table under RLS with a hash of the request (method, path, body) and the response, kept 24 hours, at most 255 printable ASCII characters. Same key and same request: the stored status and body are replayed after authorization is checked again. Same key, different request: 422 `idempotency_key_reused`. Still in flight: 409 `idempotency_in_progress`.
+- **`Idempotency-Key`** (modelled on the IETF httpapi idempotency-key draft): accepted on every non-idempotent POST, honoured at least on license and activation creation. A key is scoped to (tenant, credential: token ID or user ID), stored in a tenant table under RLS with a hash of the request (method, path, body) and the response, kept 24 hours, at most 255 printable ASCII characters. The request hash covers the resolved tenant ID, the operation and the body (not the raw path, so switching slug and ID isn't a different request). The key row is written in the operation's own transaction, so a concurrent request with the same key waits on it and a crashed request leaves no key. 2xx and 4xx outcomes are stored; 5xx is not, so it can be retried. Same key and same request: steps 1–5 are rerun for the original operation and its referenced objects; if they now refuse, that refusal is the answer, otherwise the stored status and body are replayed. Same key, different request: 422 `idempotency_key_reused`. Still in flight past the wait: 409 `idempotency_in_progress`.
 - Optimistic concurrency (`ETag` / `If-Match`) is deferred until the first editor that needs it (the feature × plan matrix); adding it later isn't breaking.
 
 ### Limits
@@ -57,8 +63,8 @@ Either credential yields an `authz.Principal` (role, product scope, tenant), che
 - A test checks that every route the server serves is in the spec, so nothing reachable is undocumented.
 
 ## Consequences
-- New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version) and its small runtime package.
-- One middleware gives every endpoint the same authentication, check order, 404-hiding and problem errors, so a handler can't forget them.
+- New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version), its small runtime package and `github.com/oapi-codegen/nullable` (merge-patch fields).
+- One outer handler gives every endpoint the same authentication, tenant resolution and problem errors; object scope (steps 4–5) still lives in each handler, behind one scoped lookup and one error mapper, and is checked by a test per endpoint.
 - Idempotency needs a tenant table and a cleanup of keys older than 24 hours.
 - Accepting slug or ID costs one lookup branch; it removes the slug-rename breakage for integrations.
 
