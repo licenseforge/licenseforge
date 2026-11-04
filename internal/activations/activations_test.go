@@ -99,6 +99,8 @@ func setup(t *testing.T) fixture {
 			"presold": func(c *ent.PlanCreate) { c.SetDurationMonths(12).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation) },
 			"cluster": func(c *ent.PlanCreate) { c.SetBindType(plan.BindTypeCluster) },
 			"site":    func(c *ent.PlanCreate) { c.SetBindType(plan.BindTypeNone) },
+			"moves":   func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetMaxRehosts(2) },
+			"locked":  func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetMaxRehosts(0) },
 		} {
 			pc := tx.Plan.Create().SetTenantID(f.a).SetProductID(p.ID).SetSlug(slug).SetName(slug)
 			c(pc)
@@ -209,7 +211,7 @@ func TestActivateReturnsVerifiableLease(t *testing.T) {
 	iat := c.IssuedAt
 	if c.LicenseID != is.License.ID || c.Tenant != f.a || c.Plan != "pro" || c.CustomerID != f.customer || got.KID != f.kid ||
 		!c.Expires.Equal(iat.Add(time.Hour)) || !c.RefreshAfter.Equal(iat.Add(30*time.Minute)) ||
-		c.MaxOffline == nil || *c.MaxOffline != 2*time.Hour || c.Grace != time.Minute ||
+		c.MaxOffline == nil || *c.MaxOffline != 2*time.Hour || c.Grace != 0 || // not capped: no grace
 		c.Binding != (licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: machine}) || !c.Entitlements.HasFeature("sso") {
 		t.Errorf("claims = %+v", c)
 	}
@@ -362,6 +364,12 @@ func TestRefusals(t *testing.T) {
 		{"forged lookup", f.req(forged, fp()), ErrUnauthenticated, false},
 		{"another tenant", func() Request { r := f.req(active.Key, fp()); r.TenantID = f.b; return r }(), ErrUnauthenticated, false},
 		{"malformed tenant", func() Request { r := f.req(active.Key, fp()); r.TenantID = "acme"; return r }(), ErrUnauthenticated, false},
+		{"empty tenant", func() Request { r := f.req(active.Key, fp()); r.TenantID = ""; return r }(), ErrUnauthenticated, false},
+		{"hostname with a space", func() Request { r := f.req(active.Key, fp()); r.Hostname = "db 1"; return r }(), ErrInvalid, false},
+		{"hostname not ASCII", func() Request { r := f.req(active.Key, fp()); r.Hostname = "dé-1"; return r }(), ErrInvalid, false},
+		{"hostname too long", func() Request { r := f.req(active.Key, fp()); r.Hostname = strings.Repeat("a", 254); return r }(), ErrInvalid, false},
+		{"zero-width in version", func() Request { r := f.req(active.Key, fp()); r.AppVersion = "1.0\u200b"; return r }(), ErrInvalid, false},
+		{"bidi override in SDK version", func() Request { r := f.req(active.Key, fp()); r.SDKVersion = "go/\u202e1"; return r }(), ErrInvalid, false},
 		{"malformed fingerprint", f.req(active.Key, "sha256:ABC"), ErrInvalid, false},
 		{"unknown source", func() Request { r := f.req(active.Key, fp()); r.Source = "bios"; return r }(), ErrInvalid, false},
 		{"control character in hostname", func() Request { r := f.req(active.Key, fp()); r.Hostname = "db\n1"; return r }(), ErrInvalid, false},
@@ -495,7 +503,175 @@ func TestRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := f.license(t, is.License.ID)
-	if want := l.ExpiresAt.UTC().Truncate(time.Second); !got.Claims.Expires.Equal(want) || got.Claims.RefreshAfter.After(want) {
+	if want := l.ExpiresAt.UTC().Truncate(time.Second); !got.Claims.Expires.Equal(want) || got.Claims.RefreshAfter.After(want) || got.Claims.Grace != time.Minute {
 		t.Errorf("exp %v refresh %v, license expires %v", got.Claims.Expires, got.Claims.RefreshAfter, l.ExpiresAt)
+	}
+}
+
+func TestLeaseClaims(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	d := func(s int64) *int64 { return &s }
+	at := func(t time.Time) *time.Time { return &t }
+	for _, tc := range []struct {
+		name         string
+		lease        int64
+		maxOffline   *int64
+		expires      *time.Time
+		exp, refresh time.Duration // after now
+		grace        time.Duration
+	}{
+		{"half the lease", 3600, nil, nil, time.Hour, 30 * time.Minute, 0},
+		{"max_offline shorter than the lease", 7 * 86400, d(86400), nil, 7 * 24 * time.Hour, 12 * time.Hour, 0},
+		{"max_offline longer than the lease", 3600, d(86400), nil, time.Hour, 30 * time.Minute, 0},
+		{"max_offline zero: refresh at once", 3600, d(0), nil, time.Hour, 0, 0},
+		{"term ends within the lease: capped, with grace", 3600, nil, at(now.Add(10 * time.Minute)), 10 * time.Minute, 10 * time.Minute, time.Minute},
+		{"term ends exactly at the lease's end: grace", 3600, nil, at(now.Add(time.Hour)), time.Hour, 30 * time.Minute, time.Minute},
+		{"term ends after the lease: no grace", 3600, nil, at(now.Add(time.Hour + time.Second)), time.Hour, 30 * time.Minute, 0},
+		{"term ends within the lease's last second: grace", 3600, nil, at(now.Add(time.Hour + 500*time.Millisecond)), time.Hour, 30 * time.Minute, time.Minute},
+		{"perpetual: no grace", 3600, nil, nil, time.Hour, 30 * time.Minute, 0},
+		{"in grace: exp stays, refresh within the grace", 3600, nil, at(now.Add(-30 * time.Second)), -30 * time.Second, 30 * time.Second, time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := &ent.License{ID: "lic_x", TenantID: "tnt_x", LeaseSeconds: tc.lease, MaxOfflineSeconds: tc.maxOffline,
+				ExpiresAt: tc.expires, GraceSeconds: 60, BindType: "machine"}
+			c := leaseClaims(l, "acme-db", now, "sha256:x")
+			if !c.Expires.Equal(now.Add(tc.exp)) || !c.RefreshAfter.Equal(now.Add(tc.refresh)) || c.Grace != tc.grace {
+				t.Errorf("exp %v refresh %v grace %v", c.Expires.Sub(now), c.RefreshAfter.Sub(now), c.Grace)
+			}
+		})
+	}
+}
+
+func TestSeatMoves(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	move := func(t *testing.T, key, from, to string) error {
+		t.Helper()
+		if from != "" {
+			if err := f.s.Deactivate(ctx, f.req(key, from)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := f.s.Activate(ctx, f.req(key, to))
+		return err
+	}
+	rehosts := func(id string) int { return f.license(t, id).RehostCount }
+
+	// max_rehosts 0: reinstalling on the same machine is free; another machine is refused.
+	locked := f.issue(t, "locked")
+	a := fp()
+	if err := move(t, locked.Key, "", a); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := move(t, locked.Key, a, a); err != nil {
+			t.Fatalf("reinstall: %v", err)
+		}
+	}
+	if err := move(t, locked.Key, a, fp()); !errors.Is(err, ErrRehostLimit) {
+		t.Fatalf("move with max_rehosts 0: %v", err)
+	}
+	es := f.events(t)
+	if e := es[len(es)-1]; e.Action != "activation.create" || e.Outcome != auditevent.OutcomeFailure || !strings.Contains(e.Details, "rehost limit") {
+		t.Errorf("refusal audited as %+v", e)
+	}
+	if rehosts(locked.License.ID) != 0 {
+		t.Errorf("rehost_count %d", rehosts(locked.License.ID))
+	}
+
+	// max_activations 1, max_rehosts 2: two moves to new machines; going back
+	// to a machine seen before doesn't count.
+	is := f.issue(t, "moves")
+	m1, m2, m3, m4 := fp(), fp(), fp(), fp()
+	if err := move(t, is.Key, "", m1); err != nil {
+		t.Fatal(err)
+	}
+	for i, step := range [][2]string{{m1, m2}, {m2, m3}, {m3, m1}, {m1, m2}} {
+		if err := move(t, is.Key, step[0], step[1]); err != nil {
+			t.Fatalf("move %d: %v", i, err)
+		}
+	}
+	if rehosts(is.License.ID) != 2 {
+		t.Errorf("rehost_count %d", rehosts(is.License.ID))
+	}
+	if err := move(t, is.Key, m2, m4); !errors.Is(err, ErrRehostLimit) {
+		t.Fatalf("third move: %v", err)
+	}
+	// An upgrade reset (ADR-0013) allows moves again.
+	f.tx(t, f.a, func(tx *ent.Tx) error { return tx.License.UpdateOneID(is.License.ID).SetRehostCount(0).Exec(ctx) })
+	if err := move(t, is.Key, "", m4); err != nil {
+		t.Fatalf("after reset: %v", err)
+	}
+	if rehosts(is.License.ID) != 1 {
+		t.Errorf("rehost_count %d", rehosts(is.License.ID))
+	}
+
+	// Machines are counted, not activation rows: a reinstall doesn't use up
+	// the second seat's first activation.
+	two := f.issue(t, "pro") // max_activations 2
+	x := fp()
+	if err := move(t, two.Key, "", x); err != nil {
+		t.Fatal(err)
+	}
+	if err := move(t, two.Key, x, x); err != nil {
+		t.Fatal(err)
+	}
+	if err := move(t, two.Key, "", fp()); err != nil || rehosts(two.License.ID) != 0 {
+		t.Errorf("second machine: %v, rehost_count %d", err, rehosts(two.License.ID))
+	}
+
+	// Without max_rehosts, moves are unlimited (seats still bounded) and counted.
+	pro := f.issue(t, "pro") // max_activations 2
+	prev := ""
+	for i := range 5 {
+		next := fp()
+		if err := move(t, pro.Key, prev, next); err != nil {
+			t.Fatalf("move %d: %v", i, err)
+		}
+		prev = next
+	}
+	if rehosts(pro.License.ID) != 3 {
+		t.Errorf("rehost_count %d", rehosts(pro.License.ID))
+	}
+}
+
+func TestGrace(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "pro") // grace 60s
+	machine := fp()
+	if _, err := f.s.Activate(ctx, f.req(is.Key, machine)); err != nil {
+		t.Fatal(err)
+	}
+	// The term ended a moment ago.
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET expires_at = issued_at + interval '1 millisecond' WHERE id = $1`, is.License.ID)
+		return err
+	})
+	l := f.license(t, is.License.ID)
+	got, err := f.s.Refresh(ctx, f.req(is.Key, machine))
+	if err != nil {
+		t.Fatalf("refresh in grace: %v", err)
+	}
+	if want := l.ExpiresAt.UTC().Truncate(time.Second); !got.Claims.Expires.Equal(want) || got.Claims.Grace != time.Minute || !got.Claims.IssuedAt.After(want.Add(-time.Second)) {
+		t.Errorf("claims %+v", got.Claims)
+	}
+	// The SDK, half a minute after the term's end: in grace.
+	later := got
+	later.Claims.IssuedAt = got.Claims.Expires.Add(30 * time.Second)
+	if _, status, err := f.open(t, later, machine); err != nil || status != licensefile.StatusGrace {
+		t.Errorf("Open = %v %v", status, err)
+	}
+	// No new activations once the term has ended.
+	if _, err := f.s.Activate(ctx, f.req(is.Key, fp())); !errors.Is(err, ErrExpired) {
+		t.Errorf("new activation in grace: %v", err)
+	}
+	// Past the grace, refresh is refused too.
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET grace_seconds = 0 WHERE id = $1`, is.License.ID)
+		return err
+	})
+	if _, err := f.s.Refresh(ctx, f.req(is.Key, machine)); !errors.Is(err, ErrExpired) {
+		t.Errorf("refresh past grace: %v", err)
 	}
 }

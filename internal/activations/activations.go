@@ -19,10 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"entgo.io/ent/dialect/sql"
 
@@ -52,6 +49,9 @@ var (
 	ErrExpired   = errors.New("activations: license expired")
 	// ErrLimit: every seat (max_activations) is taken; deactivate one first.
 	ErrLimit = errors.New("activations: activation limit reached")
+	// ErrRehostLimit: the license's seats have moved max_rehosts times
+	// (ADR-0034); support can rehost or the vendor can raise the limit.
+	ErrRehostLimit = errors.New("activations: rehost limit reached")
 	// ErrBinding: the fingerprint's binding isn't the license's (machine vs
 	// cluster), or the license is a site license, which has no activations.
 	ErrBinding = errors.New("activations: binding doesn't match the license")
@@ -129,7 +129,7 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 		if err != nil {
 			return err
 		}
-		if err := usable(l, now); err != nil {
+		if err := usable(l, now, !activate); err != nil {
 			return err
 		}
 		if string(l.BindType) != string(binding) {
@@ -183,9 +183,16 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 	return Lease{File: file, KID: kid, Claims: claims, ActivationID: actID}, nil
 }
 
-// create takes a seat for a new activation of l (locked FOR UPDATE) and
-// starts the term at the first activation.
+// create takes a seat for a new activation of l (locked FOR NO KEY UPDATE)
+// and starts the term at the first activation. Seat moves (ADR-0034): with
+// max_activations set, activating a fingerprint never activated on this
+// license before, once it has had max_activations distinct fingerprints, is
+// a move. A move increments rehost_count and is refused past max_rehosts
+// (unlimited when nil). A fingerprint seen before (uninstall and reinstall on
+// the same machine) never counts again.
 func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Request, binding activation.Binding, now time.Time) (string, error) {
+	u := tx.License.UpdateOneID(l.ID).SetUpdatedAt(now)
+	changed := false
 	if l.MaxActivations != nil {
 		n, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.DeactivatedAtIsNil()).Count(ctx)
 		if err != nil {
@@ -194,17 +201,37 @@ func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Req
 		if n >= *l.MaxActivations {
 			return "", fmt.Errorf("%w (%d)", ErrLimit, *l.MaxActivations)
 		}
+		seen, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint)).Exist(ctx)
+		if err != nil {
+			return "", err
+		}
+		if !seen {
+			fps, err := tx.Activation.Query().Where(activation.LicenseID(l.ID)).GroupBy(activation.FieldFingerprint).Strings(ctx)
+			if err != nil {
+				return "", err
+			}
+			if len(fps) >= *l.MaxActivations { // a move
+				if l.MaxRehosts != nil && l.RehostCount >= *l.MaxRehosts {
+					return "", fmt.Errorf("%w (%d)", ErrRehostLimit, *l.MaxRehosts)
+				}
+				u.AddRehostCount(1) // the CHECK licenses_rehosts_within_limit backs the limit
+				changed = true
+			}
+		}
 	}
 	if l.FirstActivatedAt == nil {
-		u := tx.License.UpdateOneID(l.ID).SetFirstActivatedAt(now).SetUpdatedAt(now)
+		u.SetFirstActivatedAt(now)
 		if l.ExpiryBasis == license.ExpiryBasisFromFirstActivation {
 			l.ExpiresAt = licenses.Expiry(now, l.DurationMonths, l.DurationSeconds)
 			u.SetNillableExpiresAt(l.ExpiresAt)
 		}
+		l.FirstActivatedAt = &now
+		changed = true
+	}
+	if changed {
 		if err := u.Exec(ctx); err != nil {
 			return "", err
 		}
-		l.FirstActivatedAt = &now
 	}
 	a, err := tx.Activation.Create().SetTenantID(l.TenantID).SetLicenseID(l.ID).SetFingerprint(req.Fingerprint).
 		SetFpSource(req.Source).SetBinding(binding).SetMode(activation.ModeOnline).
@@ -266,20 +293,20 @@ func (req Request) check(metadata bool) (string, error) {
 	if !fpRE.MatchString(req.Fingerprint) || (metadata && activation.FpSourceValidator(req.Source) != nil) {
 		return "", fmt.Errorf("%w: fingerprint or source", ErrInvalid)
 	}
-	if metadata && (!text(req.Hostname, 253) || !text(req.AppVersion, 64) || !text(req.SDKVersion, 64)) {
-		return "", fmt.Errorf("%w: hostname of up to 253 bytes, versions of up to 64, printable UTF-8", ErrInvalid)
+	if metadata && (!hostnameRE.MatchString(req.Hostname) || !versionRE.MatchString(req.AppVersion) || !versionRE.MatchString(req.SDKVersion)) {
+		return "", fmt.Errorf("%w: hostname of up to 253 letters, digits, '-', '.' or '_'; versions of up to 64 printable ASCII characters", ErrInvalid)
 	}
 	return key, nil
 }
 
-// text: at most n bytes of valid UTF-8 without control characters.
-func text(s string, n int) bool {
-	return len(s) <= n && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
-}
+var (
+	hostnameRE = regexp.MustCompile(`^[A-Za-z0-9._-]{0,253}$`)
+	versionRE  = regexp.MustCompile(`^[ -~]{0,64}$`)
+)
 
 // authenticate finds the license of key in tenantID, locked FOR NO KEY
-// UPDATE (exclusive: activate, deactivate) or FOR SHARE (refresh), and checks the key against its ciphertext: the lookup hash
-// finds it, the decrypted key proves it (ADR-0025). The hashes under every
+// UPDATE (exclusive: activate, deactivate) or FOR SHARE (refresh), and
+// checks the key against its ciphertext: the lookup hash finds it, the decrypted key proves it (ADR-0025). The hashes under every
 // keyring key are tried, so lookups keep working during a rotation.
 func (s Service) authenticate(ctx context.Context, tx *ent.Tx, tenantID, key string, exclusive bool) (*ent.License, error) {
 	q := tx.License.Query().Where(license.KeyLookupIn(s.Keys.LookupHashes(secrets.PurposeLicenseKey, []byte(key))...))
@@ -307,8 +334,10 @@ func (s Service) authenticate(ctx context.Context, tx *ent.Tx, tenantID, key str
 	return l, nil
 }
 
-// usable: active and not expired at now (the database clock).
-func usable(l *ent.License, now time.Time) error {
+// usable: active and not expired at now (the database clock). With inGrace
+// (refresh of an existing activation), the license's grace after its expiry
+// still counts.
+func usable(l *ent.License, now time.Time, inGrace bool) error {
 	switch {
 	case l.Status == license.StatusRevoked:
 		return ErrRevoked
@@ -316,30 +345,50 @@ func usable(l *ent.License, now time.Time) error {
 		return ErrSuspended
 	case l.Status != license.StatusActive:
 		return fmt.Errorf("activations: license status %q", l.Status)
-	case l.ExpiresAt != nil && !l.ExpiresAt.After(now):
+	case l.ExpiresAt == nil || l.ExpiresAt.After(now):
+		return nil
+	case !inGrace || !l.ExpiresAt.Add(time.Duration(l.GraceSeconds)*time.Second).After(now):
 		return ErrExpired
 	}
-	return nil
+	return nil // term ended, within grace: refresh only (ADR-0034)
 }
 
-// leaseClaims: issued at now, exp after the license's lease (never past the
-// license's own expiry), refresh after half the lease. Whole seconds, rounded
-// down, so the lease never outlives the license.
+// leaseClaims (ADR-0034): issued at now; exp after the license's lease,
+// never past the license's own expiry; refresh after half of the shorter of
+// the lease and max_offline (so the SDK refreshes before it must), never
+// after the lease's end. Whole seconds, rounded down, so the lease never
+// outlives the license.
+//
+// Grace only when exp is the license's own expiry (the term ends; keep
+// working while it is renewed). An unrefreshed lease ends at exp, so a
+// revoked or suspended machine stops within one lease (ADR-0004). Perpetual
+// licenses get no grace online. During grace (exp before iat) the lease ends
+// at exp + grace.
 func leaseClaims(l *ent.License, productSlug string, now time.Time, fp string) licensefile.Claims {
 	iat := now.UTC().Truncate(time.Second)
 	lease := time.Duration(l.LeaseSeconds) * time.Second
 	exp := iat.Add(lease)
-	if l.ExpiresAt != nil && l.ExpiresAt.Before(exp) {
+	var grace time.Duration
+	if l.ExpiresAt != nil && !l.ExpiresAt.UTC().Truncate(time.Second).After(exp) { // to the second, as signed
 		exp = l.ExpiresAt.UTC().Truncate(time.Second)
+		grace = time.Duration(l.GraceSeconds) * time.Second
 	}
-	refresh := iat.Add((lease / 2).Truncate(time.Second))
-	if refresh.After(exp) {
-		refresh = exp
+	window := lease
+	if l.MaxOfflineSeconds != nil { // 0 is a real limit: refresh at once
+		window = min(window, time.Duration(*l.MaxOfflineSeconds)*time.Second)
+	}
+	refresh := iat.Add((window / 2).Truncate(time.Second))
+	end := exp
+	if !exp.After(iat) {
+		end = exp.Add(grace)
+	}
+	if refresh.After(end) {
+		refresh = end
 	}
 	c := licensefile.Claims{
 		LicenseID: l.ID, Tenant: l.TenantID, Product: productSlug, Plan: l.PlanSlug, CustomerID: l.CustomerID,
 		IssuedAt: iat, Expires: &exp, RefreshAfter: &refresh,
-		Grace:        time.Duration(l.GraceSeconds) * time.Second,
+		Grace:        grace,
 		Binding:      licensefile.Binding{Type: licensefile.BindingType(l.BindType), Fingerprint: fp},
 		Entitlements: licensefile.Entitlements{Features: l.Entitlements.Features, Limits: l.Entitlements.Limits},
 	}
@@ -369,7 +418,7 @@ func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, e
 	case ev.Details == nil:
 		return err
 	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired),
-		errors.Is(err, ErrLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
+		errors.Is(err, ErrLimit), errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
 		ev.Outcome, ev.ObjectID = auditevent.OutcomeFailure, ""
 		ev.Details["reason"] = err.Error()
 	default:

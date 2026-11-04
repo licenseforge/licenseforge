@@ -421,13 +421,14 @@ func DBNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
 }
 
 // validRefs: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
-// of up to 255 bytes of valid UTF-8 without control characters (incl. NUL).
+// of up to 255 bytes of valid UTF-8 without control, format or separator
+// characters (incl. NUL, zero-width and bidi controls).
 func validRefs(refs map[string]string) bool {
 	if len(refs) > 20 {
 		return false
 	}
 	for k, v := range refs {
-		if !refKeyRE.MatchString(k) || len(v) > 255 || !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
+		if !refKeyRE.MatchString(k) || len(v) > 255 || !utf8.ValidString(v) || strings.ContainsFunc(v, invisible) {
 			return false
 		}
 	}
@@ -435,6 +436,10 @@ func validRefs(refs map[string]string) bool {
 }
 
 var refKeyRE = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
+
+// invisible: control and format characters (zero-width, bidi overrides) and
+// line or paragraph separators, which make a value read differently than it is.
+func invisible(r rune) bool { return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) }
 
 func event(p authz.Principal, action, objectID string) audit.Event {
 	actor := auditevent.ActorTypeUser

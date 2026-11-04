@@ -452,3 +452,17 @@ func TestOfflineFileWaitsForConcurrentRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Sign signs only claims of the signing tenant.
+func TestSignChecksTenant(t *testing.T) {
+	f := setup(t)
+	is := Issuer{DB: f.db, Keys: f.keys}
+	c := licensefile.Claims{LicenseID: "lic_x", Product: "acme-db", Tenant: "tnt_other", IssuedAt: time.Now().UTC().Truncate(time.Second)}
+	if _, _, err := is.Sign(context.Background(), f.tenant, c); err == nil {
+		t.Fatal("signed another tenant's claims")
+	}
+	c.Tenant = f.tenant
+	if _, kid, err := is.Sign(context.Background(), f.tenant, c); err != nil || kid != f.kid {
+		t.Fatalf("Sign = %s, %v", kid, err)
+	}
+}
