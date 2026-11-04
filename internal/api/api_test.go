@@ -23,6 +23,7 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/invitations"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -60,7 +61,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{db: d, tokens: apitokens.Service{DB: d}, mem: map[string]string{}}
-	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
@@ -732,4 +733,102 @@ func TestMemberPatchCapsTokens(t *testing.T) {
 		t.Fatalf("patch: %d %s", r.code, r.raw)
 	}
 	f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)).problem(t, 401, "unauthenticated")
+}
+
+func (f *fixture) user(t *testing.T, email string) string {
+	t.Helper()
+	var uid string
+	if err := f.db.WithIdentity(context.Background(), "", func(tx *ent.Tx) error {
+		u, err := tx.User.Create().SetIssuer("https://idp.example").SetSubject(ids.New("sub")).SetEmail(email).SetEmailVerified(true).Save(context.Background())
+		if err == nil {
+			uid = u.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return uid
+}
+
+func TestInvitationEndpoints(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/invitations"
+	email := strings.ToLower(ids.New("e")[2:14]) + "@example.com"
+	created := f.do(t, "POST", p, `{"email":"`+email+`","role":"support","all_products":false,"product_ids":["`+f.prodA+`"]}`, owner)
+	tok, _ := created.body["token"].(string)
+	if created.code != 201 || tok == "" || created.body["status"] != "pending" || created.body["invited_by"] != f.ownerA {
+		t.Fatalf("create: %d %s", created.code, created.raw)
+	}
+	second := f.do(t, "POST", p, `{"email":"x`+email+`","role":"viewer","all_products":true}`, owner)
+	// Listed newest first, paginated; the token never again.
+	r1 := f.do(t, "GET", p+"?limit=1", "", owner)
+	items, _ := r1.body["items"].([]any)
+	next, _ := r1.body["next_cursor"].(string)
+	if r1.code != 200 || len(items) != 1 || items[0].(map[string]any)["id"] != second.body["id"] || next == "" {
+		t.Fatalf("page 1: %s", r1.raw)
+	}
+	r2 := f.do(t, "GET", p+"?limit=1&cursor="+next, "", owner)
+	if items, _ := r2.body["items"].([]any); r2.code != 200 || len(items) != 1 || items[0].(map[string]any)["id"] != created.body["id"] {
+		t.Fatalf("page 2: %s", r2.raw)
+	}
+	if strings.Contains(r1.raw+r2.raw, tok) || strings.Contains(r1.raw+r2.raw, second.body["token"].(string)) || strings.Contains(r1.raw+r2.raw, "hash") {
+		t.Fatal("list shows a token or hash")
+	}
+	// Rights before values; values with a field.
+	f.do(t, "POST", p, `{"email":"nope","role":"root","all_products":true}`, f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"owner","all_products":true}`, f.session(t, f.adminA, true)).problem(t, 403, "forbidden")
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"viewer","all_products":true}`, bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 403, "forbidden")
+	bad := f.do(t, "POST", p, `{"email":"a b@example.com","role":"viewer","all_products":true}`, owner).problem(t, 422, "validation_failed")
+	if !strings.Contains(fmt.Sprint(bad["errors"]), "/email") {
+		t.Errorf("bad email: %v", bad)
+	}
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"viewer","all_products":true,"issuer":"x"}`, owner).problem(t, 400, "invalid_request")
+	// Revoke: hidden and missing alike; visible but not the caller's to take back: 403.
+	sid := second.body["id"].(string)
+	missing := f.do(t, "POST", p+"/"+ids.Invitation()+"/revoke", "", owner).problem(t, 404, "not_found")
+	bInv := f.do(t, "POST", Prefix+"/tenants/"+f.b.Slug+"/invitations", `{"email":"b`+email+`","role":"viewer","all_products":true}`, f.session(t, f.ownerB, true))
+	for name, c := range map[string]struct {
+		path string
+		o    opt
+	}{
+		"another tenant's": {p + "/" + bInv.body["id"].(string) + "/revoke", owner},
+		"scoped caller":    {p + "/" + sid + "/revoke", f.session(t, f.scoped, true)},
+	} {
+		if got := f.do(t, "POST", c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	f.do(t, "POST", p+"/"+sid+"/revoke", "", f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	if r := f.do(t, "POST", p+"/"+sid+"/revoke", "", owner); r.code != 200 || r.body["status"] != "revoked" {
+		t.Errorf("revoke: %d %s", r.code, r.raw)
+	}
+	// Accept: session only, outside the tenant path, CSRF-protected; one
+	// answer for every reason it can't be accepted.
+	accept := Prefix + "/invitations/accept"
+	invitee := f.user(t, email)
+	body := `{"token":"` + tok + `"}`
+	f.do(t, "POST", accept, body).problem(t, 401, "unauthenticated")
+	f.do(t, "POST", accept, body, bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 401, "unauthenticated")
+	f.do(t, "POST", accept, body, f.session(t, invitee, false)).problem(t, 403, "csrf_failed")
+	unknown := f.do(t, "POST", accept, `{"token":"nope"}`, f.session(t, invitee, true)).problem(t, 422, "validation_failed")
+	wrongUser := f.do(t, "POST", accept, body, f.session(t, f.user(t, "y"+email), true)).problem(t, 422, "validation_failed")
+	if !reflect.DeepEqual(unknown, wrongUser) {
+		t.Errorf("wrong user %v, unknown token %v", wrongUser, unknown)
+	}
+	f.srv.APIHost = "api.lf.example"
+	f.do(t, "POST", accept, body, f.session(t, invitee, true), func(r *http.Request) { r.Host = "api.lf.example" }).problem(t, 401, "unauthenticated")
+	f.srv.APIHost = ""
+	r := f.do(t, "POST", accept, body, f.session(t, invitee, true))
+	if r.code != 200 || r.body["tenant_id"] != f.a.ID || r.body["role"] != "support" || r.body["all_products"] != false {
+		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "GET", Prefix+"/tenants/"+f.a.ID+"/invitations", "", f.session(t, invitee, false)); r.code != 200 {
+		t.Errorf("new member's access: %d %s", r.code, r.raw)
+	}
+	if got := f.do(t, "POST", accept, body, f.session(t, invitee, true)).problem(t, 422, "validation_failed"); !reflect.DeepEqual(got, unknown) {
+		t.Errorf("used twice: %v", got)
+	}
+	// Other paths outside a tenant stay 404 for sessions.
+	f.do(t, "POST", Prefix+"/invitations/nope", body, f.session(t, invitee, true)).problem(t, 404, "not_found")
 }

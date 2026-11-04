@@ -162,6 +162,102 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listInvitations
+      summary: List the tenant's invitations (open, accepted, revoked, expired), newest first.
+      description: Needs member:read on every product; a product-scoped caller sees none. Never returns the link token.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createInvitation
+      summary: Invite someone by email. The link token is in this response only.
+      description: |
+        Dashboard sessions with member:write on every product; the role can't
+        exceed the caller's. Open for 7 days. Accepting needs the token, a
+        signed-in user whose verified email matches, and an open invitation
+        (POST /invitations/accept).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvitationCreate" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationCreated" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/invitations/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    post:
+      operationId: revokeInvitation
+      summary: Revoke an open invitation. One-way.
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation as the signed-in user.
+      description: |
+        Dashboard sessions only (outside any tenant path; API tokens get 401).
+        An unknown, revoked, expired or used token, and a user whose verified
+        email doesn't match, all answer the same 422.
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: The invite link's token. }
+      responses:
+        "200":
+          description: The new membership.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedInvitation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     apiToken:
@@ -257,6 +353,56 @@ components:
         all_products: { type: boolean }
         product_ids: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      required: [id, email, role, all_products, product_ids, status, invited_by, created_at, expires_at, accepted_at, accepted_by, revoked_at]
+      properties:
+        id: { type: string, example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        email: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids: { type: array, items: { type: string } }
+        status:
+          type: string
+          enum: [pending, accepted, revoked, expired]
+        invited_by: { type: string, nullable: true, description: User ID; null once the user is erased. }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        accepted_by: { type: string, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+    InvitationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    InvitationCreate:
+      type: object
+      required: [email, role, all_products]
+      properties:
+        email: { type: string, maxLength: 320 }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids:
+          type: array
+          items: { type: string }
+          description: Required, non-empty, when all_products is false; absent otherwise.
+    InvitationCreated:
+      allOf:
+        - $ref: "#/components/schemas/Invitation"
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: For the invite link. Shown once, never stored. }
+    AcceptedInvitation:
+      type: object
+      required: [membership_id, tenant_id, role, all_products]
+      properties:
+        membership_id: { type: string }
+        tenant_id: { type: string, description: "Usable as {tenant} in paths." }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
     MemberUpdated:
       allOf:
         - $ref: "#/components/schemas/Member"

@@ -222,7 +222,7 @@ func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason str
 			WHERE id = $1 AND revoked_at IS NULL`, t.ID); err != nil {
 			return nil, 0, err
 		}
-		ev := event(p, "api_token.revoke", "api_token", t.ID)
+		ev := audit.By(p, "api_token.revoke", "api_token", t.ID)
 		ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": reason, "member_id": m.ID}
 		if _, err := audit.Record(ctx, tx, m.TenantID, ev); err != nil {
 			return nil, 0, err
@@ -249,11 +249,11 @@ func (s Service) change(ctx context.Context, action, memberID string, fn changeF
 		return err
 	}
 	p, _ := authz.FromContext(ctx)
-	ev := event(p, action, "member", "")
+	ev := audit.By(p, action, "member", "")
 	// Members are tenant-wide: hidden from callers without member:read on
 	// every product, like a missing one.
 	if authz.Require(ctx, authz.MemberRead, "") != nil || !ids.Valid("mem", memberID) {
-		return s.refused(ctx, tenantID, ev, ErrNotFound)
+		return audit.Refused(ctx, s.DB, tenantID, ev, ErrNotFound, ErrInvalid, ErrNotFound, ErrLastOwner)
 	}
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		owners, err := tx.Membership.Query().Where(membership.RoleEQ(membership.RoleOwner)).Order(ent.Asc(membership.FieldID)).ForUpdate().IDs(ctx)
@@ -290,7 +290,7 @@ func (s Service) change(ctx context.Context, action, memberID string, fn changeF
 		return err
 	})
 	if err != nil {
-		return s.refused(ctx, tenantID, ev, err)
+		return audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound, ErrLastOwner)
 	}
 	return nil
 }
@@ -317,37 +317,6 @@ func productRefusal(err error) error {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "23503" && pe.ConstraintName == "membership_products_product_same_tenant" {
 		return &InvalidError{"/product_ids", "must be products of this tenant"}
-	}
-	return err
-}
-
-// ponytail: event and refused mirror apitokens'; move them to package audit
-// when a third service needs them.
-func event(p authz.Principal, action, objectType, objectID string) audit.Event {
-	actor := auditevent.ActorTypeUser
-	if p.Kind == authz.Token {
-		actor = auditevent.ActorTypeToken
-	}
-	return audit.Event{ActorType: actor, ActorID: p.ID, Action: action, ObjectType: objectType, ObjectID: objectID}
-}
-
-// refused records a denied or failed attempt in its own transaction and
-// returns err. Infrastructure errors aren't attempts.
-func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
-	switch {
-	case errors.Is(err, authz.ErrDenied):
-		ev.Outcome = auditevent.OutcomeDenied
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrNotFound), errors.Is(err, ErrLastOwner):
-		ev.Outcome = auditevent.OutcomeFailure
-	default:
-		return err
-	}
-	ev.Details = nil
-	if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		_, err := audit.Record(ctx, tx, tenantID, ev)
-		return err
-	}); rerr != nil {
-		return errors.Join(err, rerr)
 	}
 	return err
 }
