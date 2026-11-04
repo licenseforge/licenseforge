@@ -34,6 +34,24 @@ terminationGracePeriodSeconds: 30
 
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
+# Dashboard login through your OIDC provider (ADR-0003). Off: no login.
+oidc:
+  enabled: false
+  issuer: ""        # exactly the ID token's iss, https
+  clientID: ""
+  redirectURL: ""   # https://<public host>/auth/callback
+  # Client secret from an existing Secret; empty secretName = public client (PKCE only).
+  clientSecret:
+    secretName: ""
+    key: client-secret
+  # Server egress to the provider (discovery, keys, token), added to the
+  # NetworkPolicy. Empty `to`: any destination (0.0.0.0/0 and ::/0). Narrow it,
+  # e.g. [{ipBlock: {cidr: 203.0.113.0/24}}] or a namespace/pod selector for
+  # an in-cluster Keycloak.
+  egress:
+    port: 443
+    to: []
+
 resources:
   requests: {cpu: 100m, memory: 64Mi}
   limits: {memory: 256Mi}

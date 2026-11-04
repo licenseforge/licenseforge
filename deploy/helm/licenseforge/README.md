@@ -38,9 +38,26 @@ succeeds. The Job's deadline (`migrate.activeDeadlineSeconds`, 280s) is below
 Helm's default `--timeout` of 5m; raise both together for long migrations. Set `image.digest` to pin the exact (signed) image, and
 `image.tag=<version>-fips` for the FIPS build.
 
+## Dashboard login (OIDC)
+
+```sh
+kubectl create secret generic licenseforge-oidc --from-literal=client-secret='…'   # omit for a public client
+helm upgrade licenseforge deploy/helm/licenseforge --reuse-values \
+  --set oidc.enabled=true --set oidc.issuer=https://idp.example/realms/acme \
+  --set oidc.clientID=licenseforge --set oidc.redirectURL=https://licenseforge.example/auth/callback \
+  --set oidc.clientSecret.secretName=licenseforge-oidc
+```
+
+The server discovers the provider at start, so the NetworkPolicy then also
+allows egress to it on `oidc.egress.port` (443), to any address by default.
+Narrow `oidc.egress.to` to the provider's CIDRs, or to a namespace/pod selector
+for an in-cluster Keycloak. Rendering fails if OIDC is on without the issuer,
+client ID or redirect URL.
+
 ## Notes
 
-- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only,
+- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only
+  (plus the OIDC provider when `oidc.enabled`),
   for the server and (as a hook policy, so it applies from the first install)
   the migration Job. It needs a CNI that enforces policies. Narrow
   `networkPolicy.ingressFrom` to your ingress controller and

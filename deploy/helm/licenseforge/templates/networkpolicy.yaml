@@ -1,5 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
-# Server pods: ingress on 8080 only; egress to DNS and the database only.
+# Server pods: ingress on 8080 only; egress to DNS and the database only, plus
+# the OIDC provider when login is on.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,6 +16,10 @@ spec:
       from: {{- toYaml . | nindent 8 }}
       {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}
+    {{- if .Values.oidc.enabled }}
+    - ports: [{port: {{ .Values.oidc.egress.port }}, protocol: TCP}]
+      to: {{- toYaml (.Values.oidc.egress.to | default (list (dict "ipBlock" (dict "cidr" "0.0.0.0/0")) (dict "ipBlock" (dict "cidr" "::/0")))) | nindent 8 }}
+    {{- end }}
 {{- if .Values.migrate.enabled }}
 ---
 # The migration Job runs as a pre-install/pre-upgrade hook, before normal

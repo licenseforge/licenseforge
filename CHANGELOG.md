@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Helm chart: first-class OIDC settings (`oidc.*`, ADR-0003) rendered as `LICENSEFORGE_OIDC_*`, the client secret only by `secretKeyRef`; with OIDC on, the server NetworkPolicy allows egress to the provider (`oidc.egress.port`, default 443; `oidc.egress.to`, default any address), which the deny-by-default policy blocked before, so login failed at start. `values.schema.json` checks the OIDC values; rendering fails without issuer, client ID or redirect URL.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0032 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.
