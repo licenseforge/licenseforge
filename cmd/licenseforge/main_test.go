@@ -46,7 +46,8 @@ func TestHealthEndpoints(t *testing.T) {
 		{http.MethodGet, "/readyz", true, http.StatusServiceUnavailable},
 		{http.MethodGet, "/healthz", true, http.StatusOK}, // liveness ignores the database
 		{http.MethodPost, "/healthz", false, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/nope", false, http.StatusNotFound},
+		{http.MethodGet, "/t/acme/", false, http.StatusOK}, // the dashboard
+		{http.MethodGet, "/api/v1/nope", false, http.StatusNotFound},
 	} {
 		readyErr = nil
 		if tc.down {

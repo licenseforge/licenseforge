@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Admin dashboard scaffold (ADR-0020) in `web/`: React + TypeScript + Vite, TanStack Router and Query, shadcn/ui with Tailwind; `/login`, an app shell that loads `GET /auth/session` (401 redirects to `/login`), user menu with logout (`POST /auth/logout` with `X-CSRF-Token`), a stubbed tenant switcher and `/t/{slug}/` overview, dark mode (system or chosen), English message catalogue. Package `web` serves the bundle at `/` with SPA fallback (never for `/api/`, which answers `application/problem+json` 404, `/auth/`, `/healthz` or `/readyz`), immutable caching for hashed assets, `no-cache` for `index.html`, a strict CSP, `nosniff` and `Referrer-Policy: same-origin`. The bundle is embedded with `make web build TAGS=webui`; without the tag (no Node) a placeholder page is served. New `Web` CI workflow: lint, typecheck, vitest, build and the Go handler test against the built bundle.
 - Repository setup, Apache-2.0 license, community files, CI.
 - Architecture Decision Records 0001–0031 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.
