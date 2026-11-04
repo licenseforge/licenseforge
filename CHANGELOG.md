@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 ### Added
 - Repository setup, Apache-2.0 license, community files, CI.
-- Architecture Decision Records 0001–0031 and the `lf1` license file format draft.
+- Architecture Decision Records 0001–0032 and the `lf1` license file format draft.
 - Helm chart `deploy/helm/licenseforge` (ADR-0005): Pod Security restricted, migrations as a pre-install/pre-upgrade Job with its own Secret (serving pods never get the owner login), startup and drain-aware probes, PodDisruptionBudget, NetworkPolicies for the server and the migration Job, optional HPA; values checked at render; linted (strict) and rendered in CI.
 - Container image (distroless, non-root; FIPS variant with `--build-arg GOFIPS140=certified`) and `compose.yaml` for development: PostgreSQL with `deploy/database-setup.sql`, `migrate`, then the server.
 - Session middleware (ADR-0020): `weblogin.RequireSession` serves only live sessions (401 and a cleared cookie otherwise); unsafe methods need the `X-CSRF-Token` (derived from the session secret, no storage) and must be same-origin (`net/http.CrossOriginProtection`). `GET /auth/session` returns the user and CSRF token for the dashboard; `POST /auth/logout` ends the session.
