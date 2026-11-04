@@ -50,7 +50,8 @@ var (
 	// ErrLimit: every seat (max_activations) is taken; deactivate one first.
 	ErrLimit = errors.New("activations: activation limit reached")
 	// ErrRehostLimit: the license's seats have moved max_rehosts times
-	// (ADR-0034); support can rehost or the vendor can raise the limit.
+	// (ADR-0034). Support-side rehosts count in the same rehost_count. At the
+	// limit, support raises max_rehosts or resets rehost_count (each audited).
 	ErrRehostLimit = errors.New("activations: rehost limit reached")
 	// ErrBinding: the fingerprint's binding isn't the license's (machine vs
 	// cluster), or the license is a site license, which has no activations.
@@ -129,7 +130,9 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 		if err != nil {
 			return err
 		}
-		if err := usable(l, now, !activate); err != nil {
+		// Grace allows reusing an existing activation (refresh, or activate on
+		// an already active machine); the create branch checks the term again.
+		if err := usable(l, now, true); err != nil {
 			return err
 		}
 		if string(l.BindType) != string(binding) {
@@ -149,8 +152,15 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 				return errors.Join(ErrNotActivated, err)
 			}
 		case ent.IsNotFound(err) && activate:
-			if actID, err = s.create(ctx, tx, l, req, binding, now); err != nil {
+			if err := usable(l, now, false); err != nil { // no new activations once the term has ended
 				return err
+			}
+			var move bool
+			if actID, move, err = s.create(ctx, tx, l, req, binding, now); err != nil {
+				return err
+			}
+			if move {
+				ev.Details["move"], ev.Details["rehost_count"] = true, l.RehostCount
 			}
 			ev.ObjectID, ev.Outcome = actID, auditevent.OutcomeSuccess
 			if _, err := audit.Record(ctx, tx, req.TenantID, ev); err != nil {
@@ -190,32 +200,33 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 // a move. A move increments rehost_count and is refused past max_rehosts
 // (unlimited when nil). A fingerprint seen before (uninstall and reinstall on
 // the same machine) never counts again.
-func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Request, binding activation.Binding, now time.Time) (string, error) {
+func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Request, binding activation.Binding, now time.Time) (id string, move bool, err error) {
 	u := tx.License.UpdateOneID(l.ID).SetUpdatedAt(now)
 	changed := false
 	if l.MaxActivations != nil {
 		n, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.DeactivatedAtIsNil()).Count(ctx)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if n >= *l.MaxActivations {
-			return "", fmt.Errorf("%w (%d)", ErrLimit, *l.MaxActivations)
+			return "", false, fmt.Errorf("%w (%d)", ErrLimit, *l.MaxActivations)
 		}
 		seen, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint)).Exist(ctx)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if !seen {
-			fps, err := tx.Activation.Query().Where(activation.LicenseID(l.ID)).GroupBy(activation.FieldFingerprint).Strings(ctx)
+			machines, err := distinctMachines(ctx, tx, l.ID, *l.MaxActivations)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
-			if len(fps) >= *l.MaxActivations { // a move
+			if machines >= *l.MaxActivations {
 				if l.MaxRehosts != nil && l.RehostCount >= *l.MaxRehosts {
-					return "", fmt.Errorf("%w (%d)", ErrRehostLimit, *l.MaxRehosts)
+					return "", false, fmt.Errorf("%w (%d)", ErrRehostLimit, *l.MaxRehosts)
 				}
 				u.AddRehostCount(1) // the CHECK licenses_rehosts_within_limit backs the limit
-				changed = true
+				l.RehostCount++
+				move, changed = true, true
 			}
 		}
 	}
@@ -230,7 +241,7 @@ func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Req
 	}
 	if changed {
 		if err := u.Exec(ctx); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	a, err := tx.Activation.Create().SetTenantID(l.TenantID).SetLicenseID(l.ID).SetFingerprint(req.Fingerprint).
@@ -238,9 +249,26 @@ func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Req
 		SetNillableHostname(nilIfEmpty(req.Hostname)).SetNillableAppVersion(nilIfEmpty(req.AppVersion)).
 		SetNillableSdkVersion(nilIfEmpty(req.SDKVersion)).SetFirstSeenAt(now).SetLastSeenAt(now).SetCreatedAt(now).SetUpdatedAt(now).Save(ctx) // one clock for the row
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return a.ID, nil
+	return a.ID, move, nil
+}
+
+// distinctMachines counts the license's distinct fingerprints ever
+// activated, up to limit (enough to decide a move; bounded however long the
+// history).
+func distinctMachines(ctx context.Context, tx *ent.Tx, licenseID string, limit int) (int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT count(*) FROM (SELECT DISTINCT fingerprint FROM activations WHERE license_id = $1 LIMIT $2) d`, licenseID, limit)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var n int
+	if !rows.Next() {
+		return 0, errors.Join(errors.New("activations: count returned no row"), rows.Err())
+	}
+	err = rows.Scan(&n)
+	return n, err
 }
 
 // Deactivate frees the seat of req's fingerprint (Key and Fingerprint are

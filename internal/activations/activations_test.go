@@ -594,6 +594,17 @@ func TestSeatMoves(t *testing.T) {
 	if rehosts(is.License.ID) != 2 {
 		t.Errorf("rehost_count %d", rehosts(is.License.ID))
 	}
+	// Moves are audited as such; returning to a known machine isn't a move.
+	var moves []string
+	for _, e := range f.events(t) {
+		if e.Action == "activation.create" && e.Outcome == auditevent.OutcomeSuccess && strings.Contains(e.Details, is.License.ID) {
+			moves = append(moves, e.Details)
+		}
+	}
+	if len(moves) != 5 || strings.Contains(moves[0], `"move"`) || !strings.Contains(moves[1], `"move":true`) || !strings.Contains(moves[1], `"rehost_count":1`) ||
+		!strings.Contains(moves[2], `"rehost_count":2`) || strings.Contains(moves[3], `"move"`) || strings.Contains(moves[4], `"move"`) {
+		t.Errorf("activation entries: %q", moves)
+	}
 	if err := move(t, is.Key, m2, m4); !errors.Is(err, ErrRehostLimit) {
 		t.Fatalf("third move: %v", err)
 	}
@@ -662,6 +673,10 @@ func TestGrace(t *testing.T) {
 	if _, status, err := f.open(t, later, machine); err != nil || status != licensefile.StatusGrace {
 		t.Errorf("Open = %v %v", status, err)
 	}
+	// Activating the already active machine reuses its activation, in grace too.
+	if again, err := f.s.Activate(ctx, f.req(is.Key, machine)); err != nil || again.ActivationID != got.ActivationID || again.Claims.Grace != time.Minute {
+		t.Errorf("re-activate in grace: %+v %v", again, err)
+	}
 	// No new activations once the term has ended.
 	if _, err := f.s.Activate(ctx, f.req(is.Key, fp())); !errors.Is(err, ErrExpired) {
 		t.Errorf("new activation in grace: %v", err)
@@ -673,5 +688,48 @@ func TestGrace(t *testing.T) {
 	})
 	if _, err := f.s.Refresh(ctx, f.req(is.Key, machine)); !errors.Is(err, ErrExpired) {
 		t.Errorf("refresh past grace: %v", err)
+	}
+}
+
+// Two new machines race for the last move: one wins, the other gets a
+// limit error, never a database error.
+func TestLastMoveRace(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for round := range 3 {
+		is := f.issue(t, "moves") // max_activations 1, max_rehosts 2
+		a, b := fp(), fp()
+		for _, step := range [][2]string{{"", a}, {a, b}} {
+			if step[0] != "" {
+				if err := f.s.Deactivate(ctx, f.req(is.Key, step[0])); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.s.Activate(ctx, f.req(is.Key, step[1])); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.s.Deactivate(ctx, f.req(is.Key, b)); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		errs := make([]error, 4)
+		for i := range errs {
+			wg.Go(func() { _, errs[i] = f.s.Activate(ctx, f.req(is.Key, fp())) })
+		}
+		wg.Wait()
+		ok := 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				ok++
+			case errors.Is(err, ErrRehostLimit), errors.Is(err, ErrLimit):
+			default:
+				t.Errorf("round %d: %v", round, err)
+			}
+		}
+		if l := f.license(t, is.License.ID); ok != 1 || l.RehostCount != 2 {
+			t.Errorf("round %d: %d won, rehost_count %d", round, ok, l.RehostCount)
+		}
 	}
 }
