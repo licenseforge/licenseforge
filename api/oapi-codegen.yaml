@@ -1,0 +1,8 @@
+# oapi-codegen config (ADR-0032): stdlib net/http strict server. Run via
+# `make generate` (go:generate in internal/api/apigen).
+package: apigen
+output: apigen.gen.go # relative to internal/api/apigen, where go:generate runs
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true

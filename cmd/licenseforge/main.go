@@ -18,6 +18,7 @@
 //	LICENSEFORGE_SESSION_IDLE_TIMEOUT   dashboard session idle timeout, default 1h (5m to 24h, AC-12)
 //	LICENSEFORGE_SESSION_MAX_AGE        dashboard session lifetime, default 12h (1h to 24h, at least the idle timeout)
 //	LICENSEFORGE_LOGIN_BANNER           system use notification shown before login (AC-8), plain text up to 4 KB
+//	LICENSEFORGE_API_HOST               API-only host (api.example.com): tokens only there, sessions only elsewhere; unset = both
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
 // The serving process refuses to start if the owner login is in its
@@ -38,6 +39,8 @@ import (
 	"syscall"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/api"
+	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
@@ -148,10 +151,12 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return db.Ping(ctx)
 	}
 	mux := newMux(ready, log)
+	// Sessions everywhere (dashboard and API) use the configured timeouts.
 	ids, err := sessionTimeouts(identity.Service{DB: db})
 	if err != nil {
 		return err
 	}
+	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		login, err := weblogin.New(discoverCtx, weblogin.Config{
@@ -168,9 +173,13 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 			return err
 		}
 		login.Register(mux)
+		sessions = login.Sessions()
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
+	// API tokens need only the tenant pool (hashes, no keyring).
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Identity: ids,
+		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}

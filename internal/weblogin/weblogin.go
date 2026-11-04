@@ -83,9 +83,9 @@ type Handler struct {
 	verify           *oidc.IDTokenVerifier
 	id               identity.Service
 	log              *slog.Logger
-	cross            *http.CrossOriginProtection // trusts the redirect URL's origin
-	admin            string                      // Config.BootstrapAdmin
-	banner, bannerID string                      // bannerID: hash the login page sends back as acknowledgement
+	sessions         *Sessions
+	admin            string // Config.BootstrapAdmin
+	banner, bannerID string // bannerID: hash the login page sends back as acknowledgement
 }
 
 // origin is the browser's Origin for u: lowercase host, no default port.
@@ -140,13 +140,9 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 	if !secureURL(c.Issuer) || !secureURL(c.RedirectURL) {
 		return nil, errors.New("weblogin: issuer and redirect URL must be https (http only on localhost)")
 	}
-	own, err := origin(c.RedirectURL)
+	sessions, err := NewSessions(id, c.RedirectURL)
 	if err != nil {
 		return nil, err
-	}
-	cross := http.NewCrossOriginProtection()
-	if err := cross.AddTrustedOrigin(own); err != nil {
-		return nil, fmt.Errorf("weblogin: redirect URL: %w", err)
 	}
 	client := &http.Client{Timeout: httpTimeout}
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, client), c.Issuer) // the provider keeps the client for key fetches
@@ -162,7 +158,7 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 		verify:   p.Verifier(&oidc.Config{ClientID: c.ClientID}),
 		id:       id,
 		log:      log,
-		cross:    cross,
+		sessions: sessions,
 		admin:    c.BootstrapAdmin,
 		banner:   c.Banner,
 		bannerID: bannerID,

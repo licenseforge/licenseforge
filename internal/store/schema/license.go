@@ -57,7 +57,7 @@ func (License) Fields() []ent.Field {
 		field.String("key_lookup").NotEmpty().SchemaType(map[string]string{"postgres": "varchar(64)"}),
 		field.String("key_hint").NotEmpty().SchemaType(map[string]string{"postgres": "varchar(6)"}),
 		// Snapshot of the plan at issue (or at the last explicit upgrade).
-		field.String("plan_slug").NotEmpty().MaxLen(63).Match(slugRE).SchemaType(slugType),
+		field.String("plan_slug").NotEmpty().MaxLen(63).Match(SlugRE).SchemaType(slugType),
 		field.Enum("expiry_basis").Values(expiryBases...),
 		field.Int("duration_months").Optional().Nillable().Range(1, 1200),
 		field.Int64("duration_seconds").Optional().Nillable().Range(1, maxSeconds),

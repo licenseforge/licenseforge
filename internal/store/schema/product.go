@@ -13,7 +13,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-var slugRE = regexp.MustCompile(slugPattern)
+// SlugRE matches a slug (tenants, products, plans).
+var SlugRE = regexp.MustCompile(slugPattern)
 
 // Product is something a tenant sells (ADR-0015). Its slug is the `product`
 // claim in licenses.
@@ -24,7 +25,7 @@ func (Product) Mixin() []ent.Mixin { return []ent.Mixin{TenantScoped{}, Timestam
 func (Product) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.Product),
-		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(slugRE).SchemaType(slugType),
+		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(SlugRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 	}
 }

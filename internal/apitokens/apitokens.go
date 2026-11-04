@@ -75,7 +75,7 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
-	if err := validName(name); err != nil || ttl < MinTTL || ttl > MaxTTL || !validProducts(scope.Products) {
+	if err := ValidName(name); err != nil || ttl < MinTTL || ttl > MaxTTL || !validProducts(scope.Products) {
 		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name of up to 200 bytes of graphic characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid))
 	}
 	expires := time.Now().Add(min(ttl, MaxTTL-skew))
@@ -107,10 +107,10 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	return Created{Token: tok, Row: row}, nil
 }
 
-// validName: up to 200 bytes (the ent schema's limit), all graphic (letters, marks, numbers,
+// ValidName reports whether name is a valid token name: up to 200 bytes (the ent schema's limit), all graphic (letters, marks, numbers,
 // punctuation, symbols, spaces: no control, format such as zero-width or
 // bidi overrides, or line separators), not blank.
-func validName(name string) error {
+func ValidName(name string) error {
 	if strings.TrimSpace(name) == "" || !utf8.ValidString(name) || len(name) > 200 {
 		return ErrInvalid
 	}
@@ -197,25 +197,58 @@ func (s Service) Authenticate(ctx context.Context, tenantID, token string) (auth
 		Scope: authz.Scope{All: row.ScopeAll, Products: products}}, nil
 }
 
-// Revoke revokes an active token of ctx's tenant. The caller needs
-// token:write and may only revoke a token whose role it could have given.
-func (s Service) Revoke(ctx context.Context, tokenID string) error {
+// List returns up to limit of ctx's tenant's tokens, revoked and expired
+// ones included, newest first (created_at, then ID), after the token at
+// (afterAt, afterID), or from the start if afterID is "". The caller needs
+// token:read. Tokens are tenant-wide, so a product-scoped caller sees none
+// (lists filter silently to the caller's scope, ADR-0032).
+func (s Service) List(ctx context.Context, limit int, afterAt time.Time, afterID string) ([]*ent.APIToken, error) {
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
+		return nil, err
+	}
+	all, _, err := authz.Products(ctx, authz.TokenRead)
+	if err != nil {
+		return nil, err
+	}
+	if !all {
+		return nil, nil
+	}
+	if limit < 1 {
+		return nil, ErrInvalid
+	}
+	var rows []*ent.APIToken
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		q := tx.APIToken.Query().WithProducts().Order(ent.Desc(entapitoken.FieldCreatedAt), ent.Desc(entapitoken.FieldID)).Limit(limit)
+		if afterID != "" {
+			q.Where(entapitoken.Or(entapitoken.CreatedAtLT(afterAt), entapitoken.And(entapitoken.CreatedAt(afterAt), entapitoken.IDLT(afterID))))
+		}
+		var err error
+		rows, err = q.All(ctx)
 		return err
+	})
+	return rows, err
+}
+
+// Revoke revokes an active token of ctx's tenant and returns it. Order
+// (ADR-0032): a missing token, or any token for a caller who can't see
+// tokens (product-scoped: tokens are tenant-wide), is ErrNotFound; then the
+// caller needs token:write and may only revoke a token whose role it could
+// have given (authz.ErrDenied).
+func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, error) {
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
 	}
 	p, _ := authz.FromContext(ctx)
 	ev := event(p, "api_token.revoke", "")
-	// Authorization first (token:write, as a user with every product), so a
-	// caller who may not revoke can't probe which IDs exist.
-	if err := authz.CanAssign(ctx, authz.Token, &authz.Grant{Role: authz.SDK, Scope: authz.Scope{All: true}}, nil); err != nil {
-		return s.refused(ctx, tenantID, ev, err)
+	if authz.Require(ctx, authz.TokenRead, "") != nil || !ids.Valid("tok", tokenID) {
+		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
-	if !ids.Valid("tok", tokenID) {
-		return s.refused(ctx, tenantID, ev, ErrNotFound)
-	}
+	var row *ent.APIToken
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		row, err := tx.APIToken.Query().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).WithProducts().Only(ctx)
+		var err error
+		row, err = tx.APIToken.Query().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).WithProducts().Only(ctx)
 		if ent.IsNotFound(err) {
 			return ErrNotFound // the entry names no object: it isn't this tenant's
 		}
@@ -241,14 +274,17 @@ func (s Service) Revoke(ctx context.Context, tokenID string) error {
 		if n, err := res.RowsAffected(); err != nil || n != 1 { // revoked concurrently since the query: not ours to record
 			return errors.Join(ErrNotFound, err)
 		}
+		if row, err = tx.APIToken.Query().Where(entapitoken.ID(tokenID)).WithProducts().Only(ctx); err != nil {
+			return err
+		}
 		ev.Outcome = auditevent.OutcomeSuccess
 		_, err = audit.Record(ctx, tx, tenantID, ev)
 		return err
 	})
 	if err != nil {
-		return s.refused(ctx, tenantID, ev, err)
+		return nil, s.refused(ctx, tenantID, ev, err)
 	}
-	return nil
+	return row, nil
 }
 
 // notExpired compares with the database clock, as the api_tokens policies do.

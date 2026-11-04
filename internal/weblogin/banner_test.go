@@ -1,8 +1,10 @@
 package weblogin
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -198,4 +200,43 @@ func forgeFlowAck(t *testing.T, f *fixture, acked string) {
 		return
 	}
 	t.Fatal("no flow cookie")
+}
+
+// The checker the management API shares (Handler.Sessions) applies the
+// configured idle timeout, and sessions get the configured max age.
+func TestAPISessionsUseConfiguredTimeouts(t *testing.T) {
+	f := setupWith(t, func(_ *Config, s *identity.Service) { s.IdleTimeout, s.MaxAge = 10*time.Minute, time.Hour })
+	q := f.start(t)
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
+		t.Fatalf("callback: %d", code)
+	}
+	cookie := f.session(t)
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	var lifetime float64
+	if err := owner.QueryRow(`SELECT extract(epoch FROM expires_at - created_at) FROM sessions WHERE token_hash = sha256($1::bytea)`, cookie).Scan(&lifetime); err != nil {
+		t.Fatal(err)
+	}
+	if lifetime != time.Hour.Seconds() {
+		t.Errorf("session lifetime %vs, want the configured hour", lifetime)
+	}
+	check := func(idle string) int {
+		t.Helper()
+		if _, err := owner.Exec(`UPDATE sessions SET last_seen_at = now() - $2::interval WHERE token_hash = sha256($1::bytea)`, cookie, idle); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tenants/acme/api-tokens", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookie, Value: cookie})
+		_, code, _ := f.h.Sessions().Check(httptest.NewRecorder(), req)
+		return code
+	}
+	if code := check("9 minutes"); code != 0 {
+		t.Errorf("idle 9 of 10 minutes: %d", code)
+	}
+	if code := check("11 minutes"); code != http.StatusUnauthorized {
+		t.Errorf("idle 11 of 10 minutes: %d, want 401 (the default hour would allow it)", code)
+	}
 }

@@ -118,6 +118,7 @@ type fixture struct {
 	ids    identity.Service
 	db     *store.DB
 	client *http.Client
+	h      *Handler
 	ack    string         // ?banner= sent to /auth/login
 	last   *http.Response // the last callback's response (body closed)
 }
@@ -154,6 +155,7 @@ func setupWith(t *testing.T, cfg func(*Config, *identity.Service), opts ...func(
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.h = h
 	h.Register(mux)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "home") })
 	jar, _ := cookiejar.New(nil)
