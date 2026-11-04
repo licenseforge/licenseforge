@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { isRedirect } from "@tanstack/react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
-import { getSession, logout, requireSession } from "./session";
+import { getAuthConfig, getSession, loginHref, logout, requireSession } from "./session";
 
 const session = { user: { id: "usr_1", email: "a@example.com", name: "Ada" }, csrf_token: "tok" };
 
@@ -59,5 +59,35 @@ describe("logout", () => {
   it("throws on other errors", async () => {
     serve(403);
     await expect(logout("tok")).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("getAuthConfig", () => {
+  it("loads the banner", async () => {
+    const cfg = { banner: "Authorized use only.", banner_id: "abc" };
+    serve(200, cfg);
+    expect(await getAuthConfig()).toEqual(cfg);
+  });
+  it("is no banner when login is off (404)", async () => {
+    serve(404);
+    expect(await getAuthConfig()).toEqual({ banner: "", banner_id: "" });
+  });
+  it("throws on other errors, so the gate stays shut", async () => {
+    serve(500);
+    await expect(getAuthConfig()).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe("loginHref (banner gate)", () => {
+  const withBanner = { banner: "Authorized use only.", banner_id: "a/b+c" };
+  it("is disabled until the config loaded", () => {
+    expect(loginHref(undefined, true)).toBeNull();
+  });
+  it("needs agreement when there is a banner", () => {
+    expect(loginHref(withBanner, false)).toBeNull();
+    expect(loginHref(withBanner, true)).toBe("/auth/login?banner=a%2Fb%2Bc");
+  });
+  it("goes straight to login without a banner", () => {
+    expect(loginHref({ banner: "", banner_id: "" }, false)).toBe("/auth/login");
   });
 });

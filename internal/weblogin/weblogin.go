@@ -6,7 +6,9 @@ package weblogin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -44,20 +48,44 @@ type Config struct {
 	ClientID     string
 	ClientSecret string // empty for a public client (PKCE only)
 	RedirectURL  string // https://<host>/auth/callback
+	Banner       string // system use notification (AC-8), plain text; empty = none
 	// BootstrapAdmin is LICENSEFORGE_BOOTSTRAP_ADMIN (ADR-0003): the user it
 	// names becomes platform admin at login while there is none. Empty: off.
 	BootstrapAdmin string
 }
 
+// MaxBannerLen bounds the login banner (bytes).
+const MaxBannerLen = 4096
+
+// checkBanner refuses a banner that isn't plain printable text: it is shown
+// as text (never HTML), and control, format (bidi overrides, zero-width) and
+// line/paragraph separator characters could make what users see differ from
+// what was hashed and logged.
+func checkBanner(b string) error {
+	if len(b) > MaxBannerLen {
+		return fmt.Errorf("weblogin: login banner is %d bytes, at most %d", len(b), MaxBannerLen)
+	}
+	if !utf8.ValidString(b) {
+		return errors.New("weblogin: login banner is not UTF-8")
+	}
+	for _, r := range b {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return fmt.Errorf("weblogin: login banner has control or format character %U", r)
+		}
+	}
+	return nil
+}
+
 // Handler serves GET /auth/login and GET /auth/callback.
 type Handler struct {
-	client   *http.Client
-	oauth    oauth2.Config
-	verify   *oidc.IDTokenVerifier
-	id       identity.Service
-	log      *slog.Logger
-	sessions *Sessions
-	admin    string // Config.BootstrapAdmin
+	client           *http.Client
+	oauth            oauth2.Config
+	verify           *oidc.IDTokenVerifier
+	id               identity.Service
+	log              *slog.Logger
+	sessions         *Sessions
+	admin            string // Config.BootstrapAdmin
+	banner, bannerID string // bannerID: hash the login page sends back as acknowledgement
 }
 
 // origin is the browser's Origin for u: lowercase host, no default port.
@@ -97,6 +125,15 @@ func secureURL(u string) bool {
 // at start). Issuer and redirect URL must be https, or http on localhost for
 // development.
 func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (*Handler, error) {
+	c.Banner = strings.TrimSpace(strings.ReplaceAll(c.Banner, "\r\n", "\n"))
+	if err := checkBanner(c.Banner); err != nil {
+		return nil, err
+	}
+	var bannerID string
+	if c.Banner != "" {
+		sum := sha256.Sum256([]byte(c.Banner))
+		bannerID = base64.RawURLEncoding.EncodeToString(sum[:16])
+	}
 	if c.Issuer == "" || c.ClientID == "" || c.RedirectURL == "" {
 		return nil, errors.New("weblogin: issuer, client ID and redirect URL are required")
 	}
@@ -123,11 +160,14 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 		log:      log,
 		sessions: sessions,
 		admin:    c.BootstrapAdmin,
+		banner:   c.Banner,
+		bannerID: bannerID,
 	}, nil
 }
 
 // Register adds the login routes to mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /auth/config", h.config)
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.Handle("GET /auth/session", h.RequireSession(http.HandlerFunc(h.session)))
@@ -141,9 +181,47 @@ func setCookie(w http.ResponseWriter, name, value string, maxAge int) {
 	})
 }
 
+// config is what the login page needs before anyone signs in: the banner
+// (AC-8) and its ID, which /auth/login wants back as the acknowledgement.
+// Revalidated every time (no-cache + ETag), so a changed banner is seen at
+// once instead of looping users through a stale acknowledgement.
+func (h *Handler) config(w http.ResponseWriter, r *http.Request) {
+	etag := `"` + h.bannerID + `"`
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_ = json.NewEncoder(w).Encode(map[string]string{"banner": h.banner, "banner_id": h.bannerID})
+}
+
+// bannerChanged sends the user back to agree to the current banner.
+func bannerChanged(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, "/login?banner_changed=1", http.StatusSeeOther)
+}
+
+// login starts a login. With a banner configured it needs the banner's ID
+// (?banner=, sent once the user agreed on /login), so no login skips the
+// notice; anything else goes back to /login. The acknowledged ID rides in
+// the flow cookie, so the callback checks and logs the banner this user
+// agreed to, even if another server (other banner) finishes the login.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	ack := r.URL.Query().Get("banner")
+	if !equal(ack, h.bannerID) {
+		if ack == "" {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		bannerChanged(w, r)
+		return
+	}
 	state, nonce, verifier := rand.Text(), rand.Text(), oauth2.GenerateVerifier()
-	setCookie(w, flowCookie, state+"."+nonce+"."+verifier, int(flowTTL.Seconds()))
+	setCookie(w, flowCookie, state+"."+nonce+"."+verifier+"."+ack, int(flowTTL.Seconds()))
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, h.oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), http.StatusFound)
 }
@@ -192,11 +270,17 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(c.Value, ".")
-	if len(parts) != 3 || !equal(parts[0], q.Get("state")) {
+	if len(parts) != 4 || !equal(parts[0], q.Get("state")) {
 		h.fail(w, http.StatusBadRequest, "state mismatch", nil)
 		return
 	}
 	setCookie(w, flowCookie, "", -1) // one use, whatever happens next
+	acked := parts[3]
+	if !equal(acked, h.bannerID) { // agreed to another banner, or to none
+		h.log.Warn("login failed", "reason", "banner not acknowledged", "banner_id", h.bannerID)
+		bannerChanged(w, r)
+		return
+	}
 	if e := q.Get("error"); e != "" {
 		h.fail(w, http.StatusUnauthorized, "provider error", errors.New(e))
 		return
@@ -276,7 +360,12 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, http.StatusInternalServerError, "audit login", errors.Join(err, h.id.EndSession(ctx, cookie)))
 		return
 	}
-	setCookie(w, SessionCookie, cookie, int(identity.AbsoluteTimeout.Seconds()))
+	// AC-8 evidence: the banner this user agreed to, from their flow cookie
+	// (checked equal to the current one above).
+	if acked != "" {
+		h.log.Info("login banner acknowledged", "user", u.ID, "banner_id", acked)
+	}
+	setCookie(w, SessionCookie, cookie, int(h.id.SessionMaxAge().Seconds()))
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

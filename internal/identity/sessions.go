@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -14,13 +15,52 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-// Session lifetimes (ADR-0020): a session ends after IdleTimeout without a
-// request, and at most AbsoluteTimeout after login.
+// Session lifetimes (ADR-0020, ADR-0024 AC-12): a session ends after the idle
+// timeout without a request, and at most its max age after login. Service
+// uses these defaults for zero values.
 const (
-	IdleTimeout     = time.Hour
-	AbsoluteTimeout = 12 * time.Hour
-	seenEvery       = time.Minute // last_seen_at is written at most this often
+	DefaultIdleTimeout = time.Hour
+	DefaultMaxAge      = 12 * time.Hour
+	seenEvery          = time.Minute // last_seen_at is written at most this often
 )
+
+// Bounds for configured timeouts. The database caps a session at a day
+// (CHECK and insert policy on sessions).
+const (
+	MinIdleTimeout = 5 * time.Minute
+	MinMaxAge      = time.Hour
+	MaxMaxAge      = 24 * time.Hour
+)
+
+// CheckSessionTimeouts reports whether idle and maxAge are within bounds:
+// idle from MinIdleTimeout up to maxAge, maxAge from MinMaxAge to MaxMaxAge
+// (so idle is at most a day too).
+func CheckSessionTimeouts(idle, maxAge time.Duration) error {
+	switch {
+	case idle < MinIdleTimeout:
+		return fmt.Errorf("identity: idle timeout %v: want at least %v", idle, MinIdleTimeout)
+	case maxAge < MinMaxAge || maxAge > MaxMaxAge:
+		return fmt.Errorf("identity: session max age %v: want %v to %v", maxAge, MinMaxAge, MaxMaxAge)
+	case maxAge < idle:
+		return fmt.Errorf("identity: session max age %v is below the idle timeout %v", maxAge, idle)
+	}
+	return nil
+}
+
+func (s Service) idleTimeout() time.Duration {
+	if s.IdleTimeout == 0 {
+		return DefaultIdleTimeout
+	}
+	return s.IdleTimeout
+}
+
+// SessionMaxAge is the lifetime of new sessions (the cookie's Max-Age).
+func (s Service) SessionMaxAge() time.Duration {
+	if s.MaxAge == 0 {
+		return DefaultMaxAge
+	}
+	return s.MaxAge
+}
 
 // ErrNoSession means the cookie names no live session: unknown, malformed,
 // ended, idle too long, expired, or its user is disabled. Callers send the
@@ -56,9 +96,11 @@ func (s Service) NewSession(ctx context.Context, userID string) (string, error) 
 		if !enabled {
 			return ErrDisabled
 		}
+		// One clock reading for all three times: a full-day session must not
+		// end a microsecond past the database's one-day CHECK.
 		_, err = tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
-			VALUES ($1, $2, $3, clock_timestamp(), clock_timestamp() + make_interval(secs => $4), clock_timestamp())`,
-			ids.Session(), userID, sessionHash(cookie), AbsoluteTimeout.Seconds())
+			SELECT $1, $2, $3, n, n + make_interval(secs => $4), n FROM clock_timestamp() n`,
+			ids.Session(), userID, sessionHash(cookie), s.SessionMaxAge().Seconds())
 		return err
 	})
 	if err != nil {
@@ -79,7 +121,7 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
 			WHERE s.token_hash = $1 AND s.expires_at > clock_timestamp()
 			  AND s.last_seen_at > clock_timestamp() - make_interval(secs => $2) AND u.disabled_at IS NULL`,
-			sessionHash(cookie), IdleTimeout.Seconds())
+			sessionHash(cookie), s.idleTimeout().Seconds())
 		if err != nil {
 			return err
 		}
