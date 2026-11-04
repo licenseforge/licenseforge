@@ -415,6 +415,16 @@ func TestIssueRefusals(t *testing.T) {
 	if errHidden == nil || errHidden.Error() != errMissing.Error() || errOther.Error() != errMissing.Error() {
 		t.Errorf("hidden %v, missing %v, another tenant's %v", errHidden, errMissing, errOther)
 	}
+	// Refusals name the well-formed IDs the caller sent.
+	_, _ = f.s.Issue(ctx, mgr, IssueRequest{ProductID: f.a.prodP, PlanID: f.b.pro.ID, CustomerID: "x"})
+	if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"product_id":"`+f.a.prodP+`"`) ||
+		!strings.Contains(e.Details, `"plan_id":"`+f.b.pro.ID+`"`) || strings.Contains(e.Details, "customer_id") {
+		t.Errorf("refusal details = %s", e.Details)
+	}
+	_, _ = f.s.Issue(ctx, mgr, IssueRequest{ProductID: f.a.prodP, PlanID: f.b.pro.ID, CustomerID: f.a.customer}) // refused in the transaction
+	if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"plan_id":"`+f.b.pro.ID+`"`) || !strings.Contains(e.Details, `"customer_id":"`+f.a.customer+`"`) {
+		t.Errorf("in-transaction refusal details = %s", e.Details)
+	}
 	// A valid external ref is stored.
 	okReq := f.req(f.a)
 	okReq.ExternalRefs = map[string]string{"crm.deal-id_1": strings.Repeat("é", 127)}
@@ -614,5 +624,54 @@ func TestTransitionRefusals(t *testing.T) {
 		if _, err := f.s.Reinstate(ctx, p, mine.License.ID); err != nil {
 			t.Errorf("%s reinstate: %v", p.Role, err)
 		}
+	}
+}
+
+// One clock for the row: created_at and updated_at are issued_at (database
+// clock), so lists ordered by created_at agree across instances.
+func TestIssueTimestampsUseOneClock(t *testing.T) {
+	f := setup(t)
+	got, err := f.s.Issue(context.Background(), as(f.a.id, authz.Manager, all), f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := f.get(t, f.a.id, got.License.ID)
+	if !l.CreatedAt.Equal(l.IssuedAt) || !l.UpdatedAt.Equal(l.IssuedAt) {
+		t.Errorf("issued %v, created %v, updated %v", l.IssuedAt, l.CreatedAt, l.UpdatedAt)
+	}
+}
+
+// A state change doesn't wait for a key-share lock (what an activation's
+// foreign-key check takes), so suspending never stalls activations.
+func TestTransitionDoesNotBlockKeyShare(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	p := as(f.a.id, authz.Manager, all)
+	got, err := f.s.Issue(ctx, p, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- f.db.WithTenant(ctx, f.a.id, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM licenses WHERE id = $1 FOR KEY SHARE`, got.License.ID); err != nil {
+				return err
+			}
+			close(hold)
+			<-release
+			return nil
+		})
+	}()
+	<-hold
+	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	_, err = f.s.Suspend(sctx, p, got.License.ID)
+	cancel()
+	close(release)
+	if err != nil {
+		t.Errorf("suspend while a key-share lock is held: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

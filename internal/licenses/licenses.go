@@ -101,6 +101,16 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 		return Issued{}, err
 	}
 	ev := event(p, "license.issue", "")
+	// Refusals name the well-formed IDs the caller sent (never anything else).
+	refusal := map[string]any{}
+	for k, v := range map[string]string{"product_id": req.ProductID, "plan_id": req.PlanID, "customer_id": req.CustomerID} {
+		if ids.Valid(map[string]string{"product_id": "prd", "plan_id": "pln", "customer_id": "cus"}[k], v) {
+			refusal[k] = v
+		}
+	}
+	if len(refusal) > 0 {
+		ev.Details = refusal
+	}
 	if req.Type == "" {
 		req.Type = license.TypePaid
 	}
@@ -126,15 +136,16 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 	}
 	var row *ent.License
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		if authz.Require(ctx, authz.LicenseRead, req.ProductID) != nil {
-			return hidden{errNoProduct}
-		}
+		// One lookup, then the scope: missing and hidden do the same work.
 		ok, err := tx.Product.Query().Where(product.ID(req.ProductID)).Exist(ctx) // another tenant's: not visible under RLS
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return errNoProduct
+		}
+		if authz.Require(ctx, authz.LicenseRead, req.ProductID) != nil {
+			return hidden{errNoProduct}
 		}
 		if err := authz.Require(ctx, authz.LicenseIssue, req.ProductID); err != nil {
 			return err
@@ -153,11 +164,12 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 		if err != nil {
 			return err
 		}
-		ok, err = tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).Exist(ctx)
+		// FOR SHARE: a concurrent archive waits for this issue (or wins first).
+		cus, err := tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).ForShare().IDs(ctx)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if len(cus) == 0 {
 			return fmt.Errorf("%w: no such customer", ErrInvalid)
 		}
 		ents, err := entitlements(ctx, tx, pl, req.Overrides)
@@ -173,7 +185,7 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 			SetBindType(license.BindType(pl.BindType)).SetOfflineAllowed(pl.OfflineAllowed).
 			SetLeaseSeconds(pl.LeaseSeconds).SetNillableMaxOfflineSeconds(pl.MaxOfflineSeconds).
 			SetGraceSeconds(pl.GraceSeconds).SetEntitlements(ents).SetExternalRefs(req.ExternalRefs).
-			SetIssuedAt(now)
+			SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
 		// from_first_activation: the term starts at first activation (nil until then).
 		if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
 			c.SetNillableExpiresAt(expiry(now, pl.DurationMonths, pl.DurationSeconds))
@@ -205,6 +217,9 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 	})
 	if err != nil {
 		ev.ObjectID, ev.Details = "", nil
+		if len(refusal) > 0 {
+			ev.Details = refusal
+		}
 		return Issued{}, s.refused(ctx, tenantID, ev, err)
 	}
 	return Issued{License: row, Key: key}, nil
@@ -227,7 +242,7 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 		}
 	}
 	if len(overrides) > 0 {
-		catalog, err := tx.Feature.Query().Where(feature.ProductID(pl.ProductID), feature.KeyIn(slices.Collect(maps.Keys(overrides))...)).All(ctx)
+		catalog, err := tx.Feature.Query().Where(feature.ProductID(pl.ProductID), feature.KeyIn(slices.Collect(maps.Keys(overrides))...)).ForShare().All(ctx)
 		if err != nil {
 			return schema.LicenseEntitlements{}, err
 		}
@@ -324,8 +339,9 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 	}
 	var row *ent.License
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		// Lock order (internal/issue): the license row, then the audit lock.
-		l, err := tx.License.Query().Where(license.ID(licenseID)).ForUpdate().Only(ctx)
+		// Authorize on an unlocked read (product_id is immutable), so callers
+		// who may not change the license can't hold its lock.
+		l, err := tx.License.Query().Where(license.ID(licenseID)).Only(ctx)
 		if ent.IsNotFound(err) {
 			return ErrNotFound // the entry names no object: it isn't this tenant's
 		}
@@ -337,6 +353,24 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 			return hidden{ErrNotFound}
 		}
 		if err := authz.Require(ctx, authz.LicenseWrite, l.ProductID); err != nil {
+			return err
+		}
+		// Lock order (internal/issue): the license row, then the audit lock.
+		// NO KEY UPDATE: what the UPDATE takes anyway; it still waits for an
+		// export's FOR SHARE but not for activations' FK checks.
+		rows, err := tx.QueryContext(ctx, `SELECT status FROM licenses WHERE id = $1 FOR NO KEY UPDATE`, l.ID)
+		if err != nil {
+			return err
+		}
+		if !rows.Next() {
+			_ = rows.Close()
+			return errors.Join(ErrNotFound, rows.Err())
+		}
+		err = rows.Scan(&l.Status)
+		if cerr := rows.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
 			return err
 		}
 		if !slices.Contains(t.from, l.Status) {
