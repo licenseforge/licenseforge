@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -36,6 +37,7 @@ type TenantQuery struct {
 	withAuditEvents *AuditEventQuery
 	withInvitations *InvitationQuery
 	withMemberships *MembershipQuery
+	withAPITokens   *APITokenQuery
 	modifiers       []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -198,6 +200,28 @@ func (_q *TenantQuery) QueryMemberships() *MembershipQuery {
 			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
 			sqlgraph.To(membership.Table, membership.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, tenant.MembershipsTable, tenant.MembershipsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryAPITokens chains the current query on the "api_tokens" edge.
+func (_q *TenantQuery) QueryAPITokens() *APITokenQuery {
+	query := (&APITokenClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(apitoken.Table, apitoken.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.APITokensTable, tenant.APITokensColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -403,6 +427,7 @@ func (_q *TenantQuery) Clone() *TenantQuery {
 		withAuditEvents: _q.withAuditEvents.Clone(),
 		withInvitations: _q.withInvitations.Clone(),
 		withMemberships: _q.withMemberships.Clone(),
+		withAPITokens:   _q.withAPITokens.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -472,6 +497,17 @@ func (_q *TenantQuery) WithMemberships(opts ...func(*MembershipQuery)) *TenantQu
 		opt(query)
 	}
 	_q.withMemberships = query
+	return _q
+}
+
+// WithAPITokens tells the query-builder to eager-load the nodes that are connected to
+// the "api_tokens" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithAPITokens(opts ...func(*APITokenQuery)) *TenantQuery {
+	query := (&APITokenClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAPITokens = query
 	return _q
 }
 
@@ -553,13 +589,14 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 	var (
 		nodes       = []*Tenant{}
 		_spec       = _q.querySpec()
-		loadedTypes = [6]bool{
+		loadedTypes = [7]bool{
 			_q.withProducts != nil,
 			_q.withCustomers != nil,
 			_q.withSigningKeys != nil,
 			_q.withAuditEvents != nil,
 			_q.withInvitations != nil,
 			_q.withMemberships != nil,
+			_q.withAPITokens != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -622,6 +659,13 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 		if err := _q.loadMemberships(ctx, query, nodes,
 			func(n *Tenant) { n.Edges.Memberships = []*Membership{} },
 			func(n *Tenant, e *Membership) { n.Edges.Memberships = append(n.Edges.Memberships, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAPITokens; query != nil {
+		if err := _q.loadAPITokens(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.APITokens = []*APIToken{} },
+			func(n *Tenant, e *APIToken) { n.Edges.APITokens = append(n.Edges.APITokens, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -793,6 +837,36 @@ func (_q *TenantQuery) loadMemberships(ctx context.Context, query *MembershipQue
 	}
 	query.Where(predicate.Membership(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(tenant.MembershipsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadAPITokens(ctx context.Context, query *APITokenQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *APIToken)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(apitoken.FieldTenantID)
+	}
+	query.Where(predicate.APIToken(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.APITokensColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

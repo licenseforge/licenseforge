@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -175,6 +176,21 @@ func (_u *UserUpdate) AddInvitationsAccepted(v ...*Invitation) *UserUpdate {
 	return _u.AddInvitationsAcceptedIDs(ids...)
 }
 
+// AddAPITokenIDs adds the "api_tokens" edge to the APIToken entity by IDs.
+func (_u *UserUpdate) AddAPITokenIDs(ids ...string) *UserUpdate {
+	_u.mutation.AddAPITokenIDs(ids...)
+	return _u
+}
+
+// AddAPITokens adds the "api_tokens" edges to the APIToken entity.
+func (_u *UserUpdate) AddAPITokens(v ...*APIToken) *UserUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAPITokenIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
@@ -241,6 +257,27 @@ func (_u *UserUpdate) RemoveInvitationsAccepted(v ...*Invitation) *UserUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveInvitationsAcceptedIDs(ids...)
+}
+
+// ClearAPITokens clears all "api_tokens" edges to the APIToken entity.
+func (_u *UserUpdate) ClearAPITokens() *UserUpdate {
+	_u.mutation.ClearAPITokens()
+	return _u
+}
+
+// RemoveAPITokenIDs removes the "api_tokens" edge to APIToken entities by IDs.
+func (_u *UserUpdate) RemoveAPITokenIDs(ids ...string) *UserUpdate {
+	_u.mutation.RemoveAPITokenIDs(ids...)
+	return _u
+}
+
+// RemoveAPITokens removes "api_tokens" edges to APIToken entities.
+func (_u *UserUpdate) RemoveAPITokens(v ...*APIToken) *UserUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAPITokenIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -471,6 +508,51 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAPITokensIDs(); len(nodes) > 0 && !_u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.APITokensIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{user.Label}
@@ -636,6 +718,21 @@ func (_u *UserUpdateOne) AddInvitationsAccepted(v ...*Invitation) *UserUpdateOne
 	return _u.AddInvitationsAcceptedIDs(ids...)
 }
 
+// AddAPITokenIDs adds the "api_tokens" edge to the APIToken entity by IDs.
+func (_u *UserUpdateOne) AddAPITokenIDs(ids ...string) *UserUpdateOne {
+	_u.mutation.AddAPITokenIDs(ids...)
+	return _u
+}
+
+// AddAPITokens adds the "api_tokens" edges to the APIToken entity.
+func (_u *UserUpdateOne) AddAPITokens(v ...*APIToken) *UserUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAPITokenIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
@@ -702,6 +799,27 @@ func (_u *UserUpdateOne) RemoveInvitationsAccepted(v ...*Invitation) *UserUpdate
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveInvitationsAcceptedIDs(ids...)
+}
+
+// ClearAPITokens clears all "api_tokens" edges to the APIToken entity.
+func (_u *UserUpdateOne) ClearAPITokens() *UserUpdateOne {
+	_u.mutation.ClearAPITokens()
+	return _u
+}
+
+// RemoveAPITokenIDs removes the "api_tokens" edge to APIToken entities by IDs.
+func (_u *UserUpdateOne) RemoveAPITokenIDs(ids ...string) *UserUpdateOne {
+	_u.mutation.RemoveAPITokenIDs(ids...)
+	return _u
+}
+
+// RemoveAPITokens removes "api_tokens" edges to APIToken entities.
+func (_u *UserUpdateOne) RemoveAPITokens(v ...*APIToken) *UserUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAPITokenIDs(ids...)
 }
 
 // Where appends a list predicates to the UserUpdate builder.
@@ -955,6 +1073,51 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(invitation.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAPITokensIDs(); len(nodes) > 0 && !_u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.APITokensIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.APITokensTable,
+			Columns: []string{user.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -9,6 +9,98 @@ import (
 )
 
 var (
+	// APITokensColumns holds the columns for the "api_tokens" table.
+	APITokensColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "role", Type: field.TypeEnum, Enums: []string{"owner", "admin", "manager", "support", "viewer", "sdk"}},
+		{Name: "scope_all", Type: field.TypeBool},
+		{Name: "token_hash", Type: field.TypeBytes},
+		{Name: "display", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "expires_at", Type: field.TypeTime},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_by", Type: field.TypeString, Nullable: true, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// APITokensTable holds the schema information for the "api_tokens" table.
+	APITokensTable = &schema.Table{
+		Name:       "api_tokens",
+		Columns:    APITokensColumns,
+		PrimaryKey: []*schema.Column{APITokensColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "api_tokens_tenants_api_tokens",
+				Columns:    []*schema.Column{APITokensColumns[11]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "api_tokens_users_api_tokens",
+				Columns:    []*schema.Column{APITokensColumns[12]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "apitoken_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{APITokensColumns[11]},
+			},
+			{
+				Name:    "apitoken_tenant_id_token_hash",
+				Unique:  true,
+				Columns: []*schema.Column{APITokensColumns[11], APITokensColumns[6]},
+			},
+			{
+				Name:    "apitoken_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{APITokensColumns[11], APITokensColumns[0]},
+			},
+			{
+				Name:    "apitoken_tenant_id_id_scope_all",
+				Unique:  true,
+				Columns: []*schema.Column{APITokensColumns[11], APITokensColumns[0], APITokensColumns[5]},
+			},
+		},
+	}
+	// APITokenProductsColumns holds the columns for the "api_token_products" table.
+	APITokenProductsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "product_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "scope_all", Type: field.TypeBool, Default: false},
+		{Name: "api_token_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// APITokenProductsTable holds the schema information for the "api_token_products" table.
+	APITokenProductsTable = &schema.Table{
+		Name:       "api_token_products",
+		Columns:    APITokenProductsColumns,
+		PrimaryKey: []*schema.Column{APITokenProductsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "api_token_products_api_tokens_products",
+				Columns:    []*schema.Column{APITokenProductsColumns[4]},
+				RefColumns: []*schema.Column{APITokensColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "apitokenproduct_tenant_id",
+				Unique:  false,
+				Columns: []*schema.Column{APITokenProductsColumns[1]},
+			},
+			{
+				Name:    "apitokenproduct_api_token_id_product_id",
+				Unique:  true,
+				Columns: []*schema.Column{APITokenProductsColumns[4], APITokenProductsColumns[2]},
+			},
+		},
+	}
 	// ActivationsColumns holds the columns for the "activations" table.
 	ActivationsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -706,6 +798,8 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		APITokensTable,
+		APITokenProductsTable,
 		ActivationsTable,
 		AuditEventsTable,
 		CustomersTable,
@@ -725,6 +819,23 @@ var (
 )
 
 func init() {
+	APITokensTable.ForeignKeys[0].RefTable = TenantsTable
+	APITokensTable.ForeignKeys[1].RefTable = UsersTable
+	APITokensTable.Annotation = &entsql.Annotation{}
+	APITokensTable.Annotation.Checks = map[string]string{
+		"api_tokens_display":    "(display)::text ~ '^lf_live_[a-z2-7]{8}…$'::text",
+		"api_tokens_expiry":     "expires_at > created_at AND expires_at <= (created_at + '1 year'::interval)",
+		"api_tokens_hash_len":   "length(token_hash) = 32",
+		"api_tokens_id_format":  "id ~ '^tok_[a-z2-7]{26}$'",
+		"api_tokens_no_empty":   "btrim((name)::text) <> ''::text",
+		"api_tokens_role_valid": "(role)::text = ANY (ARRAY['owner'::text, 'admin'::text, 'manager'::text, 'support'::text, 'viewer'::text, 'sdk'::text])",
+	}
+	APITokenProductsTable.ForeignKeys[0].RefTable = APITokensTable
+	APITokenProductsTable.Annotation = &entsql.Annotation{}
+	APITokenProductsTable.Annotation.Checks = map[string]string{
+		"api_token_products_id_format": "id ~ '^tkp_[a-z2-7]{26}$'",
+		"api_token_products_scoped":    "NOT scope_all",
+	}
 	ActivationsTable.ForeignKeys[0].RefTable = LicensesTable
 	ActivationsTable.Annotation = &entsql.Annotation{}
 	ActivationsTable.Annotation.Checks = map[string]string{

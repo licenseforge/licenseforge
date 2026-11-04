@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -158,6 +159,21 @@ func (_u *TenantUpdate) AddMemberships(v ...*Membership) *TenantUpdate {
 	return _u.AddMembershipIDs(ids...)
 }
 
+// AddAPITokenIDs adds the "api_tokens" edge to the APIToken entity by IDs.
+func (_u *TenantUpdate) AddAPITokenIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddAPITokenIDs(ids...)
+	return _u
+}
+
+// AddAPITokens adds the "api_tokens" edges to the APIToken entity.
+func (_u *TenantUpdate) AddAPITokens(v ...*APIToken) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAPITokenIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -287,6 +303,27 @@ func (_u *TenantUpdate) RemoveMemberships(v ...*Membership) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveMembershipIDs(ids...)
+}
+
+// ClearAPITokens clears all "api_tokens" edges to the APIToken entity.
+func (_u *TenantUpdate) ClearAPITokens() *TenantUpdate {
+	_u.mutation.ClearAPITokens()
+	return _u
+}
+
+// RemoveAPITokenIDs removes the "api_tokens" edge to APIToken entities by IDs.
+func (_u *TenantUpdate) RemoveAPITokenIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveAPITokenIDs(ids...)
+	return _u
+}
+
+// RemoveAPITokens removes "api_tokens" edges to APIToken entities.
+func (_u *TenantUpdate) RemoveAPITokens(v ...*APIToken) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAPITokenIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -631,6 +668,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAPITokensIDs(); len(nodes) > 0 && !_u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.APITokensIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -775,6 +857,21 @@ func (_u *TenantUpdateOne) AddMemberships(v ...*Membership) *TenantUpdateOne {
 	return _u.AddMembershipIDs(ids...)
 }
 
+// AddAPITokenIDs adds the "api_tokens" edge to the APIToken entity by IDs.
+func (_u *TenantUpdateOne) AddAPITokenIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddAPITokenIDs(ids...)
+	return _u
+}
+
+// AddAPITokens adds the "api_tokens" edges to the APIToken entity.
+func (_u *TenantUpdateOne) AddAPITokens(v ...*APIToken) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAPITokenIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -904,6 +1001,27 @@ func (_u *TenantUpdateOne) RemoveMemberships(v ...*Membership) *TenantUpdateOne 
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveMembershipIDs(ids...)
+}
+
+// ClearAPITokens clears all "api_tokens" edges to the APIToken entity.
+func (_u *TenantUpdateOne) ClearAPITokens() *TenantUpdateOne {
+	_u.mutation.ClearAPITokens()
+	return _u
+}
+
+// RemoveAPITokenIDs removes the "api_tokens" edge to APIToken entities by IDs.
+func (_u *TenantUpdateOne) RemoveAPITokenIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveAPITokenIDs(ids...)
+	return _u
+}
+
+// RemoveAPITokens removes "api_tokens" edges to APIToken entities.
+func (_u *TenantUpdateOne) RemoveAPITokens(v ...*APIToken) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAPITokenIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -1271,6 +1389,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(membership.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAPITokensIDs(); len(nodes) > 0 && !_u.mutation.APITokensCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.APITokensIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

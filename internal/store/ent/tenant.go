@@ -45,9 +45,11 @@ type TenantEdges struct {
 	Invitations []*Invitation `json:"invitations,omitempty"`
 	// Memberships holds the value of the memberships edge.
 	Memberships []*Membership `json:"memberships,omitempty"`
+	// APITokens holds the value of the api_tokens edge.
+	APITokens []*APIToken `json:"api_tokens,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [6]bool
+	loadedTypes [7]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -102,6 +104,15 @@ func (e TenantEdges) MembershipsOrErr() ([]*Membership, error) {
 		return e.Memberships, nil
 	}
 	return nil, &NotLoadedError{edge: "memberships"}
+}
+
+// APITokensOrErr returns the APITokens value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) APITokensOrErr() ([]*APIToken, error) {
+	if e.loadedTypes[6] {
+		return e.APITokens, nil
+	}
+	return nil, &NotLoadedError{edge: "api_tokens"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -199,6 +210,11 @@ func (_m *Tenant) QueryInvitations() *InvitationQuery {
 // QueryMemberships queries the "memberships" edge of the Tenant entity.
 func (_m *Tenant) QueryMemberships() *MembershipQuery {
 	return NewTenantClient(_m.config).QueryMemberships(_m)
+}
+
+// QueryAPITokens queries the "api_tokens" edge of the Tenant entity.
+func (_m *Tenant) QueryAPITokens() *APITokenQuery {
+	return NewTenantClient(_m.config).QueryAPITokens(_m)
 }
 
 // Update returns a builder for updating this Tenant.

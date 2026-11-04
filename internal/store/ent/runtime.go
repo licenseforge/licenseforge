@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
+	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
@@ -27,6 +29,156 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	apitokenMixin := schema.APIToken{}.Mixin()
+	apitokenMixinFields0 := apitokenMixin[0].Fields()
+	_ = apitokenMixinFields0
+	apitokenMixinFields1 := apitokenMixin[1].Fields()
+	_ = apitokenMixinFields1
+	apitokenFields := schema.APIToken{}.Fields()
+	_ = apitokenFields
+	// apitokenDescTenantID is the schema descriptor for tenant_id field.
+	apitokenDescTenantID := apitokenMixinFields0[0].Descriptor()
+	// apitoken.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	apitoken.TenantIDValidator = func() func(string) error {
+		validators := apitokenDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// apitokenDescCreatedAt is the schema descriptor for created_at field.
+	apitokenDescCreatedAt := apitokenMixinFields1[0].Descriptor()
+	// apitoken.DefaultCreatedAt holds the default value on creation for the created_at field.
+	apitoken.DefaultCreatedAt = apitokenDescCreatedAt.Default.(func() time.Time)
+	// apitokenDescUpdatedAt is the schema descriptor for updated_at field.
+	apitokenDescUpdatedAt := apitokenMixinFields1[1].Descriptor()
+	// apitoken.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	apitoken.DefaultUpdatedAt = apitokenDescUpdatedAt.Default.(func() time.Time)
+	// apitoken.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	apitoken.UpdateDefaultUpdatedAt = apitokenDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// apitokenDescName is the schema descriptor for name field.
+	apitokenDescName := apitokenFields[1].Descriptor()
+	// apitoken.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	apitoken.NameValidator = func() func(string) error {
+		validators := apitokenDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// apitokenDescTokenHash is the schema descriptor for token_hash field.
+	apitokenDescTokenHash := apitokenFields[4].Descriptor()
+	// apitoken.TokenHashValidator is a validator for the "token_hash" field. It is called by the builders before save.
+	apitoken.TokenHashValidator = apitokenDescTokenHash.Validators[0].(func([]byte) error)
+	// apitokenDescDisplay is the schema descriptor for display field.
+	apitokenDescDisplay := apitokenFields[5].Descriptor()
+	// apitoken.DisplayValidator is a validator for the "display" field. It is called by the builders before save.
+	apitoken.DisplayValidator = func() func(string) error {
+		validators := apitokenDescDisplay.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(display string) error {
+			for _, fn := range fns {
+				if err := fn(display); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// apitokenDescID is the schema descriptor for id field.
+	apitokenDescID := apitokenFields[0].Descriptor()
+	// apitoken.DefaultID holds the default value on creation for the id field.
+	apitoken.DefaultID = apitokenDescID.Default.(func() string)
+	// apitoken.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	apitoken.IDValidator = func() func(string) error {
+		validators := apitokenDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	apitokenproductMixin := schema.APITokenProduct{}.Mixin()
+	apitokenproductMixinFields0 := apitokenproductMixin[0].Fields()
+	_ = apitokenproductMixinFields0
+	apitokenproductFields := schema.APITokenProduct{}.Fields()
+	_ = apitokenproductFields
+	// apitokenproductDescTenantID is the schema descriptor for tenant_id field.
+	apitokenproductDescTenantID := apitokenproductMixinFields0[0].Descriptor()
+	// apitokenproduct.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	apitokenproduct.TenantIDValidator = func() func(string) error {
+		validators := apitokenproductDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant_id string) error {
+			for _, fn := range fns {
+				if err := fn(tenant_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// apitokenproductDescAPITokenID is the schema descriptor for api_token_id field.
+	apitokenproductDescAPITokenID := apitokenproductFields[1].Descriptor()
+	// apitokenproduct.APITokenIDValidator is a validator for the "api_token_id" field. It is called by the builders before save.
+	apitokenproduct.APITokenIDValidator = apitokenproductDescAPITokenID.Validators[0].(func(string) error)
+	// apitokenproductDescProductID is the schema descriptor for product_id field.
+	apitokenproductDescProductID := apitokenproductFields[2].Descriptor()
+	// apitokenproduct.ProductIDValidator is a validator for the "product_id" field. It is called by the builders before save.
+	apitokenproduct.ProductIDValidator = apitokenproductDescProductID.Validators[0].(func(string) error)
+	// apitokenproductDescScopeAll is the schema descriptor for scope_all field.
+	apitokenproductDescScopeAll := apitokenproductFields[3].Descriptor()
+	// apitokenproduct.DefaultScopeAll holds the default value on creation for the scope_all field.
+	apitokenproduct.DefaultScopeAll = apitokenproductDescScopeAll.Default.(bool)
+	// apitokenproductDescID is the schema descriptor for id field.
+	apitokenproductDescID := apitokenproductFields[0].Descriptor()
+	// apitokenproduct.DefaultID holds the default value on creation for the id field.
+	apitokenproduct.DefaultID = apitokenproductDescID.Default.(func() string)
+	// apitokenproduct.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	apitokenproduct.IDValidator = func() func(string) error {
+		validators := apitokenproductDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	activationMixin := schema.Activation{}.Mixin()
 	activationMixinFields0 := activationMixin[0].Fields()
 	_ = activationMixinFields0

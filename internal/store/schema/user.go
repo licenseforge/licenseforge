@@ -47,6 +47,8 @@ func (User) Edges() []ent.Edge {
 		// Erasure (ADR-0029) nulls invited_by; it deletes accepted invitations first.
 		edge.To("invitations_sent", Invitation.Type).Annotations(entsql.OnDelete(entsql.SetNull)),
 		edge.To("invitations_accepted", Invitation.Type).Annotations(entsql.OnDelete(entsql.NoAction)),
+		// Tokens belong to the tenant and outlive their creator (ADR-0029).
+		edge.To("api_tokens", APIToken.Type).Annotations(entsql.OnDelete(entsql.SetNull)),
 	}
 }
 

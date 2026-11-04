@@ -9,6 +9,30 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
 
+// The APITokenFunc type is an adapter to allow the use of ordinary
+// function as APIToken mutator.
+type APITokenFunc func(context.Context, *ent.APITokenMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f APITokenFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.APITokenMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.APITokenMutation", m)
+}
+
+// The APITokenProductFunc type is an adapter to allow the use of ordinary
+// function as APITokenProduct mutator.
+type APITokenProductFunc func(context.Context, *ent.APITokenProductMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f APITokenProductFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.APITokenProductMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.APITokenProductMutation", m)
+}
+
 // The ActivationFunc type is an adapter to allow the use of ordinary
 // function as Activation mutator.
 type ActivationFunc func(context.Context, *ent.ActivationMutation) (ent.Value, error)

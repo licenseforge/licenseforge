@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -29,6 +30,7 @@ type UserQuery struct {
 	withMemberships         *MembershipQuery
 	withInvitationsSent     *InvitationQuery
 	withInvitationsAccepted *InvitationQuery
+	withAPITokens           *APITokenQuery
 	modifiers               []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -125,6 +127,28 @@ func (_q *UserQuery) QueryInvitationsAccepted() *InvitationQuery {
 			sqlgraph.From(user.Table, user.FieldID, selector),
 			sqlgraph.To(invitation.Table, invitation.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, user.InvitationsAcceptedTable, user.InvitationsAcceptedColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryAPITokens chains the current query on the "api_tokens" edge.
+func (_q *UserQuery) QueryAPITokens() *APITokenQuery {
+	query := (&APITokenClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(apitoken.Table, apitoken.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.APITokensTable, user.APITokensColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -327,6 +351,7 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withMemberships:         _q.withMemberships.Clone(),
 		withInvitationsSent:     _q.withInvitationsSent.Clone(),
 		withInvitationsAccepted: _q.withInvitationsAccepted.Clone(),
+		withAPITokens:           _q.withAPITokens.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -363,6 +388,17 @@ func (_q *UserQuery) WithInvitationsAccepted(opts ...func(*InvitationQuery)) *Us
 		opt(query)
 	}
 	_q.withInvitationsAccepted = query
+	return _q
+}
+
+// WithAPITokens tells the query-builder to eager-load the nodes that are connected to
+// the "api_tokens" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithAPITokens(opts ...func(*APITokenQuery)) *UserQuery {
+	query := (&APITokenClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAPITokens = query
 	return _q
 }
 
@@ -444,10 +480,11 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [3]bool{
+		loadedTypes = [4]bool{
 			_q.withMemberships != nil,
 			_q.withInvitationsSent != nil,
 			_q.withInvitationsAccepted != nil,
+			_q.withAPITokens != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -489,6 +526,13 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadInvitationsAccepted(ctx, query, nodes,
 			func(n *User) { n.Edges.InvitationsAccepted = []*Invitation{} },
 			func(n *User, e *Invitation) { n.Edges.InvitationsAccepted = append(n.Edges.InvitationsAccepted, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAPITokens; query != nil {
+		if err := _q.loadAPITokens(ctx, query, nodes,
+			func(n *User) { n.Edges.APITokens = []*APIToken{} },
+			func(n *User, e *APIToken) { n.Edges.APITokens = append(n.Edges.APITokens, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -586,6 +630,39 @@ func (_q *UserQuery) loadInvitationsAccepted(ctx context.Context, query *Invitat
 		node, ok := nodeids[*fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "accepted_by" returned %v for node %v`, *fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadAPITokens(ctx context.Context, query *APITokenQuery, nodes []*User, init func(*User), assign func(*User, *APIToken)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(apitoken.FieldCreatedBy)
+	}
+	query.Where(predicate.APIToken(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.APITokensColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.CreatedBy
+		if fk == nil {
+			return fmt.Errorf(`foreign-key "created_by" is nil for node %v`, n.ID)
+		}
+		node, ok := nodeids[*fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "created_by" returned %v for node %v`, *fk, n.ID)
 		}
 		assign(node, n)
 	}

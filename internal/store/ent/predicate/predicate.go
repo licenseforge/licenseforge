@@ -6,6 +6,12 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
+// APIToken is the predicate function for apitoken builders.
+type APIToken func(*sql.Selector)
+
+// APITokenProduct is the predicate function for apitokenproduct builders.
+type APITokenProduct func(*sql.Selector)
+
 // Activation is the predicate function for activation builders.
 type Activation func(*sql.Selector)
 

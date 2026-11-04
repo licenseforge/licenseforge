@@ -596,6 +596,14 @@ func TestIdentityGrants(t *testing.T) {
 		{IdentityRole, "tenants", "slug", "SELECT", true},
 		{IdentityRole, "tenants", "created_at", "SELECT", false},
 		{IdentityRole, "audit_events", "id", "UPDATE", false},
+		{AppRole, "api_tokens", "revoked_at", "INSERT", false},
+		{AppRole, "api_tokens", "last_used_at", "INSERT", false},
+		{AppRole, "api_tokens", "role", "UPDATE", false},
+		{AppRole, "api_tokens", "expires_at", "UPDATE", false},
+		{AppRole, "api_tokens", "revoked_at", "UPDATE", true},
+		{IdentityRole, "api_tokens", "id", "SELECT", false},
+		{AppRole, "api_token_products", "product_id", "UPDATE", false},
+		{IdentityRole, "api_token_products", "id", "SELECT", false},
 	} {
 		var got bool
 		if err := owner.QueryRow(`SELECT has_column_privilege($1, $2, $3, $4)`, g.role, g.table, g.column, g.priv).Scan(&got); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
+	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -168,6 +169,21 @@ func (_c *TenantCreate) AddMemberships(v ...*Membership) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddMembershipIDs(ids...)
+}
+
+// AddAPITokenIDs adds the "api_tokens" edge to the APIToken entity by IDs.
+func (_c *TenantCreate) AddAPITokenIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddAPITokenIDs(ids...)
+	return _c
+}
+
+// AddAPITokens adds the "api_tokens" edges to the APIToken entity.
+func (_c *TenantCreate) AddAPITokens(v ...*APIToken) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAPITokenIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -388,6 +404,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(membership.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.APITokensIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.APITokensTable,
+			Columns: []string{tenant.APITokensColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

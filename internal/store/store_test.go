@@ -381,6 +381,16 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"revoke_only (restrictive)":       `UPDATE licenseforge_app ((revoked_at IS NULL) AND (accepted_at IS NULL)) (revoked_at IS NOT NULL)`,
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
+		"api_tokens": {
+			"use_moves_forward (restrictive)":    `UPDATE licenseforge_app true (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND ((NOT (api_tokens.last_used_at IS DISTINCT FROM o.last_used_at)) OR ((api_tokens.last_used_at >= (clock_timestamp() - '00:05:00'::interval)) AND (api_tokens.last_used_at >= COALESCE(o.last_used_at, '-infinity'::timestamp with time zone)))))))`,
+			"expiry_from_now (restrictive)":      `INSERT licenseforge_app ((expires_at > clock_timestamp()) AND (expires_at <= (clock_timestamp() + '1 year'::interval)) AND ((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))))`,
+			"platform_no_unrevoke (restrictive)": `UPDATE licenseforge_platform (revoked_at IS NULL) true`,
+			"creator_is_member (restrictive)":    `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (api_tokens.tenant_id)::text) AND ((m.user_id)::text = (api_tokens.created_by)::text) AND m.scope_all AND (((m.role)::text = 'owner'::text) OR (((m.role)::text = 'admin'::text) AND ((api_tokens.role)::text <> 'owner'::text))))))`,
+			"not_revoked (restrictive)":          `UPDATE licenseforge_app (revoked_at IS NULL) (((last_used_at IS NOT NULL) OR (revoked_at IS NOT NULL)) AND ((last_used_at IS NULL) OR ((last_used_at <= expires_at) AND (last_used_at <= (clock_timestamp() + '00:05:00'::interval)))) AND ((revoked_at IS NULL) OR ((revoked_at >= (clock_timestamp() - '00:05:00'::interval)) AND (revoked_at <= (clock_timestamp() + '00:05:00'::interval)))))`,
+		},
+		"api_token_products": {
+			"new_token (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM api_tokens t WHERE (((t.id)::text = (api_token_products.api_token_id)::text) AND (t.last_used_at IS NULL) AND (t.revoked_at IS NULL) AND (t.xmin = xid(pg_current_xact_id())))))`,
+		},
 		"invitation_products": {
 			"identity_read":                 `SELECT licenseforge_identity true`,
 			"open_invitation (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM invitations i WHERE (((i.id)::text = (invitation_products.invitation_id)::text) AND (i.accepted_at IS NULL) AND (i.revoked_at IS NULL))))`,
