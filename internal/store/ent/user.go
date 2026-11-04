@@ -52,11 +52,13 @@ type UserEdges struct {
 	InvitationsAccepted []*Invitation `json:"invitations_accepted,omitempty"`
 	// APITokens holds the value of the api_tokens edge.
 	APITokens []*APIToken `json:"api_tokens,omitempty"`
+	// Sessions holds the value of the sessions edge.
+	Sessions []*Session `json:"sessions,omitempty"`
 	// PlatformAdmin holds the value of the platform_admin edge.
 	PlatformAdmin *PlatformAdmin `json:"platform_admin,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [6]bool
 }
 
 // MembershipsOrErr returns the Memberships value or an error if the edge
@@ -95,12 +97,21 @@ func (e UserEdges) APITokensOrErr() ([]*APIToken, error) {
 	return nil, &NotLoadedError{edge: "api_tokens"}
 }
 
+// SessionsOrErr returns the Sessions value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) SessionsOrErr() ([]*Session, error) {
+	if e.loadedTypes[4] {
+		return e.Sessions, nil
+	}
+	return nil, &NotLoadedError{edge: "sessions"}
+}
+
 // PlatformAdminOrErr returns the PlatformAdmin value or an error if the edge
 // was not loaded in eager-loading, or loaded but was not found.
 func (e UserEdges) PlatformAdminOrErr() (*PlatformAdmin, error) {
 	if e.PlatformAdmin != nil {
 		return e.PlatformAdmin, nil
-	} else if e.loadedTypes[4] {
+	} else if e.loadedTypes[5] {
 		return nil, &NotFoundError{label: platformadmin.Label}
 	}
 	return nil, &NotLoadedError{edge: "platform_admin"}
@@ -227,6 +238,11 @@ func (_m *User) QueryInvitationsAccepted() *InvitationQuery {
 // QueryAPITokens queries the "api_tokens" edge of the User entity.
 func (_m *User) QueryAPITokens() *APITokenQuery {
 	return NewUserClient(_m.config).QueryAPITokens(_m)
+}
+
+// QuerySessions queries the "sessions" edge of the User entity.
+func (_m *User) QuerySessions() *SessionQuery {
+	return NewUserClient(_m.config).QuerySessions(_m)
 }
 
 // QueryPlatformAdmin queries the "platform_admin" edge of the User entity.
