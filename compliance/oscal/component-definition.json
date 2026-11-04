@@ -840,7 +840,7 @@
               {
                 "uuid": "7e0de78b-633a-5da2-bbe3-5208649853fc",
                 "control-id": "sa-3",
-                "description": "Every significant decision is an ADR. Changes go through pull requests with required CI checks (no approval required, see SA-10); changes to signing, the license format, authorization or tenant isolation need a maintainer review and tests that fail without the change.",
+                "description": "Every significant decision is an ADR. Changes go through pull requests with required CI checks (no approval required, see SA-10); CONTRIBUTING.md requires a maintainer review and tests that fail without the change for signing, the license format, authorization and tenant isolation (policy; the ruleset doesn't enforce it, see SA-10).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -889,7 +889,7 @@
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
@@ -1105,12 +1105,12 @@
               {
                 "uuid": "e00928a9-27dc-5c89-967b-9fe4649a29e4",
                 "control-id": "sc-13",
-                "description": "Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
+                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "implemented"
+                    "value": "partial"
                   }
                 ],
                 "links": [
