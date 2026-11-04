@@ -19,6 +19,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
@@ -831,4 +832,54 @@ func TestInvitationEndpoints(t *testing.T) {
 	}
 	// Other paths outside a tenant stay 404 for sessions.
 	f.do(t, "POST", Prefix+"/invitations/nope", body, f.session(t, invitee, true)).problem(t, 404, "not_found")
+}
+
+// GET /me/tenants: session only, outside a tenant path; the user's own
+// memberships with role and scope, and nobody else's.
+func TestMyTenants(t *testing.T) {
+	f := setup(t)
+	path := Prefix + "/me/tenants"
+	items := func(r resp) []map[string]any {
+		t.Helper()
+		if r.code != 200 {
+			t.Fatalf("GET %s: %d %s", path, r.code, r.raw)
+		}
+		raw, ok := r.body["items"].([]any)
+		if !ok || len(r.body) != 1 {
+			t.Fatalf("body %s: want only an items array", r.raw)
+		}
+		var out []map[string]any
+		for _, it := range raw {
+			out = append(out, it.(map[string]any))
+		}
+		return out
+	}
+	f.do(t, "GET", path, "").problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path, "", bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path+"?limit=1", "", f.session(t, f.ownerA, false)).problem(t, 400, "invalid_request")
+	f.srv.APIHost = "api.lf.example"
+	f.do(t, "GET", path, "", f.session(t, f.ownerA, false), func(r *http.Request) { r.Host = "api.lf.example" }).problem(t, 401, "unauthenticated")
+	f.srv.APIHost = ""
+
+	want := map[string]any{"tenant_id": f.a.ID, "slug": f.a.Slug, "name": f.a.Name, "role": "owner", "all_products": true, "product_ids": []any{}}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.ownerA, false))); !reflect.DeepEqual(got, []map[string]any{want}) {
+		t.Errorf("owner of a: %v", got)
+	}
+	scoped := items(f.do(t, "GET", path, "", f.session(t, f.scoped, false)))
+	if len(scoped) != 1 || scoped[0]["role"] != "admin" || scoped[0]["all_products"] != false || !reflect.DeepEqual(scoped[0]["product_ids"], []any{f.prodA}) {
+		t.Errorf("scoped admin: %v", scoped)
+	}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.outsider, false))); len(got) != 1 || got[0]["tenant_id"] != f.b.ID {
+		t.Errorf("member of b only: %v", got)
+	}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.user(t, "lonely@example.com"), false))); len(got) != 0 {
+		t.Errorf("no memberships: %v", got)
+	}
+	f.do(t, "POST", path, "", f.session(t, f.ownerA, true)).problem(t, 405, "method_not_allowed")
+	// The handler itself refuses a principal that isn't a tenant-less user.
+	for _, p := range []authz.Principal{{}, {Kind: authz.Token, ID: "tok_1"}, {Kind: authz.User, ID: f.ownerA, TenantID: f.a.ID, Role: authz.Owner}} {
+		if _, err := f.srv.ListMyTenants(authz.WithPrincipal(context.Background(), p), apigen.ListMyTenantsRequestObject{}); err != errUnauthenticated {
+			t.Errorf("principal %+v: %v", p, err)
+		}
+	}
 }

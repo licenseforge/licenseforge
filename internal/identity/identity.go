@@ -112,6 +112,7 @@ type TenantMembership struct {
 	TenantID, TenantSlug, TenantName string
 	Role                             membership.Role
 	ScopeAll                         bool
+	Products                         []string // the scope when not ScopeAll
 }
 
 // Memberships lists the tenants userID belongs to, sorted by slug. Call it
@@ -121,7 +122,7 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		ms, err := tx.Membership.Query().Where(membership.UserID(userID)).
 			Order(membership.ByTenantField(tenant.FieldSlug)).
-			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).All(ctx)
+			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).WithProducts().All(ctx)
 		if err != nil {
 			return err
 		}
@@ -129,8 +130,12 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 			if m.Edges.Tenant == nil { // a tenant this login can't see (the reserved platform tenant): not switchable
 				continue
 			}
-			out = append(out, TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
-				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll})
+			tm := TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
+				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll}
+			for _, p := range m.Edges.Products {
+				tm.Products = append(tm.Products, p.ProductID)
+			}
+			out = append(out, tm)
 		}
 		return nil
 	})
