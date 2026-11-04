@@ -140,10 +140,11 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
-// principal returns ctx's principal if it is well formed and has perm.
-func principal(ctx context.Context, perm Permission) (Principal, error) {
+// wellFormed returns ctx's principal if it has an ID, a tenant, a known kind,
+// a role valid for that kind and a valid scope.
+func wellFormed(ctx context.Context) (Principal, error) {
 	p, ok := FromContext(ctx)
-	if !ok || p.ID == "" || p.TenantID == "" || !p.Scope.valid() || !p.Role.Can(perm) {
+	if !ok || p.ID == "" || p.TenantID == "" || !p.Scope.valid() || !p.Role.Valid() {
 		return Principal{}, ErrDenied
 	}
 	switch p.Kind {
@@ -158,11 +159,21 @@ func principal(ctx context.Context, perm Permission) (Principal, error) {
 	return p, nil
 }
 
-// TenantID returns the tenant ctx's principal acts in, for the RLS tenant.
+// principal returns ctx's principal if it is well formed and has perm.
+func principal(ctx context.Context, perm Permission) (Principal, error) {
+	p, err := wellFormed(ctx)
+	if err != nil || !p.Role.Can(perm) {
+		return Principal{}, ErrDenied
+	}
+	return p, nil
+}
+
+// TenantID returns the tenant ctx's principal acts in, for the RLS tenant. A
+// malformed principal gets no tenant.
 func TenantID(ctx context.Context) (string, error) {
-	p, ok := FromContext(ctx)
-	if !ok || p.TenantID == "" {
-		return "", ErrDenied
+	p, err := wellFormed(ctx)
+	if err != nil {
+		return "", err
 	}
 	return p.TenantID, nil
 }

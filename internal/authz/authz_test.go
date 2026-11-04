@@ -170,9 +170,20 @@ func TestProductsAndTenantID(t *testing.T) {
 	if _, err := TenantID(context.Background()); err == nil {
 		t.Error("TenantID without principal")
 	}
-	p.TenantID = ""
-	if _, err := TenantID(ctxWith(p)); err == nil {
-		t.Error("TenantID with empty tenant")
+	for name, f := range map[string]func(*Principal){
+		"empty tenant":   func(p *Principal) { p.TenantID = "" },
+		"no kind":        func(p *Principal) { p.Kind = "" },
+		"no ID":          func(p *Principal) { p.ID = "" },
+		"bad role":       func(p *Principal) { p.Role = "root" },
+		"bad token role": func(p *Principal) { p.Kind = Token; p.Role = "root" },
+		"sdk user":       func(p *Principal) { p.Role = SDK },
+		"zero scope":     func(p *Principal) { p.Scope = Scope{} },
+	} {
+		q := p
+		f(&q)
+		if _, err := TenantID(ctxWith(q)); err == nil {
+			t.Errorf("TenantID with %s", name)
+		}
 	}
 }
 
