@@ -181,7 +181,7 @@ func TestList(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	f := setup(t)
 	owner := as(f.a, f.ownerA, authz.Owner)
-	m, err := f.s.Update(owner, f.mem[f.viewerA], Change{Role: role(authz.Manager), Scope: &authz.Scope{Products: []string{f.prodA}}}, true)
+	m, _, err := f.s.Update(owner, f.mem[f.viewerA], Change{Role: role(authz.Manager), Scope: &authz.Scope{Products: []string{f.prodA}}}, true)
 	if err != nil || m.Role != membership.RoleManager || m.ScopeAll || len(m.Edges.Products) != 1 {
 		t.Fatalf("update = %+v, %v", m, err)
 	}
@@ -189,7 +189,7 @@ func TestUpdate(t *testing.T) {
 		t.Errorf("audit = %+v", e)
 	}
 	// Back to every product; role unchanged.
-	if m, err = f.s.Update(owner, m.ID, Change{Scope: &authz.Scope{All: true}}, true); err != nil || !m.ScopeAll || len(m.Edges.Products) != 0 || m.Role != membership.RoleManager {
+	if m, _, err = f.s.Update(owner, m.ID, Change{Scope: &authz.Scope{All: true}}, true); err != nil || !m.ScopeAll || len(m.Edges.Products) != 0 || m.Role != membership.RoleManager {
 		t.Fatalf("all products = %+v, %v", m, err)
 	}
 	// Hidden and missing: the same not-found, also for another tenant's member
@@ -203,7 +203,7 @@ func TestUpdate(t *testing.T) {
 		"another tenant's": {owner, f.mem[f.ownerB]},
 		"scoped caller":    {as(f.a, f.scopedA, authz.Admin, f.prodA), f.mem[f.viewerA]},
 	} {
-		if _, err := f.s.Update(c.ctx, c.id, Change{Role: role(authz.Viewer)}, true); !errors.Is(err, ErrNotFound) {
+		if _, _, err := f.s.Update(c.ctx, c.id, Change{Role: role(authz.Viewer)}, true); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -220,7 +220,7 @@ func TestUpdate(t *testing.T) {
 		"viewer, invalid value": {as(f.a, f.viewerA, authz.Viewer), f.mem[f.adminA], Change{Role: role("root")}}, // 403 before 422
 		"token caller":          {authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.Token, ID: ids.APIToken(), TenantID: f.a, Role: authz.Owner, Scope: authz.Scope{All: true}}), f.mem[f.viewerA], Change{Role: role(authz.Admin)}},
 	} {
-		if _, err := f.s.Update(c.ctx, c.id, c.ch, true); !errors.Is(err, authz.ErrDenied) {
+		if _, _, err := f.s.Update(c.ctx, c.id, c.ch, true); !errors.Is(err, authz.ErrDenied) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -239,7 +239,7 @@ func TestUpdate(t *testing.T) {
 		"another tenant's product": {Change{Scope: &authz.Scope{Products: []string{f.prodB}}}, "/product_ids"},
 		"unknown product":          {Change{Scope: &authz.Scope{Products: []string{ids.Product()}}}, "/product_ids"},
 	} {
-		_, err := f.s.Update(owner, f.mem[f.viewerA], c.ch, true)
+		_, _, err := f.s.Update(owner, f.mem[f.viewerA], c.ch, true)
 		var inv *InvalidError
 		if !errors.As(err, &inv) || inv.Field != c.field || !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: %v", name, err)
@@ -253,17 +253,17 @@ func TestUpdate(t *testing.T) {
 func TestLastOwner(t *testing.T) {
 	f := setup(t)
 	owner := as(f.a, f.ownerA, authz.Owner)
-	if _, err := f.s.Update(owner, f.mem[f.owner2A], Change{Role: role(authz.Admin)}, true); err != nil {
+	if _, _, err := f.s.Update(owner, f.mem[f.owner2A], Change{Role: role(authz.Admin)}, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.Update(owner, f.mem[f.ownerA], Change{Role: role(authz.Admin)}, true); !errors.Is(err, ErrLastOwner) {
+	if _, _, err := f.s.Update(owner, f.mem[f.ownerA], Change{Role: role(authz.Admin)}, true); !errors.Is(err, ErrLastOwner) {
 		t.Errorf("demote last owner: %v", err)
 	}
 	if _, err := f.s.Remove(owner, f.mem[f.ownerA], false); !errors.Is(err, ErrLastOwner) {
 		t.Errorf("remove last owner: %v", err)
 	}
 	// Scope changes keep an owner an owner.
-	if _, err := f.s.Update(owner, f.mem[f.ownerA], Change{Scope: &authz.Scope{All: true}}, true); err != nil {
+	if _, _, err := f.s.Update(owner, f.mem[f.ownerA], Change{Scope: &authz.Scope{All: true}}, true); err != nil {
 		t.Errorf("owner scope change: %v", err)
 	}
 }
@@ -277,7 +277,7 @@ func TestLastOwnerConcurrent(t *testing.T) {
 		pairs := [][2]string{{f.ownerA, f.owner2A}, {f.owner2A, f.ownerA}}
 		for i, p := range pairs {
 			wg.Go(func() {
-				_, errs[i] = f.s.Update(as(f.a, p[0], authz.Owner), f.mem[p[1]], Change{Role: role(authz.Admin)}, true)
+				_, _, errs[i] = f.s.Update(as(f.a, p[0], authz.Owner), f.mem[p[1]], Change{Role: role(authz.Admin)}, true)
 			})
 		}
 		wg.Wait()
@@ -295,7 +295,7 @@ func TestLastOwnerConcurrent(t *testing.T) {
 		if promoter == f.ownerA {
 			other = f.owner2A
 		}
-		if _, err := f.s.Update(as(f.a, promoter, authz.Owner), f.mem[other], Change{Role: role(authz.Owner)}, true); err != nil {
+		if _, _, err := f.s.Update(as(f.a, promoter, authz.Owner), f.mem[other], Change{Role: role(authz.Owner)}, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -328,8 +328,8 @@ func TestRemove(t *testing.T) {
 	}
 	// Removal revokes the member's tokens by default, each audited.
 	n, err := f.s.Remove(owner, f.mem[f.adminA], true)
-	if err != nil || n != 1 {
-		t.Fatalf("remove = %d, %v", n, err)
+	if err != nil || len(n) != 1 || n[0] != adminTok.Row.ID {
+		t.Fatalf("remove = %v, %v", n, err)
 	}
 	if f.member(t, f.a, f.mem[f.adminA]) != nil {
 		t.Error("membership still there")
@@ -341,8 +341,8 @@ func TestRemove(t *testing.T) {
 		t.Errorf("removed member's token still works: %v", err)
 	}
 	// Keeping tokens is explicit.
-	if n, err := f.s.Remove(owner, f.mem[f.owner2A], false); err != nil || n != 0 {
-		t.Fatalf("remove keeping tokens = %d, %v", n, err)
+	if n, err := f.s.Remove(owner, f.mem[f.owner2A], false); err != nil || len(n) != 0 {
+		t.Fatalf("remove keeping tokens = %v, %v", n, err)
 	}
 	if _, err := tokens.Authenticate(ctx, f.a, keptTok.Token); err != nil {
 		t.Errorf("kept token: %v", err)
@@ -362,7 +362,7 @@ func TestRemoveRefusesTokensAboveRemover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.Update(as(f.a, f.ownerA, authz.Owner), f.mem[f.owner2A], Change{Role: role(authz.Admin)}, false); err != nil { // keeps the owner token
+	if _, _, err := f.s.Update(as(f.a, f.ownerA, authz.Owner), f.mem[f.owner2A], Change{Role: role(authz.Admin)}, false); err != nil { // keeps the owner token
 		t.Fatal(err)
 	}
 	if _, err := f.s.Remove(as(f.a, f.adminA, authz.Admin), f.mem[f.owner2A], true); !errors.Is(err, authz.ErrDenied) {
@@ -383,8 +383,8 @@ func TestRemoveRefusesTokensAboveRemover(t *testing.T) {
 	if _, err := owner.Exec(`UPDATE api_tokens SET created_at = now() - interval '2 days', expires_at = now() - interval '1 day' WHERE id = $1`, ownerTok.Row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := f.s.Remove(as(f.a, f.adminA, authz.Admin), f.mem[f.owner2A], true); err != nil || n != 0 {
-		t.Errorf("removal with only an expired token above the remover: %d, %v", n, err)
+	if n, err := f.s.Remove(as(f.a, f.adminA, authz.Admin), f.mem[f.owner2A], true); err != nil || len(n) != 0 {
+		t.Errorf("removal with only an expired token above the remover: %v, %v", n, err)
 	}
 }
 
@@ -416,17 +416,17 @@ func TestDemotionCapsTokens(t *testing.T) {
 	viewerOther := mk(authz.Viewer, authz.Scope{Products: []string{other}})
 	owner := as(f.a, f.ownerA, authz.Owner)
 	// Opting out keeps everything.
-	if _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, false); err != nil {
+	if _, _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, false); err != nil {
 		t.Fatal(err)
 	}
 	if !f.tokenActive(t, adminTok) {
 		t.Fatal("opt-out revoked a token")
 	}
-	if _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Admin)}, false); err != nil {
+	if _, _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Admin)}, false); err != nil {
 		t.Fatal(err)
 	}
 	// Role: the admin token goes; viewer and sdk tokens stay.
-	if _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, true); err != nil {
+	if _, _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, true); err != nil {
 		t.Fatal(err)
 	}
 	if e := f.lastEvent(t, f.a); !strings.Contains(e.Details, `"tokens_revoked":1`) || !strings.Contains(e.Details, `"from_scope_all":true`) {
@@ -437,9 +437,25 @@ func TestDemotionCapsTokens(t *testing.T) {
 			t.Errorf("after demotion, token active = %v, want %v", !want, want)
 		}
 	}
-	// Scope: tokens beyond prodA go.
-	if _, err := f.s.Update(owner, f.mem[f.adminA], Change{Scope: &onlyA}, true); err != nil {
+	// A token an earlier change kept stays: only what a change newly
+	// excludes is capped (ADR-0035).
+	if _, _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Admin)}, false); err != nil {
 		t.Fatal(err)
+	}
+	adminTok2 := mk(authz.Admin, allP)
+	if _, revoked, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, false); err != nil || len(revoked) != 0 {
+		t.Fatalf("opt-out: %v, %v", revoked, err)
+	}
+	if _, revoked, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Support)}, true); err != nil || len(revoked) != 0 || !f.tokenActive(t, adminTok2) {
+		t.Errorf("a later change revoked a token kept earlier: %v, %v", revoked, err)
+	}
+	if _, _, err := f.s.Update(owner, f.mem[f.adminA], Change{Role: role(authz.Manager)}, true); err != nil {
+		t.Fatal(err)
+	}
+	// Scope: tokens beyond prodA go, and their IDs are returned.
+	_, revoked, err := f.s.Update(owner, f.mem[f.adminA], Change{Scope: &onlyA}, true)
+	if err != nil || len(revoked) != 3 {
+		t.Fatalf("narrowing revoked %v, %v", revoked, err)
 	}
 	for tok, want := range map[string]bool{viewerAll: false, viewerA: true, sdkAll: false, sdkA: true, viewerOther: false} {
 		if f.tokenActive(t, tok) != want {
@@ -448,22 +464,24 @@ func TestDemotionCapsTokens(t *testing.T) {
 	}
 }
 
-// Capping is all or nothing: if the caller can't revoke a capped token,
-// the demotion is refused and nothing changes.
-func TestDemotionCapRefusedAsAWhole(t *testing.T) {
+// A token an earlier demotion kept (revoke_tokens=false) isn't revoked by a
+// later one: here an owner token above the member's admin role survives a
+// demotion to viewer, which an admin may do. (Capping is all or nothing like
+// removal, but with built-in roles a newly excluded token is always one the
+// caller may revoke: it was within the member's old grant, which the caller
+// may change.)
+func TestDemotionKeepsEarlierOptOut(t *testing.T) {
 	f := setup(t)
 	ownerTok, err := apitokens.Service{DB: f.db}.Create(as(f.a, f.owner2A, authz.Owner), "CI", authz.Owner, authz.Scope{All: true}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.Update(as(f.a, f.ownerA, authz.Owner), f.mem[f.owner2A], Change{Role: role(authz.Admin)}, false); err != nil {
+	if _, _, err := f.s.Update(as(f.a, f.ownerA, authz.Owner), f.mem[f.owner2A], Change{Role: role(authz.Admin)}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.Update(as(f.a, f.adminA, authz.Admin), f.mem[f.owner2A], Change{Role: role(authz.Viewer)}, true); !errors.Is(err, authz.ErrDenied) {
-		t.Errorf("admin caps an owner token: %v", err)
-	}
-	if m := f.member(t, f.a, f.mem[f.owner2A]); m.Role != membership.RoleAdmin || !f.tokenActive(t, ownerTok.Token) {
-		t.Errorf("refused demotion changed something: %s, token active %v", m.Role, f.tokenActive(t, ownerTok.Token))
+	_, revoked, err := f.s.Update(as(f.a, f.adminA, authz.Admin), f.mem[f.owner2A], Change{Role: role(authz.Viewer)}, true)
+	if err != nil || len(revoked) != 0 || !f.tokenActive(t, ownerTok.Token) {
+		t.Errorf("later demotion: revoked %v, %v, token active %v", revoked, err, f.tokenActive(t, ownerTok.Token))
 	}
 }
 
@@ -472,14 +490,14 @@ func TestNullFields(t *testing.T) {
 	owner := as(f.a, f.ownerA, authz.Owner)
 	ch := Change{Scope: &authz.Scope{Products: []string{f.prodA}}, Null: []string{"all_products"}}
 	var inv *InvalidError
-	if _, err := f.s.Update(owner, f.mem[f.viewerA], ch, true); !errors.As(err, &inv) || inv.Field != "/all_products" {
+	if _, _, err := f.s.Update(owner, f.mem[f.viewerA], ch, true); !errors.As(err, &inv) || inv.Field != "/all_products" {
 		t.Errorf("null all_products: %v", err)
 	}
 	// Rights and lookup come first.
-	if _, err := f.s.Update(as(f.a, f.viewerA, authz.Viewer), f.mem[f.adminA], ch, true); !errors.Is(err, authz.ErrDenied) {
+	if _, _, err := f.s.Update(as(f.a, f.viewerA, authz.Viewer), f.mem[f.adminA], ch, true); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("viewer: %v", err)
 	}
-	if _, err := f.s.Update(owner, ids.Membership(), ch, true); !errors.Is(err, ErrNotFound) {
+	if _, _, err := f.s.Update(owner, ids.Membership(), ch, true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing: %v", err)
 	}
 }
@@ -519,7 +537,7 @@ func TestStaleCaller(t *testing.T) {
 			return err
 		}
 		go func() {
-			_, err := f.s.Update(as(f.a, f.owner2A, authz.Owner), f.mem[f.viewerA], Change{Role: role(authz.Owner)}, true)
+			_, _, err := f.s.Update(as(f.a, f.owner2A, authz.Owner), f.mem[f.viewerA], Change{Role: role(authz.Owner)}, true)
 			done <- err
 		}()
 		for i := 0; ; i++ { // until the promotion waits on the lock

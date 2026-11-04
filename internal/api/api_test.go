@@ -688,7 +688,7 @@ func TestMemberEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.do(t, "DELETE", p+"/"+f.mem[f.adminA]+"?revoke_tokens=maybe", "", owner).problem(t, 400, "invalid_request")
-	if r := f.do(t, "DELETE", p+"/"+f.mem[f.adminA], "", owner); r.code != 204 || r.raw != "" {
+	if r := f.do(t, "DELETE", p+"/"+f.mem[f.adminA], "", owner); r.code != 204 || r.raw != "" || r.h.Get("X-Revoked-Token-Ids") != createdByAdmin.Row.ID {
 		t.Fatalf("delete: %d %s", r.code, r.raw)
 	}
 	f.do(t, "GET", p, "", admin).problem(t, 404, "not_found")
@@ -708,17 +708,18 @@ func TestMemberEndpoints(t *testing.T) {
 func TestMemberPatchCapsTokens(t *testing.T) {
 	f := setup(t)
 	owner := f.session(t, f.ownerA, true)
-	mk := func() string {
+	mk := func() apitokens.Created {
 		c, err := f.tokens.Create(authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.User, ID: f.adminA,
 			TenantID: f.a.ID, Role: authz.Admin, Scope: authz.Scope{All: true}}), "CI", authz.Admin, authz.Scope{All: true}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return c.Token
+		return c
 	}
 	p := membersPath(f.a.Slug) + "/" + f.mem[f.adminA]
-	kept := mk()
-	if r := f.do(t, "PATCH", p+"?revoke_tokens=false", `{"role":"manager"}`, owner); r.code != 200 {
+	c := mk()
+	kept := c.Token
+	if r := f.do(t, "PATCH", p+"?revoke_tokens=false", `{"role":"manager"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_token_ids"]) != "[]" {
 		t.Fatalf("patch keeping tokens: %d %s", r.code, r.raw)
 	}
 	if r := f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)); r.code != 200 {
@@ -727,7 +728,7 @@ func TestMemberPatchCapsTokens(t *testing.T) {
 	if r := f.do(t, "PATCH", p, `{"role":"admin"}`, owner); r.code != 200 {
 		t.Fatalf("promote back: %d %s", r.code, r.raw)
 	}
-	if r := f.do(t, "PATCH", p, `{"role":"manager"}`, owner); r.code != 200 {
+	if r := f.do(t, "PATCH", p, `{"role":"manager"}`, owner); r.code != 200 || !reflect.DeepEqual(r.body["revoked_token_ids"], []any{c.Row.ID}) {
 		t.Fatalf("patch: %d %s", r.code, r.raw)
 	}
 	f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)).problem(t, 401, "unauthenticated")

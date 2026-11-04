@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/api/apigen"
@@ -60,19 +61,27 @@ func (s *server) UpdateMember(ctx context.Context, req apigen.UpdateMemberReques
 			c.Scope.Products = *b.ProductIds
 		}
 	}
-	m, err := s.Members.Update(ctx, req.Id, c, req.Params.RevokeTokens == nil || *req.Params.RevokeTokens)
+	m, revoked, err := s.Members.Update(ctx, req.Id, c, req.Params.RevokeTokens == nil || *req.Params.RevokeTokens)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.UpdateMember200JSONResponse(memberView(m)), nil
+	v := memberView(m)
+	return apigen.UpdateMember200JSONResponse{Id: v.Id, UserId: v.UserId, Email: v.Email, Name: v.Name, Role: v.Role,
+		AllProducts: v.AllProducts, ProductIds: v.ProductIds, CreatedAt: v.CreatedAt, RevokedTokenIds: append([]string{}, revoked...)}, nil
 }
 
 func (s *server) RemoveMember(ctx context.Context, req apigen.RemoveMemberRequestObject) (apigen.RemoveMemberResponseObject, error) {
 	revoke := req.Params.RevokeTokens == nil || *req.Params.RevokeTokens
-	if _, err := s.Members.Remove(ctx, req.Id, revoke); err != nil {
+	revoked, err := s.Members.Remove(ctx, req.Id, revoke)
+	if err != nil {
 		return nil, err
 	}
-	return apigen.RemoveMember204Response{}, nil
+	var res apigen.RemoveMember204Response
+	if len(revoked) > 0 { // DELETE answers 204 (ADR-0032): the IDs go in a header
+		ids := strings.Join(revoked, ",")
+		res.Headers.XRevokedTokenIds = &ids
+	}
+	return res, nil
 }
 
 func memberView(m *ent.Membership) apigen.Member {

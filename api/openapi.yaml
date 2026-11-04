@@ -130,10 +130,10 @@ paths:
             schema: { $ref: "#/components/schemas/MemberPatch" }
       responses:
         "200":
-          description: The changed member.
+          description: The changed member, and the tokens the change revoked.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Member" }
+              schema: { $ref: "#/components/schemas/MemberUpdated" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -151,7 +151,12 @@ paths:
           description: Also revoke every active API token the member created, each audited.
           schema: { type: boolean, default: true }
       responses:
-        "204": { description: Removed. }
+        "204":
+          description: Removed.
+          headers:
+            X-Revoked-Token-Ids:
+              description: Comma-separated IDs of the API tokens the removal revoked; absent if none.
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -252,6 +257,16 @@ components:
         all_products: { type: boolean }
         product_ids: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
+    MemberUpdated:
+      allOf:
+        - $ref: "#/components/schemas/Member"
+        - type: object
+          required: [revoked_token_ids]
+          properties:
+            revoked_token_ids:
+              type: array
+              items: { type: string }
+              description: API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
     MemberPage:
       type: object
       required: [items]

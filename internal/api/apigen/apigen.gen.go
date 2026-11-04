@@ -182,6 +182,25 @@ type MemberPatch struct {
 // MemberRole defines model for MemberRole.
 type MemberRole string
 
+// MemberUpdated defines model for MemberUpdated.
+type MemberUpdated struct {
+	AllProducts bool      `json:"all_products"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// Email Verified email
+	Email *string `json:"email"`
+
+	// Id Example: mem_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id         string   `json:"id"`
+	Name       *string  `json:"name"`
+	ProductIds []string `json:"product_ids"`
+
+	// RevokedTokenIds API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
+	RevokedTokenIds []string   `json:"revoked_token_ids"`
+	Role            MemberRole `json:"role"`
+	UserId          string     `json:"user_id"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Stable; clients switch on it. New codes may be added.
@@ -1205,10 +1224,18 @@ type RemoveMemberResponseObject interface {
 	VisitRemoveMemberResponse(w http.ResponseWriter) error
 }
 
+type RemoveMember204ResponseHeaders struct {
+	XRevokedTokenIds *string
+}
+
 type RemoveMember204Response struct {
+	Headers RemoveMember204ResponseHeaders
 }
 
 func (response RemoveMember204Response) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+	if response.Headers.XRevokedTokenIds != nil {
+		w.Header().Set("X-Revoked-Token-Ids", fmt.Sprint(*response.Headers.XRevokedTokenIds))
+	}
 	w.WriteHeader(204)
 	return nil
 }
@@ -1339,7 +1366,7 @@ type UpdateMemberResponseObject interface {
 	VisitUpdateMemberResponse(w http.ResponseWriter) error
 }
 
-type UpdateMember200JSONResponse Member
+type UpdateMember200JSONResponse MemberUpdated
 
 func (response UpdateMember200JSONResponse) VisitUpdateMemberResponse(w http.ResponseWriter) error {
 
