@@ -40,6 +40,8 @@ const (
 	EdgeInvitationsAccepted = "invitations_accepted"
 	// EdgeAPITokens holds the string denoting the api_tokens edge name in mutations.
 	EdgeAPITokens = "api_tokens"
+	// EdgePlatformAdmin holds the string denoting the platform_admin edge name in mutations.
+	EdgePlatformAdmin = "platform_admin"
 	// Table holds the table name of the user in the database.
 	Table = "users"
 	// MembershipsTable is the table that holds the memberships relation/edge.
@@ -70,6 +72,13 @@ const (
 	APITokensInverseTable = "api_tokens"
 	// APITokensColumn is the table column denoting the api_tokens relation/edge.
 	APITokensColumn = "created_by"
+	// PlatformAdminTable is the table that holds the platform_admin relation/edge.
+	PlatformAdminTable = "platform_admins"
+	// PlatformAdminInverseTable is the table name for the PlatformAdmin entity.
+	// It exists in this package in order to avoid circular dependency with the "platformadmin" package.
+	PlatformAdminInverseTable = "platform_admins"
+	// PlatformAdminColumn is the table column denoting the platform_admin relation/edge.
+	PlatformAdminColumn = "user_id"
 )
 
 // Columns holds all SQL columns for user fields.
@@ -227,6 +236,13 @@ func ByAPITokens(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newAPITokensStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByPlatformAdminField orders the results by platform_admin field.
+func ByPlatformAdminField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newPlatformAdminStep(), sql.OrderByField(field, opts...))
+	}
+}
 func newMembershipsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -253,5 +269,12 @@ func newAPITokensStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(APITokensInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, APITokensTable, APITokensColumn),
+	)
+}
+func newPlatformAdminStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(PlatformAdminInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2O, false, PlatformAdminTable, PlatformAdminColumn),
 	)
 }

@@ -13,6 +13,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
 
@@ -205,6 +206,25 @@ func (_c *UserCreate) AddAPITokens(v ...*APIToken) *UserCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAPITokenIDs(ids...)
+}
+
+// SetPlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID.
+func (_c *UserCreate) SetPlatformAdminID(id string) *UserCreate {
+	_c.mutation.SetPlatformAdminID(id)
+	return _c
+}
+
+// SetNillablePlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID if the given value is not nil.
+func (_c *UserCreate) SetNillablePlatformAdminID(id *string) *UserCreate {
+	if id != nil {
+		_c = _c.SetPlatformAdminID(*id)
+	}
+	return _c
+}
+
+// SetPlatformAdmin sets the "platform_admin" edge to the PlatformAdmin entity.
+func (_c *UserCreate) SetPlatformAdmin(v *PlatformAdmin) *UserCreate {
+	return _c.SetPlatformAdminID(v.ID)
 }
 
 // Mutation returns the UserMutation object of the builder.
@@ -430,6 +450,22 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.PlatformAdminIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   user.PlatformAdminTable,
+			Columns: []string{user.PlatformAdminColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(platformadmin.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {
