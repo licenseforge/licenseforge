@@ -406,6 +406,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	}
 	// Global tables (no tenant_id), each with its exact policies (ADR-0029).
 	global := map[string]map[string]string{
+		"platform_admins": {
+			"identity_read": "SELECT licenseforge_identity true",
+			"platform_all":  "ALL licenseforge_platform true true",
+		},
 		"users": {
 			"users_member_of_tenant": `SELECT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.user_id)::text = (users.id)::text) AND ((m.tenant_id)::text = app_tenant_id()))))`,
 			"identity_all":           "ALL licenseforge_identity true true",

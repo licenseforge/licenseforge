@@ -14,6 +14,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
@@ -191,6 +192,25 @@ func (_u *UserUpdate) AddAPITokens(v ...*APIToken) *UserUpdate {
 	return _u.AddAPITokenIDs(ids...)
 }
 
+// SetPlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID.
+func (_u *UserUpdate) SetPlatformAdminID(id string) *UserUpdate {
+	_u.mutation.SetPlatformAdminID(id)
+	return _u
+}
+
+// SetNillablePlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID if the given value is not nil.
+func (_u *UserUpdate) SetNillablePlatformAdminID(id *string) *UserUpdate {
+	if id != nil {
+		_u = _u.SetPlatformAdminID(*id)
+	}
+	return _u
+}
+
+// SetPlatformAdmin sets the "platform_admin" edge to the PlatformAdmin entity.
+func (_u *UserUpdate) SetPlatformAdmin(v *PlatformAdmin) *UserUpdate {
+	return _u.SetPlatformAdminID(v.ID)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
@@ -278,6 +298,12 @@ func (_u *UserUpdate) RemoveAPITokens(v ...*APIToken) *UserUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPITokenIDs(ids...)
+}
+
+// ClearPlatformAdmin clears the "platform_admin" edge to the PlatformAdmin entity.
+func (_u *UserUpdate) ClearPlatformAdmin() *UserUpdate {
+	_u.mutation.ClearPlatformAdmin()
+	return _u
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -553,6 +579,35 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.PlatformAdminCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   user.PlatformAdminTable,
+			Columns: []string{user.PlatformAdminColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(platformadmin.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.PlatformAdminIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   user.PlatformAdminTable,
+			Columns: []string{user.PlatformAdminColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(platformadmin.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{user.Label}
@@ -733,6 +788,25 @@ func (_u *UserUpdateOne) AddAPITokens(v ...*APIToken) *UserUpdateOne {
 	return _u.AddAPITokenIDs(ids...)
 }
 
+// SetPlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID.
+func (_u *UserUpdateOne) SetPlatformAdminID(id string) *UserUpdateOne {
+	_u.mutation.SetPlatformAdminID(id)
+	return _u
+}
+
+// SetNillablePlatformAdminID sets the "platform_admin" edge to the PlatformAdmin entity by ID if the given value is not nil.
+func (_u *UserUpdateOne) SetNillablePlatformAdminID(id *string) *UserUpdateOne {
+	if id != nil {
+		_u = _u.SetPlatformAdminID(*id)
+	}
+	return _u
+}
+
+// SetPlatformAdmin sets the "platform_admin" edge to the PlatformAdmin entity.
+func (_u *UserUpdateOne) SetPlatformAdmin(v *PlatformAdmin) *UserUpdateOne {
+	return _u.SetPlatformAdminID(v.ID)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
@@ -820,6 +894,12 @@ func (_u *UserUpdateOne) RemoveAPITokens(v ...*APIToken) *UserUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPITokenIDs(ids...)
+}
+
+// ClearPlatformAdmin clears the "platform_admin" edge to the PlatformAdmin entity.
+func (_u *UserUpdateOne) ClearPlatformAdmin() *UserUpdateOne {
+	_u.mutation.ClearPlatformAdmin()
+	return _u
 }
 
 // Where appends a list predicates to the UserUpdate builder.
@@ -1118,6 +1198,35 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.PlatformAdminCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   user.PlatformAdminTable,
+			Columns: []string{user.PlatformAdminColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(platformadmin.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.PlatformAdminIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   user.PlatformAdminTable,
+			Columns: []string{user.PlatformAdminColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(platformadmin.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -25,6 +25,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -102,6 +103,7 @@ func checkColumn(t, c string) error {
 			membershipproduct.Table: membershipproduct.ValidColumn,
 			plan.Table:              plan.ValidColumn,
 			planfeature.Table:       planfeature.ValidColumn,
+			platformadmin.Table:     platformadmin.ValidColumn,
 			product.Table:           product.ValidColumn,
 			signingkey.Table:        signingkey.ValidColumn,
 			tenant.Table:            tenant.ValidColumn,

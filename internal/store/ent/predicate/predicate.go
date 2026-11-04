@@ -45,6 +45,9 @@ type Plan func(*sql.Selector)
 // PlanFeature is the predicate function for planfeature builders.
 type PlanFeature func(*sql.Selector)
 
+// PlatformAdmin is the predicate function for platformadmin builders.
+type PlatformAdmin func(*sql.Selector)
+
 // Product is the predicate function for product builders.
 type Product func(*sql.Selector)
 

@@ -165,6 +165,18 @@ func (f PlanFeatureFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value,
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PlanFeatureMutation", m)
 }
 
+// The PlatformAdminFunc type is an adapter to allow the use of ordinary
+// function as PlatformAdmin mutator.
+type PlatformAdminFunc func(context.Context, *ent.PlatformAdminMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PlatformAdminFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PlatformAdminMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PlatformAdminMutation", m)
+}
+
 // The ProductFunc type is an adapter to allow the use of ordinary
 // function as Product mutator.
 type ProductFunc func(context.Context, *ent.ProductMutation) (ent.Value, error)

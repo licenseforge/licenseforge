@@ -18,6 +18,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -1153,6 +1154,36 @@ func init() {
 	// planfeature.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	planfeature.IDValidator = func() func(string) error {
 		validators := planfeatureDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	platformadminFields := schema.PlatformAdmin{}.Fields()
+	_ = platformadminFields
+	// platformadminDescUserID is the schema descriptor for user_id field.
+	platformadminDescUserID := platformadminFields[1].Descriptor()
+	// platformadmin.UserIDValidator is a validator for the "user_id" field. It is called by the builders before save.
+	platformadmin.UserIDValidator = platformadminDescUserID.Validators[0].(func(string) error)
+	// platformadminDescCreatedAt is the schema descriptor for created_at field.
+	platformadminDescCreatedAt := platformadminFields[3].Descriptor()
+	// platformadmin.DefaultCreatedAt holds the default value on creation for the created_at field.
+	platformadmin.DefaultCreatedAt = platformadminDescCreatedAt.Default.(func() time.Time)
+	// platformadminDescID is the schema descriptor for id field.
+	platformadminDescID := platformadminFields[0].Descriptor()
+	// platformadmin.DefaultID holds the default value on creation for the id field.
+	platformadmin.DefaultID = platformadminDescID.Default.(func() string)
+	// platformadmin.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	platformadmin.IDValidator = func() func(string) error {
+		validators := platformadminDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),
