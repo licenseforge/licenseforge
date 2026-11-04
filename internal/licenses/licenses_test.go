@@ -663,7 +663,11 @@ func TestTransitionDoesNotBlockKeyShare(t *testing.T) {
 			return nil
 		})
 	}()
-	<-hold
+	select { // fail fast if the lock holder couldn't take its lock
+	case <-hold:
+	case err := <-done:
+		t.Fatalf("key-share holder: %v", err)
+	}
 	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	_, err = f.s.Suspend(sctx, p, got.License.ID)
 	cancel()
