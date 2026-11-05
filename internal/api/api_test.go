@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -29,6 +31,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 	"licenseforge.io/licenseforge/internal/weblogin"
@@ -920,5 +923,107 @@ func TestMyTenants(t *testing.T) {
 		if _, err := f.srv.ListMyTenants(authz.WithPrincipal(context.Background(), p), apigen.ListMyTenantsRequestObject{}); err != errUnauthenticated {
 			t.Errorf("principal %+v: %v", p, err)
 		}
+	}
+}
+
+// GET /me/tenants never lists the reserved platform tenant, orders a scope's
+// product IDs, and returns at most identity.MaxMemberships, first by slug.
+func TestMyTenantsEdges(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	path := Prefix + "/me/tenants"
+	// Two more products of a, joined in reverse ID order.
+	var prods []string
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		for _, slug := range []string{"p1", "p2"} {
+			p, err := tx.Product.Create().SetTenantID(f.a.ID).SetSlug(slug).SetName(slug).Save(ctx)
+			if err != nil {
+				return err
+			}
+			prods = append(prods, p.ID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(prods)
+	u := f.join(t, f.a.ID, invitation.RoleViewer, f.ownerA, prods[1], prods[0])
+	// Also a member of b and of the platform tenant (direct rows, platform pool).
+	email := "edges-" + storetest.Suffix() + "@example.com"
+	if err := f.db.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		return tx.User.UpdateOneID(u).SetEmail(email).Exec(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tenant := range []string{f.b.ID, audit.PlatformTenant} {
+		if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+			inv, err := tx.Invitation.Create().SetTenantID(tenant).SetEmail(email).SetRole(invitation.RoleViewer).SetScopeAll(true).
+				SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
+				SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx)
+			if err != nil {
+				return err
+			}
+			return tx.Membership.Create().SetTenantID(tenant).SetUserID(u).SetInvitationID(inv.ID).
+				SetRole(membership.RoleViewer).SetScopeAll(true).Exec(ctx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func() []any {
+		t.Helper()
+		r := f.do(t, "GET", path, "", f.session(t, u, false))
+		items, ok := r.body["items"].([]any)
+		if r.code != 200 || !ok {
+			t.Fatalf("GET %s: %d %s", path, r.code, r.raw)
+		}
+		return items
+	}
+	first, second := f.a, f.b
+	if second.Slug < first.Slug {
+		first, second = second, first
+	}
+	items := list()
+	if len(items) != 2 {
+		t.Fatalf("want a and b, not the platform tenant: %v", items)
+	}
+	for i, want := range []*ent.Tenant{first, second} {
+		if got := items[i].(map[string]any); got["tenant_id"] != want.ID {
+			t.Errorf("item %d = %v, want %s (sorted by slug)", i, got, want.Slug)
+		}
+		if items[i].(map[string]any)["tenant_id"] == f.a.ID && fmt.Sprint(items[i].(map[string]any)["product_ids"]) != fmt.Sprint(prods) {
+			t.Errorf("product_ids %v, want sorted %v", items[i].(map[string]any)["product_ids"], prods)
+		}
+	}
+	// Scope rows stored in reverse ID order still come back sorted.
+	w := f.user(t, "rev-"+storetest.Suffix()+"@example.com")
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		wu, err := tx.User.Get(ctx, w)
+		if err != nil {
+			return err
+		}
+		inv, err := tx.Invitation.Create().SetTenantID(f.a.ID).SetEmail(*wu.Email).SetRole(invitation.RoleViewer).SetScopeAll(false).
+			SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
+			SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx)
+		if err != nil {
+			return err
+		}
+		m, err := tx.Membership.Create().SetTenantID(f.a.ID).SetUserID(w).SetInvitationID(inv.ID).
+			SetRole(membership.RoleViewer).SetScopeAll(false).Save(ctx)
+		for _, p := range []string{prods[1], prods[0]} {
+			if err == nil {
+				err = tx.MembershipProduct.Create().SetTenantID(f.a.ID).SetMembershipID(m.ID).SetProductID(p).Exec(ctx)
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do(t, "GET", path, "", f.session(t, w, false)); r.code != 200 || fmt.Sprint(r.body["items"].([]any)[0].(map[string]any)["product_ids"]) != fmt.Sprint(prods) {
+		t.Errorf("reverse-stored scope: %d %s, want %v", r.code, r.raw, prods)
+	}
+	defer func(n int) { identity.MaxMemberships = n }(identity.MaxMemberships)
+	identity.MaxMemberships = 1
+	if items := list(); len(items) != 1 || items[0].(map[string]any)["tenant_id"] != first.ID {
+		t.Errorf("capped at 1: %v, want only %s", items, first.Slug)
 	}
 }
