@@ -175,6 +175,10 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+// TimeFormat is occurred_at as Hash covers it: RFC 3339 in UTC with
+// exactly six fractional digits (the precision PostgreSQL stores).
+const TimeFormat = "2006-01-02T15:04:05.000000Z"
+
 // Hash is the chain hash of e: SHA-256 over a version tag, every field and
 // prev_hash, each length-prefixed so no field content can be read two ways.
 // NULL fields hash as empty (the database refuses empty strings).
@@ -182,7 +186,7 @@ func Hash(e *ent.AuditEvent) []byte {
 	h := sha256.New()
 	for _, f := range []string{
 		"lf-audit-v1", e.ID, e.TenantID, strconv.FormatInt(e.Seq, 10),
-		e.OccurredAt.UTC().Format("2006-01-02T15:04:05.000000Z"),
+		e.OccurredAt.UTC().Format(TimeFormat),
 		string(e.ActorType), deref(e.ActorID), e.Action, deref(e.ObjectType), deref(e.ObjectID),
 		string(e.Outcome), deref(e.SourceIP), deref(e.UserAgent), e.Details, string(e.PrevHash),
 	} {

@@ -80,7 +80,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
-		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Customers: customers.Service{DB: d}, Activations: activations.Service{DB: d, Keys: kr},
+		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Customers: customers.Service{DB: d}, Audit: audit.Log{DB: d}, Activations: activations.Service{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
@@ -207,8 +207,8 @@ func (f *fixture) do(t *testing.T, method, path, body string, opts ...opt) resp 
 	f.srv.ServeHTTP(rec, r)
 	out := resp{code: rec.Code, h: rec.Header(), raw: rec.Body.String()}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out.body)
-	if out.h.Get("X-Request-Id") == "" || out.h.Get("Cache-Control") != "no-store" {
-		t.Errorf("%s %s: X-Request-Id %q, Cache-Control %q", method, path, out.h.Get("X-Request-Id"), out.h.Get("Cache-Control"))
+	if out.h.Get("X-Request-Id") == "" || out.h.Get("Cache-Control") != "no-store" || out.h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("%s %s: X-Request-Id %q, Cache-Control %q, X-Content-Type-Options %q", method, path, out.h.Get("X-Request-Id"), out.h.Get("Cache-Control"), out.h.Get("X-Content-Type-Options"))
 	}
 	return out
 }

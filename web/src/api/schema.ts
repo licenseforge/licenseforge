@@ -415,6 +415,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+         * @description Needs audit:read on every product (owners and admins). Pages run
+         *     by `seq`, the chain's order: newest first by default; with
+         *     `after_seq`, oldest first from the entry after it (self-export:
+         *     pass the last `seq` you hold). Each entry carries `prev_hash` and
+         *     `hash` so the chain can be checked: each entry's `prev_hash` is the
+         *     previous entry's `hash` (32 zero bytes for seq 1), and `hash` is
+         *     computed from the response alone, as described on
+         *     AuditEvent.hash. Reading is audited as `audit_event.read`, at most
+         *     once per reader per 15 minutes.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/tenants": {
         parameters: {
             query?: never;
@@ -806,6 +837,55 @@ export interface components {
         };
         ActivationPage: {
             items: components["schemas"]["Activation"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        /** @description One audit entry, the fields the SIEM export carries (ADR-0036). */
+        AuditEvent: {
+            /** @example aud_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            tenant_id: string;
+            /**
+             * Format: int64
+             * @description 1, 2, … in the tenant's chain; retention removes a prefix.
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers.
+             */
+            occurred_at: string;
+            /** @enum {string} */
+            actor_type: "user" | "token" | "platform" | "system";
+            actor_id: string | null;
+            /** @example license.issue */
+            action: string;
+            object_type: string | null;
+            object_id: string | null;
+            /** @enum {string} */
+            outcome: "success" | "failure" | "denied";
+            source_ip: string | null;
+            user_agent: string | null;
+            details: {
+                [key: string]: unknown;
+            };
+            /** @description Hex; the previous entry's hash (zeros for seq 1). */
+            prev_hash: string;
+            /**
+             * @description Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+             *     as its length in bytes (4 bytes, big-endian unsigned) followed by
+             *     its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+             *     decimal), `occurred_at` (exactly as sent), `actor_type`,
+             *     `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+             *     `source_ip`, `user_agent`, `details` (the JSON text exactly as
+             *     sent, byte for byte: take it from the raw response, don't
+             *     re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+             *     A null field is the empty string (stored values are never empty).
+             */
+            hash: string;
+        };
+        AuditEventPage: {
+            items: components["schemas"]["AuditEvent"][];
             /** @description Absent on the last page. */
             next_cursor?: string;
         };
@@ -1855,6 +1935,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Activation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Oldest first, from the entry after this seq (0: from the start). Not with cursor. */
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
                 };
             };
             400: components["responses"]["Problem"];
