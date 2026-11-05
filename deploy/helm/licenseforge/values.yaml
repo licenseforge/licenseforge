@@ -75,8 +75,7 @@ audit:
     # OTLP logs over HTTP with the JSON encoding. Delivered only on a 2xx that
     # rejects no record. Empty endpoint: no export.
     otlp:
-      endpoint: ""        # e.g. https://otel-collector.monitoring:4318/v1/logs
-      port: 4318          # the endpoint's port, for the NetworkPolicy
+      endpoint: ""        # e.g. https://otel-collector.monitoring:4318/v1/logs (egress port taken from it; 443 if none)
       caSecret: ""        # Secret with ca.crt; empty: system roots
       clientSecret: ""    # kubernetes.io/tls Secret for mTLS; empty: no client cert
       headersSecret: ""   # Secret with key headers: k=v,k2=v2 (e.g. an API key)

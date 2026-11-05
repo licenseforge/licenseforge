@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -42,14 +43,15 @@ type OTLP struct {
 
 // NewOTLP checks c and its files; errors stop the server at start.
 func NewOTLP(c OTLPConfig) (*OTLP, error) {
+	// Errors never echo the endpoint: a mistyped one may carry a secret.
 	u, err := url.Parse(c.Endpoint)
-	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
-		return nil, fmt.Errorf("otlp: endpoint %q: want https://host[:port]/v1/logs", c.Endpoint)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return nil, errors.New("otlp: endpoint: want https://host[:port]/path, without userinfo, query or fragment")
 	}
 	ip := net.ParseIP(u.Hostname())
 	loopback := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
 	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
-		return nil, fmt.Errorf("otlp: endpoint %q must be https (http only on loopback)", c.Endpoint)
+		return nil, fmt.Errorf("otlp: endpoint %s://%s must be https (http only on loopback)", u.Scheme, u.Host)
 	}
 	if (c.CertFile == "") != (c.KeyFile == "") {
 		return nil, errors.New("otlp: a client certificate needs both the certificate and the key")
@@ -61,8 +63,9 @@ func NewOTLP(c OTLPConfig) (*OTLP, error) {
 		}
 		k, v, ok := strings.Cut(kv, "=")
 		k = strings.TrimSpace(k)
-		if v, err = url.QueryUnescape(strings.TrimSpace(v)); !ok || k == "" || err != nil || strings.ContainsAny(k+v, "\r\n") {
-			return nil, errors.New("otlp: headers: want k=v,k2=v2")
+		// PathUnescape: '+' stays '+' (API keys often contain it).
+		if v, err = url.PathUnescape(strings.TrimSpace(v)); !ok || err != nil || !headerName(k) || !headerValue(v) {
+			return nil, errors.New("otlp: headers: want k=v,k2=v2 with token names and values without control characters")
 		}
 		o.headers.Add(k, v)
 	}
@@ -78,6 +81,31 @@ func NewOTLP(c OTLPConfig) (*OTLP, error) {
 		}
 	}
 	return o, nil
+}
+
+// headerName reports whether s is an RFC 7230 token.
+func headerName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		alnum := c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		if !alnum && strings.IndexByte("!#$%&'*+-.^_`|~", c) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// headerValue reports whether s has no control characters (HTAB allowed).
+func headerValue(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 && c != '\t' || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func (o *OTLP) tlsConfig() (*tls.Config, error) {
@@ -98,7 +126,8 @@ func (o *OTLP) Send(ctx context.Context, batch []Entry) error {
 	// A client per batch: the CA and client certificate are read fresh, and
 	// no connection outlives the batch. No redirects: a 3xx isn't delivery.
 	client := &http.Client{
-		Transport:     &http.Transport{TLSClientConfig: cfg, Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true},
+		// No proxy, like syslog: the collector is reached directly (NetworkPolicy egress).
+		Transport:     &http.Transport{TLSClientConfig: cfg, Proxy: nil, ForceAttemptHTTP2: true},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	defer client.CloseIdleConnections()
@@ -112,7 +141,7 @@ func (o *OTLP) Send(ctx context.Context, batch []Entry) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("otlp: %w", err)
+		return fmt.Errorf("otlp: %s://%s: %w", o.url.Scheme, o.url.Host, errors.Unwrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	rb, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -122,17 +151,22 @@ func (o *OTLP) Send(ctx context.Context, batch []Entry) error {
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("otlp: collector answered %s", resp.Status)
 	}
-	// 2xx: delivered unless the collector rejected records (OTLP partial success).
+	// 2xx: delivered if the body is empty, or is an OTLP JSON response that
+	// rejects no record (partial success). Anything else isn't proof.
+	if len(bytes.TrimSpace(rb)) == 0 {
+		return nil
+	}
+	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		return fmt.Errorf("otlp: collector answered %s with a non-JSON body", resp.Status)
+	}
 	var r struct {
 		PartialSuccess struct {
 			RejectedLogRecords json.Number `json:"rejectedLogRecords"`
 			ErrorMessage       string      `json:"errorMessage"`
 		} `json:"partialSuccess"`
 	}
-	if len(bytes.TrimSpace(rb)) > 0 && strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
-		if err := json.Unmarshal(rb, &r); err != nil {
-			return fmt.Errorf("otlp: response: %w", err)
-		}
+	if err := json.Unmarshal(rb, &r); err != nil {
+		return fmt.Errorf("otlp: response: %w", err)
 	}
 	if n := r.PartialSuccess.RejectedLogRecords.String(); n != "" && n != "0" {
 		return fmt.Errorf("otlp: collector rejected %s of %d records: %s", n, len(batch), r.PartialSuccess.ErrorMessage)

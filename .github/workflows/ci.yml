@@ -135,7 +135,8 @@ jobs:
             grep -qF -- "$want" <<<"$d" || { echo "otlp Deployment: missing $want"; exit 1; }
           done
           helm template t . $s $ot --set 'audit.export.otlp.to[0].ipBlock.cidr=198.51.100.0/24' --show-only templates/networkpolicy.yaml | grep -A3 -F -- '- ports: [{port: 4318, protocol: TCP}]' | grep -qF 'cidr: 198.51.100.0/24' || { echo "otlp egress not narrowed"; exit 1; }
-          for bad in audit.export.otlp.endpoint=http://otel.example/v1/logs audit.export.otlp.port=0 audit.export.otlp.typo=1; do
+          helm template t . $s --set audit.export.otlp.endpoint=https://otel.example/v1/logs --show-only templates/networkpolicy.yaml | grep -qF -- '- ports: [{port: 443, protocol: TCP}]' || { echo "otlp egress port not derived (443)"; exit 1; }
+          for bad in audit.export.otlp.endpoint=http://otel.example/v1/logs 'audit.export.otlp.endpoint=https://otel.example/v1/logs?k=v' audit.export.otlp.port=4318 audit.export.otlp.typo=1; do
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           for bad in audit.export.syslog.port=0 audit.export.syslog.port=null 'audit.export.syslog.host=a b' audit.export.syslog.typo=1; do

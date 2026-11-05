@@ -72,8 +72,7 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "endpoint": {"type": "string", "pattern": "^(https://[^\\s/@]+/[^\\s]*)?$"},
-                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "endpoint": {"type": "string", "pattern": "^(https://[^\\s/@?#]+/[^\\s?#]*)?$"},
                 "caSecret": {"type": "string"},
                 "clientSecret": {"type": "string"},
                 "headersSecret": {"type": "string"},

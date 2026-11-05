@@ -92,9 +92,11 @@ URL, or without a port.
   entry as OTLP logs over HTTP with the JSON encoding (attributes `lf.audit.*`,
   including seq, prev_hash and hash). `caSecret`, `clientSecret` (mTLS) and
   `headersSecret` (key `headers`, e.g. `authorization=Bearer%20…`) are
-  optional; set `port` to the endpoint's port for the NetworkPolicy. A batch
-  counts as delivered only on a 2xx that rejects no record; anything else is
-  retried, visible as export failures and lag.
+  optional; the NetworkPolicy egress port is the endpoint's (443 if it names
+  none). No HTTP proxy is used (as for syslog): allow the collector itself.
+  A batch counts as delivered only on a 2xx response with an empty body or an
+  OTLP JSON body that rejects no record; anything else is retried, visible as
+  export failures and lag.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;
