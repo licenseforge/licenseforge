@@ -8,9 +8,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 - Dashboard overview at `/t/{slug}` (ADR-0020).
-  - Licenses by status and active customers. The API has no totals (ADR-0032), so the counts page through the lists, stop at 2,000 and show `2,000+` beyond. The customers count is only for callers who see every product.
+  - Licenses by status and active customers, from one `GET /summary` request. The customers tile appears only when the summary includes customers.
   - The newest licenses, with product and customer names.
   - Activations, failures and recent audit activity wait for their APIs.
+- `GET /api/v1/tenants/{tenant}/summary` (ADR-0020, ADR-0032): exact counts for the dashboard overview.
+  - Licenses by status (one GROUP BY under RLS), in the caller's product scope.
+  - Active customers, present only for callers with `customer:read` on every product.
+  - Each counter is an object, so counters (for example activations) can be added without breaking clients. Lists still carry no totals.
+  - `licenses.Service.Counts` and `customers.Service.CountActive`.
 - Dashboard licenses screen at `/t/{slug}/licenses` (ADR-0020).
   - The list filters by product, customer and status, and shows key hints, never keys.
   - The details show the entitlement snapshot and dates. Suspend and revoke ask for confirmation, and revoke says it is final; reinstate doesn't ask.

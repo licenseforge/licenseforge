@@ -182,6 +182,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Exact counts for the dashboard overview, within the caller's scope.
+         * @description Needs license:read. License counts cover the products the caller
+         *     can see: a product-scoped caller gets the counts of its products.
+         *     `customers` is present only for callers with customer:read on every
+         *     product (customers are tenant-wide), and absent otherwise.
+         *
+         *     Lists carry no totals (ADR-0032); this resource is where counts
+         *     live. More counters (for example activations) may be added as new
+         *     members; clients must ignore members they don't know.
+         */
+        get: operations["getSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses": {
         parameters: {
             query?: never;
@@ -609,6 +639,26 @@ export interface components {
             last_used_at: string | null;
             /** Format: date-time */
             revoked_at: string | null;
+        };
+        /** @description Each counter is an object, so a counter can gain members and new counters can be added without breaking clients. */
+        Summary: {
+            /** @description Licenses by status, in the caller's product scope. */
+            licenses: {
+                /** Format: int64 */
+                active: number;
+                /** Format: int64 */
+                suspended: number;
+                /** Format: int64 */
+                revoked: number;
+            };
+            /** @description Present only for callers with customer:read on every product. */
+            customers?: {
+                /**
+                 * Format: int64
+                 * @description Customers that aren't archived.
+                 */
+                active: number;
+            };
         };
         /** @enum {string} */
         LicenseStatus: "active" | "suspended" | "revoked";
@@ -1225,6 +1275,33 @@ export interface operations {
             403: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    getSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Summary"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listLicenses: {
