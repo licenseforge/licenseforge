@@ -83,7 +83,11 @@ URL, or without a port.
   on the entry `id`, and alert when a chain's `seq` doesn't follow on or
   `prev_hash` isn't the previous `hash`. The collector must answer the
   sender's TLS `close_notify` with its own (RFC 5425 §5.3): a batch counts as
-  delivered only then. Narrow the egress with `audit.export.syslog.to`.
+  delivered only then. A collector that closes without it gets every batch resent
+  indefinitely; that shows as `licenseforge_audit_export_failures_total` and
+  growing `licenseforge_audit_export_lag_seconds`. Certificates are re-read
+  for every batch, so renewed Secrets apply without a restart. Messages over
+  8 KB (RFC 5425's minimum) are sent but logged, as a collector may truncate them. Narrow the egress with `audit.export.syslog.to`.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
@@ -83,6 +84,7 @@ type collectorOpts struct {
 	mtls     bool
 	maxTLS   uint16
 	noNotify bool // close the TCP connection without close_notify
+	appData  bool // send 2 bytes of application data, then close without close_notify
 	hang     bool // never close
 }
 
@@ -151,6 +153,9 @@ func startCollector(t *testing.T, p pki, o collectorOpts) *collector {
 				switch {
 				case o.hang:
 					time.Sleep(5 * time.Second)
+				case o.appData:
+					_, _ = conn.Write([]byte("ok"))
+					_ = raw.Close()
 				case o.noNotify:
 					_ = raw.Close()
 				default:
@@ -219,13 +224,14 @@ func TestSyslogRefuses(t *testing.T) {
 		opts collectorOpts
 		cfg  func(SyslogConfig) SyslogConfig
 	}{
-		"untrusted collector":      {collectorOpts{}, func(c SyslogConfig) SyslogConfig { c.CAFile = ""; return c }},
-		"wrong server name":        {collectorOpts{}, func(c SyslogConfig) SyslogConfig { c.ServerName = "siem.example"; return c }},
-		"TLS 1.1 collector":        {collectorOpts{maxTLS: tls.VersionTLS11}, func(c SyslogConfig) SyslogConfig { return c }},
-		"mTLS without a cert":      {collectorOpts{mtls: true}, func(c SyslogConfig) SyslogConfig { c.CertFile, c.KeyFile = "", ""; return c }},
-		"no close_notify back":     {collectorOpts{noNotify: true}, func(c SyslogConfig) SyslogConfig { return c }},
-		"no close_notify, TLS 1.2": {collectorOpts{noNotify: true, maxTLS: tls.VersionTLS12}, func(c SyslogConfig) SyslogConfig { return c }},
-		"collector never closes":   {collectorOpts{hang: true}, func(c SyslogConfig) SyslogConfig { return c }},
+		"untrusted collector":              {collectorOpts{}, func(c SyslogConfig) SyslogConfig { c.CAFile = ""; return c }},
+		"wrong server name":                {collectorOpts{}, func(c SyslogConfig) SyslogConfig { c.ServerName = "siem.example"; return c }},
+		"TLS 1.1 collector":                {collectorOpts{maxTLS: tls.VersionTLS11}, func(c SyslogConfig) SyslogConfig { return c }},
+		"mTLS without a cert":              {collectorOpts{mtls: true}, func(c SyslogConfig) SyslogConfig { c.CertFile, c.KeyFile = "", ""; return c }},
+		"2 bytes of data, no close_notify": {collectorOpts{appData: true}, func(c SyslogConfig) SyslogConfig { return c }},
+		"no close_notify back":             {collectorOpts{noNotify: true}, func(c SyslogConfig) SyslogConfig { return c }},
+		"no close_notify, TLS 1.2":         {collectorOpts{noNotify: true, maxTLS: tls.VersionTLS12}, func(c SyslogConfig) SyslogConfig { return c }},
+		"collector never closes":           {collectorOpts{hang: true}, func(c SyslogConfig) SyslogConfig { return c }},
 	} {
 		col := startCollector(t, p, c.opts)
 		cfg := c.cfg(ok)
@@ -243,12 +249,19 @@ func TestSyslogRefuses(t *testing.T) {
 		}
 	}
 	for name, cfg := range map[string]SyslogConfig{
-		"no port":         {Addr: "siem.example"},
-		"cert, no key":    {Addr: "siem.example:6514", CertFile: p.clientCert},
-		"bad CA file":     {Addr: "siem.example:6514", CAFile: p.clientKey},
-		"missing CA file": {Addr: "siem.example:6514", CAFile: filepath.Join(p.dir, "nope")},
-		"bad SD-ID":       {Addr: "siem.example:6514", SDID: `a b@1`},
-		"SD-ID, no PEN":   {Addr: "siem.example:6514", SDID: `audit`},
+		"no port":               {Addr: "siem.example"},
+		"cert, no key":          {Addr: "siem.example:6514", CertFile: p.clientCert},
+		"bad CA file":           {Addr: "siem.example:6514", CAFile: p.clientKey},
+		"missing CA file":       {Addr: "siem.example:6514", CAFile: filepath.Join(p.dir, "nope")},
+		"bad SD-ID":             {Addr: "siem.example:6514", SDID: `a b@1`},
+		"SD-ID, no PEN":         {Addr: "siem.example:6514", SDID: `audit`},
+		"SD-ID, PEN not digits": {Addr: "siem.example:6514", SDID: `a@x1`},
+		"SD-ID, trailing dot":   {Addr: "siem.example:6514", SDID: `a@1.`},
+		"SD-ID, no name":        {Addr: "siem.example:6514", SDID: `@1`},
+		"SD-ID, two @":          {Addr: "siem.example:6514", SDID: `a@b@1`},
+		"SD-ID with =":          {Addr: "siem.example:6514", SDID: `a=b@1`},
+		"SD-ID with ]":          {Addr: "siem.example:6514", SDID: `a]b@1`},
+		"SD-ID over 32":         {Addr: "siem.example:6514", SDID: strings.Repeat("a", 28) + "@12345"},
 	} {
 		if _, err := NewSyslog(cfg); err == nil {
 			t.Errorf("NewSyslog accepted %s", name)
@@ -294,5 +307,63 @@ func TestSyslogExport(t *testing.T) {
 	}
 	if seq, claimed := cursorSeq(t, name2, tn); seq != 0 || claimed {
 		t.Errorf("cursor %d claimed=%v after a refused batch", seq, claimed)
+	}
+}
+
+func TestSyslogSDIDs(t *testing.T) {
+	for _, id := range []string{"licenseforge@32473", "a@1.2.3", "audit-log@12345", strings.Repeat("a", 26) + "@12345"} {
+		if _, err := NewSyslog(SyslogConfig{Addr: "siem.example:6514", SDID: id}); err != nil {
+			t.Errorf("SD-ID %q refused: %v", id, err)
+		}
+	}
+}
+
+// Rotated certificates (renewed Secrets) are used without a restart: the CA
+// file is read for every batch, the client certificate at every handshake.
+func TestSyslogPicksUpRotatedCertificates(t *testing.T) {
+	p, q := newPKI(t), newPKI(t)
+	dir := t.TempDir()
+	ca, cert, key := filepath.Join(dir, "ca.crt"), filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+	install := func(k pki) {
+		for src, dst := range map[string]string{k.caFile: ca, k.clientCert: cert, k.clientKey: key} {
+			b, err := os.ReadFile(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dst, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	install(p)
+	cp, cq := startCollector(t, p, collectorOpts{mtls: true}), startCollector(t, q, collectorOpts{mtls: true})
+	s, err := NewSyslog(SyslogConfig{Addr: cp.addr, CAFile: ca, CertFile: cert, KeyFile: key, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Send(context.Background(), []Entry{entry(1, `{}`)}); err != nil {
+		t.Fatalf("before rotation: %v", err)
+	}
+	install(q) // both the collector's CA and our client certificate change
+	s.addr = cq.addr
+	if err := s.Send(context.Background(), []Entry{entry(2, `{}`)}); err != nil || len(cq.messages()) != 1 {
+		t.Errorf("after rotation: %v, %d messages", err, len(cq.messages()))
+	}
+}
+
+func TestSyslogWarnsAboutLargeMessages(t *testing.T) {
+	p := newPKI(t)
+	c := startCollector(t, p, collectorOpts{})
+	var logs strings.Builder
+	s, err := NewSyslog(SyslogConfig{Addr: c.addr, CAFile: p.caFile, Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := entry(1, `{"note":"`+strings.Repeat("x", 9000)+`"}`)
+	if err := s.Send(context.Background(), []Entry{big, entry(2, `{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(logs.String(), "over 8 KB") != 1 {
+		t.Errorf("log: %s", logs.String())
 	}
 }
