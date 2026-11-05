@@ -122,3 +122,37 @@ func TestCustomerEndpoints(t *testing.T) {
 	}
 	f.do(t, "POST", p+"/"+id+"/archive", "", mgr).problem(t, 409, "invalid_state")
 }
+
+func TestProductArchiveEndpoint(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/products"
+	other := f.do(t, "POST", p, `{"slug":"cache","name":"Cache"}`, owner).body["id"].(string)
+	scoped := f.session(t, f.scoped, true) // admin of prodA only
+	f.do(t, "POST", p+"/"+f.prodA+"/archive", "", f.session(t, f.join(t, f.a.ID, invitation.RoleManager, f.ownerA), true)).problem(t, 403, "forbidden")
+	missing := f.do(t, "POST", p+"/"+ids.Product()+"/archive", "", owner).problem(t, 404, "not_found")
+	if got := f.do(t, "POST", p+"/"+other+"/archive", "", scoped).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+		t.Errorf("hidden: %v, missing %v", got, missing)
+	}
+	if r := f.do(t, "POST", p+"/"+f.prodA+"/archive", "", scoped); r.code != 200 || r.body["archived_at"] == nil {
+		t.Fatalf("archive: %d %s", r.code, r.raw)
+	}
+	f.do(t, "POST", p+"/"+f.prodA+"/archive", "", owner).problem(t, 409, "invalid_state")
+	ids := func(q string) []any {
+		var out []any
+		for _, it := range f.do(t, "GET", p+q, "", owner).body["items"].([]any) {
+			out = append(out, it.(map[string]any)["id"])
+		}
+		return out
+	}
+	if got := ids(""); !reflect.DeepEqual(got, []any{other, f.prodA}) {
+		t.Errorf("all: %v", got)
+	}
+	if got := ids("?archived=false"); !reflect.DeepEqual(got, []any{other}) {
+		t.Errorf("active: %v", got)
+	}
+	if got := ids("?archived=true"); !reflect.DeepEqual(got, []any{f.prodA}) {
+		t.Errorf("archived: %v", got)
+	}
+	f.do(t, "GET", p+"?archived=maybe", "", owner).problem(t, 400, "invalid_request")
+}

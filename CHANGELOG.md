@@ -26,6 +26,7 @@ All notable changes to this project are documented here. The format follows [Kee
   - Active customers, present only for callers with `customer:read` on every product.
   - Each counter is an object, so counters (for example activations) can be added without breaking clients. Lists still carry no totals.
   - `licenses.Service.Counts` and `customers.Service.CountActive`.
+- Product archive (ADR-0015): `products.archived_at` (migrations `20261105051200_product_archive.sql` and `…01_product_archive_security.sql`: the serving pools may set it; still no DELETE), `POST /tenants/{tenant}/products/{id}/archive` (`catalog:write` on the product; once, then 409 `invalid_state`; audited), `?archived=` on the product list. Archive is one-way at the database clock (restrictive `archive_once` policy: no un-archive, no back- or future-dating; rename still works), and the exact product grants are pinned by a test. No new license on an archived product (422 on `/product_id`; issue locks the product, so a concurrent archive waits); its existing licenses and activations keep working.
 - Dashboard licenses screen at `/t/{slug}/licenses` (ADR-0020).
   - The list filters by product, customer and status, and shows key hints, never keys.
   - The details show the entitlement snapshot and dates. Suspend and revoke ask for confirmation, and revoke says it is final; reinstate doesn't ask.

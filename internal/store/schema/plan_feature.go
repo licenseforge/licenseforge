@@ -17,10 +17,14 @@ import (
 // belong to the same product (and tenant) and that limit_value matches the
 // feature's type.
 //
-// Lock contract: anything that inserts, updates or deletes plan features must
-// first lock the plan row FOR UPDATE in the same transaction. Issuing reads
-// the plan FOR SHARE (internal/licenses), so a license never snapshots half
-// of a plan edit.
+// Lock contract, product row first: anything that inserts, updates or
+// deletes plan features locks the product FOR SHARE, then the plan row FOR
+// UPDATE, in the same transaction. Issuing takes the product FOR SHARE, then
+// the plan, customer and features FOR SHARE, then the audit lock
+// (internal/licenses), so a license never snapshots half of a plan edit;
+// archiving or renaming a product takes it FOR UPDATE (internal/catalog).
+// Creating a plan or feature takes the product FOR SHARE and refuses an
+// archived product.
 type PlanFeature struct{ ent.Schema }
 
 func (PlanFeature) Mixin() []ent.Mixin { return []ent.Mixin{TenantScoped{}, Timestamps{}} }

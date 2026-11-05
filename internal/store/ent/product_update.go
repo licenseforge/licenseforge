@@ -51,6 +51,26 @@ func (_u *ProductUpdate) SetNillableName(v *string) *ProductUpdate {
 	return _u
 }
 
+// SetArchivedAt sets the "archived_at" field.
+func (_u *ProductUpdate) SetArchivedAt(v time.Time) *ProductUpdate {
+	_u.mutation.SetArchivedAt(v)
+	return _u
+}
+
+// SetNillableArchivedAt sets the "archived_at" field if the given value is not nil.
+func (_u *ProductUpdate) SetNillableArchivedAt(v *time.Time) *ProductUpdate {
+	if v != nil {
+		_u.SetArchivedAt(*v)
+	}
+	return _u
+}
+
+// ClearArchivedAt clears the value of the "archived_at" field.
+func (_u *ProductUpdate) ClearArchivedAt() *ProductUpdate {
+	_u.mutation.ClearArchivedAt()
+	return _u
+}
+
 // AddFeatureIDs adds the "features" edge to the Feature entity by IDs.
 func (_u *ProductUpdate) AddFeatureIDs(ids ...string) *ProductUpdate {
 	_u.mutation.AddFeatureIDs(ids...)
@@ -231,6 +251,12 @@ func (_u *ProductUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(product.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.ArchivedAt(); ok {
+		_spec.SetField(product.FieldArchivedAt, field.TypeTime, value)
+	}
+	if _u.mutation.ArchivedAtCleared() {
+		_spec.ClearField(product.FieldArchivedAt, field.TypeTime)
+	}
 	if _u.mutation.FeaturesCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -403,6 +429,26 @@ func (_u *ProductUpdateOne) SetNillableName(v *string) *ProductUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
 	}
+	return _u
+}
+
+// SetArchivedAt sets the "archived_at" field.
+func (_u *ProductUpdateOne) SetArchivedAt(v time.Time) *ProductUpdateOne {
+	_u.mutation.SetArchivedAt(v)
+	return _u
+}
+
+// SetNillableArchivedAt sets the "archived_at" field if the given value is not nil.
+func (_u *ProductUpdateOne) SetNillableArchivedAt(v *time.Time) *ProductUpdateOne {
+	if v != nil {
+		_u.SetArchivedAt(*v)
+	}
+	return _u
+}
+
+// ClearArchivedAt clears the value of the "archived_at" field.
+func (_u *ProductUpdateOne) ClearArchivedAt() *ProductUpdateOne {
+	_u.mutation.ClearArchivedAt()
 	return _u
 }
 
@@ -615,6 +661,12 @@ func (_u *ProductUpdateOne) sqlSave(ctx context.Context) (_node *Product, err er
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(product.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ArchivedAt(); ok {
+		_spec.SetField(product.FieldArchivedAt, field.TypeTime, value)
+	}
+	if _u.mutation.ArchivedAtCleared() {
+		_spec.ClearField(product.FieldArchivedAt, field.TypeTime)
 	}
 	if _u.mutation.FeaturesCleared() {
 		edge := &sqlgraph.EdgeSpec{

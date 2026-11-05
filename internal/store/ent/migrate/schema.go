@@ -826,6 +826,7 @@ var (
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "slug", Type: field.TypeString, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
 		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// ProductsTable holds the schema information for the "products" table.
@@ -836,7 +837,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "products_tenants_products",
-				Columns:    []*schema.Column{ProductsColumns[5]},
+				Columns:    []*schema.Column{ProductsColumns[6]},
 				RefColumns: []*schema.Column{TenantsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -845,17 +846,17 @@ var (
 			{
 				Name:    "product_tenant_id",
 				Unique:  false,
-				Columns: []*schema.Column{ProductsColumns[5]},
+				Columns: []*schema.Column{ProductsColumns[6]},
 			},
 			{
 				Name:    "product_tenant_id_slug",
 				Unique:  true,
-				Columns: []*schema.Column{ProductsColumns[5], ProductsColumns[3]},
+				Columns: []*schema.Column{ProductsColumns[6], ProductsColumns[3]},
 			},
 			{
 				Name:    "product_tenant_id_id",
 				Unique:  true,
-				Columns: []*schema.Column{ProductsColumns[5], ProductsColumns[0]},
+				Columns: []*schema.Column{ProductsColumns[6], ProductsColumns[0]},
 			},
 		},
 	}

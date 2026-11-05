@@ -3,8 +3,11 @@
 // (ADR-0019): a scoped principal sees and changes only its own. Every change
 // and refusal is audited (ADR-0027), a change in its transaction.
 //
-// Lock contract (schema.PlanFeature): writers of plan features lock the plan
-// row FOR UPDATE first. Products don't take part in it.
+// Lock contract, product row first (schema.PlanFeature): a license issue
+// takes the product FOR SHARE, then the plan, the customer and the features,
+// then the audit lock; archive and rename take the product FOR UPDATE. Plan
+// and feature creation take the product FOR SHARE (before any plan FOR
+// UPDATE) and refuse an archived product.
 package catalog
 
 import (
@@ -33,6 +36,8 @@ var (
 	// ErrInvalid and ErrConflict are wrapped by InvalidError.
 	ErrInvalid  = errors.New("catalog: invalid request")
 	ErrConflict = errors.New("catalog: conflict")
+	// ErrState means the product is already archived.
+	ErrState = errors.New("catalog: already archived")
 )
 
 // InvalidError names the field (a JSON Pointer into the request); Conflict
@@ -61,8 +66,9 @@ type Patch struct {
 type Products struct{ DB *store.DB }
 
 // List returns up to limit of the tenant's products in the caller's scope,
-// newest first, after (afterAt, afterID) or from the start.
-func (s Products) List(ctx context.Context, limit int, afterAt time.Time, afterID string) ([]*ent.Product, error) {
+// archived ones included unless archived says which, newest first, after
+// (afterAt, afterID) or from the start.
+func (s Products) List(ctx context.Context, archived *bool, limit int, afterAt time.Time, afterID string) ([]*ent.Product, error) {
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
 		return nil, err
@@ -76,6 +82,13 @@ func (s Products) List(ctx context.Context, limit int, afterAt time.Time, afterI
 		q := tx.Product.Query().Order(ent.Desc(product.FieldCreatedAt), ent.Desc(product.FieldID)).Limit(limit)
 		if !all {
 			q.Where(product.IDIn(scope...))
+		}
+		switch {
+		case archived == nil:
+		case *archived:
+			q.Where(product.ArchivedAtNotNil())
+		default:
+			q.Where(product.ArchivedAtIsNil())
 		}
 		if afterID != "" {
 			q.Where(product.Or(product.CreatedAtLT(afterAt), product.And(product.CreatedAt(afterAt), product.IDLT(afterID))))
@@ -105,11 +118,20 @@ func lookup(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Product
 	if !ids.Valid("prd", id) || authz.Require(ctx, authz.CatalogRead, id) != nil {
 		return nil, ErrNotFound
 	}
-	q := tx.Product.Query().Where(product.ID(id))
-	if lock {
-		q.ForUpdate()
+	q := func() (*ent.Product, error) {
+		q := tx.Product.Query().Where(product.ID(id))
+		if lock {
+			q.ForUpdate()
+		}
+		return q.Only(ctx)
 	}
-	p, err := q.Only(ctx)
+	p, err := q()
+	if lock && ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it.
+		p, err = q()
+	}
 	if ent.IsNotFound(err) {
 		return nil, ErrNotFound
 	}
@@ -193,6 +215,49 @@ func (s Products) Update(ctx context.Context, id string, patch Patch) (*ent.Prod
 	})
 	if err != nil {
 		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound)
+	}
+	return p, nil
+}
+
+// Archive archives a product, once (ErrState after). Order (ADR-0032):
+// visible (else ErrNotFound), catalog:write on it. Its licenses and their
+// activations keep working; no new license, plan or feature can be created
+// on it (ADR-0015).
+func (s Products) Archive(ctx context.Context, id string) (*ent.Product, error) {
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pr, _ := authz.FromContext(ctx)
+	ev := audit.By(pr, "product.archive", "product", "")
+	var p *ent.Product
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		var err error
+		// FOR UPDATE: a license issue holds the product FOR SHARE, so the
+		// archive waits for it (internal/licenses).
+		if p, err = lookup(ctx, tx, id, true); err != nil {
+			return err
+		}
+		ev.ObjectID = p.ID
+		if err := authz.Require(ctx, authz.CatalogWrite, p.ID); err != nil {
+			return err
+		}
+		if p.ArchivedAt != nil {
+			return ErrState
+		}
+		// The database clock, as license times.
+		if _, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, p.ID); err != nil {
+			return err
+		}
+		if p, err = tx.Product.Get(ctx, p.ID); err != nil {
+			return err
+		}
+		ev.Outcome = auditevent.OutcomeSuccess
+		_, err = audit.Record(ctx, tx, tenantID, ev)
+		return err
+	})
+	if err != nil {
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrNotFound, ErrState)
 	}
 	return p, nil
 }
