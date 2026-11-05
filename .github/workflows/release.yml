@@ -111,24 +111,35 @@ jobs:
           # Built from source through the Go checksum database (its toolchain too, if
           # syft needs a newer Go); the version stamp names it in the SBOM.
           GOTOOLCHAIN=auto go install -ldflags "-X main.version=1.55.0" github.com/anchore/syft/cmd/syft@v1.55.0
-          # The dashboard's npm packages, which syft can't see inside the binary:
-          # production dependencies from the lockfile, merged into every SBOM below
-          # so each artifact keeps one SBOM.
+          # The npm packages in the dashboard bundle, which syft can't see inside the
+          # binary: the lockfile's production dependencies plus BUNDLED_DEV (keep in
+          # sync with web/scripts/notices.mjs), merged into every SBOM below so each
+          # artifact keeps one SBOM.
+          BUNDLED_DEV='["tailwindcss"]'
+          lock() { # lock INCLUDE_DEV OUT
+            SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=$1 syft scan file:web/package-lock.json \
+              --override-default-catalogers javascript-lock-cataloger \
+              --source-name licenseforge-dashboard --source-version "$VERSION" -o "spdx-json=$2"
+          }
+          lock false "$RUNNER_TEMP/prod.spdx.json"
+          lock true "$RUNNER_TEMP/all.spdx.json"
           DASH=$RUNNER_TEMP/dashboard.spdx.json
-          SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=false syft scan file:web/package-lock.json \
-            --override-default-catalogers javascript-lock-cataloger \
-            --source-name licenseforge-dashboard --source-version "$VERSION" -o "spdx-json=$DASH"
-          # merge FILE: add the dashboard packages, contained in FILE's root (the image
-          # or binary), with their dependency relationships (not the lockfile entry).
+          jq --slurpfile prod "$RUNNER_TEMP/prod.spdx.json" --argjson dev "$BUNDLED_DEV" '
+            [$prod[0].packages[] | "\(.name)@\(.versionInfo)"] as $keep
+            | .packages |= map(select(("\(.name)@\(.versionInfo)" as $k | $keep | index($k)) or (.name as $n | $dev | index($n))))
+          ' "$RUNNER_TEMP/all.spdx.json" > "$DASH"
+          # merge FILE: add the dashboard's packages (not the dashboard itself), contained
+          # in FILE's root (the image or binary), with their dependency relationships.
           merge() {
             jq --slurpfile d "$DASH" '
               $d[0] as $d
               | [$d.relationships[] | select(.relationshipType == "DESCRIBES") | .relatedSpdxElement] as $droot
               | [.relationships[] | select(.relationshipType == "DESCRIBES") | .relatedSpdxElement] as $root
               | if ($droot | length) != 1 or ($root | length) != 1 then error("SBOM without exactly one root") else . end
-              | [$d.packages[] | select(.SPDXID != $droot[0])] as $pkgs
+              | [$d.packages[] | select(.SPDXID != $droot[0] and .name != "licenseforge-dashboard")] as $pkgs
               | if ($pkgs | length) == 0 then error("no dashboard packages") else . end
               | [$pkgs[].SPDXID] as $ids
+              | if any(.packages[].SPDXID; . as $i | $ids | index($i)) then error("SPDXID collision") else . end
               | .packages += $pkgs
               | .relationships += [$pkgs[] | {spdxElementId: $root[0], relatedSpdxElement: .SPDXID, relationshipType: "CONTAINS"}]
               | .relationships += [$d.relationships[] | select((.spdxElementId as $e | $ids | index($e)) and (.relatedSpdxElement as $r | $ids | index($r)))]
