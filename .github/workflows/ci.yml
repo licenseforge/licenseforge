@@ -125,6 +125,22 @@ jobs:
           n=$(helm template t . $s --set metrics=null)
           grep -qF 'containerPort: 9090' <<<"$n" || { echo "metrics=null: no metrics port"; exit 1; }
           if grep -qF 'port: 9090, protocol' <<<"$n"; then echo "metrics=null: scrape port open"; exit 1; fi
+          # Audit export (ADR-0036): off by default; env, Secret volumes and one egress rule when set.
+          if helm template t . $s | grep -qE 'SYSLOG|syslog|port: 6514'; then echo "syslog export while off"; exit 1; fi
+          helm template t . $s --set audit=null >/dev/null
+          y="--set audit.export.syslog.host=siem.example --set audit.export.syslog.caSecret=siem-ca --set audit.export.syslog.clientSecret=siem-client"
+          helm lint --strict . $s $y
+          d=$(helm template t . $s $y --show-only templates/deployment.yaml)
+          for want in 'value: "siem.example:6514"' 'value: /etc/licenseforge/syslog/ca/ca.crt' 'value: /etc/licenseforge/syslog/client/tls.key' \
+            'secretName: "siem-ca"' 'secretName: "siem-client"' 'mountPath: /etc/licenseforge/syslog/client, readOnly: true'; do
+            grep -qF -- "$want" <<<"$d" || { echo "syslog Deployment: missing $want"; exit 1; }
+          done
+          n=$(helm template t . $s $y --set 'audit.export.syslog.to[0].ipBlock.cidr=203.0.113.0/24' --show-only templates/networkpolicy.yaml)
+          grep -A3 -F -- '- ports: [{port: 6514, protocol: TCP}]' <<<"$n" | grep -qF 'cidr: 203.0.113.0/24' || { echo "syslog egress not narrowed"; exit 1; }
+          if helm template t . $s --set audit.export.syslog.host=siem.example --show-only templates/deployment.yaml | grep -qE 'SYSLOG_(CA|CERT|KEY)_FILE|volumes:'; then echo "syslog files without Secrets"; exit 1; fi
+          for bad in audit.export.syslog.port=0 audit.export.syslog.port=null 'audit.export.syslog.host=a b' audit.export.syslog.typo=1; do
+            if helm template t . $s --set audit.export.syslog.host=siem.example --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
+          done
           # Default IdP egress: port 443 only, no `to` (any destination, portable across CNIs).
           n=$(helm template t . $s $o --show-only templates/networkpolicy.yaml)
           grep -A1 -F -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" | grep -q 'to:' && { echo "default IdP egress has a to"; exit 1; }

@@ -57,6 +57,22 @@ oidc:
     port: 443
     to: []
 
+# Audit export to a SIEM (ADR-0036): RFC 5424 syslog over TLS (RFC 5425),
+# certificate verification always on, TLS 1.2+. Every entry of every audit
+# chain is sent at least once, with its seq and hashes, so the SIEM can check
+# continuity. Empty host: no export.
+audit:
+  export:
+    syslog:
+      host: ""            # the collector, e.g. siem.example.com
+      port: 6514
+      serverName: ""      # name its certificate must carry; default host
+      caSecret: ""        # Secret with ca.crt (the collector's CA); empty: system roots
+      clientSecret: ""    # kubernetes.io/tls Secret (tls.crt, tls.key) for mTLS; empty: no client cert
+      sdID: ""            # structured data ID name@PEN; default licenseforge@32473
+      # NetworkPolicy egress to the collector. Empty: any destination on port.
+      to: []
+
 # Audit retention (ADR-0036): a CronJob runs `licenseforge audit prune` with
 # the retention login, the only one that deletes audit entries (never given
 # to the serving pods). Tenants set their own retention (owners only, at least

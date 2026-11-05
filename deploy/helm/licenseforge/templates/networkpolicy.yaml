@@ -21,6 +21,14 @@ spec:
       from: {{- toYaml . | nindent 8 }}
     {{- end }}
   egress: {{- include "licenseforge.egress" . | nindent 4 }}
+    {{- $sys := include "licenseforge.syslog" . | fromYaml }}
+    {{- if $sys.host }}
+    # SIEM collector (audit export, ADR-0036). Empty `to`: any destination on that port.
+    - ports: [{port: {{ $sys.port | int }}, protocol: TCP}]
+      {{- with $sys.to }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
     {{- $oidc := .Values.oidc | default dict }}
     {{- if $oidc.enabled }}
     {{- /* A rule without a port would allow every port. */}}
