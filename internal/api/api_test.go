@@ -923,7 +923,8 @@ func TestMyTenants(t *testing.T) {
 	f.do(t, "GET", path, "", f.session(t, f.ownerA, false), func(r *http.Request) { r.Host = "api.lf.example" }).problem(t, 401, "unauthenticated")
 	f.srv.APIHost = ""
 
-	want := map[string]any{"tenant_id": f.a.ID, "slug": f.a.Slug, "name": f.a.Name, "role": "owner", "all_products": true, "product_ids": []any{}}
+	want := map[string]any{"tenant_id": f.a.ID, "slug": f.a.Slug, "name": f.a.Name, "role": "owner", "all_products": true, "product_ids": []any{},
+		"mfa_policy": "none", "accessible": true}
 	if got := items(f.do(t, "GET", path, "", f.session(t, f.ownerA, false))); !reflect.DeepEqual(got, []map[string]any{want}) {
 		t.Errorf("owner of a: %v", got)
 	}

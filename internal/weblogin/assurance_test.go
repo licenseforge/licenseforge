@@ -47,7 +47,7 @@ func TestLoginRecordsAssurance(t *testing.T) {
 				t.Fatalf("callback: %d", code)
 			}
 			_, level, err := f.ids.Session(context.Background(), f.session(t))
-			if err != nil || level != tc.want {
+			if err != nil || level.Assurance != tc.want || level.ID == "" {
 				t.Fatalf("session assurance %q, %v", level, err)
 			}
 			var s *ent.Session

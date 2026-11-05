@@ -81,6 +81,7 @@ type server struct {
 	Config
 	mux     *http.ServeMux
 	limiter *keyLimiter
+	mfaSeen mfaAudited
 }
 
 // New returns the API handler; mount it at Prefix + "/".
@@ -195,7 +196,7 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 }
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
-	u, level, code, err := s.Sessions.Check(w, r)
+	u, sess, code, err := s.Sessions.Check(w, r)
 	switch code {
 	case 0:
 	case http.StatusUnauthorized:
@@ -210,15 +211,15 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		if userRoutes[r.URL.EscapedPath()] {
 			// A principal with no tenant: authz denies every permission to
 			// it; only user routes, which act for the user, accept it.
-			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: level}, nil
+			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: sess.Assurance}, nil
 		}
 		return authz.Principal{}, errNotFound
 	}
 	ctx := r.Context()
-	tenantID, err := s.Identity.TenantID(ctx, ref)
+	t, err := s.Identity.Tenant(ctx, ref)
 	var g authz.Grant
 	if err == nil {
-		g, err = s.Identity.Grant(ctx, u.ID, tenantID)
+		g, err = s.Identity.Grant(ctx, u.ID, t.ID)
 	}
 	if errors.Is(err, identity.ErrNotMember) {
 		return authz.Principal{}, errNotFound
@@ -226,7 +227,14 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
-	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope, Assurance: level}, nil
+	// ADR-0038: after the membership check, so a non-member never learns
+	// the policy (404 above); checked on every request, so a raised policy
+	// applies to live sessions at once.
+	if !sess.Assurance.Meets(t.MFAPolicy) {
+		s.mfaRefused(ctx, t, u.ID, sess)
+		return authz.Principal{}, mfaRequired(t, sess.Assurance)
+	}
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: t.ID, Role: g.Role, Scope: g.Scope, Assurance: sess.Assurance}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -412,6 +420,7 @@ type problem struct {
 	status       int
 	code, detail string
 	fields       []fieldError
+	extra        map[string]string // RFC 9457 extension members
 	err          error
 }
 
@@ -534,5 +543,15 @@ func (p *problem) body(requestID string) []byte {
 		RequestID string       `json:"request_id"`
 		Errors    []fieldError `json:"errors,omitempty"`
 	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, requestID, p.fields})
+	if len(p.extra) > 0 { // extension members, after the standard ones
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		for k, v := range p.extra {
+			if _, taken := m[k]; !taken {
+				m[k] = v
+			}
+		}
+		b, _ = json.Marshal(m)
+	}
 	return append(b, '\n')
 }
