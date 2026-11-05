@@ -15,7 +15,6 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
-	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
 
 var (
@@ -49,21 +48,31 @@ func (s Service) SetMFAPolicy(ctx context.Context, policyPtr *authz.Assurance) (
 		return PolicyChange{}, err
 	}
 	p, _ := authz.FromContext(ctx)
-	ev := audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: p.ID, Action: "tenant.mfa_policy.update",
-		ObjectType: "tenant", ObjectID: tenantID}
-	if p.Kind == authz.Token {
-		ev.ActorType = auditevent.ActorTypeToken
-	}
+	ev := audit.By(p, "tenant.mfa_policy.update", "tenant", tenantID)
+	refused := func(err error) error { return audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrPolicyUnmet) }
 	// Owners, from a session: API tokens don't change who may get in.
 	if err := authz.Require(ctx, authz.TenantWrite, ""); err != nil || p.Kind != authz.User {
-		return PolicyChange{}, s.refused(ctx, tenantID, ev, authz.ErrDenied)
+		return PolicyChange{}, refused(authz.ErrDenied)
 	}
 	if policyPtr != nil && !policyPtr.Valid() {
-		return PolicyChange{}, s.refused(ctx, tenantID, ev, ErrInvalid)
+		return PolicyChange{}, refused(ErrInvalid)
 	}
 	var out PolicyChange
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		t, err := tx.Tenant.Query().Where(tenant.ID(tenantID)).ForUpdate().Only(ctx)
+		// The caller is still an owner (a concurrent demotion or removal
+		// waits for this, or makes it fail).
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
+		// NO KEY UPDATE, not FOR UPDATE: audit entries (and every other
+		// tenant row) reference the tenant, and their foreign-key checks take
+		// KEY SHARE, which FOR UPDATE would block while this transaction
+		// waits for the chain lock: a deadlock. Lock order: tenant row, then
+		// the audit lock.
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE`, tenantID); err != nil {
+			return err
+		}
+		t, err := tx.Tenant.Get(ctx, tenantID)
 		if err != nil {
 			return err
 		}
@@ -101,29 +110,9 @@ func (s Service) SetMFAPolicy(ctx context.Context, policyPtr *authz.Assurance) (
 		return err
 	})
 	if err != nil {
-		return PolicyChange{}, s.refused(ctx, tenantID, ev, err)
+		return PolicyChange{}, refused(err)
 	}
 	return out, nil
-}
-
-// refused records a denied or failed attempt in its own transaction and
-// returns err; other errors aren't attempts.
-func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
-	switch {
-	case errors.Is(err, authz.ErrDenied):
-		ev.Outcome = auditevent.OutcomeDenied
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrPolicyUnmet):
-		ev.Outcome = auditevent.OutcomeFailure
-	default:
-		return err
-	}
-	if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		_, err := audit.Record(ctx, tx, tenantID, ev)
-		return err
-	}); rerr != nil {
-		return errors.Join(err, rerr)
-	}
-	return err
 }
 
 // notExpired compares with the database clock, as the api_tokens policies do.

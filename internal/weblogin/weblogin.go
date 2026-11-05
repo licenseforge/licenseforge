@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -434,18 +436,24 @@ func str(raw json.RawMessage) string {
 	return s
 }
 
-// unixTime decodes auth_time (seconds since the epoch, OIDC Core 2); anything
-// else is the zero time.
+// unixTime decodes auth_time: a JSON number of seconds since the epoch
+// (OIDC Core 2), not a quoted string, at most a day in the future; anything
+// else is the zero time (a malformed claim never fails the login).
 func unixTime(raw json.RawMessage) time.Time {
-	var n json.Number
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.UseNumber()
-	if d.Decode(&n) != nil {
+	s := string(bytes.TrimSpace(raw))
+	if !authTimeRE.MatchString(s) {
 		return time.Time{}
 	}
-	sec, err := n.Int64()
+	digits, _, _ := strings.Cut(s, ".") // a fraction is allowed and dropped
+	sec, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil || sec <= 0 {
 		return time.Time{}
 	}
-	return time.Unix(sec, 0).UTC()
+	t := time.Unix(sec, 0).UTC()
+	if t.After(time.Now().Add(24 * time.Hour)) {
+		return time.Time{}
+	}
+	return t
 }
+
+var authTimeRE = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]+)?$`)

@@ -7,7 +7,7 @@
 
 ## Decision
 ### Policy
-- `tenants.mfa_policy`: `none` (default), `mfa`, `phishing_resistant`. Changed only by owners (`tenant:write`) from a session through `PATCH /api/v1/tenants/{tenant}`, audited as `tenant.mfa_policy.update` (from, to).
+- `tenants.mfa_policy`: `none` (default), `mfa`, `phishing_resistant`. Changed only by owners (`tenant:write`) from a session (owner API tokens are refused: tokens carry no authentication context) through `PATCH /api/v1/tenants/{tenant}`, audited as `tenant.mfa_policy.update` (from, to).
 - **No self-lockout**: raising the policy is refused (`409 mfa_policy_unmet`) unless the caller's own session meets the new level.
 - The tenant pool gets a column grant of UPDATE on `mfa_policy` (and `updated_at`) only, under a permissive UPDATE-only policy `id = app_tenant_id()`; the RLS pin changes with it.
 
@@ -17,7 +17,7 @@
   - **phishing-resistant**: `amr` contains `hwk`, `sc` or `pop`; or a configured `acr`/`acrs` value (e.g. Okta `phr`, `phrh`; an Entra authentication context that requires phishing-resistant MFA);
   - **MFA**: the above, or `amr` contains `mfa`, `otp` or `swk`.
   - `pwd`, `sms`, `tel` never count. `swk` isn't phishing-resistant by default (RFC 8176 doesn't say the key is WebAuthn); deployments with synced passkeys can add it.
-  - On Entra the `acrs` claim is the signal of record; its `amr` is advisory.
+  - On Entra the `acrs` claim is the signal of record: the documented Entra setup sets the AMR value sets to `none` (an explicit value that disables `amr` counting), so only configured `acrs` values count.
 - Support for each IdP (Keycloak, Entra, Okta) is claimed only after an integration test with its configuration documented.
 
 ### Enforcement

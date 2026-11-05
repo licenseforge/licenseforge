@@ -35,6 +35,9 @@ func TestLoginRecordsAssurance(t *testing.T) {
 		{"amr as one string", map[string]any{"amr": "mfa"}, authz.AssuranceMFA, "mfa"},
 		{"amr malformed", map[string]any{"amr": map[string]any{"x": 1}, "acr": 3, "auth_time": "soon"}, authz.AssuranceNone, ""},
 		{"amr values not tokens", map[string]any{"amr": []any{"hw k", 7, "<script>"}}, authz.AssuranceNone, ""},
+		{"amr with a number", map[string]any{"amr": []any{"hwk", 7}}, authz.AssuranceNone, ""},
+		{"auth_time quoted", map[string]any{"amr": []string{"otp"}, "auth_time": "1700000000"}, authz.AssuranceMFA, "otp"},
+		{"auth_time far ahead", map[string]any{"amr": []string{"otp"}, "auth_time": time.Now().Add(48 * time.Hour).Unix()}, authz.AssuranceMFA, "otp"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := f.head(t)
@@ -62,6 +65,9 @@ func TestLoginRecordsAssurance(t *testing.T) {
 			}
 			if tc.name == "security key" && (s.AuthTime == nil || !s.AuthTime.Equal(authAt)) {
 				t.Errorf("auth_time %v", s.AuthTime)
+			}
+			if strings.HasPrefix(tc.name, "auth_time") && s.AuthTime != nil {
+				t.Errorf("auth_time kept: %v", s.AuthTime)
 			}
 			var login *ent.AuditEvent
 			for _, e := range f.entries(t, before) {

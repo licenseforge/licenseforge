@@ -43,6 +43,7 @@ func TestAssess(t *testing.T) {
 		{"beyond 16 values", def, Claims{AMR: append(make16("x"), "hwk")}, none},
 		{"empty acr never matches an empty set entry", AssurancePolicy{MFAACR: []string{""}}, Claims{}, none},
 		{"pwd, sms, tel never count, even if configured", AssurancePolicy{MFAAMR: []string{"pwd", "sms", "tel"}, PhishingResistantAMR: []string{"sms"}}, Claims{AMR: []string{"pwd", "sms", "tel"}}, none},
+		{"never, in any case", AssurancePolicy{MFAAMR: []string{"PWD", "Sms"}}, Claims{AMR: []string{"PWD", "Sms"}}, none},
 	} {
 		if got := tc.p.Assess(tc.c).Assurance; got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
@@ -76,6 +77,8 @@ func TestAssurancePolicyFromEnv(t *testing.T) {
 	}
 	for name, m := range map[string]map[string]string{
 		"sms counted":    {EnvMFAAMR: "mfa,sms"},
+		"SMS counted":    {EnvMFAAMR: "SMS"},
+		"none in a list": {EnvMFAAMR: "mfa,none"},
 		"pwd counted":    {EnvPhishingResistantAMR: "pwd"},
 		"tel counted":    {EnvMFAAMR: "tel"},
 		"empty entry":    {EnvMFAAMR: "mfa,,otp"},
@@ -87,5 +90,21 @@ func TestAssurancePolicyFromEnv(t *testing.T) {
 		if _, err := AssurancePolicyFromEnv(env(m)); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// "none" in an AMR variable disables amr counting (Entra: only acrs count).
+func TestAssurancePolicyNone(t *testing.T) {
+	p, err := AssurancePolicyFromEnv(func(k string) string {
+		return map[string]string{EnvMFAAMR: "none", EnvPhishingResistantAMR: "none", EnvPhishingResistantACR: "c1"}[k]
+	})
+	if err != nil || len(p.MFAAMR) != 0 || p.MFAAMR == nil || len(p.PhishingResistantAMR) != 0 {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if a := p.Assess(Claims{AMR: []string{"mfa", "hwk"}}); a.Assurance != authz.AssuranceNone {
+		t.Errorf("amr counted: %s", a.Assurance)
+	}
+	if a := p.Assess(Claims{AMR: []string{"pwd"}, ACRs: []string{"c1"}}); a.Assurance != authz.AssurancePhishingResistant {
+		t.Errorf("acrs: %s", a.Assurance)
 	}
 }

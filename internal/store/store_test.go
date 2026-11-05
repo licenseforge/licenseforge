@@ -254,7 +254,8 @@ func TestTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A can't insert into B (WITH CHECK), nor modify tenant rows at all, even its own.
+	// A can't insert into B (WITH CHECK), nor change its own tenant row beyond
+	// mfa_policy (ADR-0038: the only column granted; the name here is refused).
 	for name, op := range map[string]func(tx *ent.Tx) error{
 		"insert into B": func(tx *ent.Tx) error {
 			return tx.Product.Create().SetTenantID(b.ID).SetSlug("smuggled").SetName("x").Exec(ctx)
