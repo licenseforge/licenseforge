@@ -790,5 +790,16 @@ func TestSessionAndTenantGrantsPinned(t *testing.T) {
 		if got := cols(tc.role, tc.table, tc.priv); got != tc.want {
 			t.Errorf("%s %s on %s: %q, want %q", tc.role, tc.priv, tc.table, got, tc.want)
 		}
+	} // No serving role may pass its rights on (table or column grant options).
+	var grantable int
+	if err := owner.QueryRow(`SELECT count(*) FROM (
+			SELECT grantee, table_name FROM information_schema.column_privileges WHERE is_grantable = 'YES'
+			UNION ALL SELECT grantee, table_name FROM information_schema.table_privileges WHERE is_grantable = 'YES') g
+		JOIN pg_tables t ON t.tablename = g.table_name AND t.schemaname = 'public'
+		WHERE g.table_name IN ('tenants', 'sessions') AND g.grantee <> t.tableowner`).Scan(&grantable); err != nil {
+		t.Fatal(err)
+	}
+	if grantable != 0 {
+		t.Errorf("%d grant options on tenants/sessions held by a role other than the owner", grantable)
 	}
 }

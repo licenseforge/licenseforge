@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -441,10 +440,7 @@ func str(raw json.RawMessage) string {
 // else is the zero time (a malformed claim never fails the login).
 func unixTime(raw json.RawMessage) time.Time {
 	s := string(bytes.TrimSpace(raw))
-	if !authTimeRE.MatchString(s) {
-		return time.Time{}
-	}
-	digits, _, _ := strings.Cut(s, ".") // a fraction is allowed and dropped
+	digits, _, _ := strings.Cut(s, ".") // a fraction is allowed and dropped; a quoted value or an exponent fails ParseInt
 	sec, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil || sec <= 0 {
 		return time.Time{}
@@ -455,5 +451,3 @@ func unixTime(raw json.RawMessage) time.Time {
 	}
 	return t
 }
-
-var authTimeRE = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]+)?$`)
