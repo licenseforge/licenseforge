@@ -17,10 +17,12 @@ import (
 
 	"entgo.io/ent/dialect/sql/sqlgraph"
 
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
@@ -98,6 +100,68 @@ func authorize(ctx context.Context, tenantID string) error {
 	return nil
 }
 
+// begin returns the principal's tenant (where the attempt is recorded) and
+// the audit event for action on kid ("" when not known or malformed: hostile
+// input isn't stored). Without a well-formed principal there is no one to
+// attribute an entry to, so the caller is refused unrecorded.
+func begin(ctx context.Context, action, kid string) (string, audit.Event, error) {
+	tn, err := authz.TenantID(ctx)
+	if err != nil {
+		return "", audit.Event{}, err
+	}
+	p, _ := authz.FromContext(ctx)
+	actor := auditevent.ActorTypeUser
+	if p.Kind == authz.Token {
+		actor = auditevent.ActorTypeToken
+	}
+	if !ids.Valid("sk", kid) {
+		kid = ""
+	}
+	return tn, audit.Event{ActorType: actor, ActorID: p.ID, Action: action, ObjectType: "signing_key", ObjectID: kid}, nil
+}
+
+// refused records a denied or failed attempt in its own transaction, after
+// the action rolled back (ADR-0027), in the principal's tenant, and returns
+// err. Infrastructure errors aren't attempts and aren't recorded.
+func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
+	switch {
+	case errors.Is(err, authz.ErrDenied):
+		ev.Outcome, ev.Details = auditevent.OutcomeDenied, nil
+	case errors.Is(err, ErrPendingExists), errors.Is(err, ErrNotPending):
+		ev.Outcome, ev.Details = auditevent.OutcomeFailure, map[string]any{"reason": err.Error()}
+	default:
+		return err
+	}
+	if rerr := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		_, err := recordAudit(ctx, tx, tenantID, ev)
+		return err
+	}); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	return err
+}
+
+// record writes the success entry in tx. Lock order: the tenant's audit lock
+// before any signing-key row lock, wherever a transaction takes both, so
+// every key operation calls audit.Lock first: activation holds the audit
+// lock and then share-locks the active key to sign (ActivateTx), and a
+// Promote holding the key rows while waiting for the audit lock would
+// deadlock with it. details hold the algorithm and states, never key
+// material.
+func record(ctx context.Context, tx *ent.Tx, tenantID string, ev audit.Event, details map[string]any) error {
+	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, details
+	_, err := recordAudit(ctx, tx, tenantID, ev)
+	return err
+}
+
+// recordAudit is audit.Record; tests replace it to check that a failed audit
+// write fails the operation (fail closed, ADR-0027).
+var recordAudit = audit.Record
+
+// errStateChanged means a key wasn't in the state the operation expected when
+// it was written (a concurrent rotation): the write changed nothing.
+var errStateChanged = errors.New("signing: key state changed concurrently")
+
 func binding(tenantID, kid string) secrets.Binding {
 	return secrets.Binding{Purpose: PurposeSigningKey, TenantID: tenantID, RowID: kid}
 }
@@ -107,22 +171,34 @@ func binding(tenantID, kid string) secrets.Binding {
 // without an active key still gets a pending one: activating a key no build
 // trusts would break every deployed build (ADR-0026). It fails with
 // ErrPendingExists if the tenant already has a pending key. ctx's principal
-// needs key:write in tenantID (authz.ErrDenied otherwise).
+// needs key:write in tenantID (authz.ErrDenied otherwise). The creation and
+// refusals are audited (signing_key.create).
 func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, error) {
-	if err := authorize(ctx, tenantID); err != nil {
+	tn, ev, err := begin(ctx, "signing_key.create", "")
+	if err != nil {
 		return nil, err
+	}
+	if err := authorize(ctx, tenantID); err != nil {
+		return nil, l.refused(ctx, tn, ev, err)
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 	kid := ids.SigningKey()
+	ev.ObjectID = kid
 	ct, err := l.Keys.Encrypt(priv.Seed(), binding(tenantID, kid))
 	if err != nil {
 		return nil, err
 	}
 	var k *ent.SigningKey
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The audit lock first (see record). It also serializes Creates, so
+		// a tenant's first key can't race: the second Create sees it and
+		// makes the pending key.
+		if err := audit.Lock(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		hasKeys, err := tx.SigningKey.Query().Exist(ctx)
 		if err != nil {
 			return err
@@ -138,19 +214,37 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 		if sqlgraph.IsUniqueConstraintError(err) && strings.Contains(err.Error(), "signingkey_tenant_id_status") {
 			return ErrPendingExists
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, tenantID, ev, map[string]any{"alg": string(k.Alg), "to": string(k.Status)})
 	})
-	return k, err
+	if err != nil {
+		ev.ObjectID = "" // the key doesn't exist
+		return nil, l.refused(ctx, tn, ev, err)
+	}
+	return k, nil
 }
 
 // Promote makes the pending key kid active and retires the active one,
 // destroying its private key. Vendor builds that don't trust kid reject
-// everything signed afterwards (ADR-0026). Needs key:write, like Create.
+// everything signed afterwards (ADR-0026). Needs key:write, like Create;
+// audited as signing_key.promote.
 func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
-	if err := authorize(ctx, tenantID); err != nil {
+	tn, ev, err := begin(ctx, "signing_key.promote", kid)
+	if err != nil {
 		return err
 	}
-	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+	if err := authorize(ctx, tenantID); err != nil {
+		return l.refused(ctx, tn, ev, err)
+	}
+	if ev.ObjectID == "" { // malformed kid: refused before any query
+		return l.refused(ctx, tn, ev, ErrNotPending)
+	}
+	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		if err := audit.Lock(ctx, tx, tenantID); err != nil { // before the key rows (see record)
+			return err
+		}
 		now := time.Now()
 		// Lock the tenant's active and pending keys, so concurrent promotions
 		// serialize instead of racing on the unique index.
@@ -171,35 +265,76 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 		if pending == nil || pending.ID != kid {
 			return ErrNotPending
 		}
+		details := map[string]any{"alg": string(pending.Alg), "from": string(signingkey.StatusPending), "to": string(signingkey.StatusActive)}
 		if active != nil {
-			if err := retire(ctx, tx, active.ID, now); err != nil {
+			if err := retire(ctx, tx, active.ID, signingkey.StatusActive, now); err != nil {
 				return err
 			}
+			details["retired"] = active.ID
 		}
-		return tx.SigningKey.UpdateOneID(kid).SetStatus(signingkey.StatusActive).SetActivatedAt(now).Exec(ctx)
+		n, err := tx.SigningKey.Update().Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).
+			SetStatus(signingkey.StatusActive).SetActivatedAt(now).Save(ctx)
+		if err == nil && n != 1 {
+			err = errStateChanged
+		}
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, tenantID, ev, details)
 	})
+	if err != nil {
+		return l.refused(ctx, tn, ev, err)
+	}
+	return nil
 }
 
 // Discard retires the pending key kid without it ever signing (rotation
-// abandoned, or the pending key leaked). Needs key:write, like Create.
+// abandoned, or the pending key leaked). Needs key:write, like Create;
+// audited as signing_key.discard.
 func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
-	if err := authorize(ctx, tenantID); err != nil {
+	tn, ev, err := begin(ctx, "signing_key.discard", kid)
+	if err != nil {
 		return err
 	}
-	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		n, err := tx.SigningKey.Update().
-			Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).
-			SetStatus(signingkey.StatusRetired).SetRetiredAt(time.Now()).ClearPrivateKeyCiphertext().Save(ctx)
-		if err == nil && n == 0 {
-			err = ErrNotPending
+	if err := authorize(ctx, tenantID); err != nil {
+		return l.refused(ctx, tn, ev, err)
+	}
+	if ev.ObjectID == "" { // malformed kid: refused before any query
+		return l.refused(ctx, tn, ev, ErrNotPending)
+	}
+	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		if err := audit.Lock(ctx, tx, tenantID); err != nil { // before the key row (see record)
+			return err
 		}
-		return err
+		// The write itself requires the key to be pending, so a concurrent
+		// Promote either commits first (nothing is retired: ErrNotPending) or
+		// waits for this transaction.
+		if err := retire(ctx, tx, kid, signingkey.StatusPending, time.Now()); errors.Is(err, errStateChanged) {
+			return ErrNotPending
+		} else if err != nil {
+			return err
+		}
+		alg, err := tx.SigningKey.Query().Where(signingkey.ID(kid)).Select(signingkey.FieldAlg).String(ctx)
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, tenantID, ev, map[string]any{"alg": alg, "from": string(signingkey.StatusPending), "to": string(signingkey.StatusRetired)})
 	})
+	if err != nil {
+		return l.refused(ctx, tn, ev, err)
+	}
+	return nil
 }
 
-func retire(ctx context.Context, tx *ent.Tx, kid string, now time.Time) error {
-	return tx.SigningKey.UpdateOneID(kid).SetStatus(signingkey.StatusRetired).SetRetiredAt(now).
-		ClearPrivateKeyCiphertext().Exec(ctx)
+// retire retires kid and erases its private key, only if it is still in
+// state from (errStateChanged otherwise, and nothing changes).
+func retire(ctx context.Context, tx *ent.Tx, kid string, from signingkey.Status, now time.Time) error {
+	n, err := tx.SigningKey.Update().Where(signingkey.ID(kid), signingkey.StatusEQ(from)).
+		SetStatus(signingkey.StatusRetired).SetRetiredAt(now).ClearPrivateKeyCiphertext().Save(ctx)
+	if err == nil && n != 1 {
+		err = errStateChanged
+	}
+	return err
 }
 
 // Active returns the tenant's active kid.
