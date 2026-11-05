@@ -94,6 +94,32 @@ func (s Service) List(ctx context.Context, limit int, afterAt time.Time, afterID
 	return out, err
 }
 
+// CountActive returns how many of the tenant's customers aren't archived,
+// exactly (one COUNT under RLS). Customers are tenant-wide: only a caller
+// with customer:read on every product gets a count; for anyone else ok is
+// false (not available), never a partial count.
+func (s Service) CountActive(ctx context.Context) (n int, ok bool, err error) {
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	all, _, err := authz.Products(ctx, authz.CustomerRead)
+	if errors.Is(err, authz.ErrDenied) || err == nil && !all {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		n, err = tx.Customer.Query().Where(customer.ArchivedAtIsNil()).Count(ctx)
+		return err
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return n, true, nil
+}
+
 // Get returns a customer; missing, malformed and hidden are ErrNotFound.
 func (s Service) Get(ctx context.Context, id string) (*ent.Customer, error) {
 	tenantID, err := authz.TenantID(ctx)

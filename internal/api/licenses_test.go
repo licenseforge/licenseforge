@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -256,4 +257,54 @@ func (f *fixture) lastEvent(t *testing.T, tenant string) *ent.AuditEvent {
 		t.Fatal(err)
 	}
 	return e
+}
+
+// GET /summary: exact counts in the caller's scope and tenant; customers
+// only for callers who see every product (absent, not zero, otherwise).
+func TestSummary(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	lic := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	var onA []string
+	for range 2 {
+		r := f.do(t, "POST", lic, issueBody(f.prodA, c.planP, c.customer), owner)
+		if r.code != 201 {
+			t.Fatalf("issue: %d %s", r.code, r.raw)
+		}
+		onA = append(onA, r.body["id"].(string))
+	}
+	if r := f.do(t, "POST", lic, issueBody(c.prodQ, c.planQ, c.customer), owner); r.code != 201 {
+		t.Fatalf("issue on Q: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "POST", lic+"/"+onA[0]+"/suspend", "", owner); r.code != 200 {
+		t.Fatalf("suspend: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "POST", Prefix+"/tenants/"+f.b.Slug+"/licenses", issueBody(c.bProduct, c.bPlan, c.bCustomer), f.session(t, f.ownerB, true)); r.code != 201 {
+		t.Fatalf("issue in b: %d %s", r.code, r.raw)
+	}
+	path := func(tn *ent.Tenant) string { return Prefix + "/tenants/" + tn.Slug + "/summary" }
+	for name, tc := range map[string]struct {
+		path string
+		o    opt
+		want string
+	}{
+		"owner":                   {path(f.a), owner, `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
+		"viewer":                  {path(f.a), f.session(t, f.viewerA, false), `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
+		"scoped to prodA":         {path(f.a), f.session(t, f.scoped, false), `{"licenses":{"active":1,"revoked":0,"suspended":1}}`},
+		"other tenant":            {path(f.b), f.session(t, f.ownerB, false), `{"customers":{"active":1},"licenses":{"active":1,"revoked":0,"suspended":0}}`},
+		"API token, all products": {path(f.a), bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
+	} {
+		r := f.do(t, "GET", tc.path, "", tc.o)
+		var got, want any
+		_ = json.Unmarshal([]byte(r.raw), &got)
+		_ = json.Unmarshal([]byte(tc.want), &want)
+		if r.code != 200 || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: %d %s, want %s", name, r.code, r.raw, tc.want)
+		}
+	}
+	f.do(t, "GET", path(f.a), "").problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path(f.a), "", f.session(t, f.outsider, false)).problem(t, 404, "not_found")
+	f.do(t, "GET", path(f.a), "", bearer(f.token(t, f.a.ID, f.ownerA, authz.SDK).Token)).problem(t, 403, "forbidden")
+	f.do(t, "GET", path(f.a)+"?status=active", "", owner).problem(t, 400, "invalid_request")
 }
