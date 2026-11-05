@@ -3,6 +3,7 @@
 package session
 
 import (
+	"fmt"
 	"time"
 
 	"entgo.io/ent/dialect/sql"
@@ -24,6 +25,16 @@ const (
 	FieldExpiresAt = "expires_at"
 	// FieldLastSeenAt holds the string denoting the last_seen_at field in the database.
 	FieldLastSeenAt = "last_seen_at"
+	// FieldAssurance holds the string denoting the assurance field in the database.
+	FieldAssurance = "assurance"
+	// FieldAmr holds the string denoting the amr field in the database.
+	FieldAmr = "amr"
+	// FieldAcr holds the string denoting the acr field in the database.
+	FieldAcr = "acr"
+	// FieldAcrs holds the string denoting the acrs field in the database.
+	FieldAcrs = "acrs"
+	// FieldAuthTime holds the string denoting the auth_time field in the database.
+	FieldAuthTime = "auth_time"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// Table holds the table name of the session in the database.
@@ -45,6 +56,11 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldExpiresAt,
 	FieldLastSeenAt,
+	FieldAssurance,
+	FieldAmr,
+	FieldAcr,
+	FieldAcrs,
+	FieldAuthTime,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -66,11 +82,48 @@ var (
 	DefaultCreatedAt func() time.Time
 	// DefaultLastSeenAt holds the default value on creation for the "last_seen_at" field.
 	DefaultLastSeenAt func() time.Time
+	// DefaultAmr holds the default value on creation for the "amr" field.
+	DefaultAmr string
+	// AmrValidator is a validator for the "amr" field. It is called by the builders before save.
+	AmrValidator func(string) error
+	// AcrValidator is a validator for the "acr" field. It is called by the builders before save.
+	AcrValidator func(string) error
+	// DefaultAcrs holds the default value on creation for the "acrs" field.
+	DefaultAcrs string
+	// AcrsValidator is a validator for the "acrs" field. It is called by the builders before save.
+	AcrsValidator func(string) error
 	// DefaultID holds the default value on creation for the "id" field.
 	DefaultID func() string
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
 	IDValidator func(string) error
 )
+
+// Assurance defines the type for the "assurance" enum field.
+type Assurance string
+
+// AssuranceNone is the default value of the Assurance enum.
+const DefaultAssurance = AssuranceNone
+
+// Assurance values.
+const (
+	AssuranceNone              Assurance = "none"
+	AssuranceMfa               Assurance = "mfa"
+	AssurancePhishingResistant Assurance = "phishing_resistant"
+)
+
+func (a Assurance) String() string {
+	return string(a)
+}
+
+// AssuranceValidator is a validator for the "assurance" field enum values. It is called by the builders before save.
+func AssuranceValidator(a Assurance) error {
+	switch a {
+	case AssuranceNone, AssuranceMfa, AssurancePhishingResistant:
+		return nil
+	default:
+		return fmt.Errorf("session: invalid enum value for assurance field: %q", a)
+	}
+}
 
 // OrderOption defines the ordering options for the Session queries.
 type OrderOption func(*sql.Selector)
@@ -98,6 +151,31 @@ func ByExpiresAt(opts ...sql.OrderTermOption) OrderOption {
 // ByLastSeenAt orders the results by the last_seen_at field.
 func ByLastSeenAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLastSeenAt, opts...).ToFunc()
+}
+
+// ByAssurance orders the results by the assurance field.
+func ByAssurance(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAssurance, opts...).ToFunc()
+}
+
+// ByAmr orders the results by the amr field.
+func ByAmr(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAmr, opts...).ToFunc()
+}
+
+// ByAcr orders the results by the acr field.
+func ByAcr(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAcr, opts...).ToFunc()
+}
+
+// ByAcrs orders the results by the acrs field.
+func ByAcrs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAcrs, opts...).ToFunc()
+}
+
+// ByAuthTime orders the results by the auth_time field.
+func ByAuthTime(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAuthTime, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

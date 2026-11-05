@@ -90,6 +90,26 @@ func LastSeenAt(v time.Time) predicate.Session {
 	return predicate.Session(sql.FieldEQ(FieldLastSeenAt, v))
 }
 
+// Amr applies equality check predicate on the "amr" field. It's identical to AmrEQ.
+func Amr(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAmr, v))
+}
+
+// Acr applies equality check predicate on the "acr" field. It's identical to AcrEQ.
+func Acr(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAcr, v))
+}
+
+// Acrs applies equality check predicate on the "acrs" field. It's identical to AcrsEQ.
+func Acrs(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAcrs, v))
+}
+
+// AuthTime applies equality check predicate on the "auth_time" field. It's identical to AuthTimeEQ.
+func AuthTime(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAuthTime, v))
+}
+
 // UserIDEQ applies the EQ predicate on the "user_id" field.
 func UserIDEQ(v string) predicate.Session {
 	return predicate.Session(sql.FieldEQ(FieldUserID, v))
@@ -313,6 +333,281 @@ func LastSeenAtLT(v time.Time) predicate.Session {
 // LastSeenAtLTE applies the LTE predicate on the "last_seen_at" field.
 func LastSeenAtLTE(v time.Time) predicate.Session {
 	return predicate.Session(sql.FieldLTE(FieldLastSeenAt, v))
+}
+
+// AssuranceEQ applies the EQ predicate on the "assurance" field.
+func AssuranceEQ(v Assurance) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAssurance, v))
+}
+
+// AssuranceNEQ applies the NEQ predicate on the "assurance" field.
+func AssuranceNEQ(v Assurance) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldAssurance, v))
+}
+
+// AssuranceIn applies the In predicate on the "assurance" field.
+func AssuranceIn(vs ...Assurance) predicate.Session {
+	return predicate.Session(sql.FieldIn(FieldAssurance, vs...))
+}
+
+// AssuranceNotIn applies the NotIn predicate on the "assurance" field.
+func AssuranceNotIn(vs ...Assurance) predicate.Session {
+	return predicate.Session(sql.FieldNotIn(FieldAssurance, vs...))
+}
+
+// AmrEQ applies the EQ predicate on the "amr" field.
+func AmrEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAmr, v))
+}
+
+// AmrNEQ applies the NEQ predicate on the "amr" field.
+func AmrNEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldAmr, v))
+}
+
+// AmrIn applies the In predicate on the "amr" field.
+func AmrIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldIn(FieldAmr, vs...))
+}
+
+// AmrNotIn applies the NotIn predicate on the "amr" field.
+func AmrNotIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldNotIn(FieldAmr, vs...))
+}
+
+// AmrGT applies the GT predicate on the "amr" field.
+func AmrGT(v string) predicate.Session {
+	return predicate.Session(sql.FieldGT(FieldAmr, v))
+}
+
+// AmrGTE applies the GTE predicate on the "amr" field.
+func AmrGTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldGTE(FieldAmr, v))
+}
+
+// AmrLT applies the LT predicate on the "amr" field.
+func AmrLT(v string) predicate.Session {
+	return predicate.Session(sql.FieldLT(FieldAmr, v))
+}
+
+// AmrLTE applies the LTE predicate on the "amr" field.
+func AmrLTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldLTE(FieldAmr, v))
+}
+
+// AmrContains applies the Contains predicate on the "amr" field.
+func AmrContains(v string) predicate.Session {
+	return predicate.Session(sql.FieldContains(FieldAmr, v))
+}
+
+// AmrHasPrefix applies the HasPrefix predicate on the "amr" field.
+func AmrHasPrefix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasPrefix(FieldAmr, v))
+}
+
+// AmrHasSuffix applies the HasSuffix predicate on the "amr" field.
+func AmrHasSuffix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasSuffix(FieldAmr, v))
+}
+
+// AmrEqualFold applies the EqualFold predicate on the "amr" field.
+func AmrEqualFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldEqualFold(FieldAmr, v))
+}
+
+// AmrContainsFold applies the ContainsFold predicate on the "amr" field.
+func AmrContainsFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldContainsFold(FieldAmr, v))
+}
+
+// AcrEQ applies the EQ predicate on the "acr" field.
+func AcrEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAcr, v))
+}
+
+// AcrNEQ applies the NEQ predicate on the "acr" field.
+func AcrNEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldAcr, v))
+}
+
+// AcrIn applies the In predicate on the "acr" field.
+func AcrIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldIn(FieldAcr, vs...))
+}
+
+// AcrNotIn applies the NotIn predicate on the "acr" field.
+func AcrNotIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldNotIn(FieldAcr, vs...))
+}
+
+// AcrGT applies the GT predicate on the "acr" field.
+func AcrGT(v string) predicate.Session {
+	return predicate.Session(sql.FieldGT(FieldAcr, v))
+}
+
+// AcrGTE applies the GTE predicate on the "acr" field.
+func AcrGTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldGTE(FieldAcr, v))
+}
+
+// AcrLT applies the LT predicate on the "acr" field.
+func AcrLT(v string) predicate.Session {
+	return predicate.Session(sql.FieldLT(FieldAcr, v))
+}
+
+// AcrLTE applies the LTE predicate on the "acr" field.
+func AcrLTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldLTE(FieldAcr, v))
+}
+
+// AcrContains applies the Contains predicate on the "acr" field.
+func AcrContains(v string) predicate.Session {
+	return predicate.Session(sql.FieldContains(FieldAcr, v))
+}
+
+// AcrHasPrefix applies the HasPrefix predicate on the "acr" field.
+func AcrHasPrefix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasPrefix(FieldAcr, v))
+}
+
+// AcrHasSuffix applies the HasSuffix predicate on the "acr" field.
+func AcrHasSuffix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasSuffix(FieldAcr, v))
+}
+
+// AcrIsNil applies the IsNil predicate on the "acr" field.
+func AcrIsNil() predicate.Session {
+	return predicate.Session(sql.FieldIsNull(FieldAcr))
+}
+
+// AcrNotNil applies the NotNil predicate on the "acr" field.
+func AcrNotNil() predicate.Session {
+	return predicate.Session(sql.FieldNotNull(FieldAcr))
+}
+
+// AcrEqualFold applies the EqualFold predicate on the "acr" field.
+func AcrEqualFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldEqualFold(FieldAcr, v))
+}
+
+// AcrContainsFold applies the ContainsFold predicate on the "acr" field.
+func AcrContainsFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldContainsFold(FieldAcr, v))
+}
+
+// AcrsEQ applies the EQ predicate on the "acrs" field.
+func AcrsEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAcrs, v))
+}
+
+// AcrsNEQ applies the NEQ predicate on the "acrs" field.
+func AcrsNEQ(v string) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldAcrs, v))
+}
+
+// AcrsIn applies the In predicate on the "acrs" field.
+func AcrsIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldIn(FieldAcrs, vs...))
+}
+
+// AcrsNotIn applies the NotIn predicate on the "acrs" field.
+func AcrsNotIn(vs ...string) predicate.Session {
+	return predicate.Session(sql.FieldNotIn(FieldAcrs, vs...))
+}
+
+// AcrsGT applies the GT predicate on the "acrs" field.
+func AcrsGT(v string) predicate.Session {
+	return predicate.Session(sql.FieldGT(FieldAcrs, v))
+}
+
+// AcrsGTE applies the GTE predicate on the "acrs" field.
+func AcrsGTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldGTE(FieldAcrs, v))
+}
+
+// AcrsLT applies the LT predicate on the "acrs" field.
+func AcrsLT(v string) predicate.Session {
+	return predicate.Session(sql.FieldLT(FieldAcrs, v))
+}
+
+// AcrsLTE applies the LTE predicate on the "acrs" field.
+func AcrsLTE(v string) predicate.Session {
+	return predicate.Session(sql.FieldLTE(FieldAcrs, v))
+}
+
+// AcrsContains applies the Contains predicate on the "acrs" field.
+func AcrsContains(v string) predicate.Session {
+	return predicate.Session(sql.FieldContains(FieldAcrs, v))
+}
+
+// AcrsHasPrefix applies the HasPrefix predicate on the "acrs" field.
+func AcrsHasPrefix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasPrefix(FieldAcrs, v))
+}
+
+// AcrsHasSuffix applies the HasSuffix predicate on the "acrs" field.
+func AcrsHasSuffix(v string) predicate.Session {
+	return predicate.Session(sql.FieldHasSuffix(FieldAcrs, v))
+}
+
+// AcrsEqualFold applies the EqualFold predicate on the "acrs" field.
+func AcrsEqualFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldEqualFold(FieldAcrs, v))
+}
+
+// AcrsContainsFold applies the ContainsFold predicate on the "acrs" field.
+func AcrsContainsFold(v string) predicate.Session {
+	return predicate.Session(sql.FieldContainsFold(FieldAcrs, v))
+}
+
+// AuthTimeEQ applies the EQ predicate on the "auth_time" field.
+func AuthTimeEQ(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldEQ(FieldAuthTime, v))
+}
+
+// AuthTimeNEQ applies the NEQ predicate on the "auth_time" field.
+func AuthTimeNEQ(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldNEQ(FieldAuthTime, v))
+}
+
+// AuthTimeIn applies the In predicate on the "auth_time" field.
+func AuthTimeIn(vs ...time.Time) predicate.Session {
+	return predicate.Session(sql.FieldIn(FieldAuthTime, vs...))
+}
+
+// AuthTimeNotIn applies the NotIn predicate on the "auth_time" field.
+func AuthTimeNotIn(vs ...time.Time) predicate.Session {
+	return predicate.Session(sql.FieldNotIn(FieldAuthTime, vs...))
+}
+
+// AuthTimeGT applies the GT predicate on the "auth_time" field.
+func AuthTimeGT(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldGT(FieldAuthTime, v))
+}
+
+// AuthTimeGTE applies the GTE predicate on the "auth_time" field.
+func AuthTimeGTE(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldGTE(FieldAuthTime, v))
+}
+
+// AuthTimeLT applies the LT predicate on the "auth_time" field.
+func AuthTimeLT(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldLT(FieldAuthTime, v))
+}
+
+// AuthTimeLTE applies the LTE predicate on the "auth_time" field.
+func AuthTimeLTE(v time.Time) predicate.Session {
+	return predicate.Session(sql.FieldLTE(FieldAuthTime, v))
+}
+
+// AuthTimeIsNil applies the IsNil predicate on the "auth_time" field.
+func AuthTimeIsNil() predicate.Session {
+	return predicate.Session(sql.FieldIsNull(FieldAuthTime))
+}
+
+// AuthTimeNotNil applies the NotNil predicate on the "auth_time" field.
+func AuthTimeNotNil() predicate.Session {
+	return predicate.Session(sql.FieldNotNull(FieldAuthTime))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

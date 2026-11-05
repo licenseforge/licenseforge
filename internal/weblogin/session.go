@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
@@ -62,27 +63,28 @@ func NewSessions(id identity.Service, redirectURL string) (*Sessions, error) {
 // a forged form post. The redirect URL's origin is trusted, so a proxy that
 // rewrites Host doesn't break browsers that send only Origin. On failure it
 // returns the status to answer (401, 403, or 500) and why; it writes
-// nothing except clearing a dead session cookie.
-func (s *Sessions) Check(w http.ResponseWriter, r *http.Request) (*ent.User, int, error) {
+// nothing except clearing a dead session cookie. It also returns the
+// assurance the session's login proved (ADR-0038).
+func (s *Sessions) Check(w http.ResponseWriter, r *http.Request) (*ent.User, authz.Assurance, int, error) {
 	if err := s.cross.Check(r); err != nil {
-		return nil, http.StatusForbidden, err
+		return nil, "", http.StatusForbidden, err
 	}
 	c, err := r.Cookie(SessionCookie)
 	if err != nil {
-		return nil, http.StatusUnauthorized, err
+		return nil, "", http.StatusUnauthorized, err
 	}
 	if !safeMethod(r.Method) && !equal(r.Header.Get(CSRFHeader), CSRFToken(c.Value)) {
-		return nil, http.StatusForbidden, errors.New("missing or wrong " + CSRFHeader)
+		return nil, "", http.StatusForbidden, errors.New("missing or wrong " + CSRFHeader)
 	}
-	u, err := s.id.Session(r.Context(), c.Value)
+	u, level, err := s.id.Session(r.Context(), c.Value)
 	if errors.Is(err, identity.ErrNoSession) {
 		setCookie(w, SessionCookie, "", -1)
-		return nil, http.StatusUnauthorized, err
+		return nil, "", http.StatusUnauthorized, err
 	}
 	if err != nil {
-		return nil, http.StatusInternalServerError, err
+		return nil, "", http.StatusInternalServerError, err
 	}
-	return u, 0, nil
+	return u, level, 0, nil
 }
 
 // Sessions returns h's session checker.
@@ -92,7 +94,7 @@ func (h *Handler) Sessions() *Sessions { return h.sessions }
 func (h *Handler) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		u, code, err := h.sessions.Check(w, r)
+		u, _, code, err := h.sessions.Check(w, r)
 		switch code {
 		case 0:
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))

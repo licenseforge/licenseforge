@@ -67,6 +67,31 @@ func (s *server) ListLicenses(ctx context.Context, req apigen.ListLicensesReques
 	return page, nil
 }
 
+// GetSummary answers exact counts for the dashboard overview. Lists carry no
+// totals (ADR-0032); this resource is where counts live. License counts are
+// in the caller's product scope; customers only for callers who see every
+// product (absent otherwise, never a partial count).
+func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObject) (apigen.GetSummaryResponseObject, error) {
+	byStatus, err := s.Licenses.Counts(ctx, principal(ctx))
+	if err != nil {
+		return nil, err
+	}
+	var out apigen.GetSummary200JSONResponse
+	out.Licenses.Active = int64(byStatus[license.StatusActive])
+	out.Licenses.Suspended = int64(byStatus[license.StatusSuspended])
+	out.Licenses.Revoked = int64(byStatus[license.StatusRevoked])
+	n, ok, err := s.Customers.CountActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		out.Customers = &struct {
+			Active int64 `json:"active"`
+		}{int64(n)}
+	}
+	return out, nil
+}
+
 func (s *server) GetLicense(ctx context.Context, req apigen.GetLicenseRequestObject) (apigen.GetLicenseResponseObject, error) {
 	l, err := s.Licenses.Get(ctx, principal(ctx), req.Id)
 	if err != nil {

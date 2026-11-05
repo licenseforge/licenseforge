@@ -3,7 +3,8 @@ import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect
 import { requireSession } from "@/api/session";
 import { tenantsQuery } from "@/api/tenants";
 import { AppShell } from "@/app-shell";
-import { ErrorPage, LoginPage, NoTenants, NotFound, Overview, TenantLayout } from "@/pages";
+import { Overview } from "@/overview-page";
+import { ErrorPage, LoginPage, NoTenants, NotFound, TenantLayout } from "@/pages";
 import { CustomersPage, ProductsPage } from "@/catalog-pages";
 import { InvitePage } from "@/invite-page";
 import { LicensesPage } from "@/licenses-page";

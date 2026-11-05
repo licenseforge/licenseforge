@@ -420,7 +420,7 @@
               {
                 "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",
                 "control-id": "au-6",
-                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics.",
+                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS) and/or OTLP logs over HTTP (JSON; delivered only on a 2xx rejecting no record), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics. Tenants read and self-export their own chain through the REST API (audit:read, owners and admins; under RLS, the platform chain never visible) with the same fields, so they can check it themselves; reading is itself audited, once per reader per 15 minutes.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -438,9 +438,19 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/auditexport/export_test.go",
                     "rel": "reference",
                     "text": "TestAtLeastOnceAfterACrash"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestAuditEventEndpoints"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/read_test.go",
+                    "rel": "reference",
+                    "text": "TestListRecordsReads"
                   }
                 ],
-                "remarks": "Not yet: OTLP export, the SIEM correlation rule in the docs, and the dashboard audit viewer (v0.2)."
+                "remarks": "Not yet: the SIEM correlation rule in the docs, and the dashboard audit viewer screen (v0.2)."
               },
               {
                 "uuid": "73f6ddcd-57bc-5f54-b68b-66d9640e06f2",
@@ -720,15 +730,36 @@
               {
                 "uuid": "d716037b-ca0f-5bd5-8ee7-8578153f7a11",
                 "control-id": "ia-2.1",
-                "description": "Per-tenant MFA enforcement through the IdP's acr and amr claims, including a 'require phishing-resistant MFA' policy (ADR-0024).",
+                "description": "Every dashboard session records, at login, the verified ID token's amr, acr (and Entra's acrs) and auth_time, and a computed assurance level: none, mfa or phishing_resistant (configurable value sets; missing or unknown claims mean none). Each tenant has an MFA policy (none, mfa, phishing_resistant) that only owners change from a session, audited; raising it needs a session that already meets the new level (ADR-0038).",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "partial"
                   }
                 ],
-                "remarks": "Not implemented: MFA is whatever the IdP enforces (Roadmap v0.1: MFA enforcement per tenant via amr/acr)."
+                "remarks": "Not enforced yet: the policy is stored but sessions aren't checked against it per request, and there is no step-up login (ADR-0038 PR 2).",
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance_test.go",
+                    "rel": "reference",
+                    "text": "TestAssess"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/assurance_test.go",
+                    "rel": "reference",
+                    "text": "TestLoginRecordsAssurance"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/tenants/tenants_test.go",
+                    "rel": "reference",
+                    "text": "TestSetMFAPolicy"
+                  }
+                ]
               },
               {
                 "uuid": "8a03dceb-ea4b-50a5-af7d-dd144c89186f",
@@ -738,15 +769,50 @@
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "partial"
                   }
                 ],
-                "remarks": "As IA-2(1)."
+                "remarks": "As IA-2(1).",
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/tenants/tenants_test.go",
+                    "rel": "reference",
+                    "text": "TestSetMFAPolicy"
+                  }
+                ]
+              },
+              {
+                "uuid": "e636681c-72eb-46a6-bede-515df58abf3c",
+                "control-id": "ia-2.6",
+                "description": "A tenant can require phishing-resistant MFA (ADR-0038): sessions whose IdP asserts amr hwk, sc or pop, or a configured acr (e.g. Okta phr/phrh, an Entra authentication context requiring phishing-resistant MFA), are recorded as phishing_resistant. Whether that authenticator is a separate device depends on the IdP's authenticator policy (e.g. hardware security keys or PIV/CAC only, versus synced passkeys).",
+                "props": [
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://licenseforge.io/ns/oscal",
+                    "value": "partial"
+                  }
+                ],
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance_test.go",
+                    "rel": "reference",
+                    "text": "TestAssess"
+                  }
+                ],
+                "remarks": "As IA-2(1): recorded and settable, enforced with ADR-0038 PR 2. Each IdP's claims are verified by an integration test before support is claimed."
               },
               {
                 "uuid": "be29326b-aa2f-5724-bd6b-14a06044504a",
                 "control-id": "ia-2.8",
-                "description": "The login flow is single-use: state, nonce and the PKCE verifier sit in a short-lived __Host- cookie that is cleared on the first callback, the nonce is bound to the ID token, and the PKCE S256 challenge is bound to the code exchange.",
+                "description": "The login flow is single-use: state, nonce and the PKCE verifier sit in a short-lived __Host- cookie that is cleared on the first callback, the nonce is bound to the ID token, and the PKCE S256 challenge is bound to the code exchange. Replay resistance of the authenticator itself is inherited from the IdP; the per-tenant phishing-resistant policy strengthens it once enforcement lands (ADR-0038).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1065,7 +1131,7 @@
               {
                 "uuid": "671b5971-8004-5f3a-a71a-2771bed5a4e3",
                 "control-id": "sc-5",
-                "description": "Bounded timeouts: HTTP read-header (10 s) and idle (60 s), IdP calls (10 s), the startup database connect (30 s) and the readiness check (2 s). Chart resource limits; optional HPA.",
+                "description": "A per-client-address rate limit runs before anything else on the public listener (ADR-0032 step 0): fixed one-minute windows per address (IPv6 per /64) and surface (activation 1200, management 600, login 60 by default), 429 with Retry-After and RateLimit headers, bounded memory. Bounded timeouts: HTTP read-header (10 s), read (30 s), write (60 s) and idle (60 s), IdP calls (10 s), the startup database connect (30 s) and the readiness check (2 s). Chart resource limits; optional HPA.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1079,12 +1145,22 @@
                     "rel": "reference"
                   },
                   {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/ratelimit/ratelimit_test.go",
+                    "rel": "reference",
+                    "text": "TestLimitThen429"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/ratelimit/ratelimit_test.go",
+                    "rel": "reference",
+                    "text": "TestSpoofedForwardedForDoesNotEscape"
+                  },
+                  {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
                     "rel": "reference",
                     "text": "TestKeyFetchTimesOut"
                   }
                 ],
-                "remarks": "No request rate limiting in the server: configure it at the ingress (Secure Configuration Guide)."
+                "remarks": "The limit is per replica (N replicas allow N times the quota) and fails open for new addresses once 100,000 are tracked in a window (counted in licenseforge_rate_limit_untracked_requests_total). Volumetric attacks belong to the ingress or network (Secure Configuration Guide)."
               },
               {
                 "uuid": "1085c3b2-eb7f-54de-8357-9cc26371ca4a",

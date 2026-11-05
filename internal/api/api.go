@@ -27,6 +27,7 @@ import (
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/catalog"
 	"licenseforge.io/licenseforge/internal/customers"
@@ -37,6 +38,7 @@ import (
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -59,8 +61,12 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Customers customers.Service
+	// Audit reads the tenant's audit log (audit:read).
+	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
+	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
+	Tenants tenants.Service
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
 	Identity    identity.Service
@@ -103,6 +109,7 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w := &tracked{ResponseWriter: rw}
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
 	if _, pattern := s.mux.Handler(r); pattern != "" { // before auth, so refusals get the route too
 		metrics.SetRoute(r.Context(), pattern)
@@ -192,7 +199,7 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 }
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
-	u, code, err := s.Sessions.Check(w, r)
+	u, level, code, err := s.Sessions.Check(w, r)
 	switch code {
 	case 0:
 	case http.StatusUnauthorized:
@@ -207,7 +214,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		if userRoutes[r.URL.EscapedPath()] {
 			// A principal with no tenant: authz denies every permission to
 			// it; only user routes, which act for the user, accept it.
-			return authz.Principal{Kind: authz.User, ID: u.ID}, nil
+			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: level}, nil
 		}
 		return authz.Principal{}, errNotFound
 	}
@@ -223,7 +230,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
-	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope}, nil
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope, Assurance: level}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -270,6 +277,7 @@ var queryParams = map[string][]string{
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor"},
 	"ListCustomers":   {"limit", "cursor"},
+	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
@@ -478,6 +486,10 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{invalidInvitation.Field, invalidInvitation.Message})
 	case errors.Is(err, store.ErrInvitation): // one answer for every reason (no oracle)
 		p = invalid(fieldError{"/token", "invalid, expired, revoked or used, or not for this account"})
+	case errors.Is(err, tenants.ErrPolicyUnmet):
+		p = &problem{status: http.StatusConflict, code: "mfa_policy_unmet", detail: "Your session doesn't meet this MFA policy: sign in with the stronger method first, so you can't lock yourself out.", err: err}
+	case errors.Is(err, tenants.ErrInvalid):
+		p = invalid(fieldError{"/mfa_policy", "must be none, mfa or phishing_resistant"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
 	case errors.Is(err, licenses.ErrState):
