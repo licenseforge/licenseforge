@@ -4,6 +4,7 @@ import {
   acceptInvitation,
   assignableMemberRoles,
   changeRole,
+  everyPage,
   exceeds,
   type Invitation,
   inviteLink,
@@ -119,6 +120,22 @@ describe("revocation previews (mirror internal/members)", () => {
     expect(previewRoleChange(member, "owner", tokens, invs, now)).toEqual({ tokens: [], invitations: [] });
   });
 
+  it("owner to admin revokes only the pending owner invitations", () => {
+    const owner = { ...member, role: "owner" as const };
+    const p = previewRoleChange(owner, "admin", [], [inv("owner-inv", { role: "owner" }), inv("admin-inv", { role: "admin" })], now);
+    expect(p.invitations.map((x) => x.id)).toEqual(["owner-inv"]);
+  });
+
+  it("a product-scoped admin couldn't invite before, so a demotion revokes no invitation", () => {
+    const scoped = { ...member, all_products: false, product_ids: ["prd_1"] };
+    expect(previewRoleChange(scoped, "manager", [], [inv("viewer-inv", {})], now).invitations).toEqual([]);
+  });
+
+  it("an invitation already outside the old grant stays (an earlier opt-out)", () => {
+    // an admin with a pending owner invitation: the old grant couldn't send it either
+    expect(previewRoleChange(member, "manager", [], [inv("owner-inv", { role: "owner" })], now).invitations).toEqual([]);
+  });
+
   it("a removal revokes every active token and pending invitation of the member", () => {
     const p = previewRemoval(member, tokens, invs, now);
     expect(p.tokens.map((x) => x.id)).toEqual(["admin", "manager", "sdk"]);
@@ -148,5 +165,14 @@ describe("assignableMemberRoles", () => {
   it("offers nothing without member:write on every product", () => {
     expect(assignableMemberRoles({ role: "manager", scope: all })).toEqual([]);
     expect(assignableMemberRoles({ role: "owner", scope: { all: false, products: ["prd_1"] } })).toEqual([]);
+  });
+});
+
+describe("everyPage", () => {
+  it("says whether it saw every page", async () => {
+    const endless = async (c?: string) => ({ items: [c ?? "first"], next_cursor: "more" });
+    expect(await everyPage(endless, 2)).toEqual({ items: ["first", "more"], complete: false });
+    const two = async (c?: string) => (c ? { items: [2] } : { items: [1], next_cursor: "c" });
+    expect(await everyPage(two, 2)).toEqual({ items: [1, 2], complete: true });
   });
 });

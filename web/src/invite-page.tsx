@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import { acceptInvitation } from "@/api/members";
 import { sessionQuery } from "@/api/session";
@@ -11,7 +11,13 @@ import { t } from "@/i18n";
 import { forgetInviteToken, takeInviteToken } from "@/invite";
 
 export function InvitePage() {
-  const [token] = useState(takeInviteToken);
+  const hash = useRouterState({ select: (s) => s.location.hash });
+  const router = useRouter();
+  const [token] = useState(() => takeInviteToken(hash));
+  // Off the address bar (and the router's state) once read.
+  useEffect(() => {
+    if (hash) router.history.replace("/invite");
+  }, [hash, router]);
   const session = useQuery(sessionQuery);
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -27,6 +33,7 @@ export function InvitePage() {
       if (e instanceof ApiError && e.status === 422) forgetInviteToken(); // won't work later either
     },
   });
+  const refused = accept.error instanceof ApiError && accept.error.status === 422;
   return (
     <main className="mx-auto flex min-h-svh max-w-md flex-col justify-center gap-4 p-6">
       <h1 className="text-2xl font-semibold">{t("invite.title")}</h1>
@@ -44,11 +51,12 @@ export function InvitePage() {
           <p className="text-muted-foreground">{t("invite.body", { email: session.data.user.email })}</p>
           {accept.isError && (
             <p role="alert" className="text-sm font-medium">
-              {accept.error instanceof ApiError && accept.error.status === 422 ? t("invite.refused") : errorText(accept.error)}
+              {refused ? t("invite.refused") : errorText(accept.error)}
             </p>
           )}
           <div className="flex gap-2">
-            <Button disabled={accept.isPending || accept.isError} onClick={() => accept.mutate()}>
+            {/* Only a refusal is final; other errors (network, 5xx) can be retried. */}
+            <Button disabled={accept.isPending || refused} onClick={() => accept.mutate()}>
               {t("invite.accept")}
             </Button>
             <Button

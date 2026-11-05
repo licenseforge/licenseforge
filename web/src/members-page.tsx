@@ -21,6 +21,7 @@ import {
   removeMember,
   type Revoked,
   revokeInvitation,
+  within,
 } from "@/api/members";
 import { sessionQuery } from "@/api/session";
 import { tenantsQuery } from "@/api/tenants";
@@ -35,7 +36,7 @@ const scopeText = (x: { all_products: boolean; product_ids: string[] }) =>
 const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2";
 
-type Change = { kind: "role"; member: Member; role: MemberRole } | { kind: "remove"; member: Member };
+type Change = { kind: "role" | "remove"; member: Member };
 
 export function MembersPage() {
   const { slug } = useParams({ from: "/app/t/$slug/settings/members" });
@@ -92,29 +93,19 @@ export function MembersPage() {
                   </div>
                   {m.email && m.name && <div className="text-xs text-muted-foreground">{m.email}</div>}
                 </td>
-                <td className={td}>
-                  {changeable(m) ? (
-                    <select
-                      aria-label={t("members.roleFor", { name: m.name ?? m.email ?? m.user_id })}
-                      className={input}
-                      value={m.role}
-                      onChange={(e) => setChange({ kind: "role", member: m, role: e.target.value as MemberRole })}
-                    >
-                      {roles.map((r) => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    m.role
-                  )}
-                </td>
+                <td className={td}>{m.role}</td>
                 <td className={td}>{scopeText(m)}</td>
                 <td className={td}>{date.format(new Date(m.created_at))}</td>
-                <td className={`${td} text-right`}>
+                <td className={`${td} whitespace-nowrap text-right`}>
                   {changeable(m) && (
-                    <Button variant="ghost" onClick={() => setChange({ kind: "remove", member: m })}>
-                      {t("members.remove")}
-                    </Button>
+                    <>
+                      <Button variant="ghost" aria-label={t("members.roleFor", { name: m.name ?? m.email ?? m.user_id })} onClick={() => setChange({ kind: "role", member: m })}>
+                        {t("members.change")}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setChange({ kind: "remove", member: m })}>
+                        {t("members.remove")}
+                      </Button>
+                    </>
                   )}
                 </td>
               </tr>
@@ -181,6 +172,8 @@ export function MembersPage() {
       {change && (
         <ChangeDialog
           tenant={slug}
+          caller={caller}
+          roles={roles}
           change={change}
           onClose={() => setChange(null)}
           onDone={(r) => {
@@ -195,24 +188,42 @@ export function MembersPage() {
   );
 }
 
-/** A role change or a removal: previews what it revokes (tokens, invitations), with a toggle for each. */
-function ChangeDialog({ tenant, change, onClose, onDone }: { tenant: string; change: Change; onClose: () => void; onDone: (r: Revoked) => void }) {
+/**
+ * A role change or a removal: previews what it revokes (tokens, invitations),
+ * with a toggle for each. Confirming waits for the preview; if the preview
+ * can't load, both toggles start off, so nothing unseen is revoked.
+ */
+export function ChangeDialog({ tenant, caller, roles, change, onClose, onDone }: {
+  tenant: string; caller: Membership; roles: MemberRole[]; change: Change; onClose: () => void; onDone: (r: Revoked) => void;
+}) {
   const qc = useQueryClient();
   const m = change.member;
   const name = m.name ?? m.email ?? m.user_id;
+  const [role, setRole] = useState<MemberRole>(m.role); // the select lives here: arrow keys only move it
   const tokens = useQuery({ queryKey: ["api-tokens-all", tenant], queryFn: () => allTokens(tenant) });
   const invs = useQuery({ queryKey: ["invitations-all", tenant], queryFn: () => allInvitations(tenant) });
+  const failed = tokens.isError || invs.isError;
+  const loading = !failed && (tokens.isPending || invs.isPending);
   const [opts, setOpts] = useState({ tokens: true, invitations: true });
+  const [failedOff, setFailedOff] = useState(false);
+  if (failed && !failedOff) {
+    setFailedOff(true); // once: the user may tick them again knowingly
+    setOpts({ tokens: false, invitations: false });
+  }
   const preview =
     tokens.data && invs.data
       ? change.kind === "role"
-        ? previewRoleChange(m, change.role, tokens.data, invs.data)
-        : previewRemoval(m, tokens.data, invs.data)
+        ? previewRoleChange(m, role, tokens.data.items, invs.data.items)
+        : previewRemoval(m, tokens.data.items, invs.data.items)
       : null;
+  const incomplete = (tokens.data && !tokens.data.complete) || (invs.data && !invs.data.complete);
+  // The server refuses the whole change (403) if it would revoke a token the caller couldn't assign.
+  const aboveCaller = (tok: ApiToken) => tok.role !== "sdk" && !within(tok.role, caller.role);
+  const blocked = opts.tokens && (preview?.tokens.some(aboveCaller) ?? false);
   const run = useMutation({
     mutationFn: async (): Promise<Revoked> => {
       if (change.kind === "remove") return removeMember(tenant, m.id, opts);
-      const u = await changeRole(tenant, m.id, change.role, opts);
+      const u = await changeRole(tenant, m.id, role, opts);
       return { tokens: u.revoked_token_ids, invitations: u.revoked_invitation_ids };
     },
     onSuccess: async (r) => {
@@ -222,21 +233,38 @@ function ChangeDialog({ tenant, change, onClose, onDone }: { tenant: string; cha
       onDone(r);
     },
   });
-  const title = change.kind === "role" ? t("members.changeTitle", { name, role: change.role }) : t("members.removeTitle", { name });
+  const title = change.kind === "role" ? t("members.changeTitle", { name }) : t("members.removeTitle", { name });
   return (
     <Modal title={title} onClose={onClose}>
       {change.kind === "remove" && <p className="mb-3 text-sm">{t("members.removeBody")}</p>}
-      {(tokens.isError || invs.isError) && (
-        <p role="alert" className="mb-3 text-sm">
+      {change.kind === "role" && (
+        <label className="mb-3 flex flex-col gap-1 text-sm">
+          {t("tokens.field.role")}
+          <select className={input} value={role} onChange={(e) => setRole(e.target.value as MemberRole)}>
+            {roles.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {loading && <p className="text-sm text-muted-foreground">{t("members.previewLoading")}</p>}
+      {failed && (
+        <p role="alert" className="mb-3 text-sm font-medium">
           {t("members.previewFailed")}
         </p>
       )}
+      {incomplete && <p className="mb-3 text-sm">{t("members.previewIncomplete")}</p>}
       <Preview
         label={t("members.revokeTokens")}
         checked={opts.tokens}
         onChange={(v) => setOpts({ ...opts, tokens: v })}
-        items={preview?.tokens.map((tok: ApiToken) => `${tok.name} (${tok.role}, ${tok.display})`)}
+        items={preview?.tokens.map((tok) => `${tok.name} (${tok.role}, ${tok.display})${aboveCaller(tok) ? ` ${t("members.aboveYou")}` : ""}`)}
       />
+      {blocked && (
+        <p role="alert" className="ml-6 text-sm">
+          {t("members.aboveYouHint")}
+        </p>
+      )}
       <Preview
         label={t("members.revokeInvitations")}
         checked={opts.invitations}
@@ -252,7 +280,7 @@ function ChangeDialog({ tenant, change, onClose, onDone }: { tenant: string; cha
         <Button variant="ghost" onClick={onClose}>
           {t("tokens.cancel")}
         </Button>
-        <Button disabled={run.isPending} onClick={() => run.mutate()}>
+        <Button disabled={run.isPending || loading || (change.kind === "role" && role === m.role)} onClick={() => run.mutate()}>
           {change.kind === "role" ? t("members.change") : t("members.remove")}
         </Button>
       </div>

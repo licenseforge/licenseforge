@@ -75,16 +75,19 @@ export async function acceptInvitation(token: string) {
 /** The invite link: the token in the fragment, which browsers never send to the server. */
 export const inviteLink = (token: string) => `${window.location.origin}/invite#token=${encodeURIComponent(token)}`;
 
-/** Every page of a list, for previews (bounded: at most 50 pages of 200). */
-export async function everyPage<T>(get: (cursor?: string) => Promise<{ items: T[]; next_cursor?: string }>): Promise<T[]> {
-  const out: T[] = [];
+/** Every page of a list, for previews, bounded at maxPages: complete is false if it stopped there. */
+export async function everyPage<T>(
+  get: (cursor?: string) => Promise<{ items: T[]; next_cursor?: string }>,
+  maxPages = 50,
+): Promise<{ items: T[]; complete: boolean }> {
+  const items: T[] = [];
   let cursor: string | undefined;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < maxPages; i++) {
     const p = await get(cursor);
-    out.push(...p.items);
-    if (!(cursor = p.next_cursor)) break;
+    items.push(...p.items);
+    if (!(cursor = p.next_cursor)) return { items, complete: true };
   }
-  return out;
+  return { items, complete: false };
 }
 
 export const allTokens = (tenant: string) =>
@@ -98,7 +101,8 @@ export const allInvitations = (tenant: string) =>
 
 // The previews mirror internal/members (exceeds, canInvite); the server decides.
 const ranked: Role[] = ["owner", "admin", "manager", "support", "viewer"];
-const within = (r: Role, g: Role) => r !== "sdk" && ranked.indexOf(r) >= ranked.indexOf(g);
+/** Whether role r has no permission g lacks (never sdk, which stands alone). */
+export const within = (r: Role, g: Role) => r !== "sdk" && ranked.indexOf(r) >= ranked.indexOf(g);
 
 /** Whether grant g goes beyond to: a role above it (never sdk) or a product outside its scope. */
 export function exceeds(g: Membership, to: Membership): boolean {
