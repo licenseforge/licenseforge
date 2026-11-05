@@ -10,6 +10,7 @@
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
+//	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
 //	LICENSEFORGE_DRAIN                  wait after SIGTERM before closing, default 5s
 //	LICENSEFORGE_OIDC_ISSUER            dashboard login (ADR-0003); unset = no login
 //	LICENSEFORGE_OIDC_CLIENT_ID         OIDC client registration, required with the issuer
@@ -39,11 +40,18 @@ import (
 	"syscall"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/issue"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
@@ -54,6 +62,7 @@ var version = "dev"
 
 func main() {
 	addr := flag.String("addr", envOr("LICENSEFORGE_ADDR", ":8080"), "listen address")
+	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]   run the server\n       licenseforge migrate   apply database migrations\n")
@@ -78,9 +87,13 @@ func main() {
 	var err error
 	switch flag.Arg(0) {
 	case "":
-		var ln net.Listener
+		var ln, mln net.Listener
 		if ln, err = net.Listen("tcp", *addr); err == nil {
-			err = serve(ctx, ln, log)
+			if mln, err = net.Listen("tcp", *metricsAddr); err == nil {
+				err = serve(ctx, ln, mln, log)
+			} else {
+				_ = ln.Close()
+			}
 		}
 	case "migrate":
 		err = migrate(ctx, log)
@@ -106,9 +119,10 @@ func migrate(ctx context.Context, log *slog.Logger) error {
 	return nil
 }
 
-// serve runs the server on ln until ctx is done. It closes ln.
-func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
-	defer func() { _ = ln.Close() }()
+// serve runs the server on ln, and /metrics alone on mln, until ctx is done.
+// It closes both.
+func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
+	defer func() { _ = ln.Close(); _ = mln.Close() }()
 	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
 		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
 	}
@@ -132,7 +146,8 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if _, err := secrets.ParseKeyring(keys); err != nil { // fail at start, not on first use
+	keyring, err := secrets.ParseKeyring(keys)
+	if err != nil { // fail at start, not on first use
 		return fmt.Errorf("LICENSEFORGE_MASTER_KEYS: %w", err)
 	}
 	// A database outage at start is a crash loop (Kubernetes retries), not "not ready".
@@ -143,6 +158,7 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	metrics.SetPools(db.Stats)
 
 	var draining atomic.Bool
 	ready := func(ctx context.Context) error {
@@ -178,26 +194,39 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
-	// API tokens need only the tenant pool (hashes, no keyring).
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Identity: ids,
-		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
+	// API tokens need only the tenant pool (hashes, no keyring); license keys
+	// and stored idempotent responses (which can hold one) are encrypted, and
+	// the activation API decrypts license keys and signs leases.
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
+		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},
+		Sessions:    sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           metrics.Instrument(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	errc := make(chan error, 1)
+	msrv := &http.Server{
+		Handler:           metricsMux(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	errc, merrc := make(chan error, 1), make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", ln.Addr().String(), "version", version)
+		log.Info("listening", "addr", ln.Addr().String(), "metrics", mln.Addr().String(), "version", version)
 		errc <- srv.Serve(ln)
 	}()
+	go func() { merrc <- msrv.Serve(mln) }()
+	defer func() { _ = msrv.Close() }()
 
 	select {
 	case err := <-errc:
 		return err
+	case err := <-merrc:
+		return fmt.Errorf("metrics listener: %w", err)
 	case <-ctx.Done():
 	}
 
@@ -216,6 +245,14 @@ func serve(ctx context.Context, ln net.Listener, log *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+// metricsMux serves /metrics only. It runs on its own listener: the public
+// mux never mounts it.
+func metricsMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metrics.Handler())
+	return mux
 }
 
 // newMux serves the health endpoints and the dashboard. ready reports whether the database is

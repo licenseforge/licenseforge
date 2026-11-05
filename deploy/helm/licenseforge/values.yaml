@@ -65,6 +65,20 @@ service:
   type: ClusterIP
   port: 80
 
+# Prometheus metrics on their own port (LICENSEFORGE_METRICS_ADDR), never on
+# the http port. No auth: the NetworkPolicy admits only scrapeFrom.
+metrics:
+  port: 9090
+  # Who may scrape (NetworkPolicy peers). Default: pods in the "monitoring"
+  # namespace. Empty: nobody (the port stays closed).
+  scrapeFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # A ServiceMonitor for the Prometheus Operator (needs its CRDs).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus
+
 podDisruptionBudget:
   enabled: true
   maxUnavailable: 1   # never blocks node drains, even with one replica

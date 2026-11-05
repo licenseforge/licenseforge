@@ -116,12 +116,17 @@ paths:
         Dashboard sessions with member:write on every product. The caller may
         only give or take away a role it holds itself; the last owner can't
         be demoted (409). A demotion or narrower scope also revokes the
-        member's tokens the new grant wouldn't allow (ADR-0035), unless
-        revoke_tokens=false.
+        member's tokens the new grant wouldn't allow, and the pending
+        invitations it couldn't have sent (ADR-0035), unless
+        revoke_tokens=false / revoke_invitations=false.
       parameters:
         - name: revoke_tokens
           in: query
           description: Revoke the member's active API tokens above the new role or outside the new scope, each audited.
+          schema: { type: boolean, default: true }
+        - name: revoke_invitations
+          in: query
+          description: Revoke the member's pending invitations the new grant couldn't have sent, each audited.
           schema: { type: boolean, default: true }
       requestBody:
         required: true
@@ -143,12 +148,16 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
     delete:
       operationId: removeMember
-      summary: Remove a member, by default revoking the API tokens they created (ADR-0029).
+      summary: Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
       description: Their access ends at once. The last owner can't be removed (409).
       parameters:
         - name: revoke_tokens
           in: query
           description: Also revoke every active API token the member created, each audited.
+          schema: { type: boolean, default: true }
+        - name: revoke_invitations
+          in: query
+          description: Also revoke every pending invitation the member sent, each audited.
           schema: { type: boolean, default: true }
       responses:
         "204":
@@ -157,11 +166,341 @@ paths:
             X-Revoked-Token-Ids:
               description: Comma-separated IDs of the API tokens the removal revoked; absent if none.
               schema: { type: string }
+            X-Revoked-Invitation-Ids:
+              description: Comma-separated IDs of the pending invitations the removal revoked; absent if none.
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listInvitations
+      summary: List the tenant's invitations (open, accepted, revoked, expired), newest first.
+      description: Needs member:read on every product; a product-scoped caller sees none. Never returns the link token.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createInvitation
+      summary: Invite someone by email. The link token is in this response only.
+      description: |
+        Dashboard sessions with member:write on every product; the role can't
+        exceed the caller's. Open for 7 days. Accepting needs the token, a
+        signed-in user whose verified email matches, and an open invitation
+        (POST /invitations/accept).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvitationCreate" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationCreated" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/invitations/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    post:
+      operationId: revokeInvitation
+      summary: Revoke an open invitation. One-way.
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation as the signed-in user.
+      description: |
+        Dashboard sessions only (outside any tenant path; API tokens get 401).
+        An unknown, revoked, expired or used token, and a user whose verified
+        email doesn't match, all answer the same 422.
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: The invite link's token. }
+      responses:
+        "200":
+          description: The new membership.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedInvitation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listLicenses
+      summary: List licenses in the caller's product scope, newest first.
+      description: Filters are equality on product, customer and status, and a creation-time range. A filter naming a hidden or missing object gives an empty list.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - { name: product_id, in: query, schema: { type: string } }
+        - { name: customer_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/LicenseStatus" } }
+        - { name: created_after, in: query, schema: { type: string, format: date-time } }
+        - { name: created_before, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicensePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: issueLicense
+      summary: Issue a license from a plan. The license key is in this response only.
+      description: |
+        Needs license:issue on the product. The plan's terms and features are
+        copied into the license, with per-license overrides. A missing or
+        hidden product, plan or customer answers 422 on its field.
+        With Idempotency-Key, a retry within 24 hours gets the first answer
+        (the key again included, for the same credential).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: 1-255 printable ASCII characters; scoped to the tenant and the credential.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LicenseIssue" }
+      responses:
+        "201":
+          description: Issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicenseIssued" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    get:
+      operationId: getLicense
+      summary: Get a license (never its key).
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: suspendLicense
+      summary: Suspend an active license.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/reinstate:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: reinstateLicense
+      summary: Make a suspended license active again. A revoked license stays revoked.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: revokeLicense
+      summary: Revoke an active or suspended license. Final.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /me/tenants:
+    get:
+      operationId: listMyTenants
+      summary: The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+      description: |
+        Dashboard sessions only (outside any tenant path; API tokens get 401):
+        the dashboard's tenant switcher. Always one page (a user belongs to
+        few tenants), so there is no `next_cursor`.
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Every tenant the user is a member of.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyTenantPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /activation/tenants/{tenant}/activate:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: activate
+      summary: Activate this machine or cluster and get a signed lease (SDKs).
+      description: |
+        Activation API (ADR-0004, ADR-0034): authenticated by the license key,
+        not by a token or session. Activating an already active fingerprint
+        reuses its activation (no new seat). With `Idempotency-Key`, a retry
+        gets the first answer back (ADR-0032).
+      security:
+        - licenseKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: Activated; the lease.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lease" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /activation/tenants/{tenant}/refresh:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: refreshLease
+      summary: Refresh an active activation's lease (also validate). Never takes a seat.
+      description: "`not_activated` (404) asks the SDK to activate again."
+      security:
+        - licenseKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: The new lease.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lease" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /activation/tenants/{tenant}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: deactivate
+      summary: Deactivate this machine or cluster, freeing its seat.
+      security:
+        - licenseKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeactivationRequest" }
+      responses:
+        "204":
+          description: Deactivated.
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 components:
   securitySchemes:
     apiToken:
@@ -178,13 +517,34 @@ components:
       in: header
       name: X-CSRF-Token
       description: Required with the session on unsafe methods; from GET /auth/session.
+    licenseKey:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Activation API only: `Authorization: License LF-XXXXX-…` (the license key as the user typed it)."
   parameters:
+    LicenseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
       required: true
       description: The tenant's slug or ID (`tnt_…`).
       schema: { type: string }
+    ActivationTenant:
+      name: tenant
+      in: path
+      required: true
+      description: The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it).
+      schema: { type: string, example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: 1–255 printable ASCII characters; kept 24 hours (ADR-0032).
+      schema: { type: string, maxLength: 255 }
     Limit:
       name: limit
       in: query
@@ -202,7 +562,44 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Too many requests for this license key (ADR-0034); retry after `Retry-After` seconds.
+      headers:
+        X-Request-Id: { schema: { type: string } }
+        Retry-After: { schema: { type: integer } }
+        RateLimit-Policy: { schema: { type: string, example: '"license-key";q=60;w=60' } }
+        RateLimit: { schema: { type: string, example: '"license-key";r=0;t=17' } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    ActivationRequest:
+      type: object
+      required: [fingerprint, fp_source]
+      properties:
+        fingerprint: { type: string, description: "The lease's bind.fp: `sha256:` + 64 lowercase hex (License File Format, Fingerprints).", example: "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684" }
+        fp_source:
+          type: string
+          enum: [override, env, kubernetes, machine-id]
+          description: Where the fingerprint came from; kubernetes binds the cluster, the others the machine.
+        hostname: { type: string, maxLength: 253, description: "Letters, digits, `-`, `.`, `_`." }
+        app_version: { type: string, maxLength: 64, description: Printable ASCII. }
+        sdk_version: { type: string, maxLength: 64, description: Printable ASCII. }
+    DeactivationRequest:
+      type: object
+      required: [fingerprint]
+      properties:
+        fingerprint: { type: string }
+    Lease:
+      type: object
+      required: [lease, kid, activation_id, issued_at, expires_at, refresh_after]
+      properties:
+        lease: { type: string, description: The signed lf1 lease (License File Format); verify it with the SDK. }
+        kid: { type: string, description: The signing key's ID. }
+        activation_id: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        issued_at: { type: string, format: date-time, description: Server time (ADR-0018). }
+        expires_at: { type: string, format: date-time }
+        refresh_after: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code, request_id]
@@ -242,6 +639,68 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time, nullable: true }
         revoked_at: { type: string, format: date-time, nullable: true }
+    LicenseStatus:
+      type: string
+      enum: [active, suspended, revoked]
+    License:
+      type: object
+      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
+      properties:
+        id: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        product_id: { type: string }
+        plan_id: { type: string }
+        plan_slug: { type: string, description: The plan's slug when issued. }
+        customer_id: { type: string }
+        type: { type: string, enum: [dev, trial, paid, community] }
+        status: { $ref: "#/components/schemas/LicenseStatus" }
+        key_hint: { type: string, description: The key's last 6 characters, to tell keys apart. Never the key. }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
+        expires_at: { type: string, format: date-time, nullable: true, description: Null for a perpetual license, or until first activation. }
+        max_activations: { type: integer, nullable: true }
+        entitlements:
+          type: object
+          required: [features, limits]
+          properties:
+            features: { type: array, items: { type: string } }
+            limits: { type: object, additionalProperties: { type: integer, format: int64 } }
+        external_refs: { type: object, additionalProperties: { type: string } }
+        issued_at: { type: string, format: date-time }
+        suspended_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    LicensePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/License" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    LicenseIssue:
+      type: object
+      required: [product_id, plan_id, customer_id]
+      properties:
+        product_id: { type: string }
+        plan_id: { type: string }
+        customer_id: { type: string }
+        type: { type: string, enum: [dev, trial, paid, community], default: paid }
+        overrides:
+          type: object
+          description: Per-license feature changes by feature key (an enterprise deal).
+          additionalProperties:
+            type: object
+            properties:
+              remove: { type: boolean, description: Drop the feature. }
+              limit: { type: integer, format: int64, description: For a limit feature (required for one), -1 = unlimited. }
+        external_refs:
+          type: object
+          description: Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-].
+          additionalProperties: { type: string, maxLength: 255 }
+    LicenseIssued:
+      allOf:
+        - $ref: "#/components/schemas/License"
+        - type: object
+          required: [key]
+          properties:
+            key: { type: string, description: The license key. Shown once (and on an idempotent replay to the same credential), stored only encrypted. }
     MemberRole:
       type: string
       enum: [owner, admin, manager, support, viewer]
@@ -257,16 +716,85 @@ components:
         all_products: { type: boolean }
         product_ids: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      required: [id, email, role, all_products, product_ids, status, invited_by, created_at, expires_at, accepted_at, accepted_by, revoked_at]
+      properties:
+        id: { type: string, example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        email: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids: { type: array, items: { type: string } }
+        status:
+          type: string
+          enum: [pending, accepted, revoked, expired]
+        invited_by: { type: string, nullable: true, description: User ID; null once the user is erased. }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        accepted_by: { type: string, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+    InvitationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    InvitationCreate:
+      type: object
+      required: [email, role, all_products]
+      properties:
+        email: { type: string, maxLength: 320 }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids:
+          type: array
+          items: { type: string }
+          description: Required, non-empty, when all_products is false; absent otherwise.
+    InvitationCreated:
+      allOf:
+        - $ref: "#/components/schemas/Invitation"
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: For the invite link. Shown once, never stored. }
+    AcceptedInvitation:
+      type: object
+      required: [membership_id, tenant_id, role, all_products]
+      properties:
+        membership_id: { type: string }
+        tenant_id: { type: string, description: "Usable as {tenant} in paths." }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+    MyTenant:
+      type: object
+      required: [tenant_id, slug, name, role, all_products, product_ids]
+      properties:
+        tenant_id: { type: string, description: "Usable as {tenant} in paths." }
+        slug: { type: string, description: "The dashboard's /t/{slug}/." }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids: { type: array, items: { type: string }, description: The scope when all_products is false; empty otherwise. }
+    MyTenantPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MyTenant" } }
     MemberUpdated:
       allOf:
         - $ref: "#/components/schemas/Member"
         - type: object
-          required: [revoked_token_ids]
+          required: [revoked_token_ids, revoked_invitation_ids]
           properties:
             revoked_token_ids:
               type: array
               items: { type: string }
               description: API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
+            revoked_invitation_ids:
+              type: array
+              items: { type: string }
+              description: Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids).
     MemberPage:
       type: object
       required: [items]

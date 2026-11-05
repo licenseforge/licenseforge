@@ -27,7 +27,9 @@ import (
 	"licenseforge.io/licenseforge/internal/issue"
 	"licenseforge.io/licenseforge/internal/licensekey"
 	"licenseforge.io/licenseforge/internal/licenses"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
@@ -95,102 +97,217 @@ var fpRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // one needs a free seat. The first activation starts a from_first_activation
 // term.
 func (s Service) Activate(ctx context.Context, req Request) (Lease, error) {
-	return s.lease(ctx, req, true)
+	l, err := s.lease(ctx, req, true)
+	count(metrics.Activations, err)
+	return l, err
 }
 
 // Refresh (also the SDK's validate) returns a new lease for an active
 // activation and records its last-seen time and metadata. It never takes a
 // seat: ErrNotActivated asks the SDK to activate.
 func (s Service) Refresh(ctx context.Context, req Request) (Lease, error) {
-	return s.lease(ctx, req, false)
+	l, err := s.lease(ctx, req, false)
+	count(metrics.LeaseRefreshes, err)
+	return l, err
 }
 
-func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, error) {
+// count records an activate or refresh outcome: refusals of a valid key are
+// denied; unknown keys are also counted on their own (ADR-0034).
+func count(c metrics.OutcomeCounter, err error) {
+	switch {
+	case err == nil:
+		c.Inc(metrics.Success)
+	case errors.Is(err, ErrUnauthenticated):
+		metrics.UnknownLicenseKeys.Inc()
+		c.Inc(metrics.Failure)
+	case errors.Is(err, ErrInvalid):
+		c.Inc(metrics.Failure)
+	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired), errors.Is(err, ErrLimit),
+		errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
+		c.Inc(metrics.Denied)
+	default:
+		c.Inc(metrics.Failure)
+	}
+}
+
+// granted is what grant decided: the lease's claims, the activation, and
+// the audit event (its Details set once the key matched a license).
+type granted struct {
+	claims licensefile.Claims
+	actID  string
+	ev     audit.Event
+}
+
+// grant authenticates req and activates or refreshes in tx. Activate locks
+// the license FOR NO KEY UPDATE: seats are counted and taken one at a time,
+// and a suspend or revoke (which takes the same lock) waits. Lock order:
+// license row, then the audit lock.
+func (s Service) grant(ctx context.Context, tx *ent.Tx, req Request, activate bool) (granted, error) {
+	g := granted{ev: audit.Event{ActorType: auditevent.ActorTypeSystem, Action: "activation.create", ObjectType: "activation"}}
 	key, err := req.check(true)
 	if err != nil {
-		return Lease{}, err
+		return g, err
 	}
 	binding := activation.BindingMachine
 	if req.Source == activation.FpSourceKubernetes {
 		binding = activation.BindingCluster
 	}
-	ev := audit.Event{ActorType: auditevent.ActorTypeSystem, Action: "activation.create", ObjectType: "activation"}
-	var claims licensefile.Claims
-	var actID string
-	err = s.DB.WithTenant(ctx, req.TenantID, func(tx *ent.Tx) error {
-		// Activate locks the license FOR NO KEY UPDATE: seats are counted and
-		// taken one at a time, and a suspend or revoke (which takes the same
-		// lock) waits. Lock order: license row, then the audit lock.
-		l, err := s.authenticate(ctx, tx, req.TenantID, key, activate)
+	l, err := s.authenticate(ctx, tx, req.TenantID, key, activate)
+	if err != nil {
+		return g, err
+	}
+	g.ev.Details = map[string]any{"license_id": l.ID, "fingerprint": req.Fingerprint, "fp_source": string(req.Source)}
+	now, err := licenses.DBNow(ctx, tx)
+	if err != nil {
+		return g, err
+	}
+	// Grace allows reusing an existing activation (refresh, or activate on
+	// an already active machine); the create branch checks the term again.
+	if err := usable(l, now, true); err != nil {
+		return g, err
+	}
+	if string(l.BindType) != string(binding) {
+		return g, fmt.Errorf("%w: the license binds %s", ErrBinding, l.BindType)
+	}
+	act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
+	switch {
+	case err == nil:
+		g.actID = act.ID
+		res, err := tx.ExecContext(ctx, `UPDATE activations SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()),
+			hostname = $2, app_version = $3, sdk_version = $4, updated_at = clock_timestamp() WHERE id = $1 AND deactivated_at IS NULL`,
+			act.ID, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion))
 		if err != nil {
-			return err
+			return g, err
 		}
-		ev.Details = map[string]any{"license_id": l.ID, "fingerprint": req.Fingerprint, "fp_source": string(req.Source)}
-		now, err := licenses.DBNow(ctx, tx)
-		if err != nil {
-			return err
+		if n, err := res.RowsAffected(); err != nil || n != 1 { // deactivated concurrently
+			return g, errors.Join(ErrNotActivated, err)
 		}
-		// Grace allows reusing an existing activation (refresh, or activate on
-		// an already active machine); the create branch checks the term again.
-		if err := usable(l, now, true); err != nil {
-			return err
+	case ent.IsNotFound(err) && activate:
+		if err := usable(l, now, false); err != nil { // no new activations once the term has ended
+			return g, err
 		}
-		if string(l.BindType) != string(binding) {
-			return fmt.Errorf("%w: the license binds %s", ErrBinding, l.BindType)
+		var move bool
+		if g.actID, move, err = s.create(ctx, tx, l, req, binding, now); err != nil {
+			return g, err
 		}
-		act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
-		switch {
-		case err == nil:
-			actID = act.ID
-			res, err := tx.ExecContext(ctx, `UPDATE activations SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()),
-				hostname = $2, app_version = $3, sdk_version = $4, updated_at = clock_timestamp() WHERE id = $1 AND deactivated_at IS NULL`,
-				act.ID, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion))
-			if err != nil {
-				return err
-			}
-			if n, err := res.RowsAffected(); err != nil || n != 1 { // deactivated concurrently
-				return errors.Join(ErrNotActivated, err)
-			}
-		case ent.IsNotFound(err) && activate:
-			if err := usable(l, now, false); err != nil { // no new activations once the term has ended
-				return err
-			}
-			var move bool
-			if actID, move, err = s.create(ctx, tx, l, req, binding, now); err != nil {
-				return err
-			}
-			if move {
-				ev.Details["move"], ev.Details["rehost_count"] = true, l.RehostCount
-			}
-			ev.ObjectID, ev.Outcome = actID, auditevent.OutcomeSuccess
-			if _, err := audit.Record(ctx, tx, req.TenantID, ev); err != nil {
-				return err
-			}
-		case ent.IsNotFound(err):
-			return ErrNotActivated
-		default:
-			return err
+		if move {
+			g.ev.Details["move"], g.ev.Details["rehost_count"] = true, l.RehostCount
 		}
-		p, err := tx.Product.Get(ctx, l.ProductID)
-		if err != nil {
-			return err
+		g.ev.ObjectID, g.ev.Outcome = g.actID, auditevent.OutcomeSuccess
+		if _, err := audit.Record(ctx, tx, req.TenantID, g.ev); err != nil {
+			return g, err
 		}
-		claims = leaseClaims(l, p.Slug, now, req.Fingerprint)
-		return nil
+	case ent.IsNotFound(err):
+		return g, ErrNotActivated
+	default:
+		return g, err
+	}
+	p, err := tx.Product.Get(ctx, l.ProductID)
+	if err != nil {
+		return g, err
+	}
+	g.claims = leaseClaims(l, p.Slug, now, req.Fingerprint)
+	return g, nil
+}
+
+func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, error) {
+	if _, err := req.check(true); err != nil { // before the tenant is used
+		return Lease{}, err
+	}
+	var g granted
+	err := s.DB.WithTenant(ctx, req.TenantID, func(tx *ent.Tx) error {
+		var err error
+		g, err = s.grant(ctx, tx, req, activate)
+		return err
 	})
 	if err != nil {
 		if !activate {
-			ev.Details = nil // refreshes aren't audited
+			g.ev.Details = nil // refreshes aren't audited
 		}
-		return Lease{}, s.refused(ctx, req.TenantID, ev, err)
+		return Lease{}, s.refused(ctx, req.TenantID, g.ev, err)
 	}
 	// Signed after the commit: if signing fails, the seat stays taken and a
 	// retry reuses it.
-	file, kid, err := s.Issuer.Sign(ctx, req.TenantID, claims)
+	return s.sign(ctx, req.TenantID, g)
+}
+
+func (s Service) sign(ctx context.Context, tenantID string, g granted) (Lease, error) {
+	file, kid, err := s.Issuer.Sign(ctx, tenantID, g.claims)
 	if err != nil {
 		return Lease{}, err
 	}
-	return Lease{File: file, KID: kid, Claims: claims, ActivationID: actID}, nil
+	return Lease{File: file, KID: kid, Claims: g.claims, ActivationID: g.actID}, nil
+}
+
+// ActivateTx is Activate inside the caller's transaction tx (for
+// idempotency.Store.Do): the lease is signed before tx commits, so a stored
+// outcome always carries it, and a refused activation of a known license is
+// audited in tx (the caller commits refusals it stores).
+func (s Service) ActivateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease, error) {
+	l, err := s.activateTx(ctx, tx, req)
+	count(metrics.Activations, err)
+	return l, err
+}
+
+func (s Service) activateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease, error) {
+	// Sign in tx too: a signer opening its own transactions would need a
+	// second pool connection while tx holds the license and key locks.
+	// ponytail: only signing.Local is tx-aware; other Signer types (KMS)
+	// fall back to their own transactions, bringing back the pool-exhaustion
+	// risk. Upgrade path: a WithTx method on the Signer interface.
+	if l, ok := s.Issuer.Keys.(signing.Local); ok {
+		s.Issuer.Keys = l.WithTx(tx)
+	}
+	g, err := s.grant(ctx, tx, req, true)
+	if err != nil {
+		if ev, ok := refusal(g.ev, err); ok {
+			if _, rerr := audit.Record(ctx, tx, req.TenantID, ev); rerr != nil {
+				return Lease{}, errors.Join(err, rerr)
+			}
+		}
+		return Lease{}, err
+	}
+	return s.sign(ctx, req.TenantID, g)
+}
+
+// Identify returns the ID of the license req's key authenticates in
+// req.TenantID, without changing anything (the idempotency credential).
+func (s Service) Identify(ctx context.Context, req Request) (string, error) {
+	key, err := req.check(false)
+	if err != nil {
+		return "", err
+	}
+	var id string
+	err = s.DB.WithTenant(ctx, req.TenantID, func(tx *ent.Tx) error {
+		l, err := s.authenticate(ctx, tx, req.TenantID, key, false)
+		if err == nil {
+			id = l.ID
+		}
+		return err
+	})
+	if err != nil {
+		count(metrics.Activations, err) // the activation stops here
+	}
+	return id, err
+}
+
+// Recheck is the replay check of a stored activation (ADR-0032: rerun for
+// the original operation): the key still authenticates and its license is
+// still usable (grace included). It reads in tx and changes nothing.
+func (s Service) Recheck(ctx context.Context, tx *ent.Tx, req Request) error {
+	key, err := req.check(false)
+	if err != nil {
+		return err
+	}
+	l, err := s.authenticate(ctx, tx, req.TenantID, key, false)
+	if err != nil {
+		return err
+	}
+	now, err := licenses.DBNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return usable(l, now, true)
 }
 
 // create takes a seat for a new activation of l (locked FOR NO KEY UPDATE)
@@ -438,18 +555,27 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
-// refused records a refused activation or deactivation of a known license
-// (ev.Details set once the key matched) in its own transaction, and returns
-// err. Unknown keys and refreshes aren't recorded.
-func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
+// refusal returns the audit entry of a refused activation or deactivation
+// of a known license (ev.Details set once the key matched); ok is false for
+// unknown keys, refreshes (Details nil) and errors that aren't refusals.
+func refusal(ev audit.Event, err error) (audit.Event, bool) {
 	switch {
 	case ev.Details == nil:
-		return err
+		return ev, false
 	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired),
 		errors.Is(err, ErrLimit), errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
 		ev.Outcome, ev.ObjectID = auditevent.OutcomeFailure, ""
 		ev.Details["reason"] = err.Error()
-	default:
+		return ev, true
+	}
+	return ev, false
+}
+
+// refused records a refusal (see refusal) in its own transaction and
+// returns err.
+func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
+	ev, ok := refusal(ev, err)
+	if !ok {
 		return err
 	}
 	if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {

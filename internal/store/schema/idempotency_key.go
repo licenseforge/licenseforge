@@ -24,7 +24,7 @@ func (IdempotencyKey) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.IdempotencyKey),
 		field.String("tenant_id").Immutable().NotEmpty().MaxLen(40).SchemaType(idType),
-		field.String("credential").Immutable().NotEmpty().SchemaType(idType).Comment("API token or user ID"),
+		field.String("credential").Immutable().NotEmpty().SchemaType(idType).Comment("API token, user or license ID"),
 		field.String("key").Immutable().NotEmpty().MaxLen(255).SchemaType(map[string]string{"postgres": "varchar(255)"}),
 		field.Bytes("request_hash").Immutable().NotEmpty(),
 		field.Int("status").Optional().Nillable().Comment("nil only inside the claiming transaction"),
@@ -42,8 +42,8 @@ func (IdempotencyKey) Edges() []ent.Edge {
 func (IdempotencyKey) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
 		"idempotency_keys_id_format":  `id ~ '^idk_` + idChars + `$'`,
-		"idempotency_keys_credential": `credential ~ '^(tok|usr)_` + idChars + `$'`,
-		"idempotency_keys_key":        `key ~ '^[ -~]{1,255}$'`, // printable ASCII
+		"idempotency_keys_credential": `credential ~ '^(tok|usr|lic)_` + idChars + `$'`, // API token, user, or license (activation API)
+		"idempotency_keys_key":        `key ~ '^[ -~]{1,255}$'`,                         // printable ASCII
 		"idempotency_keys_hash_len":   `length(request_hash) = 32`,
 		"idempotency_keys_status":     `status IS NULL OR (status >= 200 AND status <= 299) OR (status >= 400 AND status <= 499)`,
 		"idempotency_keys_outcome":    `(status IS NULL) = (body IS NULL)`,

@@ -13,10 +13,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -57,7 +59,7 @@ func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
-	if c.EmailVerified && !usableEmail(c.Email) {
+	if c.EmailVerified && !UsableEmail(c.Email) {
 		c.Email, c.EmailVerified = "", false
 	}
 	u, err := s.login(ctx, c)
@@ -112,11 +114,16 @@ func (s Service) login(ctx context.Context, c Claims) (*ent.User, error) {
 	return u, nil
 }
 
+// MaxMemberships caps Memberships (one page, GET /me/tenants). A variable so
+// tests can lower it.
+var MaxMemberships = 200
+
 // TenantMembership is one entry of the tenant switcher.
 type TenantMembership struct {
 	TenantID, TenantSlug, TenantName string
 	Role                             membership.Role
 	ScopeAll                         bool
+	Products                         []string // the scope when not ScopeAll
 }
 
 // Memberships lists the tenants userID belongs to, sorted by slug. Call it
@@ -124,18 +131,27 @@ type TenantMembership struct {
 func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMembership, error) {
 	var out []TenantMembership
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
-		ms, err := tx.Membership.Query().Where(membership.UserID(userID)).
-			Order(membership.ByTenantField(tenant.FieldSlug)).
-			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).All(ctx)
+		// ponytail: at most MaxMemberships, the first by slug; a user in more
+		// tenants doesn't see the rest in the switcher. Paginate if anyone does.
+		// The reserved platform tenant is never switchable; filtered here so it
+		// can't take a place under the cap.
+		ms, err := tx.Membership.Query().Where(membership.UserID(userID), membership.TenantIDNEQ(audit.PlatformTenant)).
+			Order(membership.ByTenantField(tenant.FieldSlug)).Limit(MaxMemberships).
+			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).
+			WithProducts(func(q *ent.MembershipProductQuery) { q.Order(membershipproduct.ByProductID()) }).All(ctx)
 		if err != nil {
 			return err
 		}
 		for _, m := range ms {
-			if m.Edges.Tenant == nil { // a tenant this login can't see (the reserved platform tenant): not switchable
+			if m.Edges.Tenant == nil { // a tenant this login can't see: not switchable
 				continue
 			}
-			out = append(out, TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
-				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll})
+			tm := TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
+				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll}
+			for _, p := range m.Edges.Products {
+				tm.Products = append(tm.Products, p.ProductID)
+			}
+			out = append(out, tm)
 		}
 		return nil
 	})
@@ -179,11 +195,11 @@ func (c Claims) check() error {
 	return nil
 }
 
-// usableEmail reports whether a verified email can be stored and shown in
+// UsableEmail reports whether an email can be stored and shown in
 // member lists: no spaces or invisible/spoofing characters. One that isn't is
 // treated as unverified (the user still signs in, but can't accept
 // invitations or bootstrap by email with it).
-func usableEmail(email string) bool {
+func UsableEmail(email string) bool {
 	return email != "" && len(email) <= 320 && utf8.ValidString(email) && strings.Contains(email, "@") && graphic(email)
 }
 

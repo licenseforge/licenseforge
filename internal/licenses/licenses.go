@@ -50,8 +50,21 @@ var (
 
 	// errNoProduct answers a missing, hidden or malformed product_id alike
 	// (ADR-0032: a body reference).
-	errNoProduct = fmt.Errorf("%w: no such product", ErrInvalid)
+	errNoProduct = &InvalidError{"/product_id", "no such product"}
 )
+
+// InvalidError is an ErrInvalid naming the request field it is about, as a
+// JSON Pointer into the issue request (product_id, plan_id, customer_id,
+// type, external_refs, overrides/<feature key>).
+type InvalidError struct{ Field, Message string }
+
+func (e *InvalidError) Error() string {
+	return "licenses: invalid request: " + e.Field + ": " + e.Message
+}
+func (e *InvalidError) Unwrap() error { return ErrInvalid }
+
+// pointer escapes a JSON object key as a JSON Pointer token (RFC 6901).
+var pointer = strings.NewReplacer("~", "~0", "/", "~1")
 
 // hidden is an object outside the principal's product scope: recorded as
 // denied, answered with visible, the same error as a missing object.
@@ -91,15 +104,120 @@ type Issued struct {
 }
 
 // Issue issues a license for p's tenant. Order of checks (ADR-0032): the
-// request's format, the product (missing, hidden and malformed alike:
-// ErrInvalid), license:issue on it (authz.ErrDenied), then plan, customer
-// and overrides.
+// product (missing, hidden and malformed alike: an InvalidError on
+// /product_id), license:issue on it (authz.ErrDenied), then plan, customer,
+// type, external refs and overrides (InvalidError). A refusal is recorded in
+// a transaction of its own.
 func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest) (Issued, error) {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
 		return Issued{}, err
 	}
+	var out Issued
+	var ev audit.Event
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		var err error
+		out, ev, err = s.issue(ctx, tx, tenantID, p, req)
+		return err
+	})
+	if err != nil {
+		return Issued{}, s.refused(ctx, tenantID, ev, err)
+	}
+	return out, nil
+}
+
+// IssueTx is Issue in tx, a WithTenant transaction of p's tenant (an
+// idempotency.Store.Do operation): a refusal is recorded in tx, so it
+// commits with the stored outcome.
+func (s Service) IssueTx(ctx context.Context, tx *ent.Tx, p authz.Principal, req IssueRequest) (Issued, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return Issued{}, err
+	}
+	out, ev, err := s.issue(ctx, tx, tenantID, p, req)
+	if err != nil {
+		o, visible, ok := classify(err)
+		if !ok {
+			return Issued{}, err
+		}
+		ev.Outcome = o
+		if _, rerr := audit.Record(ctx, tx, tenantID, ev); rerr != nil {
+			// Not the refusal (a 4xx would be stored without its entry): an
+			// outage, so Do rolls back and stores nothing.
+			return Issued{}, fmt.Errorf("licenses: recording a refused issue: %w", rerr)
+		}
+		return Issued{}, visible
+	}
+	return out, nil
+}
+
+// RecheckIssue repeats Issue's product and permission checks in tx, for a
+// replayed idempotent issue (idempotency.Store.Do's recheck): p must still
+// see productID and hold license:issue on it. Only the product is checked
+// again: plans and customers have no visibility beyond the tenant, and
+// licenses are never deleted. A refusal is recorded in a transaction of its
+// own (Do rolls back tx). The replayed body is the issue-time snapshot;
+// clients GET the license for its current status.
+func (s Service) RecheckIssue(ctx context.Context, tx *ent.Tx, p authz.Principal, productID string) error {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+	if err := checkProduct(ctx, tx, productID); err != nil {
+		ev := event(p, "license.issue", "")
+		ev.Details = map[string]any{"replay": true}
+		if ids.Valid("prd", productID) {
+			ev.Details["product_id"] = productID
+		}
+		return s.refused(ctx, tenantID, ev, err)
+	}
+	return nil
+}
+
+// RecordKeyReveal records that p was shown licenseID's key again (a replayed
+// idempotent issue), as every key reveal is (ADR-0025): no key material.
+func (s Service) RecordKeyReveal(ctx context.Context, p authz.Principal, licenseID, productID string) error {
+	if !ids.Valid("lic", licenseID) || !ids.Valid("prd", productID) {
+		return errors.New("licenses: key reveal of a malformed license or product ID")
+	}
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+	ev := event(p, "license.key_reveal", licenseID)
+	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": "idempotent_replay", "product_id": productID}
+	return s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		_, err := audit.Record(ctx, tx, tenantID, ev)
+		return err
+	})
+}
+
+// checkProduct: the product exists, p sees it and may issue for it. One
+// lookup, then the scope: missing and hidden do the same work.
+func checkProduct(ctx context.Context, tx *ent.Tx, productID string) error {
+	if !ids.Valid("prd", productID) {
+		return errNoProduct
+	}
+	ok, err := tx.Product.Query().Where(product.ID(productID)).Exist(ctx) // another tenant's: not visible under RLS
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errNoProduct
+	}
+	if authz.Require(ctx, authz.LicenseRead, productID) != nil {
+		return hidden{errNoProduct}
+	}
+	return authz.Require(ctx, authz.LicenseIssue, productID)
+}
+
+// issue does Issue's work in tx and returns the audit event: the success
+// entry is recorded in tx; on error ev is the refusal to record.
+func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz.Principal, req IssueRequest) (Issued, audit.Event, error) {
 	ev := event(p, "license.issue", "")
 	// Refusals name the well-formed IDs the caller sent (never anything else).
 	refusal := map[string]any{}
@@ -111,118 +229,112 @@ func (s Service) Issue(ctx context.Context, p authz.Principal, req IssueRequest)
 	if len(refusal) > 0 {
 		ev.Details = refusal
 	}
+	refused := func(err error) (Issued, audit.Event, error) {
+		ev.ObjectID, ev.Details = "", nil
+		if len(refusal) > 0 {
+			ev.Details = refusal
+		}
+		return Issued{}, ev, err
+	}
 	if req.Type == "" {
 		req.Type = license.TypePaid
 	}
 	if req.ExternalRefs == nil {
 		req.ExternalRefs = map[string]string{}
 	}
+	// Steps 4-5 first; the values only after (ADR-0032).
+	if err := checkProduct(ctx, tx, req.ProductID); err != nil {
+		return refused(err)
+	}
 	switch {
-	case !ids.Valid("prd", req.ProductID):
-		return Issued{}, s.refused(ctx, tenantID, ev, errNoProduct)
-	case !ids.Valid("pln", req.PlanID) || !ids.Valid("cus", req.CustomerID) || license.TypeValidator(req.Type) != nil:
-		return Issued{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: plan, customer or type", ErrInvalid))
+	case !ids.Valid("pln", req.PlanID):
+		return refused(&InvalidError{"/plan_id", "no such plan for the product"})
+	case !ids.Valid("cus", req.CustomerID):
+		return refused(&InvalidError{"/customer_id", "no such customer"})
+	case license.TypeValidator(req.Type) != nil:
+		return refused(&InvalidError{"/type", "unknown license type"})
 	case !validRefs(req.ExternalRefs):
-		return Issued{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: external_refs: at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes of UTF-8 without control characters", ErrInvalid))
+		return refused(&InvalidError{"/external_refs", "at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes of UTF-8 without control characters"})
 	}
 	id, key := ids.License(), licensekey.New() // New returns the canonical form, which Normalize gives at lookup
 	ct, err := s.Keys.Encrypt([]byte(key), secrets.Binding{Purpose: secrets.PurposeLicenseKey, TenantID: tenantID, RowID: id})
 	if err != nil {
-		return Issued{}, err
+		return Issued{}, ev, err
 	}
 	lookup, err := s.Keys.LookupHash(secrets.PurposeLicenseKey, []byte(key))
 	if err != nil {
-		return Issued{}, err
+		return Issued{}, ev, err
 	}
-	var row *ent.License
-	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		// One lookup, then the scope: missing and hidden do the same work.
-		ok, err := tx.Product.Query().Where(product.ID(req.ProductID)).Exist(ctx) // another tenant's: not visible under RLS
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errNoProduct
-		}
-		if authz.Require(ctx, authz.LicenseRead, req.ProductID) != nil {
-			return hidden{errNoProduct}
-		}
-		if err := authz.Require(ctx, authz.LicenseIssue, req.ProductID); err != nil {
-			return err
-		}
-		now, err := DBNow(ctx, tx)
-		if err != nil {
-			return err
-		}
-		// FOR SHARE: plan-feature writers lock the plan row FOR UPDATE first
-		// (schema.PlanFeature), so the terms and features copied below are
-		// from one version of the plan.
-		pl, err := tx.Plan.Query().Where(plan.ID(req.PlanID), plan.ArchivedAtIsNil()).ForShare().Only(ctx)
-		if ent.IsNotFound(err) || err == nil && pl.ProductID != req.ProductID {
-			return fmt.Errorf("%w: no such plan for the product", ErrInvalid)
-		}
-		if err != nil {
-			return err
-		}
-		// FOR SHARE: a concurrent archive waits for this issue (or wins first).
-		cus, err := tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).ForShare().IDs(ctx)
-		if err != nil {
-			return err
-		}
-		if len(cus) == 0 {
-			return fmt.Errorf("%w: no such customer", ErrInvalid)
-		}
-		ents, err := entitlements(ctx, tx, pl, req.Overrides)
-		if err != nil {
-			return err
-		}
-		c := tx.License.Create().SetID(id).SetTenantID(tenantID).SetProductID(pl.ProductID).SetPlanID(pl.ID).
-			SetCustomerID(req.CustomerID).SetType(req.Type).
-			SetKeyCiphertext(ct).SetKeyLookup(lookup).SetKeyHint(key[len(key)-6:]).
-			SetPlanSlug(pl.Slug).SetExpiryBasis(license.ExpiryBasis(pl.ExpiryBasis)).
-			SetNillableDurationMonths(pl.DurationMonths).SetNillableDurationSeconds(pl.DurationSeconds).
-			SetNillableMaxActivations(pl.MaxActivations).SetNillableMaxRehosts(pl.MaxRehosts).
-			SetBindType(license.BindType(pl.BindType)).SetOfflineAllowed(pl.OfflineAllowed).
-			SetLeaseSeconds(pl.LeaseSeconds).SetNillableMaxOfflineSeconds(pl.MaxOfflineSeconds).
-			SetGraceSeconds(pl.GraceSeconds).SetEntitlements(ents).SetExternalRefs(req.ExternalRefs).
-			SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
-		// from_first_activation: the term starts at first activation (nil until then).
-		if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
-			c.SetNillableExpiresAt(Expiry(now, pl.DurationMonths, pl.DurationSeconds))
-		}
-		if row, err = c.Save(ctx); err != nil {
-			return err
-		}
-		ev.ObjectID, ev.Outcome = row.ID, auditevent.OutcomeSuccess
-		// What was granted: no key material.
-		overrides := map[string]any{}
-		for k, o := range req.Overrides {
-			switch {
-			case o.Remove:
-				overrides[k] = "removed"
-			case o.Limit != nil:
-				overrides[k] = *o.Limit
-			default:
-				overrides[k] = "granted"
-			}
-		}
-		var expires any
-		if row.ExpiresAt != nil {
-			expires = row.ExpiresAt.UTC().Format(time.RFC3339Nano)
-		}
-		ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug,
-			"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": expires, "overrides": overrides}
-		_, err = audit.Record(ctx, tx, tenantID, ev)
-		return err
-	})
+	now, err := DBNow(ctx, tx)
 	if err != nil {
-		ev.ObjectID, ev.Details = "", nil
-		if len(refusal) > 0 {
-			ev.Details = refusal
-		}
-		return Issued{}, s.refused(ctx, tenantID, ev, err)
+		return Issued{}, ev, err
 	}
-	return Issued{License: row, Key: key}, nil
+	// FOR SHARE: plan-feature writers lock the plan row FOR UPDATE first
+	// (schema.PlanFeature), so the terms and features copied below are
+	// from one version of the plan.
+	pl, err := tx.Plan.Query().Where(plan.ID(req.PlanID), plan.ArchivedAtIsNil()).ForShare().Only(ctx)
+	if ent.IsNotFound(err) || err == nil && pl.ProductID != req.ProductID {
+		return refused(&InvalidError{"/plan_id", "no such plan for the product"})
+	}
+	if err != nil {
+		return Issued{}, ev, err
+	}
+	// FOR SHARE: a concurrent archive waits for this issue (or wins first).
+	cus, err := tx.Customer.Query().Where(customer.ID(req.CustomerID), customer.ArchivedAtIsNil()).ForShare().IDs(ctx)
+	if err != nil {
+		return Issued{}, ev, err
+	}
+	if len(cus) == 0 {
+		return refused(&InvalidError{"/customer_id", "no such customer"})
+	}
+	ents, err := entitlements(ctx, tx, pl, req.Overrides)
+	if errors.Is(err, ErrInvalid) {
+		return refused(err)
+	}
+	if err != nil {
+		return Issued{}, ev, err
+	}
+	c := tx.License.Create().SetID(id).SetTenantID(tenantID).SetProductID(pl.ProductID).SetPlanID(pl.ID).
+		SetCustomerID(req.CustomerID).SetType(req.Type).
+		SetKeyCiphertext(ct).SetKeyLookup(lookup).SetKeyHint(key[len(key)-6:]).
+		SetPlanSlug(pl.Slug).SetExpiryBasis(license.ExpiryBasis(pl.ExpiryBasis)).
+		SetNillableDurationMonths(pl.DurationMonths).SetNillableDurationSeconds(pl.DurationSeconds).
+		SetNillableMaxActivations(pl.MaxActivations).SetNillableMaxRehosts(pl.MaxRehosts).
+		SetBindType(license.BindType(pl.BindType)).SetOfflineAllowed(pl.OfflineAllowed).
+		SetLeaseSeconds(pl.LeaseSeconds).SetNillableMaxOfflineSeconds(pl.MaxOfflineSeconds).
+		SetGraceSeconds(pl.GraceSeconds).SetEntitlements(ents).SetExternalRefs(req.ExternalRefs).
+		SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
+	// from_first_activation: the term starts at first activation (nil until then).
+	if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
+		c.SetNillableExpiresAt(Expiry(now, pl.DurationMonths, pl.DurationSeconds))
+	}
+	row, err := c.Save(ctx)
+	if err != nil {
+		return Issued{}, ev, err
+	}
+	ev.ObjectID, ev.Outcome = row.ID, auditevent.OutcomeSuccess
+	// What was granted: no key material.
+	overrides := map[string]any{}
+	for k, o := range req.Overrides {
+		switch {
+		case o.Remove:
+			overrides[k] = "removed"
+		case o.Limit != nil:
+			overrides[k] = *o.Limit
+		default:
+			overrides[k] = "granted"
+		}
+	}
+	var expires any
+	if row.ExpiresAt != nil {
+		expires = row.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug,
+		"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": expires, "overrides": overrides}
+	if _, err := audit.Record(ctx, tx, tenantID, ev); err != nil {
+		return Issued{}, ev, err
+	}
+	return Issued{License: row, Key: key}, ev, nil
 }
 
 // entitlements resolves the plan's features with the overrides applied. Each
@@ -254,18 +366,18 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 			o, f := overrides[k], byKey[k]
 			switch {
 			case f == nil:
-				return schema.LicenseEntitlements{}, fmt.Errorf("%w: unknown feature %q", ErrInvalid, k)
+				return schema.LicenseEntitlements{}, &InvalidError{"/overrides/" + pointer.Replace(k), "unknown feature"}
 			case o.Remove && o.Limit != nil, f.Type == feature.TypeBoolean && o.Limit != nil:
-				return schema.LicenseEntitlements{}, fmt.Errorf("%w: feature %q takes no limit", ErrInvalid, k)
+				return schema.LicenseEntitlements{}, &InvalidError{"/overrides/" + pointer.Replace(k), "takes no limit"}
 			case o.Remove:
 				delete(bools, k)
 				delete(limits, k)
 			case f.ArchivedAt != nil:
-				return schema.LicenseEntitlements{}, fmt.Errorf("%w: feature %q is archived", ErrInvalid, k)
+				return schema.LicenseEntitlements{}, &InvalidError{"/overrides/" + pointer.Replace(k), "feature is archived"}
 			case f.Type == feature.TypeBoolean:
 				bools[k] = true
 			case o.Limit == nil || *o.Limit < -1 || *o.Limit > maxLimit:
-				return schema.LicenseEntitlements{}, fmt.Errorf("%w: feature %q needs a limit from -1 to 2^53-1", ErrInvalid, k)
+				return schema.LicenseEntitlements{}, &InvalidError{"/overrides/" + pointer.Replace(k), "needs a limit from -1 to 2^53-1"}
 			default:
 				limits[k] = *o.Limit
 			}
@@ -402,6 +514,90 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 	return row, nil
 }
 
+// Filter narrows List; zero fields don't filter. A filter naming a missing
+// or hidden object gives an empty list (ADR-0032).
+type Filter struct {
+	ProductID, CustomerID       string
+	Status                      license.Status
+	CreatedAfter, CreatedBefore *time.Time
+}
+
+// List returns up to limit of p's tenant's licenses in p's product scope
+// (silently filtered), matching f, newest first, after (afterAt, afterID)
+// or from the start if afterID is "".
+func (s Service) List(ctx context.Context, p authz.Principal, f Filter, limit int, afterAt time.Time, afterID string) ([]*ent.License, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all, products, err := authz.Products(ctx, authz.LicenseRead)
+	if err != nil {
+		return nil, err
+	}
+	var out []*ent.License
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		q := tx.License.Query().Order(ent.Desc(license.FieldCreatedAt), ent.Desc(license.FieldID)).Limit(limit)
+		if !all {
+			q.Where(license.ProductIDIn(products...))
+		}
+		if f.ProductID != "" {
+			q.Where(license.ProductID(f.ProductID))
+		}
+		if f.CustomerID != "" {
+			q.Where(license.CustomerID(f.CustomerID))
+		}
+		if f.Status != "" {
+			q.Where(license.StatusEQ(f.Status))
+		}
+		if f.CreatedAfter != nil {
+			q.Where(license.CreatedAtGT(*f.CreatedAfter))
+		}
+		if f.CreatedBefore != nil {
+			q.Where(license.CreatedAtLT(*f.CreatedBefore))
+		}
+		if afterID != "" {
+			q.Where(license.Or(license.CreatedAtLT(afterAt), license.And(license.CreatedAt(afterAt), license.IDLT(afterID))))
+		}
+		var err error
+		out, err = q.All(ctx)
+		return err
+	})
+	return out, err
+}
+
+// Get returns one of p's tenant's licenses; missing, malformed and outside
+// p's product scope are ErrNotFound alike.
+func (s Service) Get(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ids.Valid("lic", licenseID) {
+		return nil, ErrNotFound
+	}
+	var l *ent.License
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		var err error
+		l, err = tx.License.Query().Where(license.ID(licenseID)).Only(ctx)
+		if ent.IsNotFound(err) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if authz.Require(ctx, authz.LicenseRead, l.ProductID) != nil {
+			return ErrNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
 // DBNow is the database clock, as stored (microseconds), in UTC so calendar
 // months are counted in UTC.
 func DBNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
@@ -449,26 +645,39 @@ func event(p authz.Principal, action, objectID string) audit.Event {
 	return audit.Event{ActorType: actor, ActorID: p.ID, Action: action, ObjectType: "license", ObjectID: objectID}
 }
 
+// classify returns a refusal's audit outcome and the error to answer with
+// (a hidden object answers like a missing one); ok is false for an outage,
+// which isn't an attempt.
+func classify(err error) (o auditevent.Outcome, visible error, ok bool) {
+	var h hidden
+	switch {
+	case errors.As(err, &h):
+		return auditevent.OutcomeDenied, h.visible, true
+	case errors.Is(err, authz.ErrDenied):
+		return auditevent.OutcomeDenied, err, true
+	case errors.Is(err, ErrInvalid), errors.Is(err, ErrNotFound), errors.Is(err, ErrState):
+		return auditevent.OutcomeFailure, err, true
+	}
+	return "", err, false
+}
+
 // refused records a denied or failed attempt in its own transaction
 // (ADR-0027) and returns the caller's error. Infrastructure errors aren't
 // attempts.
 func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
-	var h hidden
-	switch {
-	case errors.As(err, &h):
-		ev.Outcome, err = auditevent.OutcomeDenied, h.visible
-	case errors.Is(err, authz.ErrDenied):
-		ev.Outcome = auditevent.OutcomeDenied
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrNotFound), errors.Is(err, ErrState):
-		ev.Outcome = auditevent.OutcomeFailure
-	default:
+	o, visible, ok := classify(err)
+	if !ok {
 		return err
 	}
+	ev.Outcome, err = o, visible
 	if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		_, err := audit.Record(ctx, tx, tenantID, ev)
 		return err
 	}); rerr != nil {
-		return errors.Join(err, rerr)
+		// Fail closed: an outage (500), never the refusal without its entry.
+		// Not covered by a test: the audit write can't be made to fail here
+		// without a fault-injection hook.
+		return fmt.Errorf("licenses: recording a refusal: %w", rerr)
 	}
 	return err
 }

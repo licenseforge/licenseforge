@@ -26,6 +26,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
 
@@ -231,6 +232,11 @@ func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []by
 // fail logs the reason and shows the user only a status.
 func (h *Handler) fail(w http.ResponseWriter, code int, reason string, err error) {
 	h.log.Warn("login failed", "reason", reason, "err", err)
+	if code == http.StatusForbidden {
+		metrics.Logins.Inc(metrics.Denied) // a known user refused (disabled)
+	} else {
+		metrics.Logins.Inc(metrics.Failure)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, http.StatusText(code), code)
 }
@@ -366,6 +372,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.log.Info("login banner acknowledged", "user", u.ID, "banner_id", acked)
 	}
 	setCookie(w, SessionCookie, cookie, int(h.id.SessionMaxAge().Seconds()))
+	metrics.Logins.Inc(metrics.Success)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
