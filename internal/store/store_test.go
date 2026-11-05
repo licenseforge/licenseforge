@@ -380,11 +380,11 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"audit_anchors": { // ADR-0036: insert-only, by the retention login
 			"retention_read":   `SELECT licenseforge_retention true`,
-			"retention_anchor": `INSERT licenseforge_retention ((EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e.seq = audit_anchors.seq) AND (e.hash = audit_anchors.hash)))) AND (seq > COALESCE(( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_anchors.tenant_id)::text)), (0)::bigint)))`,
+			"retention_anchor": `INSERT licenseforge_retention ((EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e.seq = audit_anchors.seq) AND (e.hash = audit_anchors.hash) AND (e.occurred_at < (now() - '365 days'::interval))))) AND (EXISTS ( SELECT 1 FROM audit_events e2 WHERE (((e2.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e2.seq > audit_anchors.seq)))) AND (seq > COALESCE(( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_anchors.tenant_id)::text)), (0)::bigint)))`,
 		},
 		"audit_events": {
 			"retention_read":                `SELECT licenseforge_retention true`,
-			"retention_record":              `INSERT licenseforge_retention (((action)::text = 'audit.retention'::text) AND ((actor_type)::text = 'system'::text))`,
+			"retention_record":              `INSERT licenseforge_retention (((action)::text = 'audit.retention'::text) AND ((actor_type)::text = 'system'::text) AND (occurred_at >= now()))`,
 			"retention_delete":              `DELETE licenseforge_retention true`,
 			"retention_floor (restrictive)": `DELETE licenseforge_retention ((occurred_at < (now() - '365 days'::interval)) AND (seq <= ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_events.tenant_id)::text))))`,
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,

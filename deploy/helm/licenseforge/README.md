@@ -9,6 +9,9 @@ Pods meet the Pod Security Standard **restricted**.
 
 1. PostgreSQL 17 or newer with the logins from
    [`deploy/database-setup.sql`](../../database-setup.sql) (ADR-0009).
+   **Upgrading from a release before audit retention (ADR-0036):** create the
+   group role first, as a database admin, or the migration Job stops with an
+   error: `CREATE ROLE licenseforge_retention NOLOGIN;`
 2. Two Secrets, created by you or by External Secrets (never in values):
 
    ```sh

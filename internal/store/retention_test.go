@@ -121,38 +121,72 @@ func TestRetentionFloorAndAnchors(t *testing.T) {
 	if n := f.prune(); n != 0 {
 		t.Fatalf("pruned %d entries without an anchor", n)
 	}
-	// Anchors must name a real entry and move forward.
+	// Entry 2 out of time order (a clock step): the age floor still keeps it.
+	if _, err := f.owner.Exec(`UPDATE audit_events SET occurred_at = now() - interval '7 days' WHERE tenant_id = $1 AND seq = 2`, f.tenant); err != nil {
+		t.Fatal(err)
+	}
+	// Anchors name a real, aged entry that isn't the last, and move forward.
+	other := createTenants(t, f.d, 1)[0].ID
 	for name, err := range map[string]error{
-		"wrong hash":    f.anchor(3, f.hashes[4]),
-		"no such entry": f.anchor(9, f.hashes[3]),
-		"another tenant's": func() error {
-			other := createTenants(t, f.d, 1)[0].ID
+		"wrong hash":       f.anchor(3, f.hashes[4]),
+		"no such entry":    f.anchor(9, f.hashes[3]),
+		"a young entry":    f.anchor(6, f.hashes[6]),
+		"the chain's head": f.anchor(7, f.hashes[7]),
+		"another tenant's chain": func() error {
 			_, err := f.ret.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) VALUES ($1, $2, 3, $3, now())`, ids.AuditAnchor(), other, f.hashes[3])
 			return err
 		}(),
 	} {
 		if err == nil {
-			t.Errorf("anchor with %s accepted", name)
+			t.Errorf("anchor on %s accepted", name)
 		}
 	}
 	if err := f.anchor(3, f.hashes[3]); err != nil {
 		t.Fatalf("anchor at 3: %v", err)
 	}
-	for name, err := range map[string]error{"backwards": f.anchor(2, f.hashes[2]), "the same seq": f.anchor(3, f.hashes[3])} {
+	for name, err := range map[string]error{"backwards": f.anchor(1, f.hashes[1]), "the same seq": f.anchor(3, f.hashes[3])} {
 		if err == nil {
 			t.Errorf("anchor %s accepted", name)
 		}
 	}
-	// Deletes reach at most the anchor.
-	if n := f.prune(); n != 3 || fmt.Sprint(f.seqs(t)) != "[4 5 6 7]" {
-		t.Fatalf("pruned %d, left %v; want 1..3 gone", n, f.seqs(t))
+	// Deletes reach at most the anchor, and never an entry younger than 365 days.
+	if n := f.prune(); n != 2 || fmt.Sprint(f.seqs(t)) != "[2 4 5 6 7]" {
+		t.Fatalf("pruned %d, left %v; want 1 and 3 gone, the young 2 kept", n, f.seqs(t))
 	}
-	// An anchor past the floor: entries younger than 365 days stay anyway.
-	if err := f.anchor(7, f.hashes[7]); err != nil {
+	if err := f.anchor(5, f.hashes[5]); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.prune(); n != 2 || fmt.Sprint(f.seqs(t)) != "[6 7]" {
-		t.Errorf("pruned %d, left %v; want 4..5 gone, 6..7 kept (younger than 365 days)", n, f.seqs(t))
+	if n := f.prune(); n != 2 || fmt.Sprint(f.seqs(t)) != "[2 6 7]" {
+		t.Errorf("pruned %d, left %v; want 4..5 gone", n, f.seqs(t))
+	}
+}
+
+// Anchors and deletes are per chain: another tenant's anchors neither allow
+// deletes in a chain without one nor hold its anchors back.
+func TestRetentionIsPerChain(t *testing.T) {
+	f := newRetentionFixture(t)
+	if err := f.anchor(5, f.hashes[5]); err != nil {
+		t.Fatal(err)
+	}
+	g := f
+	g.tenant = createTenants(t, f.d, 1)[0].ID
+	for seq := int64(1); seq <= 3; seq++ {
+		if _, err := f.owner.Exec(`INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, action, outcome, details, prev_hash, hash)
+			VALUES ($1, $2, $3, now() - interval '400 days', 'system', 'test.entry', 'success', '{}', $4, $5)`,
+			ids.AuditEvent(), g.tenant, seq, make([]byte, 32), f.hashes[seq]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := g.prune(); n != 0 {
+		t.Errorf("deleted %d entries of a chain without an anchor", n)
+	}
+	// An old entry that is this chain's last can't be an anchor, even though
+	// another chain has later entries.
+	if err := g.anchor(3, f.hashes[3]); err == nil {
+		t.Error("anchor on the chain's last entry accepted")
+	}
+	if err := g.anchor(2, f.hashes[2]); err != nil { // below the other chain's anchor (5): still forward for this chain
+		t.Errorf("anchor at 2 refused because of another chain's anchor: %v", err)
 	}
 }
 
@@ -181,6 +215,10 @@ func TestRetentionLoginLimits(t *testing.T) {
 		if err == nil {
 			t.Errorf("retention login could %s", name)
 		}
+	}
+	if _, err := f.ret.Exec(`INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, action, outcome, details, prev_hash, hash)
+		VALUES ($1, $2, 8, now() - interval '1 day', 'system', 'audit.retention', 'success', '{}', $3, $3)`, ids.AuditEvent(), f.tenant, f.hashes[7]); err == nil {
+		t.Error("retention login wrote a backdated entry")
 	}
 	if err := record("audit.retention", "system"); err != nil {
 		t.Errorf("retention login can't record its own entry: %v", err)
