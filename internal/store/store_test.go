@@ -384,7 +384,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,
 			"retention_read":                 `SELECT licenseforge_retention true`,
-			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
+			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND (o.seq = audit_export_cursors.seq)))) (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
 		},
 		"audit_anchors": { // ADR-0036: insert-only, by the retention login
 			"retention_read":   `SELECT licenseforge_retention true`,
@@ -411,10 +411,13 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
 			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM plans.archived_at))))) (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND ((NOT (plans.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((plans.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (plans.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
-		"customers": {"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`},
 		"licenses": {
 			"insert_active (restrictive)":       `INSERT licenseforge_app,licenseforge_platform ((suspended_at IS NULL) AND (revoked_at IS NULL))`,
 			"license_transitions (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (revoked_at IS NULL) (((revoked_at IS NULL) OR ((revoked_at >= (clock_timestamp() - '00:05:00'::interval)) AND (revoked_at <= (clock_timestamp() + '00:05:00'::interval)))) AND ((suspended_at IS NULL) OR ((suspended_at >= (clock_timestamp() - '00:05:00'::interval)) AND (suspended_at <= (clock_timestamp() + '00:05:00'::interval))) OR (EXISTS ( SELECT 1 FROM licenses o WHERE (((o.id)::text = (licenses.id)::text) AND (o.suspended_at = licenses.suspended_at))))))`,
+		},
+		"customers": { // ADR-0015: as for products
+			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
+			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
@@ -423,7 +426,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
 		"api_tokens": {
-			"use_moves_forward (restrictive)":    `UPDATE licenseforge_app true (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND ((NOT (api_tokens.last_used_at IS DISTINCT FROM o.last_used_at)) OR ((api_tokens.last_used_at >= (clock_timestamp() - '00:05:00'::interval)) AND (api_tokens.last_used_at >= COALESCE(o.last_used_at, '-infinity'::timestamp with time zone)))))))`,
+			"use_moves_forward (restrictive)":    `UPDATE licenseforge_app (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND (NOT (o.last_used_at IS DISTINCT FROM api_tokens.last_used_at))))) (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND ((NOT (api_tokens.last_used_at IS DISTINCT FROM o.last_used_at)) OR ((api_tokens.last_used_at >= (clock_timestamp() - '00:05:00'::interval)) AND (api_tokens.last_used_at >= COALESCE(o.last_used_at, '-infinity'::timestamp with time zone)))))))`,
 			"expiry_from_now (restrictive)":      `INSERT licenseforge_app ((expires_at > clock_timestamp()) AND (expires_at <= (clock_timestamp() + '1 year'::interval)) AND ((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))))`,
 			"platform_no_unrevoke (restrictive)": `UPDATE licenseforge_platform (revoked_at IS NULL) true`,
 			"creator_is_member (restrictive)":    `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (api_tokens.tenant_id)::text) AND ((m.user_id)::text = (api_tokens.created_by)::text) AND m.scope_all AND (((m.role)::text = 'owner'::text) OR (((m.role)::text = 'admin'::text) AND ((api_tokens.role)::text <> 'owner'::text))))))`,
@@ -821,6 +824,18 @@ func archivables() []archivable {
 			`INSERT INTO plans (id, tenant_id, product_id, slug, name, created_at, updated_at)
 				SELECT $1::text, $2::text, product_id, $3::text, 'x', now(), now() FROM plans WHERE slug = $3::text AND tenant_id = $2::text
 				ON CONFLICT (product_id, slug) DO UPDATE SET archived_at = NULL`},
+		{"customers", []string{"name", "email", "external_refs", "updated_at", "archived_at"},
+			func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error) {
+				c, err := tx.Customer.Create().SetTenantID(tenant).SetName(strings.ReplaceAll(key, "_", "-")).Save(ctx)
+				if err != nil {
+					return "", err
+				}
+				return c.ID, nil
+			},
+			// No natural key: the conflict is on the ID of the customer named $3.
+			`INSERT INTO customers (id, tenant_id, name, external_refs, created_at, updated_at)
+				SELECT id, $2::text, 'x', '{}', now(), now() FROM customers WHERE name = $3::text AND tenant_id = $2::text AND $1::text <> ''
+				ON CONFLICT (id) DO UPDATE SET archived_at = NULL`},
 	}
 }
 
@@ -1013,7 +1028,7 @@ func TestArchiveRace(t *testing.T) {
 							if a.table != "features" { // slugs: dashes
 								k = strings.ReplaceAll(key, "_", "-")
 							}
-							_, err := tx.ExecContext(ctx, a.upsert, map[string]string{"products": ids.Product(), "features": ids.Feature(), "plans": ids.Plan()}[a.table], tn.ID, k)
+							_, err := tx.ExecContext(ctx, a.upsert, map[string]string{"products": ids.Product(), "features": ids.Feature(), "plans": ids.Plan(), "customers": ids.Customer()}[a.table], tn.ID, k)
 							return err
 						}
 						_, err := tx.ExecContext(ctx, fmt.Sprintf(c.q, a.table), id)
