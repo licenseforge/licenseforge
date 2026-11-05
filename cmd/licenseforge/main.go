@@ -27,6 +27,9 @@
 //	LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE client certificate (mTLS), PEM, with _KEY_FILE; unset = none
 //	LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE
 //	LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME  name the collector's certificate must carry; default the address's host
+//	LICENSEFORGE_AUDIT_OTLP_ENDPOINT    OTLP/HTTP logs URL (JSON), https://host:4318/v1/logs (ADR-0036); unset = none
+//	LICENSEFORGE_AUDIT_OTLP_CA_FILE, _CERT_FILE, _KEY_FILE  as for syslog
+//	LICENSEFORGE_AUDIT_OTLP_HEADERS     request headers, k=v,k2=v2 (values %-encoded), e.g. an API key
 //	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //	LICENSEFORGE_TRUSTED_PROXIES        CIDRs or addresses of proxies whose X-Forwarded-For is believed; unset = none
@@ -218,6 +221,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	}
 	defer func() { _ = db.Close() }()
 	metrics.SetPools(db.Stats)
+	sinks := map[string]auditexport.Sink{}
 	if addr := os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_ADDR"); addr != "" {
 		sink, err := auditexport.NewSyslog(auditexport.SyslogConfig{Addr: addr,
 			CAFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE"),
@@ -226,14 +230,26 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("LICENSEFORGE_AUDIT_SYSLOG_*: %w", err)
 		}
+		sinks["syslog"] = sink
+	}
+	if endpoint := os.Getenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT"); endpoint != "" {
+		sink, err := auditexport.NewOTLP(auditexport.OTLPConfig{Endpoint: endpoint,
+			CAFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CERT_FILE"),
+			KeyFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_KEY_FILE"), Headers: os.Getenv("LICENSEFORGE_AUDIT_OTLP_HEADERS")})
+		if err != nil {
+			return fmt.Errorf("LICENSEFORGE_AUDIT_OTLP_*: %w", err)
+		}
+		sinks["otlp"] = sink
+	}
+	for name, sink := range sinks {
 		// Registered before serving: from now on retention keeps what this sink hasn't exported.
-		if err := auditexport.Register(ctx, db, "syslog"); err != nil {
+		if err := auditexport.Register(ctx, db, name); err != nil {
 			return err
 		}
-		x := auditexport.New(db, "syslog", sink, log)
+		x := auditexport.New(db, name, sink, log)
 		go func() { // stops with ctx (shutdown); entries left are sent by the next pod
 			if err := x.Run(ctx); err != nil {
-				log.Error("audit export stopped", "sink", "syslog", "err", err)
+				log.Error("audit export stopped", "sink", name, "err", err)
 			}
 		}()
 	}

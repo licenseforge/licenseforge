@@ -93,6 +93,15 @@ URL, or without a port.
   growing `licenseforge_audit_export_lag_seconds`. Certificates are re-read
   for every batch, so renewed Secrets apply without a restart. Messages over
   8 KB (RFC 5425's minimum) are sent but logged, as a collector may truncate them. Narrow the egress with `audit.export.syslog.to`.
+- **OTLP export** (ADR-0036): `audit.export.otlp.endpoint` sends every audit
+  entry as OTLP logs over HTTP with the JSON encoding (attributes `lf.audit.*`,
+  including seq, prev_hash and hash). `caSecret`, `clientSecret` (mTLS) and
+  `headersSecret` (key `headers`, e.g. `authorization=Bearer%20…`) are
+  optional; the NetworkPolicy egress port is the endpoint's (443 if it names
+  none). No HTTP proxy is used (as for syslog): allow the collector itself.
+  A batch counts as delivered only on a 2xx response with an empty body or an
+  OTLP JSON body that rejects no record; anything else is retried, visible as
+  export failures and lag.
 - **Audit retention** (ADR-0036): set `auditRetention.enabled` and
   `auditRetention.secret` (a Secret with `retention-database-url`, the
   `licenseforge_pruner` login) to run `licenseforge audit prune` on
