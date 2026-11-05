@@ -373,6 +373,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"tenants": {
 			"identity_read": `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 		},
+		"audit_export_cursors": { // ADR-0036
+			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,
+			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
+		},
 		"audit_events": {
 			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
@@ -413,6 +417,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	}
 	// Global tables (no tenant_id), each with its exact policies (ADR-0029).
 	global := map[string]map[string]string{
+		"audit_export_sinks": {"platform_all": "ALL licenseforge_platform true true"}, // ADR-0036
 		"sessions": {
 			"new_session (restrictive)": `INSERT licenseforge_identity (((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))) AND ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval))) AND (expires_at <= (clock_timestamp() + '1 day'::interval)) AND (EXISTS ( SELECT 1 FROM users u WHERE (((u.id)::text = (sessions.user_id)::text) AND (u.disabled_at IS NULL)))))`,
 			"seen_now (restrictive)":    `UPDATE licenseforge_identity true ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval)))`,
@@ -668,5 +673,57 @@ func TestPingChecksEveryPool(t *testing.T) {
 			t.Errorf("Ping with the %s pool closed = nil", pool)
 		}
 		_ = d.Close()
+	}
+}
+
+// The audit export tables (ADR-0036): the platform pool may register sinks
+// and lease and advance cursors, nothing more; the other logins get nothing.
+func TestAuditExportPrivileges(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	for _, c := range []struct {
+		role, table, column, priv string
+		want                      bool
+	}{
+		{PlatformRole, "audit_export_sinks", "", "SELECT", true},
+		{PlatformRole, "audit_export_sinks", "", "INSERT", true},
+		{PlatformRole, "audit_export_sinks", "", "UPDATE", false},
+		{PlatformRole, "audit_export_sinks", "", "DELETE", false},
+		{PlatformRole, "audit_export_cursors", "", "SELECT", true},
+		{PlatformRole, "audit_export_cursors", "", "INSERT", true},
+		{PlatformRole, "audit_export_cursors", "", "DELETE", false},
+		{PlatformRole, "audit_export_cursors", "seq", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "claimed_by", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "claimed_until", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "tenant_id", "UPDATE", false},
+		{PlatformRole, "audit_export_cursors", "sink_id", "UPDATE", false},
+		{PlatformRole, "audit_export_cursors", "id", "UPDATE", false},
+	} {
+		var got bool
+		q, args := `SELECT has_table_privilege($1, $2, $3)`, []any{c.role, c.table, c.priv}
+		if c.column != "" {
+			q, args = `SELECT has_column_privilege($1, $2, $3, $4)`, []any{c.role, c.table, c.column, c.priv}
+		}
+		if err := owner.QueryRow(q, args...).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("%s %s %s.%s = %v, want %v", c.role, c.priv, c.table, c.column, got, c.want)
+		}
+	}
+	for _, role := range []string{AppRole, IdentityRole} {
+		for _, table := range []string{"audit_export_sinks", "audit_export_cursors"} {
+			var any bool
+			if err := owner.QueryRow(`SELECT has_table_privilege($1, $2, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+				OR has_any_column_privilege($1, $2, 'SELECT,INSERT,UPDATE,REFERENCES')`, role, table).Scan(&any); err != nil {
+				t.Fatal(err)
+			}
+			if any {
+				t.Errorf("%s has privileges on %s", role, table)
+			}
+		}
 	}
 }

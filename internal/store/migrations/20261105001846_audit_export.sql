@@ -1,0 +1,6 @@
+-- Create "audit_export_sinks" table
+CREATE TABLE "audit_export_sinks" ("id" character varying(32) NOT NULL, "created_at" timestamptz NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "audit_export_sinks_id_format" CHECK ((id)::text ~ '^[a-z][a-z0-9-]{0,31}$'::text));
+-- Create "audit_export_cursors" table
+CREATE TABLE "audit_export_cursors" ("id" character varying(40) NOT NULL, "seq" bigint NOT NULL DEFAULT 0, "claimed_by" character varying(100) NULL, "claimed_until" timestamptz NULL, "sink_id" character varying(32) NOT NULL, "tenant_id" character varying(40) NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "audit_export_cursors_audit_export_sinks_cursors" FOREIGN KEY ("sink_id") REFERENCES "audit_export_sinks" ("id") ON UPDATE NO ACTION ON DELETE CASCADE, CONSTRAINT "audit_export_cursors_tenants_audit_export_cursors" FOREIGN KEY ("tenant_id") REFERENCES "tenants" ("id") ON UPDATE NO ACTION ON DELETE NO ACTION, CONSTRAINT "audit_export_cursors_claim" CHECK ((claimed_by IS NULL) = (claimed_until IS NULL)), CONSTRAINT "audit_export_cursors_id_format" CHECK ((id)::text ~ '^aec_[a-z2-7]{26}$'::text), CONSTRAINT "audit_export_cursors_seq" CHECK (seq >= 0));
+-- Create index "auditexportcursor_tenant_id_sink_id" to table: "audit_export_cursors"
+CREATE UNIQUE INDEX "auditexportcursor_tenant_id_sink_id" ON "audit_export_cursors" ("tenant_id", "sink_id");

@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -190,6 +191,21 @@ func (_u *TenantUpdate) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdate {
 	return _u.AddIdempotencyKeyIDs(ids...)
 }
 
+// AddAuditExportCursorIDs adds the "audit_export_cursors" edge to the AuditExportCursor entity by IDs.
+func (_u *TenantUpdate) AddAuditExportCursorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddAuditExportCursorIDs(ids...)
+	return _u
+}
+
+// AddAuditExportCursors adds the "audit_export_cursors" edges to the AuditExportCursor entity.
+func (_u *TenantUpdate) AddAuditExportCursors(v ...*AuditExportCursor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditExportCursorIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -361,6 +377,27 @@ func (_u *TenantUpdate) RemoveIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdat
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveIdempotencyKeyIDs(ids...)
+}
+
+// ClearAuditExportCursors clears all "audit_export_cursors" edges to the AuditExportCursor entity.
+func (_u *TenantUpdate) ClearAuditExportCursors() *TenantUpdate {
+	_u.mutation.ClearAuditExportCursors()
+	return _u
+}
+
+// RemoveAuditExportCursorIDs removes the "audit_export_cursors" edge to AuditExportCursor entities by IDs.
+func (_u *TenantUpdate) RemoveAuditExportCursorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveAuditExportCursorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditExportCursors removes "audit_export_cursors" edges to AuditExportCursor entities.
+func (_u *TenantUpdate) RemoveAuditExportCursors(v ...*AuditExportCursor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditExportCursorIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -795,6 +832,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AuditExportCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditExportCursorsIDs(); len(nodes) > 0 && !_u.mutation.AuditExportCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditExportCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -969,6 +1051,21 @@ func (_u *TenantUpdateOne) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdat
 	return _u.AddIdempotencyKeyIDs(ids...)
 }
 
+// AddAuditExportCursorIDs adds the "audit_export_cursors" edge to the AuditExportCursor entity by IDs.
+func (_u *TenantUpdateOne) AddAuditExportCursorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddAuditExportCursorIDs(ids...)
+	return _u
+}
+
+// AddAuditExportCursors adds the "audit_export_cursors" edges to the AuditExportCursor entity.
+func (_u *TenantUpdateOne) AddAuditExportCursors(v ...*AuditExportCursor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditExportCursorIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -1140,6 +1237,27 @@ func (_u *TenantUpdateOne) RemoveIdempotencyKeys(v ...*IdempotencyKey) *TenantUp
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveIdempotencyKeyIDs(ids...)
+}
+
+// ClearAuditExportCursors clears all "audit_export_cursors" edges to the AuditExportCursor entity.
+func (_u *TenantUpdateOne) ClearAuditExportCursors() *TenantUpdateOne {
+	_u.mutation.ClearAuditExportCursors()
+	return _u
+}
+
+// RemoveAuditExportCursorIDs removes the "audit_export_cursors" edge to AuditExportCursor entities by IDs.
+func (_u *TenantUpdateOne) RemoveAuditExportCursorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveAuditExportCursorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditExportCursors removes "audit_export_cursors" edges to AuditExportCursor entities.
+func (_u *TenantUpdateOne) RemoveAuditExportCursors(v ...*AuditExportCursor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditExportCursorIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -1597,6 +1715,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AuditExportCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditExportCursorsIDs(); len(nodes) > 0 && !_u.mutation.AuditExportCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditExportCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {
