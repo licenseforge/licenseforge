@@ -329,6 +329,27 @@ type MemberUpdated struct {
 	UserId          string     `json:"user_id"`
 }
 
+// MyTenant defines model for MyTenant.
+type MyTenant struct {
+	AllProducts bool   `json:"all_products"`
+	Name        string `json:"name"`
+
+	// ProductIds The scope when all_products is false; empty otherwise.
+	ProductIds []string   `json:"product_ids"`
+	Role       MemberRole `json:"role"`
+
+	// Slug The dashboard's /t/{slug}/.
+	Slug string `json:"slug"`
+
+	// TenantId Usable as {tenant} in paths.
+	TenantId string `json:"tenant_id"`
+}
+
+// MyTenantPage defines model for MyTenantPage.
+type MyTenantPage struct {
+	Items []MyTenant `json:"items"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Stable; clients switch on it. New codes may be added.
@@ -426,6 +447,9 @@ type ServerInterface interface {
 	// AcceptInvitation Accept an invitation as the signed-in user.
 	// (POST /invitations/accept)
 	AcceptInvitation(w http.ResponseWriter, r *http.Request)
+	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+	// (GET /me/tenants)
+	ListMyTenants(w http.ResponseWriter, r *http.Request)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams)
@@ -469,6 +493,20 @@ func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AcceptInvitation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyTenants operation middleware
+func (siw *ServerInterfaceWrapper) ListMyTenants(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyTenants(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1023,6 +1061,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations", wrapper.CreateInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations/{id}/revoke", wrapper.RevokeInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invitations/accept", wrapper.AcceptInvitation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 
 	return m
 }
@@ -1169,6 +1208,70 @@ func (response AcceptInvitation422ApplicationProblemPlusJSONResponse) VisitAccep
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenantsRequestObject struct {
+}
+
+type ListMyTenantsResponseObject interface {
+	VisitListMyTenantsResponse(w http.ResponseWriter) error
+}
+
+type ListMyTenants200JSONResponse MyTenantPage
+
+func (response ListMyTenants200JSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenants400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListMyTenants400ApplicationProblemPlusJSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenants401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListMyTenants401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListMyTenants401ResponseHeaders
+}
+
+func (response ListMyTenants401ApplicationProblemPlusJSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2405,6 +2508,9 @@ type StrictServerInterface interface {
 	// AcceptInvitation Accept an invitation as the signed-in user.
 	// (POST /invitations/accept)
 	AcceptInvitation(ctx context.Context, request AcceptInvitationRequestObject) (AcceptInvitationResponseObject, error)
+	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+	// (GET /me/tenants)
+	ListMyTenants(ctx context.Context, request ListMyTenantsRequestObject) (ListMyTenantsResponseObject, error)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
@@ -2497,6 +2603,30 @@ func (sh *strictHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AcceptInvitationResponseObject); ok {
 		if err := validResponse.VisitAcceptInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyTenants operation middleware
+func (sh *strictHandler) ListMyTenants(w http.ResponseWriter, r *http.Request) {
+	var request ListMyTenantsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyTenants(ctx, request.(ListMyTenantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyTenants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyTenantsResponseObject); ok {
+		if err := validResponse.VisitListMyTenantsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
