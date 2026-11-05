@@ -717,11 +717,15 @@ paths:
       - $ref: "#/components/parameters/Tenant"
     get:
       operationId: listProducts
-      summary: List products in the caller's product scope, newest first.
+      summary: List products in the caller's product scope, newest first, archived ones included.
       description: "Needs catalog:read; a product-scoped caller sees only its products."
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
+        - name: archived
+          in: query
+          description: Only archived products (true) or only active ones (false).
+          schema: { type: boolean }
       responses:
         "200":
           description: OK.
@@ -792,6 +796,25 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/products/{id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/ProductId"
+    post:
+      operationId: archiveProduct
+      summary: Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
+      description: Needs catalog:write on the product. Products are archived, never deleted (ADR-0015). An archived product answers 409 invalid_state.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/customers:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1213,11 +1236,12 @@ components:
             key: { type: string, description: The license key. Shown once (and on an idempotent replay to the same credential), stored only encrypted. }
     Product:
       type: object
-      required: [id, slug, name, created_at]
+      required: [id, slug, name, archived_at, created_at]
       properties:
         id: { type: string, example: prd_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         slug: { type: string, description: The license's product claim. Immutable. }
         name: { type: string }
+        archived_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
     ProductPage:
       type: object

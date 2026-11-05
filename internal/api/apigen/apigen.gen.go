@@ -984,7 +984,8 @@ type Problem struct {
 
 // Product defines model for Product.
 type Product struct {
-	CreatedAt time.Time `json:"created_at"`
+	ArchivedAt *time.Time `json:"archived_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 
 	// Id Example: prd_01jcz5b2y3c4d5e6f7g8h9j0k1
 	Id   string `json:"id"`
@@ -1230,6 +1231,9 @@ type ListProductsParams struct {
 
 	// Cursor Opaque; `next_cursor` of the previous page.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Archived Only archived products (true) or only active ones (false).
+	Archived *bool `form:"archived,omitempty" json:"archived,omitempty"`
 }
 
 // ListSigningKeysParams defines parameters for ListSigningKeys.
@@ -1368,7 +1372,7 @@ type ServerInterface interface {
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
 	// (PATCH /tenants/{tenant}/members/{id})
 	UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params UpdateMemberParams)
-	// ListProducts List products in the caller's product scope, newest first.
+	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListProductsParams)
 	// CreateProduct Add a product.
@@ -1380,6 +1384,9 @@ type ServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
+	// ArchiveProduct Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
+	// (POST /tenants/{tenant}/products/{id}/archive)
+	ArchiveProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
 	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
 	// (GET /tenants/{tenant}/signing-keys)
 	ListSigningKeys(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListSigningKeysParams)
@@ -2693,6 +2700,19 @@ func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "archived", r.URL.Query(), &params.Archived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "archived"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListProducts(w, r, tenant, params)
 	}))
@@ -2791,6 +2811,41 @@ func (siw *ServerInterfaceWrapper) UpdateProduct(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateProduct(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArchiveProduct operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ProductId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveProduct(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3130,6 +3185,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products", wrapper.CreateProduct)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.GetProduct)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.UpdateProduct)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products/{id}/archive", wrapper.ArchiveProduct)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.ListCustomers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.CreateCustomer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}", wrapper.GetCustomer)
@@ -7756,6 +7812,144 @@ func (response UpdateProduct422ApplicationProblemPlusJSONResponse) VisitUpdatePr
 	return err
 }
 
+type ArchiveProductRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     ProductId `json:"id"`
+}
+
+type ArchiveProductResponseObject interface {
+	VisitArchiveProductResponse(w http.ResponseWriter) error
+}
+
+type ArchiveProduct200JSONResponse Product
+
+func (response ArchiveProduct200JSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveProduct400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ArchiveProduct400ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveProduct401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveProduct401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveProduct401ResponseHeaders
+}
+
+func (response ArchiveProduct401ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveProduct403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveProduct403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveProduct403ResponseHeaders
+}
+
+func (response ArchiveProduct403ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveProduct404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveProduct404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveProduct404ResponseHeaders
+}
+
+func (response ArchiveProduct404ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveProduct409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveProduct409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveProduct409ResponseHeaders
+}
+
+func (response ArchiveProduct409ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSigningKeysRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListSigningKeysParams
@@ -8461,7 +8655,7 @@ type StrictServerInterface interface {
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
 	// (PATCH /tenants/{tenant}/members/{id})
 	UpdateMember(ctx context.Context, request UpdateMemberRequestObject) (UpdateMemberResponseObject, error)
-	// ListProducts List products in the caller's product scope, newest first.
+	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(ctx context.Context, request ListProductsRequestObject) (ListProductsResponseObject, error)
 	// CreateProduct Add a product.
@@ -8473,6 +8667,9 @@ type StrictServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(ctx context.Context, request UpdateProductRequestObject) (UpdateProductResponseObject, error)
+	// ArchiveProduct Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
+	// (POST /tenants/{tenant}/products/{id}/archive)
+	ArchiveProduct(ctx context.Context, request ArchiveProductRequestObject) (ArchiveProductResponseObject, error)
 	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
 	// (GET /tenants/{tenant}/signing-keys)
 	ListSigningKeys(ctx context.Context, request ListSigningKeysRequestObject) (ListSigningKeysResponseObject, error)
@@ -9495,6 +9692,33 @@ func (sh *strictHandler) UpdateProduct(w http.ResponseWriter, r *http.Request, t
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProductResponseObject); ok {
 		if err := validResponse.VisitUpdateProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveProduct operation middleware
+func (sh *strictHandler) ArchiveProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId) {
+	var request ArchiveProductRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveProduct(ctx, request.(ArchiveProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveProductResponseObject); ok {
+		if err := validResponse.VisitArchiveProductResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

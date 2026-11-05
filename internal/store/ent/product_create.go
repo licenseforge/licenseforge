@@ -70,6 +70,20 @@ func (_c *ProductCreate) SetName(v string) *ProductCreate {
 	return _c
 }
 
+// SetArchivedAt sets the "archived_at" field.
+func (_c *ProductCreate) SetArchivedAt(v time.Time) *ProductCreate {
+	_c.mutation.SetArchivedAt(v)
+	return _c
+}
+
+// SetNillableArchivedAt sets the "archived_at" field if the given value is not nil.
+func (_c *ProductCreate) SetNillableArchivedAt(v *time.Time) *ProductCreate {
+	if v != nil {
+		_c.SetArchivedAt(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *ProductCreate) SetID(v string) *ProductCreate {
 	_c.mutation.SetID(v)
@@ -273,6 +287,10 @@ func (_c *ProductCreate) createSpec() (*Product, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(product.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.ArchivedAt(); ok {
+		_spec.SetField(product.FieldArchivedAt, field.TypeTime, value)
+		_node.ArchivedAt = &value
 	}
 	if nodes := _c.mutation.TenantIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
