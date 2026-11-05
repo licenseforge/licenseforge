@@ -953,6 +953,7 @@ var (
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "slug", Type: field.TypeString, Unique: true, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "audit_retention_days", Type: field.TypeInt, Nullable: true},
 		{Name: "mfa_policy", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
 	}
 	// TenantsTable holds the schema information for the "tenants" table.
@@ -1245,10 +1246,11 @@ func init() {
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
-		"tenants_id_format":      "id ~ '^tnt_[a-z2-7]{26}$'",
-		"tenants_mfa_policy":     "(mfa_policy)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
-		"tenants_name_not_blank": "btrim(name) <> ''",
-		"tenants_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"tenants_audit_retention": "audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)",
+		"tenants_id_format":       "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_mfa_policy":      "(mfa_policy)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
+		"tenants_name_not_blank":  "btrim(name) <> ''",
+		"tenants_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 	UsersTable.Annotation = &entsql.Annotation{}
 	UsersTable.Annotation.Checks = map[string]string{

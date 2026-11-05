@@ -23,6 +23,8 @@ const (
 	FieldSlug = "slug"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldAuditRetentionDays holds the string denoting the audit_retention_days field in the database.
+	FieldAuditRetentionDays = "audit_retention_days"
 	// FieldMfaPolicy holds the string denoting the mfa_policy field in the database.
 	FieldMfaPolicy = "mfa_policy"
 	// EdgeProducts holds the string denoting the products edge name in mutations.
@@ -126,6 +128,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldSlug,
 	FieldName,
+	FieldAuditRetentionDays,
 	FieldMfaPolicy,
 }
 
@@ -209,6 +212,11 @@ func BySlug(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByAuditRetentionDays orders the results by the audit_retention_days field.
+func ByAuditRetentionDays(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAuditRetentionDays, opts...).ToFunc()
 }
 
 // ByMfaPolicy orders the results by the mfa_policy field.

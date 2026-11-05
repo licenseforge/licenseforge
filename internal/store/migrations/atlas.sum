@@ -1,4 +1,4 @@
-h1:7BhEbdDM3CtMRE8ldSWjVeXrbf1LtKgfci/QwvRdIic=
+h1:yvGicjiU+iJ3srTmSC5UH9qBwTEIUgl9OmwE8igvmAg=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -26,5 +26,7 @@ h1:7BhEbdDM3CtMRE8ldSWjVeXrbf1LtKgfci/QwvRdIic=
 20261105001847_audit_export_security.sql h1:QN1mioztjxIFSm37brZXQrcPAXxAXQz++fYrjvI4iPg=
 20261105014358_audit_anchors.sql h1:sUCEu/qJ0AHNB2SErq+mUBw4TgFmegQ5schXNED+tYA=
 20261105014359_audit_anchors_security.sql h1:ZrM917uk5phnBWJTGQeqGYa3g+zi/gomu32+fPVTfkI=
-20261105051158_tenant_mfa.sql h1:LEHORAKtzehWtlF4R3g104F6AipkZotB53trx2UR9/Q=
-20261105051159_tenant_mfa_security.sql h1:WTjU5TqTs7PPdAw+aXtPs7GKl2b4fMFbAISrGGXoOvU=
+20261105023832_audit_retention.sql h1:b2C8lzCbwSyJKNdE2R8z7l7coTjtbXKJpZWo8u8Pm1E=
+20261105023833_audit_retention_security.sql h1:OqT2ewfZpO0oKYoEzYx3HERT9zIEphKkvbzRfq3QkMY=
+20261105051158_tenant_mfa.sql h1:gc9T5bWt3EcKiDdzgx7k+XS/clyT663CxC4VW/gRMsc=
+20261105051159_tenant_mfa_security.sql h1:k9soSny+I0xRXH7EfKpmkXL+Vhoy2rYdJwM4JgPNIvI=

@@ -6,6 +6,7 @@ import { AppShell } from "@/app-shell";
 import { ErrorPage, LoginPage, NoTenants, NotFound, Overview, TenantLayout } from "@/pages";
 import { CustomersPage, ProductsPage } from "@/catalog-pages";
 import { InvitePage } from "@/invite-page";
+import { LicensesPage } from "@/licenses-page";
 import { inviteWaiting } from "@/invite";
 import { MembersPage } from "@/members-page";
 import { TokensPage } from "@/tokens-page";
@@ -46,11 +47,12 @@ const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "sett
 const membersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/members", component: MembersPage });
 const productsRoute = createRoute({ getParentRoute: () => tenantRoute, path: "products", component: ProductsPage });
 const customersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "customers", component: CustomersPage });
+const licensesRoute = createRoute({ getParentRoute: () => tenantRoute, path: "licenses", component: LicensesPage });
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
-  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, customersRoute, tokensRoute, membersRoute])]),
+  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, customersRoute, licensesRoute, tokensRoute, membersRoute])]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {

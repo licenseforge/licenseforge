@@ -779,9 +779,9 @@ func TestSessionAndTenantGrantsPinned(t *testing.T) {
 		return strings.Join(out, ",")
 	}
 	for _, tc := range []struct{ role, table, priv, want string }{
-		{AppRole, "tenants", "UPDATE", "mfa_policy,updated_at"},
+		{AppRole, "tenants", "UPDATE", "audit_retention_days,mfa_policy,updated_at"},
 		{IdentityRole, "tenants", "UPDATE", ""},
-		{PlatformRole, "tenants", "UPDATE", "created_at,id,mfa_policy,name,slug,updated_at"},
+		{PlatformRole, "tenants", "UPDATE", "audit_retention_days,created_at,id,mfa_policy,name,slug,updated_at"},
 		{IdentityRole, "sessions", "UPDATE", "last_seen_at"},
 		{AppRole, "sessions", "UPDATE", ""},
 		{PlatformRole, "sessions", "UPDATE", ""},
