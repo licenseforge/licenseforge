@@ -9,6 +9,7 @@
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
+//	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, 365 to 36,500 days; unset = keep everything
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
@@ -26,8 +27,19 @@
 //	LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE client certificate (mTLS), PEM, with _KEY_FILE; unset = none
 //	LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE
 //	LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME  name the collector's certificate must carry; default the address's host
+//	LICENSEFORGE_AUDIT_OTLP_ENDPOINT    OTLP/HTTP logs URL (JSON), https://host:4318/v1/logs (ADR-0036); unset = none
+//	LICENSEFORGE_AUDIT_OTLP_CA_FILE, _CERT_FILE, _KEY_FILE  as for syslog
+//	LICENSEFORGE_AUDIT_OTLP_HEADERS     request headers, k=v,k2=v2 (values %-encoded), e.g. an API key
 //	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
+//	LICENSEFORGE_TRUSTED_PROXIES        CIDRs or addresses of proxies whose X-Forwarded-For is believed; unset = none
+//	LICENSEFORGE_RATE_LIMIT_ACTIVATION  requests per client address per minute, per replica, on the activation API; default 1200, 0 = off
+//	LICENSEFORGE_RATE_LIMIT_MANAGEMENT  the same for the rest of /api/v1 and /auth/ (except login); default 600, 0 = off
+//	LICENSEFORGE_RATE_LIMIT_LOGIN       the same for /auth/login and /auth/callback; default 60, 0 = off
+//	LICENSEFORGE_OIDC_MFA_AMR                amr values that count as MFA (comma list; default mfa,otp,swk; ADR-0038)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR amr values that count as phishing-resistant MFA (default hwk,sc,pop)
+//	LICENSEFORGE_OIDC_MFA_ACR                acr/acrs values that count as MFA (default none)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR acr/acrs values that count as phishing-resistant (default none; e.g. phr,phrh on Okta)
 //
 // The serving process refuses to start if the owner or the retention login is
 // in its environment: serving pods must never hold them (ADR-0009, ADR-0036).
@@ -43,6 +55,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -60,9 +74,12 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/ratelimit"
+	"licenseforge.io/licenseforge/internal/retention"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
 )
@@ -75,7 +92,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]   run the server\n       licenseforge migrate   apply database migrations\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -90,12 +107,9 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
-	if flag.NArg() > 1 {
-		flag.Usage()
-		os.Exit(2)
-	}
+	cmd := strings.Join(flag.Args(), " ")
 	var err error
-	switch flag.Arg(0) {
+	switch cmd {
 	case "":
 		var ln, mln net.Listener
 		if ln, err = net.Listen("tcp", *addr); err == nil {
@@ -107,6 +121,8 @@ func main() {
 		}
 	case "migrate":
 		err = migrate(ctx, log)
+	case "audit prune":
+		err = prune(ctx, log)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -115,6 +131,35 @@ func main() {
 		log.Error("stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// prune applies audit retention (ADR-0036) with the retention login:
+// tenants' audit_retention_days, and LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
+// (unset: keep everything) for the platform chain. Run it as the CronJob.
+func prune(ctx context.Context, log *slog.Logger) error {
+	dsn, err := mustEnv("LICENSEFORGE_RETENTION_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	platformDays := 0
+	if v := os.Getenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS"); v != "" {
+		if platformDays, err = strconv.Atoi(v); err != nil || platformDays < retention.MinDays || platformDays > retention.MaxDays {
+			return fmt.Errorf("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS: want whole days, %d to %d; got %q", retention.MinDays, retention.MaxDays, v)
+		}
+	}
+	r, err := store.OpenRetention(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+	cuts, err := retention.Prune(ctx, r, platformDays)
+	var deleted int64
+	for _, c := range cuts {
+		deleted += c.Deleted
+		log.Info("audit retention cut", "chain", c.TenantID, "through_seq", c.Through, "deleted", c.Deleted)
+	}
+	log.Info("audit retention done", "cuts", len(cuts), "deleted", deleted, "platform_days", platformDays)
+	return err
 }
 
 func migrate(ctx context.Context, log *slog.Logger) error {
@@ -142,6 +187,10 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
 	if err != nil || drain < 0 {
 		return fmt.Errorf("LICENSEFORGE_DRAIN: want a duration like 5s, got %q", os.Getenv("LICENSEFORGE_DRAIN"))
+	}
+	limiter, err := rateLimiter(log)
+	if err != nil {
+		return err
 	}
 	tenantDSN, err := mustEnv("LICENSEFORGE_DATABASE_URL")
 	if err != nil {
@@ -172,6 +221,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	}
 	defer func() { _ = db.Close() }()
 	metrics.SetPools(db.Stats)
+	sinks := map[string]auditexport.Sink{}
 	if addr := os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_ADDR"); addr != "" {
 		sink, err := auditexport.NewSyslog(auditexport.SyslogConfig{Addr: addr,
 			CAFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE"),
@@ -180,14 +230,26 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("LICENSEFORGE_AUDIT_SYSLOG_*: %w", err)
 		}
+		sinks["syslog"] = sink
+	}
+	if endpoint := os.Getenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT"); endpoint != "" {
+		sink, err := auditexport.NewOTLP(auditexport.OTLPConfig{Endpoint: endpoint,
+			CAFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CERT_FILE"),
+			KeyFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_KEY_FILE"), Headers: os.Getenv("LICENSEFORGE_AUDIT_OTLP_HEADERS")})
+		if err != nil {
+			return fmt.Errorf("LICENSEFORGE_AUDIT_OTLP_*: %w", err)
+		}
+		sinks["otlp"] = sink
+	}
+	for name, sink := range sinks {
 		// Registered before serving: from now on retention keeps what this sink hasn't exported.
-		if err := auditexport.Register(ctx, db, "syslog"); err != nil {
+		if err := auditexport.Register(ctx, db, name); err != nil {
 			return err
 		}
-		x := auditexport.New(db, "syslog", sink, log)
+		x := auditexport.New(db, name, sink, log)
 		go func() { // stops with ctx (shutdown); entries left are sent by the next pod
 			if err := x.Run(ctx); err != nil {
-				log.Error("audit export stopped", "sink", "syslog", "err", err)
+				log.Error("audit export stopped", "sink", name, "err", err)
 			}
 		}()
 	}
@@ -205,6 +267,11 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Fail at start on a malformed policy, not at the first login.
+	assurance, err := identity.AssurancePolicyFromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
 	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -216,6 +283,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
 			// Read only here, at start: a later change needs a restart.
 			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
+			Assurance:      &assurance,
 		}, ids, log)
 		cancel()
 		if err != nil {
@@ -229,7 +297,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// API tokens need only the tenant pool (hashes, no keyring); license keys
 	// and stored idempotent responses (which can hold one) are encrypted, and
 	// the activation API decrypts license keys and signs leases.
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Products: catalog.Products{DB: db}, Customers: customers.Service{DB: db},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},
@@ -237,14 +305,23 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}
+	// The address limit runs before anything else (ADR-0032 step 0). No
+	// endpoint streams: bodies are at most 1 MB, the slowest handler (login
+	// callback) is bounded by 15 s of IdP calls, and the dashboard's assets
+	// are small, so a request that takes 30 s to send or 60 s to answer is
+	// a slow client holding a connection.
 	srv := &http.Server{
-		Handler:           metrics.Instrument(mux),
+		Handler:           limiter.Wrap(metrics.Instrument(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	msrv := &http.Server{
 		Handler:           metricsMux(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	errc, merrc := make(chan error, 1), make(chan error, 1)
@@ -310,6 +387,31 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 	})
 	web.Mount(mux) // more specific routes (health, /auth/, /api/) win
 	return mux
+}
+
+// rateLimiter builds the per-client-address limiter from the environment.
+func rateLimiter(log *slog.Logger) (*ratelimit.Limiter, error) {
+	trusted, err := ratelimit.ParseTrusted(os.Getenv("LICENSEFORGE_TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, fmt.Errorf("LICENSEFORGE_TRUSTED_PROXIES: %w", err)
+	}
+	quotas := map[ratelimit.Surface]int{}
+	for _, q := range []struct {
+		env     string
+		surface ratelimit.Surface
+		def     int
+	}{
+		{"LICENSEFORGE_RATE_LIMIT_ACTIVATION", ratelimit.Activation, ratelimit.DefaultActivation},
+		{"LICENSEFORGE_RATE_LIMIT_MANAGEMENT", ratelimit.Management, ratelimit.DefaultManagement},
+		{"LICENSEFORGE_RATE_LIMIT_LOGIN", ratelimit.Login, ratelimit.DefaultLogin},
+	} {
+		n, err := strconv.Atoi(envOr(q.env, strconv.Itoa(q.def)))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%s: want requests per minute (0 = off), got %q", q.env, os.Getenv(q.env))
+		}
+		quotas[q.surface] = n
+	}
+	return ratelimit.New(ratelimit.Config{Trusted: trusted, Quotas: quotas, Log: log}), nil
 }
 
 // sessionTimeouts sets s's timeouts from the environment, within bounds.

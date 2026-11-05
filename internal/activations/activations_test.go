@@ -741,3 +741,26 @@ func TestLastMoveRace(t *testing.T) {
 		}
 	}
 }
+
+// free changes an active activation once; the second time there is nothing
+// to free.
+func TestFreeOnce(t *testing.T) {
+	f := setup(t)
+	is := f.issue(t, "pro")
+	got, err := f.s.Activate(context.Background(), f.req(is.Key, fp()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		if err := free(context.Background(), tx, got.ActivationID); err != nil {
+			return err
+		}
+		if err := free(context.Background(), tx, got.ActivationID); !errors.Is(err, ErrNotActivated) {
+			t.Errorf("second free: %v", err)
+		}
+		return nil
+	})
+	if as := f.activations(t, is.License.ID); len(as) != 1 || as[0].DeactivatedAt == nil {
+		t.Errorf("activations %+v", as)
+	}
+}

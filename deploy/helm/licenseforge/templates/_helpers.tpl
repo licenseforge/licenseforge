@@ -63,3 +63,8 @@ capabilities:
 {{- define "licenseforge.hostPort" -}}
 {{- $h := index . 0 -}}{{- if contains ":" $h -}}[{{ $h }}]{{- else -}}{{ $h }}{{- end -}}:{{ index . 1 | int }}
 {{- end -}}
+
+{{/* audit.export.otlp, nil-safe (values reused from older releases). */}}
+{{- define "licenseforge.otlp" -}}
+{{- toYaml (dig "export" "otlp" dict (.Values.audit | default dict)) -}}
+{{- end -}}

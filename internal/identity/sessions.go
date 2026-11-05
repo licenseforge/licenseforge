@@ -8,8 +8,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -75,12 +77,20 @@ func sessionHash(cookie string) []byte {
 	return h[:]
 }
 
-// NewSession starts a session for userID and returns the cookie value (the
-// HTTP layer sets it HttpOnly, Secure, SameSite=Lax). Only its SHA-256 is
-// stored. Times come from the database clock. A disabled user gets
+// NewSession starts a session for userID, authenticated as auth says
+// (ADR-0038; stored with it, never changed), and returns the cookie value
+// (the HTTP layer sets it HttpOnly, Secure, SameSite=Lax). Only its SHA-256
+// is stored. Times come from the database clock. A disabled user gets
 // ErrDisabled; the user row is share-locked so a concurrent DisableUser
 // either sees this session (and deletes it) or is seen first.
-func (s Service) NewSession(ctx context.Context, userID string) (string, error) {
+func (s Service) NewSession(ctx context.Context, userID string, auth SessionAuth) (string, error) {
+	if !auth.Assurance.Valid() {
+		return "", fmt.Errorf("identity: session assurance %q", auth.Assurance)
+	}
+	var acr *string
+	if auth.ACR != "" {
+		acr = &auth.ACR
+	}
 	var b [32]byte
 	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (Go 1.24+)
 	cookie := base64.RawURLEncoding.EncodeToString(b[:])
@@ -98,9 +108,10 @@ func (s Service) NewSession(ctx context.Context, userID string) (string, error) 
 		}
 		// One clock reading for all three times: a full-day session must not
 		// end a microsecond past the database's one-day CHECK.
-		_, err = tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
-			SELECT $1, $2, $3, n, n + make_interval(secs => $4), n FROM clock_timestamp() n`,
-			ids.Session(), userID, sessionHash(cookie), s.SessionMaxAge().Seconds())
+		_, err = tx.ExecContext(ctx, `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at, assurance, amr, acr, acrs, auth_time)
+			SELECT $1, $2, $3, n, n + make_interval(secs => $4), n, $5, $6, $7, $8, $9 FROM clock_timestamp() n`,
+			ids.Session(), userID, sessionHash(cookie), s.SessionMaxAge().Seconds(),
+			string(auth.Assurance), strings.Join(auth.AMR, " "), acr, strings.Join(auth.ACRs, " "), auth.AuthTime)
 		return err
 	})
 	if err != nil {
@@ -109,16 +120,17 @@ func (s Service) NewSession(ctx context.Context, userID string) (string, error) 
 	return cookie, nil
 }
 
-// Session returns the user of a live session and records the activity (at
-// most once a minute).
-func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) {
+// Session returns the user of a live session and the assurance its login
+// proved (ADR-0038), and records the activity (at most once a minute).
+func (s Service) Session(ctx context.Context, cookie string) (*ent.User, authz.Assurance, error) {
 	if len(cookie) != cookieLen {
-		return nil, ErrNoSession
+		return nil, "", ErrNoSession
 	}
 	var u *ent.User
+	var level authz.Assurance
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		var id, userID string
-		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
+		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id, s.assurance FROM sessions s JOIN users u ON u.id = s.user_id
 			WHERE s.token_hash = $1 AND s.expires_at > clock_timestamp()
 			  AND s.last_seen_at > clock_timestamp() - make_interval(secs => $2) AND u.disabled_at IS NULL`,
 			sessionHash(cookie), s.idleTimeout().Seconds())
@@ -129,7 +141,7 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 			_ = rows.Close()
 			return errors.Join(sql.ErrNoRows, rows.Err())
 		}
-		err = rows.Scan(&id, &userID)
+		err = rows.Scan(&id, &userID, &level)
 		if cerr := rows.Close(); err == nil {
 			err = cerr
 		}
@@ -148,12 +160,12 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, error) 
 		return err
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNoSession
+		return nil, "", ErrNoSession
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return u, nil
+	return u, level, nil
 }
 
 // EndSession ends the session (logout). Ending an unknown session is not an

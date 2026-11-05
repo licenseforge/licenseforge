@@ -80,7 +80,7 @@ func (f *fixture) admins(t *testing.T) []*ent.PlatformAdmin {
 
 func (f *fixture) user(t *testing.T, sub string) *ent.User {
 	t.Helper()
-	u, err := f.ids.Session(context.Background(), f.session(t))
+	u, _, err := f.ids.Session(context.Background(), f.session(t))
 	if err != nil || u.Subject != sub {
 		t.Fatalf("session user %+v, %v", u, err)
 	}
