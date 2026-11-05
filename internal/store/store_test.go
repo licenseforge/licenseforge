@@ -398,6 +398,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"features": { // ADR-0015: archive is one-way, at the database clock
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
+		"plans": { // ADR-0015: archive is one-way, at the database clock
+			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM plans.archived_at))))) (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND ((NOT (plans.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((plans.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (plans.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+		},
 		"products": { // ADR-0015: archive is one-way, at the database clock
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
@@ -790,6 +793,22 @@ func archivables() []archivable {
 			`INSERT INTO features (id, tenant_id, product_id, key, name, type, created_at, updated_at)
 				SELECT $1::text, $2::text, product_id, $3::text, 'x', 'boolean', now(), now() FROM features WHERE key = $3::text AND tenant_id = $2::text
 				ON CONFLICT (product_id, key) DO UPDATE SET archived_at = NULL`},
+		{"plans", []string{"name", "duration_months", "duration_seconds", "expiry_basis", "max_activations", "max_rehosts",
+			"offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds", "updated_at", "archived_at"},
+			func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error) {
+				p, err := product(ctx, tx, tenant, "p-"+strings.ReplaceAll(key, "_", "-"))
+				if err != nil {
+					return "", err
+				}
+				pl, err := tx.Plan.Create().SetTenantID(tenant).SetProductID(p.ID).SetSlug(strings.ReplaceAll(key, "_", "-")).SetName("P").Save(ctx)
+				if err != nil {
+					return "", err
+				}
+				return pl.ID, nil
+			},
+			`INSERT INTO plans (id, tenant_id, product_id, slug, name, created_at, updated_at)
+				SELECT $1::text, $2::text, product_id, $3::text, 'x', now(), now() FROM plans WHERE slug = $3::text AND tenant_id = $2::text
+				ON CONFLICT (product_id, slug) DO UPDATE SET archived_at = NULL`},
 	}
 }
 
@@ -979,10 +998,10 @@ func TestArchiveRace(t *testing.T) {
 					run := func(tx *ent.Tx) error {
 						if upsert {
 							k := key
-							if a.table == "products" {
+							if a.table == "products" || a.table == "plans" {
 								k = strings.ReplaceAll(key, "_", "-")
 							}
-							_, err := tx.ExecContext(ctx, a.upsert, map[string]string{"products": ids.Product(), "features": ids.Feature()}[a.table], tn.ID, k)
+							_, err := tx.ExecContext(ctx, a.upsert, map[string]string{"products": ids.Product(), "features": ids.Feature(), "plans": ids.Plan()}[a.table], tn.ID, k)
 							return err
 						}
 						_, err := tx.ExecContext(ctx, fmt.Sprintf(c.q, a.table), id)
