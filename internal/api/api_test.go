@@ -36,6 +36,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -80,7 +81,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
-		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Customers: customers.Service{DB: d}, Audit: audit.Log{DB: d}, Activations: activations.Service{DB: d, Keys: kr},
+		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Customers: customers.Service{DB: d}, Audit: audit.Log{DB: d}, SigningKeys: signing.Local{DB: d, Keys: kr}, Activations: activations.Service{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {

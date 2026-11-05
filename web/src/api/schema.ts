@@ -446,6 +446,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tenant's signing keys (ADR-0026), newest first. Public keys only.
+         * @description Needs key:read on every product. Each item's kid, alg and public_key is the trusted-key entry vendors embed in their builds.
+         */
+        get: operations["listSigningKeys"];
+        put?: never;
+        /**
+         * Generate a signing key. The tenant's first key is active; later keys are pending until promoted.
+         * @description Needs key:write (owners). A pending key never signs: publish its
+         *     public key for vendors to add to their trusted set, then promote
+         *     it. A tenant that already has a pending key answers 409
+         *     pending_key_exists. Audited. Idempotency-Key isn't honoured: a
+         *     retry after a lost answer may get 409 pending_key_exists, or leave
+         *     a pending key you didn't mean to make; discard it.
+         */
+        post: operations["createSigningKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/signing-keys/{kid}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                kid: components["parameters"]["Kid"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the pending key active and retire the active key, erasing its private key. Can't be undone.
+         * @description Needs key:write (owners). Builds that don't trust this kid reject
+         *     every license and lease signed afterwards (ADR-0026). A key that
+         *     isn't the pending key answers 409 invalid_state; an unknown kid,
+         *     404 (audited as a failure). Audited.
+         */
+        post: operations["promoteSigningKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/signing-keys/{kid}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                kid: components["parameters"]["Kid"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire the pending key without it ever signing (rotation abandoned, or the pending key leaked).
+         * @description Needs key:write (owners). A key that isn't the pending key answers 409 invalid_state. Audited.
+         */
+        post: operations["discardSigningKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/tenants": {
         parameters: {
             query?: never;
@@ -889,6 +972,34 @@ export interface components {
             /** @description Absent on the last page. */
             next_cursor?: string;
         };
+        /** @description A signing key's public part. Private keys are never returned. */
+        SigningKey: {
+            /** @example sk_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            kid: string;
+            /** @enum {string} */
+            alg: "ed25519";
+            /**
+             * @description Base64url without padding (RFC 4648 §5), as in the trusted key set (License File Format).
+             * @example K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k
+             */
+            public_key: string;
+            /**
+             * @description pending: published, never signs; active: signs everything new (at most one); retired: never signs again, private key erased.
+             * @enum {string}
+             */
+            status: "pending" | "active" | "retired";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            activated_at: string | null;
+            /** Format: date-time */
+            retired_at: string | null;
+        };
+        SigningKeyPage: {
+            items: components["schemas"]["SigningKey"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
         Problem: {
             /** @example about:blank */
             type: string;
@@ -1294,6 +1405,7 @@ export interface components {
         CustomerId: string;
         LicenseId: string;
         ActivationId: string;
+        Kid: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
         /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
@@ -1974,6 +2086,122 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    listSigningKeys: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeyPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createSigningKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKey"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    promoteSigningKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                kid: components["parameters"]["Kid"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKey"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    discardSigningKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                kid: components["parameters"]["Kid"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKey"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listMyTenants: {
