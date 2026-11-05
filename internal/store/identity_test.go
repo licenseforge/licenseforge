@@ -596,6 +596,18 @@ func TestIdentityGrants(t *testing.T) {
 		{IdentityRole, "tenants", "slug", "SELECT", true},
 		{IdentityRole, "tenants", "created_at", "SELECT", false},
 		{IdentityRole, "audit_events", "id", "UPDATE", false},
+		// ADR-0038: the tenant pool changes only its tenant's MFA policy; a
+		// session's authentication is written once by the login path.
+		{AppRole, "tenants", "mfa_policy", "UPDATE", true},
+		{AppRole, "tenants", "name", "UPDATE", false},
+		{AppRole, "tenants", "slug", "UPDATE", false},
+		{AppRole, "tenants", "id", "UPDATE", false},
+		{IdentityRole, "tenants", "mfa_policy", "UPDATE", false},
+		{IdentityRole, "sessions", "assurance", "INSERT", true},
+		{IdentityRole, "sessions", "amr", "INSERT", true},
+		{IdentityRole, "sessions", "assurance", "UPDATE", false},
+		{IdentityRole, "sessions", "amr", "UPDATE", false},
+		{IdentityRole, "sessions", "auth_time", "UPDATE", false},
 		{AppRole, "api_tokens", "revoked_at", "INSERT", false},
 		{AppRole, "api_tokens", "last_used_at", "INSERT", false},
 		{AppRole, "api_tokens", "role", "UPDATE", false},

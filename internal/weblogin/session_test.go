@@ -62,7 +62,7 @@ func TestSessionAndLogout(t *testing.T) {
 			t.Errorf("logout with %s: %d", name, resp.StatusCode)
 		}
 	}
-	if _, err := f.ids.Session(t.Context(), f.session(t)); err != nil {
+	if _, _, err := f.ids.Session(t.Context(), f.session(t)); err != nil {
 		t.Fatalf("refused logouts ended the session: %v", err)
 	}
 	// Behind a proxy that rewrites Host, the configured public origin is
@@ -87,7 +87,7 @@ func TestSessionAndLogout(t *testing.T) {
 	if resp, _ := do("POST", "/auth/logout", map[string]string{CSRFHeader: token}); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout: %d", resp.StatusCode)
 	}
-	if _, err := f.ids.Session(t.Context(), cookie); err == nil {
+	if _, _, err := f.ids.Session(t.Context(), cookie); err == nil {
 		t.Error("session alive after logout")
 	}
 	if f.session(t) != "" {

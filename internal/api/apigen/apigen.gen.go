@@ -245,6 +245,27 @@ func (e MemberRole) Valid() bool {
 	}
 }
 
+// Defines values for MfaPolicy.
+const (
+	Mfa               MfaPolicy = "mfa"
+	None              MfaPolicy = "none"
+	PhishingResistant MfaPolicy = "phishing_resistant"
+)
+
+// Valid indicates whether the value is a known member of the MfaPolicy enum.
+func (e MfaPolicy) Valid() bool {
+	switch e {
+	case Mfa:
+		return true
+	case None:
+		return true
+	case PhishingResistant:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleAdmin   Role = "admin"
@@ -640,6 +661,11 @@ type MemberUpdated struct {
 	UserId          string     `json:"user_id"`
 }
 
+// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+// the identity provider asserts it in the ID token (amr/acr).
+type MfaPolicy string
+
 // MyTenant defines model for MyTenant.
 type MyTenant struct {
 	AllProducts bool   `json:"all_products"`
@@ -683,6 +709,30 @@ type Problem struct {
 
 // Role defines model for Role.
 type Role string
+
+// TenantPatch Absent fields stay; none is nullable (null answers 422).
+type TenantPatch struct {
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy *MfaPolicy `json:"mfa_policy,omitempty"`
+}
+
+// TenantUpdated defines model for TenantUpdated.
+type TenantUpdated struct {
+	// ActiveApiTokens Active API tokens, all created before this change and not revoked by it; review them in the token list.
+	ActiveApiTokens int `json:"active_api_tokens"`
+
+	// Id Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy MfaPolicy `json:"mfa_policy"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+}
 
 // ActivationTenant Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
 type ActivationTenant = string
@@ -790,6 +840,9 @@ type RefreshLeaseJSONRequestBody = ActivationRequest
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 
+// UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
+type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
 
@@ -819,6 +872,9 @@ type ServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(w http.ResponseWriter, r *http.Request)
+	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+	// (PATCH /tenants/{tenant})
+	UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams)
@@ -996,6 +1052,32 @@ func (siw *ServerInterfaceWrapper) ListMyTenants(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyTenants(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTenant operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTenant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTenant(w, r, tenant)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1850,6 +1932,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}", wrapper.UpdateTenant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.ListApiTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.CreateApiToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens/{id}/revoke", wrapper.RevokeApiToken)
@@ -2633,6 +2716,192 @@ func (response ListMyTenants401ApplicationProblemPlusJSONResponse) VisitListMyTe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenantRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Body   *UpdateTenantApplicationMergePatchPlusJSONRequestBody
+}
+
+type UpdateTenantResponseObject interface {
+	VisitUpdateTenantResponse(w http.ResponseWriter) error
+}
+
+type UpdateTenant200JSONResponse TenantUpdated
+
+func (response UpdateTenant200JSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateTenant400ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant401ResponseHeaders
+}
+
+func (response UpdateTenant401ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant403ResponseHeaders
+}
+
+func (response UpdateTenant403ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant404ResponseHeaders
+}
+
+func (response UpdateTenant404ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant409ResponseHeaders
+}
+
+func (response UpdateTenant409ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant413ResponseHeaders
+}
+
+func (response UpdateTenant413ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant422ResponseHeaders
+}
+
+func (response UpdateTenant422ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4710,6 +4979,9 @@ type StrictServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(ctx context.Context, request ListMyTenantsRequestObject) (ListMyTenantsResponseObject, error)
+	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+	// (PATCH /tenants/{tenant})
+	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
@@ -4944,6 +5216,39 @@ func (sh *strictHandler) ListMyTenants(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyTenantsResponseObject); ok {
 		if err := validResponse.VisitListMyTenantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateTenant operation middleware
+func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request UpdateTenantRequestObject
+
+	request.Tenant = tenant
+
+	var body UpdateTenantApplicationMergePatchPlusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateTenant(ctx, request.(UpdateTenantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateTenant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateTenantResponseObject); ok {
+		if err := validResponse.VisitUpdateTenantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

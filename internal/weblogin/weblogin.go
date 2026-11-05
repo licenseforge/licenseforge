@@ -4,6 +4,7 @@
 package weblogin
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -53,6 +54,9 @@ type Config struct {
 	// BootstrapAdmin is LICENSEFORGE_BOOTSTRAP_ADMIN (ADR-0003): the user it
 	// names becomes platform admin at login while there is none. Empty: off.
 	BootstrapAdmin string
+	// Assurance maps the ID token's amr/acr to the session's assurance
+	// (ADR-0038). nil: identity.DefaultAssurancePolicy.
+	Assurance *identity.AssurancePolicy
 }
 
 // MaxBannerLen bounds the login banner (bytes).
@@ -86,6 +90,7 @@ type Handler struct {
 	log              *slog.Logger
 	sessions         *Sessions
 	admin            string // Config.BootstrapAdmin
+	assure           identity.AssurancePolicy
 	banner, bannerID string // bannerID: hash the login page sends back as acknowledgement
 }
 
@@ -161,6 +166,7 @@ func New(ctx context.Context, c Config, id identity.Service, log *slog.Logger) (
 		log:      log,
 		sessions: sessions,
 		admin:    c.BootstrapAdmin,
+		assure:   assurance(c.Assurance),
 		banner:   c.Banner,
 		bannerID: bannerID,
 	}, nil
@@ -257,7 +263,7 @@ func source(r *http.Request) identity.Source {
 // can cause them without an IdP account, and the chain serializes writers.
 // The login is refused either way, so a record that fails is only logged.
 func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, code int, userID string, outcome auditevent.Outcome, reason string, err error) {
-	if rerr := h.id.RecordLogin(r.Context(), userID, outcome, reason, source(r)); rerr != nil {
+	if rerr := h.id.RecordLogin(r.Context(), userID, outcome, reason, source(r), nil); rerr != nil {
 		h.log.Error("audit login refusal", "err", rerr)
 	}
 	h.fail(w, code, reason, err)
@@ -311,10 +317,14 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		AuthorizedParty string   `json:"azp"`
-		Email           string   `json:"email"`
-		EmailVerified   flexBool `json:"email_verified"`
-		Name            string   `json:"name"`
+		AuthorizedParty string          `json:"azp"`
+		Email           string          `json:"email"`
+		EmailVerified   flexBool        `json:"email_verified"`
+		Name            string          `json:"name"`
+		AMR             json.RawMessage `json:"amr"`       // decoded leniently below:
+		ACR             json.RawMessage `json:"acr"`       // a malformed value means
+		ACRs            json.RawMessage `json:"acrs"`      // no assurance, not a
+		AuthTime        json.RawMessage `json:"auth_time"` // refused login
 	}
 	if err := idt.Claims(&claims); err != nil {
 		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "invalid_claims", err)
@@ -324,10 +334,13 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.refuse(w, r, http.StatusUnauthorized, "", auditevent.OutcomeFailure, "wrong_azp", nil)
 		return
 	}
-	u, err := h.id.Login(ctx, identity.Claims{
+	ic := identity.Claims{
 		Issuer: idt.Issuer, Subject: idt.Subject,
 		Email: claims.Email, EmailVerified: bool(claims.EmailVerified), Name: claims.Name,
-	})
+		AMR: strList(claims.AMR), ACR: str(claims.ACR), ACRs: strList(claims.ACRs), AuthTime: unixTime(claims.AuthTime),
+	}
+	auth := h.assure.Assess(ic)
+	u, err := h.id.Login(ctx, ic)
 	switch {
 	case errors.Is(err, identity.ErrDisabled):
 		h.refuse(w, r, http.StatusForbidden, u.ID, auditevent.OutcomeDenied, "user_disabled", err)
@@ -352,7 +365,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cookie, err := h.id.NewSession(ctx, u.ID)
+	cookie, err := h.id.NewSession(ctx, u.ID, auth)
 	if errors.Is(err, identity.ErrDisabled) { // disabled since Login
 		h.refuse(w, r, http.StatusForbidden, u.ID, auditevent.OutcomeDenied, "user_disabled", err)
 		return
@@ -362,7 +375,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No session without its record (AU-5, fail closed).
-	if err := h.id.RecordLogin(ctx, u.ID, auditevent.OutcomeSuccess, "", source(r)); err != nil {
+	if err := h.id.RecordLogin(ctx, u.ID, auditevent.OutcomeSuccess, "", source(r), &auth); err != nil {
 		h.fail(w, http.StatusInternalServerError, "audit login", errors.Join(err, h.id.EndSession(ctx, cookie)))
 		return
 	}
@@ -392,4 +405,47 @@ func (b *flexBool) UnmarshalJSON(data []byte) error {
 		return json.Unmarshal(data, &v) // reports the type error
 	}
 	return nil
+}
+
+func assurance(p *identity.AssurancePolicy) identity.AssurancePolicy {
+	if p == nil {
+		return identity.DefaultAssurancePolicy()
+	}
+	return *p
+}
+
+// strList decodes a JSON array of strings, or a single string (some IdPs
+// send amr or acrs as one value); anything else is no values.
+func strList(raw json.RawMessage) []string {
+	var list []string
+	if json.Unmarshal(raw, &list) == nil {
+		return list
+	}
+	if s := str(raw); s != "" {
+		return []string{s}
+	}
+	return nil
+}
+
+// str decodes a JSON string; anything else is "".
+func str(raw json.RawMessage) string {
+	var s string
+	_ = json.Unmarshal(raw, &s)
+	return s
+}
+
+// unixTime decodes auth_time (seconds since the epoch, OIDC Core 2); anything
+// else is the zero time.
+func unixTime(raw json.RawMessage) time.Time {
+	var n json.Number
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	if d.Decode(&n) != nil {
+		return time.Time{}
+	}
+	sec, err := n.Int64()
+	if err != nil || sec <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0).UTC()
 }

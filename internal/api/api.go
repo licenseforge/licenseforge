@@ -35,6 +35,7 @@ import (
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -56,6 +57,8 @@ type Config struct {
 	Licenses licenses.Service
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
+	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
+	Tenants tenants.Service
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
 	Identity    identity.Service
@@ -187,7 +190,7 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 }
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
-	u, code, err := s.Sessions.Check(w, r)
+	u, level, code, err := s.Sessions.Check(w, r)
 	switch code {
 	case 0:
 	case http.StatusUnauthorized:
@@ -202,7 +205,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		if userRoutes[r.URL.EscapedPath()] {
 			// A principal with no tenant: authz denies every permission to
 			// it; only user routes, which act for the user, accept it.
-			return authz.Principal{Kind: authz.User, ID: u.ID}, nil
+			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: level}, nil
 		}
 		return authz.Principal{}, errNotFound
 	}
@@ -218,7 +221,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
-	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope}, nil
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope, Assurance: level}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -458,6 +461,10 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{invalidInvitation.Field, invalidInvitation.Message})
 	case errors.Is(err, store.ErrInvitation): // one answer for every reason (no oracle)
 		p = invalid(fieldError{"/token", "invalid, expired, revoked or used, or not for this account"})
+	case errors.Is(err, tenants.ErrPolicyUnmet):
+		p = &problem{status: http.StatusConflict, code: "mfa_policy_unmet", detail: "Your session doesn't meet this MFA policy: sign in with the stronger method first, so you can't lock yourself out.", err: err}
+	case errors.Is(err, tenants.ErrInvalid):
+		p = invalid(fieldError{"/mfa_policy", "must be none, mfa or phishing_resistant"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
 	case errors.Is(err, licenses.ErrState):

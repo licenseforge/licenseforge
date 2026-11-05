@@ -70,6 +70,20 @@ func (_c *TenantCreate) SetName(v string) *TenantCreate {
 	return _c
 }
 
+// SetMfaPolicy sets the "mfa_policy" field.
+func (_c *TenantCreate) SetMfaPolicy(v tenant.MfaPolicy) *TenantCreate {
+	_c.mutation.SetMfaPolicy(v)
+	return _c
+}
+
+// SetNillableMfaPolicy sets the "mfa_policy" field if the given value is not nil.
+func (_c *TenantCreate) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantCreate {
+	if v != nil {
+		_c.SetMfaPolicy(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *TenantCreate) SetID(v string) *TenantCreate {
 	_c.mutation.SetID(v)
@@ -277,6 +291,10 @@ func (_c *TenantCreate) defaults() {
 		v := tenant.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.MfaPolicy(); !ok {
+		v := tenant.DefaultMfaPolicy
+		_c.mutation.SetMfaPolicy(v)
+	}
 	if _, ok := _c.mutation.ID(); !ok {
 		v := tenant.DefaultID()
 		_c.mutation.SetID(v)
@@ -305,6 +323,14 @@ func (_c *TenantCreate) check() error {
 	if v, ok := _c.mutation.Name(); ok {
 		if err := tenant.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Tenant.name": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.MfaPolicy(); !ok {
+		return &ValidationError{Name: "mfa_policy", err: errors.New(`ent: missing required field "Tenant.mfa_policy"`)}
+	}
+	if v, ok := _c.mutation.MfaPolicy(); ok {
+		if err := tenant.MfaPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
 		}
 	}
 	if v, ok := _c.mutation.ID(); ok {
@@ -362,6 +388,10 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.MfaPolicy(); ok {
+		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
+		_node.MfaPolicy = value
 	}
 	if nodes := _c.mutation.ProductsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
