@@ -144,12 +144,29 @@ func TestKeyRefusalsAreAudited(t *testing.T) {
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.promote", pending.ID, denied, map[string]any{}})
 	_ = l.Discard(viewer, tn, pending.ID)
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", pending.ID, denied, map[string]any{}})
-	_ = l.Discard(viewer, tn, "sk_../../x")
-	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", "", denied, nil}) // malformed IDs aren't stored
-	if err := l.Discard(owner, tn, "sk_../../x"); !errors.Is(err, ErrNotPending) {
-		t.Errorf("malformed kid: %v", err)
+	// The key is looked up before key:write (ADR-0032): malformed and
+	// unknown kids are failures without an object, for every reader.
+	for _, kid := range []string{"sk_../../x", "sk_aaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		for _, ctx := range []context.Context{viewer, owner} {
+			if err := l.Discard(ctx, tn, kid); !errors.Is(err, ErrNotFound) {
+				t.Errorf("discard %s: %v", kid, err)
+			}
+			n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", "", failed, map[string]any{"reason": ErrNotFound.Error()}})
+			if err := l.Promote(ctx, tn, kid); !errors.Is(err, ErrNotFound) {
+				t.Errorf("promote %s: %v", kid, err)
+			}
+			n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.promote", "", failed, map[string]any{"reason": ErrNotFound.Error()}})
+		}
 	}
-	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", "", auditevent.OutcomeFailure, nil})
+	// Another tenant's key is unknown here.
+	theirs, err := l.Create(as(other), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Promote(owner, tn, theirs.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another tenant's key: %v", err)
+	}
+	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.promote", "", failed, nil})
 
 	_, _ = l.Create(owner, tn)
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.create", "", failed, map[string]any{"reason": ErrPendingExists.Error()}})
@@ -251,8 +268,8 @@ func failAudit(t *testing.T) {
 }
 
 // Fail closed (ADR-0027): if the audit entry can't be written, the operation
-// fails and changes nothing; a refusal whose entry can't be written reports
-// both errors.
+// fails and changes nothing; a refusal whose entry can't be written is the
+// audit error alone.
 func TestFailedAuditFailsTheOperation(t *testing.T) {
 	l, _, _ := setup(t)
 	first, rotating := newTenant(t, l), newTenant(t, l)
@@ -279,9 +296,14 @@ func TestFailedAuditFailsTheOperation(t *testing.T) {
 	if err := l.Discard(as(rotating), rotating, pending.ID); !errors.Is(err, errInjected) {
 		t.Errorf("Discard: %v, want the audit error", err)
 	}
+	// A refusal whose entry can't be written is an outage (a 500), not the
+	// refusal: the audit fails closed (AU-5).
 	_, err = l.Create(asRole(rotating, authz.Viewer), rotating)
-	if !errors.Is(err, authz.ErrDenied) || !errors.Is(err, errInjected) {
-		t.Errorf("refused Create: %v, want ErrDenied and the audit error", err)
+	if !errors.Is(err, errInjected) || errors.Is(err, authz.ErrDenied) {
+		t.Errorf("refused Create: %v, want the audit error only", err)
+	}
+	if err := l.Promote(as(rotating), rotating, "sk_aaaaaaaaaaaaaaaaaaaaaaaaaa"); !errors.Is(err, errInjected) || errors.Is(err, ErrNotFound) {
+		t.Errorf("refused Promote: %v, want the audit error only", err)
 	}
 	for tn, before := range map[string]map[string]string{first: beforeFirst, rotating: beforeRotating} {
 		after := statuses(t, l, tn)

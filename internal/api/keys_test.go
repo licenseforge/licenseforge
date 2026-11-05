@@ -85,6 +85,11 @@ func TestSigningKeyEndpoints(t *testing.T) {
 			t.Errorf("%s: %v, missing %v", name, got, missing)
 		}
 	}
+	// An attempt on an unknown key is recorded as a failure without an object.
+	f.do(t, "POST", p+"/sk_aaaaaaaaaaaaaaaaaaaaaaaaaa/discard", "", viewer).problem(t, 404, "not_found")
+	if e := f.lastEvent(t, f.a.ID); e.Action != "signing_key.discard" || e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil {
+		t.Errorf("unknown key entry %+v", e)
+	}
 	f.do(t, "POST", p+"/"+kid+"/promote", "", admin).problem(t, 403, "forbidden")
 	if e := f.lastEvent(t, f.a.ID); e.Action != "signing_key.promote" || e.Outcome != auditevent.OutcomeDenied || *e.ActorID != f.adminA {
 		t.Errorf("denied promote entry %+v", e)
