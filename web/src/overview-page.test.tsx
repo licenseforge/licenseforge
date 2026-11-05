@@ -33,11 +33,9 @@ async function open(scopeAll: boolean) {
       if (u.pathname === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (u.pathname === "/api/v1/me/tenants")
         return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role: "manager", all_products: scopeAll, product_ids: scopeAll ? [] : ["prd_1"] }] });
-      if (u.pathname.endsWith("/licenses")) {
-        const status = u.searchParams.get("status");
-        if (!status) return json({ items: [license(1, "active"), license(2, "suspended")] }); // the newest
-        return json({ items: Array.from({ length: { active: 3, suspended: 1, revoked: 0 }[status]! }, (_, i) => license(i, status)) });
-      }
+      if (u.pathname.endsWith("/summary"))
+        return json({ licenses: { active: 3, suspended: 1, revoked: 0 }, ...(scopeAll ? { customers: { active: 1 } } : {}) });
+      if (u.pathname.endsWith("/licenses")) return json({ items: [license(1, "active"), license(2, "suspended")] }); // the newest
       if (u.pathname.endsWith("/customers"))
         return json({ items: [{ id: "cus_1", name: "Globex", email: null, external_refs: {}, archived_at: null, created_at: "" }, { id: "cus_2", name: "Old", email: null, external_refs: {}, archived_at: "2026-01-01T00:00:00Z", created_at: "" }] });
       if (u.pathname.endsWith("/products")) return json({ items: [{ id: "prd_1", slug: "db", name: "DB Server", created_at: "" }] });
@@ -73,4 +71,11 @@ it("a product-scoped caller gets no customers tile and doesn't ask for customers
   expect(tile("Active customers")).toBeUndefined();
   expect(el.textContent).toContain("Counts cover the products your role can see.");
   expect(asked.some((p) => p.endsWith("/customers"))).toBe(false);
+});
+
+it("counts in one request: no list paging for the tiles", async () => {
+  const { tile, asked } = await open(true);
+  await vi.waitFor(() => expect(tile("Revoked")).toBe("0"));
+  expect(asked.filter((p) => p.endsWith("/summary"))).toHaveLength(1);
+  expect(asked.filter((p) => p.endsWith("/licenses"))).toHaveLength(1); // only the newest five
 });

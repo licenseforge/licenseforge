@@ -1,8 +1,8 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { allCustomers, allProducts } from "@/api/catalog";
 import type { LicenseStatus } from "@/api/licenses";
-import { type Count, countActiveCustomers, countLicenses, formatCount, recentLicenses } from "@/api/overview";
+import { formatCount, recentLicenses, summaryQuery } from "@/api/overview";
 import { tenantsQuery } from "@/api/tenants";
 import { errorText } from "@/components/modal";
 import { t } from "@/i18n";
@@ -11,49 +11,49 @@ import { expiryText } from "@/licenses-page";
 const statuses: LicenseStatus[] = ["active", "suspended", "revoked"];
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
-function Tile({ label, count, isError, error }: { label: string; count?: Count; isError: boolean; error: unknown }) {
+function Tile({ label, value }: { label: string; value?: number }) {
   return (
     <div className="rounded-md border p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums" aria-live="polite">
-        {isError ? <span className="text-sm font-normal">{errorText(error)}</span> : count ? formatCount(count) : "…"}
+        {value === undefined ? "…" : formatCount(value)}
       </div>
     </div>
   );
 }
 
 /**
- * The tenant overview (ADR-0020): licenses by status, active customers and
- * the newest licenses. Counts page the lists (the API has no totals).
+ * The tenant overview (ADR-0020): exact counts from GET /summary (licenses
+ * by status; active customers when the server includes them) and the newest
+ * licenses.
  */
 export function Overview() {
   const { slug } = useParams({ from: "/app/t/$slug/" });
   const { data: tenants = [] } = useQuery(tenantsQuery);
   const caller = tenants.find((tn) => tn.slug === slug);
-  const seesCustomers = caller?.scope.all ?? false; // customers are tenant-wide
-  const byStatus = useQueries({
-    queries: statuses.map((s) => ({ queryKey: ["overview-licenses", slug, s], queryFn: () => countLicenses(slug, s) })),
-  });
-  const customers = useQuery({ queryKey: ["overview-customers", slug], queryFn: () => countActiveCustomers(slug), enabled: seesCustomers });
+  const summary = useQuery(summaryQuery(slug));
   const recent = useQuery({ queryKey: ["overview-recent", slug], queryFn: () => recentLicenses(slug) });
   const products = useQuery({ queryKey: ["products-all", slug], queryFn: () => allProducts(slug) });
-  const names = useQuery({ queryKey: ["customers-all", slug], queryFn: () => allCustomers(slug), enabled: seesCustomers });
+  // Customer names only for callers who see customers (tenant-wide).
+  const names = useQuery({ queryKey: ["customers-all", slug], queryFn: () => allCustomers(slug), enabled: caller?.scope.all ?? false });
   const productName = (id: string) => products.data?.items.find((p) => p.id === id)?.name ?? id;
   const customerName = (id: string) => names.data?.items.find((c) => c.id === id)?.name ?? id;
+  const customers = summary.data?.customers; // absent for callers who don't see every product
 
   return (
     <>
       <h1 className="text-2xl font-semibold">{t("overview.title")}</h1>
       {caller && !caller.scope.all && <p className="mt-1 text-sm text-muted-foreground">{t("overview.scoped")}</p>}
+      {summary.isError && <p role="alert" className="mt-4">{errorText(summary.error)}</p>}
       <h2 className="mt-6 font-semibold">{t("overview.licenses")}</h2>
       <div className="mt-2 grid gap-3 sm:grid-cols-3">
-        {statuses.map((s, i) => (
-          <Tile key={s} label={t(`licenses.status.${s}`)} count={byStatus[i]!.data} isError={byStatus[i]!.isError} error={byStatus[i]!.error} />
+        {statuses.map((s) => (
+          <Tile key={s} label={t(`licenses.status.${s}`)} value={summary.data?.licenses[s]} />
         ))}
       </div>
-      {seesCustomers && (
+      {customers && (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Tile label={t("overview.customers")} count={customers.data} isError={customers.isError} error={customers.error} />
+          <Tile label={t("overview.customers")} value={customers.active} />
         </div>
       )}
       <div className="mt-8 flex items-center justify-between">
