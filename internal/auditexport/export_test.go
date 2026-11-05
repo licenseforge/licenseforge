@@ -324,6 +324,43 @@ func TestConcurrentReplicasDeliverInOrder(t *testing.T) {
 	}
 }
 
+// blocking is a Sink that waits until its context is done.
+type blocking struct{}
+
+func (blocking) Send(ctx context.Context, _ []Entry) error { <-ctx.Done(); return ctx.Err() }
+
+// A send gets half the lease, so it gives up before another replica may take over.
+func TestSendCantOutliveTheLease(t *testing.T) {
+	d := openDB(t)
+	chain(t, d, 1)
+	x := exporter(t, d, sinkName(), blocking{})
+	x.Lease = 400 * time.Millisecond
+	start := time.Now()
+	if _, err := x.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Once = %v, want the send's deadline", err)
+	}
+	if took := time.Since(start); took > 350*time.Millisecond {
+		t.Errorf("send ran %v of a 400ms lease", took)
+	}
+}
+
+func TestInvalidSettings(t *testing.T) {
+	d := openDB(t)
+	for name, set := range map[string]func(*Exporter){
+		"lease": func(x *Exporter) { x.Lease = 0 }, "batch": func(x *Exporter) { x.Batch = 0 },
+		"interval": func(x *Exporter) { x.Interval = -time.Second },
+	} {
+		x := New(d, sinkName(), &recorder{}, quiet)
+		set(x)
+		if _, err := x.Once(context.Background()); err == nil {
+			t.Errorf("Once with bad %s", name)
+		}
+		if err := x.Run(context.Background()); err == nil {
+			t.Errorf("Run with bad %s", name)
+		}
+	}
+}
+
 func TestLagAndFailureMetrics(t *testing.T) {
 	d := openDB(t)
 	chain(t, d, 1)
@@ -333,7 +370,9 @@ func TestLagAndFailureMetrics(t *testing.T) {
 	x.Interval = 10 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	x.Run(ctx)
+	if err := x.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if n := testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues(name)); n < 1 {
 		t.Errorf("failures = %v", n)
 	}
@@ -370,6 +409,24 @@ func TestCursorRules(t *testing.T) {
 	} {
 		if err := exec(q, name, tn); err == nil {
 			t.Errorf("platform pool moved a cursor %s", why)
+		}
+	}
+	// A cursor whose entry was pruned can still be claimed, released and advanced.
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq = 2`, tn); err != nil {
+		t.Fatal(err)
+	}
+	for q, why := range map[string]string{
+		`UPDATE audit_export_cursors SET claimed_by = 'r', claimed_until = clock_timestamp() WHERE sink_id = $1 AND tenant_id = $2`: "claim",
+		`UPDATE audit_export_cursors SET claimed_by = NULL, claimed_until = NULL WHERE sink_id = $1 AND tenant_id = $2`:             "release",
+		`UPDATE audit_export_cursors SET seq = 3 WHERE sink_id = $1 AND tenant_id = $2`:                                             "advance",
+	} {
+		if err := exec(q, name, tn); err != nil {
+			t.Errorf("%s of a cursor whose entry is gone: %v", why, err)
 		}
 	}
 	// A new chain's cursor starts at 0, never further on.

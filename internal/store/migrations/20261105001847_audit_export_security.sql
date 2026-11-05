@@ -20,10 +20,13 @@ CREATE POLICY platform_all ON "audit_export_cursors" TO licenseforge_platform US
 -- can't skip entries the prune gate then treats as exported.
 CREATE POLICY start_at_zero ON "audit_export_cursors" AS RESTRICTIVE FOR INSERT TO licenseforge_platform
   WITH CHECK ("seq" = 0);
--- A cursor only moves forward, and only to an entry of its chain that exists.
--- The subquery reads the row as it was before this update.
+-- A cursor only moves forward, and only to an entry of its chain that
+-- exists. An update that keeps seq (claim, release) is always allowed, so a
+-- cursor whose entry was pruned isn't frozen. The subquery reads the row as
+-- it was before this update.
 CREATE POLICY forward_to_entry ON "audit_export_cursors" AS RESTRICTIVE FOR UPDATE TO licenseforge_platform
   USING (true)
-  WITH CHECK (EXISTS (SELECT 1 FROM "audit_export_cursors" o WHERE o."id" = "audit_export_cursors"."id" AND o."seq" <= "audit_export_cursors"."seq")
-    AND ("seq" = 0 OR EXISTS (SELECT 1 FROM "audit_events" e WHERE e."tenant_id" = "audit_export_cursors"."tenant_id" AND e."seq" = "audit_export_cursors"."seq")));
+  WITH CHECK (EXISTS (SELECT 1 FROM "audit_export_cursors" o WHERE o."id" = "audit_export_cursors"."id"
+    AND (o."seq" = "audit_export_cursors"."seq" OR (o."seq" < "audit_export_cursors"."seq"
+      AND EXISTS (SELECT 1 FROM "audit_events" e WHERE e."tenant_id" = "audit_export_cursors"."tenant_id" AND e."seq" = "audit_export_cursors"."seq")))));
 CREATE POLICY migrator_all ON "audit_export_cursors" TO CURRENT_USER USING (true) WITH CHECK (true);

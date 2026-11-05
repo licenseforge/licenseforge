@@ -375,7 +375,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,
-			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true ((EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND (o.seq <= audit_export_cursors.seq)))) AND ((seq = 0) OR (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq))))))`,
+			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
 		},
 		"audit_events": {
 			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
@@ -673,5 +673,57 @@ func TestPingChecksEveryPool(t *testing.T) {
 			t.Errorf("Ping with the %s pool closed = nil", pool)
 		}
 		_ = d.Close()
+	}
+}
+
+// The audit export tables (ADR-0036): the platform pool may register sinks
+// and lease and advance cursors, nothing more; the other logins get nothing.
+func TestAuditExportPrivileges(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	for _, c := range []struct {
+		role, table, column, priv string
+		want                      bool
+	}{
+		{PlatformRole, "audit_export_sinks", "", "SELECT", true},
+		{PlatformRole, "audit_export_sinks", "", "INSERT", true},
+		{PlatformRole, "audit_export_sinks", "", "UPDATE", false},
+		{PlatformRole, "audit_export_sinks", "", "DELETE", false},
+		{PlatformRole, "audit_export_cursors", "", "SELECT", true},
+		{PlatformRole, "audit_export_cursors", "", "INSERT", true},
+		{PlatformRole, "audit_export_cursors", "", "DELETE", false},
+		{PlatformRole, "audit_export_cursors", "seq", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "claimed_by", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "claimed_until", "UPDATE", true},
+		{PlatformRole, "audit_export_cursors", "tenant_id", "UPDATE", false},
+		{PlatformRole, "audit_export_cursors", "sink_id", "UPDATE", false},
+		{PlatformRole, "audit_export_cursors", "id", "UPDATE", false},
+	} {
+		var got bool
+		q, args := `SELECT has_table_privilege($1, $2, $3)`, []any{c.role, c.table, c.priv}
+		if c.column != "" {
+			q, args = `SELECT has_column_privilege($1, $2, $3, $4)`, []any{c.role, c.table, c.column, c.priv}
+		}
+		if err := owner.QueryRow(q, args...).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("%s %s %s.%s = %v, want %v", c.role, c.priv, c.table, c.column, got, c.want)
+		}
+	}
+	for _, role := range []string{AppRole, IdentityRole} {
+		for _, table := range []string{"audit_export_sinks", "audit_export_cursors"} {
+			var any bool
+			if err := owner.QueryRow(`SELECT has_table_privilege($1, $2, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+				OR has_any_column_privilege($1, $2, 'SELECT,INSERT,UPDATE,REFERENCES')`, role, table).Scan(&any); err != nil {
+				t.Fatal(err)
+			}
+			if any {
+				t.Errorf("%s has privileges on %s", role, table)
+			}
+		}
 	}
 }

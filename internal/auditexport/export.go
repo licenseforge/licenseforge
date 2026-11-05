@@ -52,7 +52,9 @@ type Entry struct {
 
 // Sink delivers one chain's batch, in seq order. It returns nil only once the
 // batch was handed over as far as the transport can tell; the cursor then
-// advances past it.
+// advances past it. Send must give up when ctx is done (Once gives it half
+// the lease), so a slow send can't outlive the lease and race the replica
+// that takes the cursor over.
 type Sink interface {
 	Send(ctx context.Context, batch []Entry) error
 }
@@ -92,7 +94,10 @@ func Register(ctx context.Context, db *store.DB, name string) error {
 
 // Run exports until ctx is done: every round it adds cursors for new chains,
 // sends batches until nothing is pending, and updates the lag metric.
-func (x *Exporter) Run(ctx context.Context) {
+func (x *Exporter) Run(ctx context.Context) error {
+	if err := x.check(); err != nil {
+		return err
+	}
 	failures := metrics.AuditExportFailures.WithLabelValues(x.Name)
 	for {
 		err := Register(ctx, x.DB, x.Name)
@@ -114,7 +119,7 @@ func (x *Exporter) Run(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-time.After(x.Interval):
 		}
 	}
@@ -123,18 +128,34 @@ func (x *Exporter) Run(ctx context.Context) {
 // Once exports one batch of one chain whose cursor is free and behind. It
 // returns how many entries it delivered: 0 when nothing is pending.
 func (x *Exporter) Once(ctx context.Context) (int, error) {
+	if err := x.check(); err != nil {
+		return 0, err
+	}
 	c, ok, err := x.claim(ctx)
 	if err != nil || !ok {
 		return 0, err
 	}
 	batch, err := x.read(ctx, c)
 	if err == nil && len(batch) > 0 {
-		err = x.Sink.Send(ctx, batch)
+		sendCtx, cancel := context.WithTimeout(ctx, x.Lease/2)
+		err = x.Sink.Send(sendCtx, batch)
+		cancel()
 	}
+	// Advance and release run even if ctx was cancelled meanwhile, briefly.
+	done, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	if err != nil || len(batch) == 0 {
-		return 0, errors.Join(err, x.release(context.WithoutCancel(ctx), c))
+		return 0, errors.Join(err, x.release(done, c))
 	}
-	return len(batch), x.advance(context.WithoutCancel(ctx), c, batch[len(batch)-1].Seq)
+	return len(batch), x.advance(done, c, batch[len(batch)-1].Seq)
+}
+
+// check refuses settings that would make the loop spin or a lease useless.
+func (x *Exporter) check() error {
+	if x.Lease <= 0 || x.Batch <= 0 || x.Interval <= 0 || x.Sink == nil || x.Name == "" {
+		return fmt.Errorf("auditexport: invalid exporter settings (lease %v, batch %d, interval %v)", x.Lease, x.Batch, x.Interval)
+	}
+	return nil
 }
 
 type cursor struct {
