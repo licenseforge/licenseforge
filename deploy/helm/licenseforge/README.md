@@ -66,6 +66,8 @@ URL, or without a port.
 
 ## Notes
 
+- **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
+
 - **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only
   (plus the OIDC provider when `oidc.enabled`),
   for the server and (as a hook policy, so it applies from the first install)

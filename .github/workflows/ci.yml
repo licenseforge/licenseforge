@@ -71,6 +71,7 @@ jobs:
           helm template t . $s --set autoscaling.enabled=true --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 >/dev/null
           helm template t . --set secrets.server=s --set migrate.enabled=false --set networkPolicy.enabled=false --set podDisruptionBudget.enabled=false >/dev/null
           helm template t . $s --set 'networkPolicy.databaseTo[0].ipBlock.cidr=10.0.0.0/8' --set 'networkPolicy.dns.ports={53,5353}' --set podLabels.team=a --set 'extraEnv[0].name=X' --set 'extraEnv[0].value=y' >/dev/null
+          helm template t . $s --set 'trustedProxies=10.0.0.0/8\,fd00::/8' --show-only templates/deployment.yaml | grep -qF 'value: "10.0.0.0/8,fd00::/8"' || { echo "trustedProxies not rendered"; exit 1; }
           # Bad values fail the render instead of producing a broken release.
           for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}' \
             metrics.port=8080 metrics.port=null 'metrics.scrapeFrom[0].ports[0].port=1' metrics.serviceMonitor.interval=soon \

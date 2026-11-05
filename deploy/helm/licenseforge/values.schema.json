@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "trustedProxies": {"type": "string"},
     "oidc": {
       "type": "object",
       "additionalProperties": false,

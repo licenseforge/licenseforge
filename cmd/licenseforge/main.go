@@ -27,6 +27,10 @@
 //	LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME  name the collector's certificate must carry; default the address's host
 //	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
+//	LICENSEFORGE_TRUSTED_PROXIES        CIDRs or addresses of proxies whose X-Forwarded-For is believed; unset = none
+//	LICENSEFORGE_RATE_LIMIT_ACTIVATION  requests per client address per minute, per replica, on the activation API; default 1200, 0 = off
+//	LICENSEFORGE_RATE_LIMIT_MANAGEMENT  the same for the rest of /api/v1 and /auth/ (except login); default 600, 0 = off
+//	LICENSEFORGE_RATE_LIMIT_LOGIN       the same for /auth/login and /auth/callback; default 60, 0 = off
 //
 // The serving process refuses to start if the owner login is in its
 // environment: serving pods must never hold it (ADR-0009).
@@ -42,6 +46,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -57,6 +62,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
@@ -136,6 +142,10 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
 	if err != nil || drain < 0 {
 		return fmt.Errorf("LICENSEFORGE_DRAIN: want a duration like 5s, got %q", os.Getenv("LICENSEFORGE_DRAIN"))
+	}
+	limiter, err := rateLimiter()
+	if err != nil {
+		return err
 	}
 	tenantDSN, err := mustEnv("LICENSEFORGE_DATABASE_URL")
 	if err != nil {
@@ -230,14 +240,23 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}
+	// The address limit runs before anything else (ADR-0032 step 0). No
+	// endpoint streams: bodies are at most 1 MB, the slowest handler (login
+	// callback) is bounded by 15 s of IdP calls, and the dashboard's assets
+	// are small, so a request that takes 30 s to send or 60 s to answer is
+	// a slow client holding a connection.
 	srv := &http.Server{
-		Handler:           metrics.Instrument(mux),
+		Handler:           limiter.Wrap(metrics.Instrument(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	msrv := &http.Server{
 		Handler:           metricsMux(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	errc, merrc := make(chan error, 1), make(chan error, 1)
@@ -303,6 +322,31 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 	})
 	web.Mount(mux) // more specific routes (health, /auth/, /api/) win
 	return mux
+}
+
+// rateLimiter builds the per-client-address limiter from the environment.
+func rateLimiter() (*ratelimit.Limiter, error) {
+	trusted, err := ratelimit.ParseTrusted(os.Getenv("LICENSEFORGE_TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, fmt.Errorf("LICENSEFORGE_TRUSTED_PROXIES: %w", err)
+	}
+	quotas := map[ratelimit.Surface]int{}
+	for _, q := range []struct {
+		env     string
+		surface ratelimit.Surface
+		def     int
+	}{
+		{"LICENSEFORGE_RATE_LIMIT_ACTIVATION", ratelimit.Activation, ratelimit.DefaultActivation},
+		{"LICENSEFORGE_RATE_LIMIT_MANAGEMENT", ratelimit.Management, ratelimit.DefaultManagement},
+		{"LICENSEFORGE_RATE_LIMIT_LOGIN", ratelimit.Login, ratelimit.DefaultLogin},
+	} {
+		n, err := strconv.Atoi(envOr(q.env, strconv.Itoa(q.def)))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%s: want requests per minute (0 = off), got %q", q.env, os.Getenv(q.env))
+		}
+		quotas[q.surface] = n
+	}
+	return ratelimit.New(ratelimit.Config{Trusted: trusted, Quotas: quotas}), nil
 }
 
 // sessionTimeouts sets s's timeouts from the environment, within bounds.

@@ -283,8 +283,9 @@ func (l *keyLimiter) take(w http.ResponseWriter, key string) (ok bool, retry int
 	reset := max(1, int((l.window.Add(limiterWindow).Sub(now)+time.Second-1)/time.Second))
 	window = l.window
 	l.mu.Unlock()
-	w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"license-key";q=%d;w=%d`, l.quota, int(limiterWindow/time.Second)))
-	w.Header().Set("RateLimit", fmt.Sprintf(`"license-key";r=%d;t=%d`, remaining, reset))
+	// Added, not set: the per-address limit's policy is on the response too.
+	w.Header().Add("RateLimit-Policy", fmt.Sprintf(`"license-key";q=%d;w=%d`, l.quota, int(limiterWindow/time.Second)))
+	w.Header().Add("RateLimit", fmt.Sprintf(`"license-key";r=%d;t=%d`, remaining, reset))
 	return ok, reset, window
 }
 

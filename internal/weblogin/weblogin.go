@@ -27,6 +27,7 @@ import (
 
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
 
@@ -241,11 +242,14 @@ func (h *Handler) fail(w http.ResponseWriter, code int, reason string, err error
 	http.Error(w, http.StatusText(code), code)
 }
 
-// source is the request's origin for audit entries: the connection's address
-// (no proxy header is trusted yet).
+// source is the request's origin for audit entries: the client address the
+// rate limiter resolved (behind trusted proxies, LICENSEFORGE_TRUSTED_PROXIES),
+// else the connection's address.
 func source(r *http.Request) identity.Source {
 	src := identity.Source{UserAgent: r.UserAgent()}
-	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+	if a, ok := ratelimit.Addr(r.Context()); ok {
+		src.IP = a.String()
+	} else if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
 		src.IP = ap.Addr().WithZone("").String()
 	}
 	return src

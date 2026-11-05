@@ -34,6 +34,12 @@ terminationGracePeriodSeconds: 30
 
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
+# Your ingress controller's or load balancer's addresses (CIDRs, comma-
+# separated): only their X-Forwarded-For is believed. Leave empty and every
+# client counts as the ingress for the per-address rate limit and in audit
+# entries. List proxies only, never client networks.
+trustedProxies: ""
+
 # Dashboard login through your OIDC provider (ADR-0003). Off: no login.
 oidc:
   enabled: false
