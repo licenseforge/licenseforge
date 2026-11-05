@@ -803,3 +803,89 @@ func TestRepairedChainResumesFromItsHead(t *testing.T) {
 		t.Errorf("repaired chain verified from %+v, want its head (seq 4)", from)
 	}
 }
+
+// A chain that keeps failing with an error that isn't a break is counted on
+// every run, and the full pass it blocks never completes: the full-pass
+// gauge stays where it was although other chains keep the progress gauge
+// fresh.
+func TestPersistentChainErrorsAreCounted(t *testing.T) {
+	d, j, _ := setup(t)
+	a := chain(t, d, 1)
+	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
+		if c == a {
+			return audit.Head{}, audit.Head{}, errors.New("statement timeout")
+		}
+		return audit.VerifyAnchored(ctx, run, c, from)
+	}
+	metrics.AuditVerifyLastFull.Set(0)
+	for i := range 3 {
+		errs := testutil.ToFloat64(metrics.AuditVerifyErrors)
+		metrics.AuditVerifyLastSuccess.Set(0)
+		r, err := j.Once(context.Background())
+		if err == nil || !r.Full {
+			t.Fatalf("run %d = %+v, %v: want the error and the pass still open", i, r, err)
+		}
+		if got := testutil.ToFloat64(metrics.AuditVerifyErrors); got != errs+1 {
+			t.Errorf("run %d: verify errors %v, want %v", i, got, errs+1)
+		}
+		if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) == 0 {
+			t.Errorf("run %d: the other chains made no progress", i)
+		}
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != 0 {
+		t.Errorf("full-pass gauge moved to %v by a pass that never completed", got)
+	}
+	j.verify = audit.VerifyAnchored
+	start := time.Now()
+	if r, err := j.Once(context.Background()); err != nil || !r.Full {
+		t.Fatalf("completing run = %+v, %v", r, err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got < float64(start.Unix()) {
+		t.Errorf("full-pass gauge %v after the pass completed, want at least %v", got, start.Unix())
+	}
+	last := testutil.ToFloat64(metrics.AuditVerifyLastFull)
+	if r, err := j.Once(context.Background()); err != nil || r.Full || testutil.ToFloat64(metrics.AuditVerifyLastFull) != last {
+		t.Errorf("an incremental run moved the full-pass gauge: %+v, %v", r, err)
+	}
+}
+
+// A run cut off by its time limit counts as an error.
+func TestTimeoutCountsAsAnError(t *testing.T) {
+	d, j, _ := setup(t)
+	chain(t, d, 1)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j.Interval = 200 * time.Millisecond
+	j.verify = func(ctx context.Context, _ audit.Runner, _ string, _ audit.Head) (audit.Head, audit.Head, error) {
+		<-ctx.Done()
+		return audit.Head{}, audit.Head{}, ctx.Err()
+	}
+	errs := testutil.ToFloat64(metrics.AuditVerifyErrors)
+	if _, err := j.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stuck run: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyErrors); got < errs+1 {
+		t.Errorf("verify errors %v after a timeout, want at least %v", got, errs+1)
+	}
+}
+
+// A leader whose lock connection hangs gives up on the ping after
+// aliveTimeout instead of waiting out the run's whole limit.
+func TestHungPingIsCutOff(t *testing.T) {
+	d, j, _ := setup(t)
+	chain(t, d, 1)
+	if _, err := j.Once(context.Background()); err != nil { // now the leader
+		t.Fatal(err)
+	}
+	old := aliveTimeout
+	aliveTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { aliveTimeout = old })
+	j.Interval = time.Minute
+	j.ping = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() } // a hung connection
+	start := time.Now()
+	_, _ = j.Once(context.Background())
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("a hung ping held the run for %v", took)
+	}
+}
