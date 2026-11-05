@@ -29,6 +29,11 @@ export async function getCustomer(tenant: string, id: string): Promise<Customer>
   return unwrap(await api.GET("/tenants/{tenant}/customers/{id}", { params: { path: { tenant, id } } }));
 }
 
+/** Archives a product, one-way (ADR-0015): no new licenses, plans or features; existing licenses keep working. */
+export async function archiveProduct(tenant: string, id: string): Promise<Product> {
+  return unwrap(await api.POST("/tenants/{tenant}/products/{id}/archive", { params: { path: { tenant, id } } }));
+}
+
 export async function createProduct(tenant: string, slug: string, name: string): Promise<Product> {
   return unwrap(await api.POST("/tenants/{tenant}/products", { params: { path: { tenant } }, body: { slug, name } }));
 }
