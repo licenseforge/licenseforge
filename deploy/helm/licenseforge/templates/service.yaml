@@ -10,3 +10,21 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+---
+# Metrics on their own Service, always ClusterIP: a LoadBalancer or NodePort
+# service.type must never publish the unauthenticated /metrics. The
+# NetworkPolicy admits only metrics.scrapeFrom.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "licenseforge.fullname" . }}-metrics
+  labels:
+    {{- include "licenseforge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector: {{- include "licenseforge.serverSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ include "licenseforge.metricsPort" . }}
+      targetPort: metrics

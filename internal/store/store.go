@@ -87,6 +87,11 @@ func (d *DB) Ping(ctx context.Context) error {
 	return errors.Join(d.tenantDB.PingContext(ctx), d.platformDB.PingContext(ctx), d.identityDB.PingContext(ctx))
 }
 
+// Stats are the connection pool stats by pool name (metrics).
+func (d *DB) Stats() map[string]sql.DBStats {
+	return map[string]sql.DBStats{"tenant": d.tenantDB.Stats(), "platform": d.platformDB.Stats(), "identity": d.identityDB.Stats()}
+}
+
 // Close closes every pool.
 func (d *DB) Close() error {
 	return errors.Join(d.tenantDB.Close(), d.platformDB.Close(), d.identityDB.Close())

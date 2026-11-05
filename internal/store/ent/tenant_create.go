@@ -13,6 +13,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
+	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
@@ -184,6 +185,21 @@ func (_c *TenantCreate) AddAPITokens(v ...*APIToken) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAPITokenIDs(ids...)
+}
+
+// AddIdempotencyKeyIDs adds the "idempotency_keys" edge to the IdempotencyKey entity by IDs.
+func (_c *TenantCreate) AddIdempotencyKeyIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddIdempotencyKeyIDs(ids...)
+	return _c
+}
+
+// AddIdempotencyKeys adds the "idempotency_keys" edges to the IdempotencyKey entity.
+func (_c *TenantCreate) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddIdempotencyKeyIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -420,6 +436,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.IdempotencyKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -116,12 +116,17 @@ paths:
         Dashboard sessions with member:write on every product. The caller may
         only give or take away a role it holds itself; the last owner can't
         be demoted (409). A demotion or narrower scope also revokes the
-        member's tokens the new grant wouldn't allow (ADR-0035), unless
-        revoke_tokens=false.
+        member's tokens the new grant wouldn't allow, and the pending
+        invitations it couldn't have sent (ADR-0035), unless
+        revoke_tokens=false / revoke_invitations=false.
       parameters:
         - name: revoke_tokens
           in: query
           description: Revoke the member's active API tokens above the new role or outside the new scope, each audited.
+          schema: { type: boolean, default: true }
+        - name: revoke_invitations
+          in: query
+          description: Revoke the member's pending invitations the new grant couldn't have sent, each audited.
           schema: { type: boolean, default: true }
       requestBody:
         required: true
@@ -143,12 +148,16 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
     delete:
       operationId: removeMember
-      summary: Remove a member, by default revoking the API tokens they created (ADR-0029).
+      summary: Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
       description: Their access ends at once. The last owner can't be removed (409).
       parameters:
         - name: revoke_tokens
           in: query
           description: Also revoke every active API token the member created, each audited.
+          schema: { type: boolean, default: true }
+        - name: revoke_invitations
+          in: query
+          description: Also revoke every pending invitation the member sent, each audited.
           schema: { type: boolean, default: true }
       responses:
         "204":
@@ -156,6 +165,9 @@ paths:
           headers:
             X-Revoked-Token-Ids:
               description: Comma-separated IDs of the API tokens the removal revoked; absent if none.
+              schema: { type: string }
+            X-Revoked-Invitation-Ids:
+              description: Comma-separated IDs of the pending invitations the removal revoked; absent if none.
               schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
@@ -440,12 +452,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/Member"
         - type: object
-          required: [revoked_token_ids]
+          required: [revoked_token_ids, revoked_invitation_ids]
           properties:
             revoked_token_ids:
               type: array
               items: { type: string }
               description: API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
+            revoked_invitation_ids:
+              type: array
+              items: { type: string }
+              description: Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids).
     MemberPage:
       type: object
       required: [items]

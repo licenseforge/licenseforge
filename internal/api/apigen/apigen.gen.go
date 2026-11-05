@@ -320,6 +320,9 @@ type MemberUpdated struct {
 	Name       *string  `json:"name"`
 	ProductIds []string `json:"product_ids"`
 
+	// RevokedInvitationIds Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids).
+	RevokedInvitationIds []string `json:"revoked_invitation_ids"`
+
 	// RevokedTokenIds API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
 	RevokedTokenIds []string   `json:"revoked_token_ids"`
 	Role            MemberRole `json:"role"`
@@ -413,12 +416,18 @@ type ListMembersParams struct {
 type RemoveMemberParams struct {
 	// RevokeTokens Also revoke every active API token the member created, each audited.
 	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+
+	// RevokeInvitations Also revoke every pending invitation the member sent, each audited.
+	RevokeInvitations *bool `form:"revoke_invitations,omitempty" json:"revoke_invitations,omitempty"`
 }
 
 // UpdateMemberParams defines parameters for UpdateMember.
 type UpdateMemberParams struct {
 	// RevokeTokens Revoke the member's active API tokens above the new role or outside the new scope, each audited.
 	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+
+	// RevokeInvitations Revoke the member's pending invitations the new grant couldn't have sent, each audited.
+	RevokeInvitations *bool `form:"revoke_invitations,omitempty" json:"revoke_invitations,omitempty"`
 }
 
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
@@ -462,7 +471,7 @@ type ServerInterface interface {
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListMembersParams)
-	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// RemoveMember Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
 	// (DELETE /tenants/{tenant}/members/{id})
 	RemoveMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params RemoveMemberParams)
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
@@ -834,6 +843,19 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Optional query parameter "revoke_invitations" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_invitations", r.URL.Query(), &params.RevokeInvitations, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_invitations"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_invitations", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveMember(w, r, tenant, id, params)
 	}))
@@ -881,6 +903,19 @@ func (siw *ServerInterfaceWrapper) UpdateMember(w http.ResponseWriter, r *http.R
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_tokens"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_tokens", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "revoke_invitations" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_invitations", r.URL.Query(), &params.RevokeInvitations, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_invitations"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_invitations", Err: err})
 		}
 		return
 	}
@@ -2146,7 +2181,8 @@ type RemoveMemberResponseObject interface {
 }
 
 type RemoveMember204ResponseHeaders struct {
-	XRevokedTokenIds *string
+	XRevokedInvitationIds *string
+	XRevokedTokenIds      *string
 }
 
 type RemoveMember204Response struct {
@@ -2154,6 +2190,9 @@ type RemoveMember204Response struct {
 }
 
 func (response RemoveMember204Response) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+	if response.Headers.XRevokedInvitationIds != nil {
+		w.Header().Set("X-Revoked-Invitation-Ids", fmt.Sprint(*response.Headers.XRevokedInvitationIds))
+	}
 	if response.Headers.XRevokedTokenIds != nil {
 		w.Header().Set("X-Revoked-Token-Ids", fmt.Sprint(*response.Headers.XRevokedTokenIds))
 	}
@@ -2493,7 +2532,7 @@ type StrictServerInterface interface {
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
-	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// RemoveMember Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
 	// (DELETE /tenants/{tenant}/members/{id})
 	RemoveMember(ctx context.Context, request RemoveMemberRequestObject) (RemoveMemberResponseObject, error)
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).

@@ -28,6 +28,9 @@ import (
 // DefaultTTL is how long an invitation stays open (ADR-0029).
 const DefaultTTL = 7 * 24 * time.Hour
 
+// maxTokenLen bounds what Accept looks up; link tokens are rand.Text (26).
+const maxTokenLen = 64
+
 var (
 	// ErrNotFound means no such open invitation in the tenant, or one the
 	// caller can't see (the same answer, ADR-0032).
@@ -151,6 +154,11 @@ func (s Service) Revoke(ctx context.Context, id string) (*ent.Invitation, error)
 	}
 	var row *ent.Invitation
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The caller's membership before the invitation: the lock order of a
+		// member change (memberships, then invitations; members.lockHeld).
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
 		var err error
 		row, err = tx.Invitation.Query().Where(invitation.ID(id), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil()).
 			WithProducts().ForUpdate().Only(ctx)
@@ -168,12 +176,13 @@ func (s Service) Revoke(ctx context.Context, id string) (*ent.Invitation, error)
 		if err := authz.CanAssign(ctx, authz.User, &g, nil); err != nil {
 			return err
 		}
-		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+		// The database clock; the revoke_only policy allows nothing else.
+		res, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, row.ID)
+		if err != nil {
 			return err
 		}
-		// The database clock; the revoke_only policy allows nothing else.
-		if _, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, row.ID); err != nil {
-			return err
+		if n, err := res.RowsAffected(); err != nil || n != 1 { // locked above: can't change meanwhile
+			return errors.Join(errors.New("invitations: invitation changed while locked"), err)
 		}
 		if row, err = tx.Invitation.Query().Where(invitation.ID(id)).WithProducts().Only(ctx); err != nil {
 			return err
@@ -192,6 +201,9 @@ func (s Service) Revoke(ctx context.Context, id string) (*ent.Invitation, error)
 // token, audited in the invitation's tenant in the same transaction. Any
 // reason it can't be accepted is store.ErrInvitation.
 func (s Service) Accept(ctx context.Context, userID, token string) (*ent.Membership, error) {
+	if token == "" || len(token) > maxTokenLen { // never a link token: the same answer, without a query
+		return nil, store.ErrInvitation
+	}
 	return s.DB.AcceptInvitation(ctx, token, userID, func(tx *ent.Tx, m *ent.Membership) error {
 		_, err := audit.Record(ctx, tx, m.TenantID, audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID,
 			Action: "invitation.accept", ObjectType: "invitation", ObjectID: m.InvitationID, Outcome: auditevent.OutcomeSuccess,

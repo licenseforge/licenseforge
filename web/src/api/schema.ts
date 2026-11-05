@@ -91,7 +91,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Remove a member, by default revoking the API tokens they created (ADR-0029).
+         * Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
          * @description Their access ends at once. The last owner can't be removed (409).
          */
         delete: operations["removeMember"];
@@ -102,8 +102,9 @@ export interface paths {
          * @description Dashboard sessions with member:write on every product. The caller may
          *     only give or take away a role it holds itself; the last owner can't
          *     be demoted (409). A demotion or narrower scope also revokes the
-         *     member's tokens the new grant wouldn't allow (ADR-0035), unless
-         *     revoke_tokens=false.
+         *     member's tokens the new grant wouldn't allow, and the pending
+         *     invitations it couldn't have sent (ADR-0035), unless
+         *     revoke_tokens=false / revoke_invitations=false.
          */
         patch: operations["updateMember"];
         trace?: never;
@@ -326,6 +327,8 @@ export interface components {
         MemberUpdated: components["schemas"]["Member"] & {
             /** @description API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids). */
             revoked_token_ids: string[];
+            /** @description Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids). */
+            revoked_invitation_ids: string[];
         };
         MemberPage: {
             items: components["schemas"]["Member"][];
@@ -517,6 +520,8 @@ export interface operations {
             query?: {
                 /** @description Also revoke every active API token the member created, each audited. */
                 revoke_tokens?: boolean;
+                /** @description Also revoke every pending invitation the member sent, each audited. */
+                revoke_invitations?: boolean;
             };
             header?: never;
             path: {
@@ -533,6 +538,8 @@ export interface operations {
                 headers: {
                     /** @description Comma-separated IDs of the API tokens the removal revoked; absent if none. */
                     "X-Revoked-Token-Ids"?: string;
+                    /** @description Comma-separated IDs of the pending invitations the removal revoked; absent if none. */
+                    "X-Revoked-Invitation-Ids"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -549,6 +556,8 @@ export interface operations {
             query?: {
                 /** @description Revoke the member's active API tokens above the new role or outside the new scope, each audited. */
                 revoke_tokens?: boolean;
+                /** @description Revoke the member's pending invitations the new grant couldn't have sent, each audited. */
+                revoke_invitations?: boolean;
             };
             header?: never;
             path: {

@@ -27,6 +27,7 @@ import (
 	"licenseforge.io/licenseforge/internal/issue"
 	"licenseforge.io/licenseforge/internal/licensekey"
 	"licenseforge.io/licenseforge/internal/licenses"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -95,14 +96,37 @@ var fpRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // one needs a free seat. The first activation starts a from_first_activation
 // term.
 func (s Service) Activate(ctx context.Context, req Request) (Lease, error) {
-	return s.lease(ctx, req, true)
+	l, err := s.lease(ctx, req, true)
+	count(metrics.Activations, err)
+	return l, err
 }
 
 // Refresh (also the SDK's validate) returns a new lease for an active
 // activation and records its last-seen time and metadata. It never takes a
 // seat: ErrNotActivated asks the SDK to activate.
 func (s Service) Refresh(ctx context.Context, req Request) (Lease, error) {
-	return s.lease(ctx, req, false)
+	l, err := s.lease(ctx, req, false)
+	count(metrics.LeaseRefreshes, err)
+	return l, err
+}
+
+// count records an activate or refresh outcome: refusals of a valid key are
+// denied; unknown keys are also counted on their own (ADR-0034).
+func count(c metrics.OutcomeCounter, err error) {
+	switch {
+	case err == nil:
+		c.Inc(metrics.Success)
+	case errors.Is(err, ErrUnauthenticated):
+		metrics.UnknownLicenseKeys.Inc()
+		c.Inc(metrics.Failure)
+	case errors.Is(err, ErrInvalid):
+		c.Inc(metrics.Failure)
+	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired), errors.Is(err, ErrLimit),
+		errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
+		c.Inc(metrics.Denied)
+	default:
+		c.Inc(metrics.Failure)
+	}
 }
 
 func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, error) {

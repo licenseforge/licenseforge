@@ -30,6 +30,7 @@ import (
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
 	"licenseforge.io/licenseforge/internal/members"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
@@ -88,6 +89,9 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
 	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
+	if _, pattern := s.mux.Handler(r); pattern != "" { // before auth, so refusals get the route too
+		metrics.SetRoute(r.Context(), pattern)
+	}
 	defer func() {
 		if v := recover(); v != nil {
 			if v == http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
@@ -244,8 +248,8 @@ var queryParams = map[string][]string{
 	"ListApiTokens":   {"limit", "cursor"},
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
-	"RemoveMember":    {"revoke_tokens"},
-	"UpdateMember":    {"revoke_tokens"},
+	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
+	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
 
 // strictInput refuses unknown query parameters and decodes the body again

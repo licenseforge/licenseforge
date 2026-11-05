@@ -48,3 +48,4 @@ func APITokenProduct() string   { return New("tkp") }
 func Session() string           { return New("ses") }
 func PlatformAdmin() string     { return New("pad") }
 func AuditEvent() string        { return New("aud") }
+func IdempotencyKey() string    { return New("idk") }
