@@ -252,6 +252,9 @@ func (s Service) ActivateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease
 func (s Service) activateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease, error) {
 	// Sign in tx too: a signer opening its own transactions would need a
 	// second pool connection while tx holds the license and key locks.
+	// ponytail: only signing.Local is tx-aware; other Signer types (KMS)
+	// fall back to their own transactions, bringing back the pool-exhaustion
+	// risk. Upgrade path: a WithTx method on the Signer interface.
 	if l, ok := s.Issuer.Keys.(signing.Local); ok {
 		s.Issuer.Keys = l.WithTx(tx)
 	}

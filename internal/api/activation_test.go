@@ -305,6 +305,7 @@ func TestActivationRateLimitIgnoresUnknownKeys(t *testing.T) {
 		{"bad body", "activate", `{"x":1}`, nil, 400, "invalid_request"},
 		{"bad fingerprint", "activate", `{"fingerprint":"x","fp_source":"env"}`, nil, 400, "invalid_request"},
 		{"unknown route", "nope", actBody(newFP()), nil, 404, "not_found"},
+		{"too large", "activate", `{"fingerprint":"` + strings.Repeat("a", maxBody) + `"}`, nil, 413, "body_too_large"},
 	} {
 		name := tc.name
 		for range 6 {
@@ -363,19 +364,19 @@ func TestKeyLimiterBounded(t *testing.T) {
 	l.maxKeys = 2
 	w := httptest.NewRecorder()
 	for _, k := range []string{"a", "b"} {
-		if ok, _ := l.take(w, k); !ok {
+		if ok, _, _ := l.take(w, k); !ok {
 			t.Fatal(k)
 		}
 	}
 	for range 10 {
-		if ok, _ := l.take(w, "c"); !ok {
+		if ok, _, _ := l.take(w, "c"); !ok {
 			t.Fatal("untracked key refused")
 		}
 	}
 	if len(l.counts) != 2 {
 		t.Errorf("%d keys tracked", len(l.counts))
 	}
-	if ok, _ := l.take(w, "a"); !ok {
+	if ok, _, _ := l.take(w, "a"); !ok {
 		t.Error("known key refused")
 	}
 	var mu sync.Mutex // concurrent use is safe (go test -race)
@@ -383,7 +384,7 @@ func TestKeyLimiterBounded(t *testing.T) {
 	n := 0
 	for range 20 {
 		wg.Go(func() {
-			if ok, _ := l.take(httptest.NewRecorder(), "b"); ok {
+			if ok, _, _ := l.take(httptest.NewRecorder(), "b"); ok {
 				mu.Lock()
 				n++
 				mu.Unlock()
@@ -464,4 +465,26 @@ func TestActivationIdempotency(t *testing.T) {
 	}
 	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(sfp), licenseAuth(susp.Key), key).problem(t, 403, "license_suspended")
 	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(efp), licenseAuth(exp.Key), key).problem(t, 403, "license_expired")
+}
+
+// A release after the window moved on leaves the new window's count alone.
+func TestKeyLimiterReleaseOldWindow(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 59, 0, time.UTC)
+	l := newKeyLimiter(2)
+	l.now = func() time.Time { return now }
+	w := httptest.NewRecorder()
+	_, _, old := l.take(w, "k")
+	now = now.Add(2 * time.Second) // the next minute
+	if _, _, cur := l.take(w, "k"); cur.Equal(old) {
+		t.Fatal("same window")
+	}
+	l.release("k", old)
+	if n := l.counts[sha256.Sum256([]byte("k"))]; n != 1 {
+		t.Errorf("count %d after a stale release", n)
+	}
+	_, _, cur := l.take(w, "k")
+	l.release("k", cur)
+	if n := l.counts[sha256.Sum256([]byte("k"))]; n != 1 {
+		t.Errorf("count %d after a current release", n)
+	}
 }

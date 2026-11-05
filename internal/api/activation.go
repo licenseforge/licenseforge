@@ -49,22 +49,25 @@ func (s *server) activation(w http.ResponseWriter, r *http.Request) {
 		s.write(w, r, errUnauthenticated)
 		return
 	}
-	if ok, retry := s.limiter.take(w, key); !ok {
+	ok, retry, window := s.limiter.take(w, key)
+	if !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		s.write(w, r, &problem{status: http.StatusTooManyRequests, code: "rate_limited", detail: "Too many requests for this license key; retry after Retry-After seconds."})
 		return
 	}
+	// From here on every way out releases the count unless the key
+	// authenticated: oversized and aborted bodies too.
+	mark := &keyMark{}
+	defer func() {
+		if !mark.ok {
+			s.limiter.release(key, window)
+		}
+	}()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		s.badRequest(w, r, err)
 		return
 	}
-	mark := &keyMark{}
-	defer func() {
-		if !mark.ok {
-			s.limiter.release(key)
-		}
-	}()
 	ctx := context.WithValue(context.WithValue(r.Context(), bodyKey{}, body), licenseKeyKey{}, key)
 	r = r.WithContext(context.WithValue(ctx, keyMarkKey{}, mark))
 	r.Body = io.NopCloser(strings.NewReader(string(body)))
@@ -259,8 +262,9 @@ func newKeyLimiter(quota int) *keyLimiter {
 }
 
 // take counts one request for key, sets the RateLimit headers and reports
-// whether it is within the limit, and else the seconds until it resets.
-func (l *keyLimiter) take(w http.ResponseWriter, key string) (ok bool, retry int) {
+// whether it is within the limit, and else the seconds until it resets. It
+// returns the window it counted in, for release.
+func (l *keyLimiter) take(w http.ResponseWriter, key string) (ok bool, retry int, window time.Time) {
 	h := sha256.Sum256([]byte(key))
 	l.mu.Lock()
 	now := l.now()
@@ -279,18 +283,23 @@ func (l *keyLimiter) take(w http.ResponseWriter, key string) (ok bool, retry int
 		remaining = l.quota - n
 	}
 	reset := max(1, int((l.window.Add(limiterWindow).Sub(now)+time.Second-1)/time.Second))
+	window = l.window
 	l.mu.Unlock()
 	w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"license-key";q=%d;w=%d`, l.quota, int(limiterWindow/time.Second)))
 	w.Header().Set("RateLimit", fmt.Sprintf(`"license-key";r=%d;t=%d`, remaining, reset))
-	return ok, reset
+	return ok, reset, window
 }
 
-// release undoes take's count for key (an unknown key), forgetting it when
-// nothing is left.
-func (l *keyLimiter) release(key string) {
+// release undoes take's count for key (an unknown key) in window,
+// forgetting it when nothing is left. Once the window has moved on, the
+// count is gone already and the new window's isn't touched.
+func (l *keyLimiter) release(key string, window time.Time) {
 	h := sha256.Sum256([]byte(key))
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if !window.Equal(l.window) {
+		return
+	}
 	switch n := l.counts[h]; {
 	case n > 1:
 		l.counts[h] = n - 1
