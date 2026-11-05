@@ -41,16 +41,12 @@ func (s *server) CreateSigningKey(ctx context.Context, _ apigen.CreateSigningKey
 	return apigen.CreateSigningKey201JSONResponse(keyView(k)), nil
 }
 
-// Promote and discard look the key up first (ADR-0032 step 4: a missing key
-// is 404, before key:write's 403); keys are never deleted, so it can't
-// disappear before the change.
+// Promote and discard: internal/signing looks the key up first (ADR-0032
+// step 4: a missing key is 404, before key:write's 403) and audits every
+// attempt.
 
 func (s *server) PromoteSigningKey(ctx context.Context, req apigen.PromoteSigningKeyRequestObject) (apigen.PromoteSigningKeyResponseObject, error) {
-	tn := principal(ctx).TenantID
-	if _, err := s.SigningKeys.Get(ctx, tn, req.Kid); err != nil {
-		return nil, err
-	}
-	k, err := s.SigningKeys.PromoteKey(ctx, tn, req.Kid)
+	k, err := s.SigningKeys.PromoteKey(ctx, principal(ctx).TenantID, req.Kid)
 	if err != nil {
 		return nil, err
 	}
@@ -58,11 +54,7 @@ func (s *server) PromoteSigningKey(ctx context.Context, req apigen.PromoteSignin
 }
 
 func (s *server) DiscardSigningKey(ctx context.Context, req apigen.DiscardSigningKeyRequestObject) (apigen.DiscardSigningKeyResponseObject, error) {
-	tn := principal(ctx).TenantID
-	if _, err := s.SigningKeys.Get(ctx, tn, req.Kid); err != nil {
-		return nil, err
-	}
-	k, err := s.SigningKeys.DiscardKey(ctx, tn, req.Kid)
+	k, err := s.SigningKeys.DiscardKey(ctx, principal(ctx).TenantID, req.Kid)
 	if err != nil {
 		return nil, err
 	}

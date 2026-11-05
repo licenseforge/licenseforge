@@ -12,6 +12,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -178,12 +179,14 @@ func begin(ctx context.Context, action, kid string) (string, audit.Event, error)
 
 // refused records a denied or failed attempt in its own transaction, after
 // the action rolled back (ADR-0027), in the principal's tenant, and returns
-// err. Infrastructure errors aren't attempts and aren't recorded.
+// err; if the entry can't be written, the audit error alone (a 500, never
+// the refusal without its entry). Infrastructure errors aren't attempts and
+// aren't recorded.
 func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
 	switch {
 	case errors.Is(err, authz.ErrDenied):
 		ev.Outcome, ev.Details = auditevent.OutcomeDenied, nil
-	case errors.Is(err, ErrPendingExists), errors.Is(err, ErrNotPending):
+	case errors.Is(err, ErrPendingExists), errors.Is(err, ErrNotPending), errors.Is(err, ErrNotFound):
 		ev.Outcome, ev.Details = auditevent.OutcomeFailure, map[string]any{"reason": err.Error()}
 	default:
 		return err
@@ -192,7 +195,8 @@ func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err
 		_, err := recordAudit(ctx, tx, tenantID, ev)
 		return err
 	}); rerr != nil {
-		return errors.Join(err, rerr)
+		// Fail closed (AU-5): an outage, never the refusal without its entry.
+		return fmt.Errorf("signing: recording a refused %s: %w", ev.Action, rerr)
 	}
 	return err
 }
@@ -297,11 +301,20 @@ func (l Local) PromoteKey(ctx context.Context, tenantID, kid string) (*ent.Signi
 	if err != nil {
 		return nil, err
 	}
-	if err := authorize(ctx, tenantID); err != nil {
+	// The key first (ADR-0032 step 4): in the principal's own tenant, with
+	// key:read, so an unknown or malformed kid is a failure without an
+	// object for every reader; then key:write.
+	if err := authorizeRead(ctx, tenantID); err != nil {
 		return nil, l.refused(ctx, tn, ev, err)
 	}
-	if ev.ObjectID == "" { // malformed kid: refused before any query
-		return nil, l.refused(ctx, tn, ev, ErrNotPending)
+	if _, err := l.Get(ctx, tenantID, ev.ObjectID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ev.ObjectID = ""
+		}
+		return nil, l.refused(ctx, tn, ev, err)
+	}
+	if err := authorize(ctx, tenantID); err != nil {
+		return nil, l.refused(ctx, tn, ev, err)
 	}
 	var out *ent.SigningKey
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
@@ -368,11 +381,20 @@ func (l Local) DiscardKey(ctx context.Context, tenantID, kid string) (*ent.Signi
 	if err != nil {
 		return nil, err
 	}
-	if err := authorize(ctx, tenantID); err != nil {
+	// The key first (ADR-0032 step 4): in the principal's own tenant, with
+	// key:read, so an unknown or malformed kid is a failure without an
+	// object for every reader; then key:write.
+	if err := authorizeRead(ctx, tenantID); err != nil {
 		return nil, l.refused(ctx, tn, ev, err)
 	}
-	if ev.ObjectID == "" { // malformed kid: refused before any query
-		return nil, l.refused(ctx, tn, ev, ErrNotPending)
+	if _, err := l.Get(ctx, tenantID, ev.ObjectID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ev.ObjectID = ""
+		}
+		return nil, l.refused(ctx, tn, ev, err)
+	}
+	if err := authorize(ctx, tenantID); err != nil {
+		return nil, l.refused(ctx, tn, ev, err)
 	}
 	var out *ent.SigningKey
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {

@@ -467,7 +467,9 @@ export interface paths {
          * @description Needs key:write (owners). A pending key never signs: publish its
          *     public key for vendors to add to their trusted set, then promote
          *     it. A tenant that already has a pending key answers 409
-         *     pending_key_exists. Audited.
+         *     pending_key_exists. Audited. Idempotency-Key isn't honoured: a
+         *     retry after a lost answer may get 409 pending_key_exists, or leave
+         *     a pending key you didn't mean to make; discard it.
          */
         post: operations["createSigningKey"];
         delete?: never;
@@ -493,7 +495,8 @@ export interface paths {
          * Make the pending key active and retire the active key, erasing its private key. Can't be undone.
          * @description Needs key:write (owners). Builds that don't trust this kid reject
          *     every license and lease signed afterwards (ADR-0026). A key that
-         *     isn't the pending key answers 409 invalid_state. Audited.
+         *     isn't the pending key answers 409 invalid_state; an unknown kid,
+         *     404 (audited as a failure). Audited.
          */
         post: operations["promoteSigningKey"];
         delete?: never;
