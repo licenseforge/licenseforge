@@ -151,7 +151,8 @@ func (j *Job) lead(ctx context.Context) (bool, error) {
 // Each verified chain moves licenseforge_audit_verify_last_success_timestamp_seconds
 // (progress, also inside a long full pass); a broken chain has its own metric.
 func (j *Job) Once(parent context.Context) (Result, error) {
-	full := j.fullPass != nil || j.lastFull.IsZero() || j.now().Sub(j.lastFull) >= j.FullInterval
+	// lastFull moves only when a pass completes, so an unfinished pass stays due.
+	full := j.lastFull.IsZero() || j.now().Sub(j.lastFull) >= j.FullInterval
 	limit := j.Interval
 	if full {
 		limit = j.FullTimeout

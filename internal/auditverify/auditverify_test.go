@@ -667,7 +667,9 @@ func TestTimedOutFullRunResumes(t *testing.T) {
 	stuck := true
 	froms := map[string]audit.Head{}
 	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
-		froms[c] = from
+		if _, seen := froms[c]; !seen { // where the chain's verification starts (a second call checks the old head)
+			froms[c] = from
+		}
 		if c == x && stuck {
 			<-ctx.Done()
 			return audit.Head{}, audit.Head{}, ctx.Err()
@@ -758,5 +760,41 @@ func TestRunReleasesTheLockOnShutdown(t *testing.T) {
 	}
 	if pids := lockHolders(t, adm); len(pids) != 0 {
 		t.Errorf("lock still held after Run returned: %v", pids)
+	}
+}
+
+// Once a broken chain is repaired, it is no longer flagged and resumes from
+// its head again (no anchor walk on every run).
+func TestRepairedChainResumesFromItsHead(t *testing.T) {
+	d, j, owner := setup(t)
+	a := chain(t, d, 3)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	add(t, d, a, 1)
+	if _, err := owner.Exec(`UPDATE audit_events SET action = 'test.tampered' WHERE tenant_id = $1 AND seq = 4`, a); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := j.Once(context.Background()); err != nil || !contains(r.Broken, a) {
+		t.Fatalf("tampered run = %+v, %v", r, err)
+	}
+	if _, err := owner.Exec(`UPDATE audit_events SET action = 'test.entry' WHERE tenant_id = $1 AND seq = 4`, a); err != nil { // repaired
+		t.Fatal(err)
+	}
+	if r, err := j.Once(context.Background()); err != nil || contains(r.Broken, a) || j.broken[a] {
+		t.Fatalf("after the repair = %+v, %v, flagged %v", r, err, j.broken[a])
+	}
+	var from audit.Head
+	j.verify = func(ctx context.Context, run audit.Runner, c string, f audit.Head) (audit.Head, audit.Head, error) {
+		if c == a {
+			from = f
+		}
+		return audit.VerifyAnchored(ctx, run, c, f)
+	}
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if from.Seq != 4 {
+		t.Errorf("repaired chain verified from %+v, want its head (seq 4)", from)
 	}
 }
