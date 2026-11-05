@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -197,6 +198,39 @@ func TestMFARefusalRaceRecordsOnce(t *testing.T) {
 	}
 	if got := len(f.mfaEvents(t, f.a.ID)); got != 1 {
 		t.Errorf("%d entries", got)
+	}
+}
+
+// The refusal lookup is served by the partial index, not a scan of the
+// chain (the planner is told to avoid scans, as on a large table).
+func TestMFARefusalLookupUsesIndex(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var plan strings.Builder
+	if err := f.db.WithTenant(ctx, f.a.ID, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+			return err
+		}
+		// The shape of mfaRefused's Exist query.
+		rows, err := tx.QueryContext(ctx, `EXPLAIN SELECT id FROM audit_events WHERE tenant_id = $1 AND action = $2
+			AND object_type = $3 AND object_id = $4 LIMIT 1`, f.a.ID, "session.mfa_required", "session", "ses_x")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				return err
+			}
+			plan.WriteString(line + "\n")
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.String(), "auditevent_tenant_id_object_id") {
+		t.Errorf("plan:\n%s", plan.String())
 	}
 }
 
