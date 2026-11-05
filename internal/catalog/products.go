@@ -3,8 +3,11 @@
 // (ADR-0019): a scoped principal sees and changes only its own. Every change
 // and refusal is audited (ADR-0027), a change in its transaction.
 //
-// Lock contract (schema.PlanFeature): writers of plan features lock the plan
-// row FOR UPDATE first. Products don't take part in it.
+// Lock contract, product row first (schema.PlanFeature): a license issue
+// takes the product FOR SHARE, then the plan, the customer and the features,
+// then the audit lock; archive and rename take the product FOR UPDATE. Plan
+// and feature creation take the product FOR SHARE (before any plan FOR
+// UPDATE) and refuse an archived product.
 package catalog
 
 import (
