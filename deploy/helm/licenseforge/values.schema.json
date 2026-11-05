@@ -2,6 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "auditVerify": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intervalMinutes": {"type": "integer", "minimum": 0, "maximum": 1440},
+        "fullIntervalHours": {"type": "integer", "minimum": 1, "maximum": 8760}
+      }
+    },
     "oidc": {
       "type": "object",
       "additionalProperties": false,

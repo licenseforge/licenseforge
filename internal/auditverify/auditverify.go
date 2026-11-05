@@ -1,8 +1,14 @@
 // Package auditverify is the periodic audit chain verification (ADR-0036,
-// Verification): every Interval, one replica verifies every chain from the
-// head it verified last (O(new entries)), and from the anchor every
+// Verification): every Interval, the leader replica verifies every chain
+// from the head it verified last (O(new entries)), and from the anchor every
 // FullInterval, then appends audit.checkpoint entries with the verified heads
-// to the platform chain, where the SIEM can compare them with what it holds.
+// and anchors to the platform chain, where the SIEM can compare them with
+// what it holds.
+//
+// Leader election: the first replica to take a session advisory lock keeps
+// it, with its connection, for its lifetime, and checks the connection
+// before each run; the others try again every interval and only run once
+// the leader's session is gone.
 //
 // It runs inside serve, on the platform pool (the only serving login that
 // reads every chain), rather than as a CronJob: the heads it resumes from
@@ -12,6 +18,7 @@
 package auditverify
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -21,13 +28,13 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/audit"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
 
-// lockKey is the session advisory lock that lets one replica run per
-// interval ("LFAUVR").
+// lockKey is the leader's session advisory lock ("LFAUVR").
 const lockKey = 0x4C46_4155_5652
 
 // HeadsPerEntry caps the heads in one checkpoint entry (about 150 bytes
@@ -41,39 +48,52 @@ const (
 	DefaultFullInterval = 7 * 24 * time.Hour
 )
 
-// Job verifies chains. One per replica; build it with New.
+// Job verifies chains. One per replica; build it with New, and Close it
+// to give up the lead.
 type Job struct {
 	DB           *store.DB
 	Log          *slog.Logger
-	Interval     time.Duration
+	Interval     time.Duration // also the time limit of one run
 	FullInterval time.Duration
 
 	heads    map[string]audit.Head // verified heads by chain, this replica's memory only
 	lastFull time.Time
+	lock     *store.SessionLock // held while this replica leads
 	now      func() time.Time
+	verify   func(ctx context.Context, run audit.Runner, tenantID string, from audit.Head) (head, anchor audit.Head, err error)
 }
 
 // New returns a Job with the default schedule.
 func New(db *store.DB, log *slog.Logger) *Job {
 	return &Job{DB: db, Log: log, Interval: DefaultInterval, FullInterval: DefaultFullInterval,
-		heads: map[string]audit.Head{}, now: time.Now}
+		heads: map[string]audit.Head{}, now: time.Now, verify: audit.VerifyAnchored}
+}
+
+// Close gives up the lead, if this replica has it.
+func (j *Job) Close() {
+	if j.lock != nil {
+		j.lock.Release()
+		j.lock = nil
+	}
 }
 
 // Result is what one run did.
 type Result struct {
-	Ran      bool     // false: another replica holds the lock
+	Ran      bool     // false: another replica leads
 	Full     bool     // verified from the anchor
 	Verified int      // chains with entries that verified
 	Broken   []string // chains that didn't (the metric counts each)
 }
 
-// Run verifies every Interval until ctx is done. Errors are logged; a
-// broken chain is counted in licenseforge_audit_verify_failures_total by
-// audit.Verify, run after run, until it is repaired.
+// Run verifies every Interval until ctx is done, then gives up the lead.
+// Errors are logged; a broken chain is counted in
+// licenseforge_audit_verify_failures_total by audit.Verify, run after run,
+// until it is repaired.
 func (j *Job) Run(ctx context.Context) error {
 	if j.Interval <= 0 || j.FullInterval <= 0 {
 		return fmt.Errorf("auditverify: invalid schedule (interval %v, full %v)", j.Interval, j.FullInterval)
 	}
+	defer j.Close()
 	t := time.NewTicker(j.Interval)
 	defer t.Stop()
 	for {
@@ -92,15 +112,38 @@ func (j *Job) Run(ctx context.Context) error {
 	}
 }
 
-// Once runs one verification if no other replica is running one: every
+// lead reports whether this replica leads: it holds the lock and its
+// connection still answers, or it takes the lock now. A lost lock (the
+// connection dropped) is released and taken again if it's free.
+func (j *Job) lead(ctx context.Context) (bool, error) {
+	if j.lock != nil {
+		if err := j.lock.Alive(ctx); err == nil {
+			return true, nil
+		} else if ctx.Err() == nil {
+			j.Log.Warn("audit verify: lost the leader lock; trying to take it again", "err", err)
+		}
+		j.Close()
+	}
+	l, ok, err := j.DB.TryPlatformLock(ctx, lockKey)
+	if err != nil || !ok {
+		return false, err
+	}
+	j.lock = l
+	return true, nil
+}
+
+// Once runs one verification if this replica leads, within Interval: every
 // chain from its last verified head (from the anchor when there is none or a
-// full run is due), then the checkpoint entries.
+// full run is due), then the checkpoint entries. Only a run that completes
+// without errors moves licenseforge_audit_verify_last_success_timestamp_seconds
+// (a broken chain has its own alert) and, if full, the full schedule.
 func (j *Job) Once(ctx context.Context) (Result, error) {
-	unlock, ok, err := j.DB.TryPlatformLock(ctx, lockKey)
+	ctx, cancel := context.WithTimeout(ctx, j.Interval)
+	defer cancel()
+	ok, err := j.lead(ctx)
 	if err != nil || !ok {
 		return Result{}, err
 	}
-	defer unlock()
 	r := Result{Ran: true, Full: j.lastFull.IsZero() || j.now().Sub(j.lastFull) >= j.FullInterval}
 	var chains []string
 	if err := j.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
@@ -112,41 +155,66 @@ func (j *Job) Once(ctx context.Context) (Result, error) {
 	}
 	chains = append(chains, audit.PlatformTenant) // its tenants row is hidden from every serving login
 	sort.Strings(chains)
-	verified := []head{} // "heads": [] in the entry, never null
+	listed := []head{} // "heads": [] in the entry, never null
 	var errs []error
 	for _, c := range chains {
-		from := j.heads[c]
+		prev, known := j.heads[c]
+		from := prev
 		if r.Full {
 			from = audit.Head{}
 		}
-		h, err := audit.Verify(ctx, j.DB.ReadPlatform, c, from)
+		h, anchor, err := j.verify(ctx, j.DB.ReadPlatform, c, from)
 		switch {
 		case errors.Is(err, audit.ErrBroken):
-			r.Broken = append(r.Broken, c) // keep the last good head: the next run checks again
+			// Forget the head: the break may be below it, which a resumed
+			// run wouldn't see. The next run starts from the anchor and
+			// counts the break again, until it is repaired.
+			delete(j.heads, c)
+			r.Broken = append(r.Broken, c)
 			continue
 		case err != nil:
 			errs = append(errs, fmt.Errorf("chain %s: %w", c, err))
 			continue
 		}
 		j.heads[c] = h
-		if h.Seq > 0 {
-			r.Verified++
-			verified = append(verified, head{TenantID: c, Seq: h.Seq, Hash: hex.EncodeToString(h.Hash)})
+		if h.Seq == 0 {
+			continue
+		}
+		r.Verified++
+		if r.Full || !known || h.Seq != prev.Seq || !bytes.Equal(h.Hash, prev.Hash) {
+			listed = append(listed, head{TenantID: c, Seq: h.Seq, Hash: hex.EncodeToString(h.Hash),
+				Anchor: anchorOf(anchor)})
 		}
 	}
-	if err := j.checkpoint(ctx, r, verified); err != nil {
+	if err := j.checkpoint(ctx, r, listed); err != nil {
 		errs = append(errs, err)
 	}
-	if r.Full && len(errs) == 0 {
-		j.lastFull = j.now()
+	if len(errs) == 0 {
+		metrics.AuditVerifyLastSuccess.Set(float64(j.now().Unix()))
+		if r.Full {
+			j.lastFull = j.now()
+		}
 	}
 	return r, errors.Join(errs...)
 }
 
 type head struct {
-	TenantID string `json:"tenant_id"`
-	Seq      int64  `json:"seq"`
-	Hash     string `json:"hash"`
+	TenantID string    `json:"tenant_id"`
+	Seq      int64     `json:"seq"`
+	Hash     string    `json:"hash"`
+	Anchor   anchorRef `json:"anchor"` // where the chain starts: seq 0 and no hash while nothing was pruned
+}
+
+type anchorRef struct {
+	Seq  int64  `json:"seq"`
+	Hash string `json:"hash"`
+}
+
+func anchorOf(a audit.Head) anchorRef {
+	if a.Seq == 0 {
+		return anchorRef{}
+	}
+	return anchorRef{Seq: a.Seq, Hash: hex.EncodeToString(a.Hash)}
 }
 
 // checkpoint appends the verified heads to the platform chain, HeadsPerEntry

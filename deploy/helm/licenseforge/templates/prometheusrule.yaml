@@ -1,8 +1,12 @@
 {{- $alerts := dig "alerts" dict (.Values.metrics | default dict) }}
-{{- if and (dig "enabled" true $alerts) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+{{- $sm := dig "serviceMonitor" dict (.Values.metrics | default dict) }}
+{{- $verify := int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict)) }}
+{{- if and (dig "enabled" true $alerts) $sm.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
 {{- $ns := printf "namespace=%q" .Release.Namespace }}
 # Audit failure alerts (ADR-0036, AU-5): on by default when the Prometheus
-# Operator's CRDs exist. Route them to whoever must act on audit failures
+# Operator's CRDs exist and the chart's ServiceMonitor scrapes the server
+# (without it the metrics never arrive and no alert would ever fire).
+# Route them to whoever must act on audit failures
 # (Secure Configuration Guide). Series carry the namespace label the
 # Operator's scrapes add; only this release's namespace is matched.
 apiVersion: monitoring.coreos.com/v1
@@ -34,6 +38,16 @@ spec:
           labels: {severity: critical}
           annotations:
             summary: "An audit hash chain doesn't verify: an entry was changed, removed or reordered. The server log and the latest audit.checkpoint entry name the chain."
+        {{- if gt $verify 0 }}
+        - alert: LicenseForgeAuditVerifyStalled
+          # The leader replica verifies every auditVerify.intervalMinutes; two
+          # missed runs (or no data at all) mean nobody is verifying.
+          expr: (time() - max by (namespace) (licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })) > {{ mul 2 $verify 60 }} or absent(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })
+          for: {{ $verify }}m
+          labels: {severity: critical}
+          annotations:
+            summary: "No audit chain verification has completed for over {{ mul 2 $verify }} minutes: the verifier is stuck, failing or not running."
+        {{- end }}
         - alert: LicenseForgeRateLimitTableFull
           # Past its address bound the per-address limit lets new addresses through (fail open).
           expr: sum by (namespace, surface) (increase(licenseforge_rate_limit_untracked_requests_total{ {{- $ns -}} }[5m])) > 0

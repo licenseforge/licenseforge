@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
@@ -38,7 +41,41 @@ func setup(t *testing.T) (*store.DB, *Job, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = owner.Close() })
-	return d, New(d, slog.New(slog.NewTextHandler(io.Discard, nil))), owner
+	j := New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(j.Close) // before the pool closes: the next test's job may lead
+	return d, j, owner
+}
+
+// admin is a superuser connection, for pg_locks and pg_terminate_backend.
+func admin(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// lockHolders lists the sessions holding the job's lock in this database.
+func lockHolders(t *testing.T, db *sql.DB) []int {
+	t.Helper()
+	rows, err := db.Query(`SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
+		AND ((classid::bigint << 32) | objid::bigint) = $1
+		AND database = (SELECT oid FROM pg_database WHERE datname = $2)`, int64(lockKey), env.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var pids []int
+	for rows.Next() {
+		var pid int
+		if err := rows.Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+		pids = append(pids, pid)
+	}
+	return pids
 }
 
 // chain creates a tenant with n entries and returns it and its head.
@@ -220,7 +257,6 @@ func TestTamperedEntryFiresTheMetric(t *testing.T) {
 	if _, err := j.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	good := j.heads[a]
 	add(t, d, a, 2)
 	tamper(t, owner, `UPDATE audit_events SET details = '{"x":1}' WHERE tenant_id = $1 AND seq = 4`,
 		`UPDATE audit_events SET details = '{}' WHERE tenant_id = $1 AND seq = 4`, a)
@@ -237,8 +273,11 @@ func TestTamperedEntryFiresTheMetric(t *testing.T) {
 	if len(cs) != 1 || es[0].Outcome != auditevent.OutcomeFailure || !contains(cs[0].Broken, a) {
 		t.Errorf("checkpoint %+v outcome %s", cs, es[0].Outcome)
 	}
-	if _, ok := headFor(cs, a); ok || j.heads[a].Seq != good.Seq {
-		t.Errorf("broken chain's head moved: %+v", j.heads[a])
+	if _, ok := headFor(cs, a); ok {
+		t.Errorf("broken chain listed as verified: %+v", cs)
+	}
+	if h, ok := j.heads[a]; ok {
+		t.Errorf("broken chain keeps a head (%+v): the next run must start from the anchor", h)
 	}
 	failures = testutil.ToFloat64(metrics.AuditVerifyFailures)
 	if r, err := j.Once(context.Background()); err != nil || !contains(r.Broken, a) || testutil.ToFloat64(metrics.AuditVerifyFailures) < failures+1 {
@@ -250,7 +289,7 @@ func TestTamperedEntryFiresTheMetric(t *testing.T) {
 func TestOneReplicaAtATime(t *testing.T) {
 	d, j, _ := setup(t)
 	chain(t, d, 1)
-	unlock, ok, err := d.TryPlatformLock(context.Background(), lockKey) // the other replica
+	other, ok, err := d.TryPlatformLock(context.Background(), lockKey) // the other replica
 	if err != nil || !ok {
 		t.Fatalf("lock: %v %v", ok, err)
 	}
@@ -264,16 +303,20 @@ func TestOneReplicaAtATime(t *testing.T) {
 	if _, ok, err := d.TryPlatformLock(context.Background(), lockKey); err != nil || ok {
 		t.Errorf("second lock taken: %v %v", ok, err)
 	}
-	unlock()
+	other.Release()
 	if r, err := j.Once(context.Background()); err != nil || !r.Ran {
 		t.Errorf("after release: %+v %v", r, err)
 	}
-	// The run released the lock again.
-	unlock, ok, err = d.TryPlatformLock(context.Background(), lockKey)
-	if err != nil || !ok {
-		t.Fatalf("lock after a run: %v %v", ok, err)
+	// The leader keeps the lock between runs: nobody else gets it.
+	if _, ok, err := d.TryPlatformLock(context.Background(), lockKey); err != nil || ok {
+		t.Errorf("lock free after a run: %v %v", ok, err)
 	}
-	unlock()
+	j.Close()
+	l, ok, err := d.TryPlatformLock(context.Background(), lockKey)
+	if err != nil || !ok {
+		t.Fatalf("lock after Close: %v %v", ok, err)
+	}
+	l.Release()
 }
 
 func TestCheckpointBatches(t *testing.T) {
@@ -311,5 +354,233 @@ func TestRunRefusesBadSchedule(t *testing.T) {
 	j.Interval = 0
 	if err := j.Run(context.Background()); err == nil {
 		t.Error("interval 0 accepted")
+	}
+}
+
+// The reviewer's probe: a break below a verified head, found by a full
+// run, must keep being reported by the following incremental runs (the
+// chain is re-verified from its anchor), not cleared after one report.
+func TestBrokenBelowHeadKeepsCounting(t *testing.T) {
+	d, j, owner := setup(t)
+	ck := time.Now()
+	j.now = func() time.Time { return ck }
+	a := chain(t, d, 3)
+	if _, err := j.Once(context.Background()); err != nil { // full: head at 3
+		t.Fatal(err)
+	}
+	add(t, d, a, 2)
+	if _, err := j.Once(context.Background()); err != nil { // incremental: head at 5
+		t.Fatal(err)
+	}
+	tamper(t, owner, `UPDATE audit_events SET action = 'test.tampered' WHERE tenant_id = $1 AND seq = 2`,
+		`UPDATE audit_events SET action = 'test.entry' WHERE tenant_id = $1 AND seq = 2`, a)
+	ck = ck.Add(j.FullInterval)
+	if r, err := j.Once(context.Background()); err != nil || !r.Full || !contains(r.Broken, a) {
+		t.Fatalf("full run = %+v, %v", r, err)
+	}
+	for range 2 { // incremental schedule from here on
+		failures := testutil.ToFloat64(metrics.AuditVerifyFailures)
+		r, err := j.Once(context.Background())
+		if err != nil || r.Full || !contains(r.Broken, a) || testutil.ToFloat64(metrics.AuditVerifyFailures) < failures+1 {
+			t.Fatalf("incremental run after the break = %+v, %v: the break below the head must keep counting", r, err)
+		}
+	}
+}
+
+// Incremental runs list only chains whose head moved (and broken ones);
+// full runs list every chain. Each head carries its chain's anchor.
+func TestCheckpointListsMovedHeads(t *testing.T) {
+	d, j, _ := setup(t)
+	ck := time.Now()
+	j.now = func() time.Time { return ck }
+	a, b := chain(t, d, 2), chain(t, d, 2)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	add(t, d, a, 1)
+	before := platformHead(t, d)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, cs := checkpoints(t, d, before)
+	if h, ok := headFor(cs, a); !ok || h.Seq != 3 {
+		t.Errorf("moved chain a: %+v %v", h, ok)
+	}
+	if _, ok := headFor(cs, b); ok {
+		t.Errorf("unchanged chain b listed in an incremental checkpoint: %+v", cs)
+	}
+	ck = ck.Add(j.FullInterval)
+	before = platformHead(t, d)
+	if r, err := j.Once(context.Background()); err != nil || !r.Full {
+		t.Fatalf("full run = %+v, %v", r, err)
+	}
+	_, cs = checkpoints(t, d, before)
+	if h, ok := headFor(cs, b); !ok || h.Seq != 2 || h.Anchor.Seq != 0 || h.Anchor.Hash != "" {
+		t.Errorf("full checkpoint, chain b: %+v %v", h, ok)
+	}
+}
+
+func TestHeadsCarryTheAnchor(t *testing.T) {
+	d, j, owner := setup(t)
+	a := chain(t, d, 3)
+	var first []byte
+	if err := owner.QueryRow(`SELECT hash FROM audit_events WHERE tenant_id = $1 AND seq = 1`, a).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	// What a prune leaves: the anchor names seq 1, which is gone.
+	if _, err := owner.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) VALUES ($1, $2, 1, $3, now())`, ids.AuditAnchor(), a, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq = 1`, a); err != nil {
+		t.Fatal(err)
+	}
+	before := platformHead(t, d)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, cs := checkpoints(t, d, before)
+	if h, ok := headFor(cs, a); !ok || h.Seq != 3 || h.Anchor.Seq != 1 || h.Anchor.Hash != hex.EncodeToString(first) {
+		t.Errorf("head with anchor: %+v %v, want anchor 1 %x", h, ok, first)
+	}
+}
+
+// The leader keeps its lock (and connection) between runs; if its
+// connection drops, the lock is free and another replica takes over, and
+// the old leader re-acquires once that one is gone.
+func TestLeaderElection(t *testing.T) {
+	d, leader, _ := setup(t)
+	follower := New(d, leader.Log)
+	t.Cleanup(follower.Close)
+	chain(t, d, 1)
+	adm := admin(t)
+	if r, err := leader.Once(context.Background()); err != nil || !r.Ran {
+		t.Fatalf("leader: %+v %v", r, err)
+	}
+	for range 2 {
+		if r, err := follower.Once(context.Background()); err != nil || r.Ran {
+			t.Fatalf("follower ran while the leader lives: %+v %v", r, err)
+		}
+		if r, err := leader.Once(context.Background()); err != nil || !r.Ran {
+			t.Fatalf("leader lost the lead: %+v %v", r, err)
+		}
+	}
+	pids := lockHolders(t, adm)
+	if len(pids) != 1 {
+		t.Fatalf("lock holders %v", pids)
+	}
+	if _, err := adm.Exec(`SELECT pg_terminate_backend($1)`, pids[0]); err != nil { // the leader's connection drops
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(lockHolders(t, adm)) != 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if r, err := follower.Once(context.Background()); err != nil || !r.Ran {
+		t.Fatalf("follower didn't take over: %+v %v", r, err)
+	}
+	if r, err := leader.Once(context.Background()); err != nil || r.Ran {
+		t.Errorf("old leader ran beside the new one: %+v %v", r, err)
+	}
+	follower.Close()
+	if r, err := leader.Once(context.Background()); err != nil || !r.Ran {
+		t.Errorf("old leader didn't re-acquire: %+v %v", r, err)
+	}
+}
+
+// Release frees the lock (seen from another session), also when the lock's
+// connection is already dead, and the pool stays usable.
+func TestReleaseFreesTheLock(t *testing.T) {
+	d, _, _ := setup(t)
+	adm := admin(t)
+	l, ok, err := d.TryPlatformLock(context.Background(), lockKey)
+	if err != nil || !ok {
+		t.Fatalf("lock: %v %v", ok, err)
+	}
+	if err := l.Alive(context.Background()); err != nil {
+		t.Fatalf("Alive: %v", err)
+	}
+	l.Release()
+	if pids := lockHolders(t, adm); len(pids) != 0 {
+		t.Errorf("lock still held after Release by %v", pids)
+	}
+	l, ok, err = d.TryPlatformLock(context.Background(), lockKey)
+	if err != nil || !ok {
+		t.Fatalf("lock: %v %v", ok, err)
+	}
+	pids := lockHolders(t, adm)
+	if _, err := adm.Exec(`SELECT pg_terminate_backend($1)`, pids[0]); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := l.Alive(context.Background()); err == nil {
+		t.Error("Alive on a dead connection")
+	}
+	l.Release() // the unlock fails: the connection is discarded, not pooled
+	for range 5 {
+		if err := d.ReadPlatform(context.Background(), false, func(*ent.Tx) error { return nil }); err != nil {
+			t.Fatalf("pool after releasing a dead lock: %v", err)
+		}
+	}
+}
+
+// A run that takes longer than the interval is cut off; only completed runs
+// move the last-success gauge the stall alert watches.
+func TestStuckRunTimesOutAndSuccessIsTimed(t *testing.T) {
+	d, j, _ := setup(t)
+	chain(t, d, 1)
+	j.Interval = 200 * time.Millisecond
+	j.verify = func(ctx context.Context, _ audit.Runner, _ string, _ audit.Head) (audit.Head, audit.Head, error) {
+		<-ctx.Done() // a hung query
+		return audit.Head{}, audit.Head{}, ctx.Err()
+	}
+	metrics.AuditVerifyLastSuccess.Set(0) // a failed run must leave it there
+	before := testutil.ToFloat64(metrics.AuditVerifyLastSuccess)
+	start := time.Now()
+	if _, err := j.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
+		t.Fatalf("stuck run: %v after %v", err, time.Since(start))
+	}
+	if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) != before {
+		t.Error("a stuck run moved the last-success gauge")
+	}
+	j.verify = audit.VerifyAnchored
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastSuccess); got < float64(start.Unix()) {
+		t.Errorf("last success %v, want at least %v", got, start.Unix())
+	}
+}
+
+// An error on one chain that isn't a broken chain (the database) is
+// reported, isn't counted as a verify failure, and a full run it spoiled is
+// retried on the next run.
+func TestFailedFullRunIsRetried(t *testing.T) {
+	d, j, _ := setup(t)
+	a := chain(t, d, 1)
+	boom := errors.New("connection reset")
+	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
+		if c == a {
+			return audit.Head{}, audit.Head{}, boom
+		}
+		return audit.VerifyAnchored(ctx, run, c, from)
+	}
+	failures := testutil.ToFloat64(metrics.AuditVerifyFailures)
+	metrics.AuditVerifyLastSuccess.Set(0)
+	r, err := j.Once(context.Background())
+	if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) != 0 {
+		t.Error("a run with a chain error counted as a success")
+	}
+	if !errors.Is(err, boom) || !strings.Contains(err.Error(), a) || !r.Full || contains(r.Broken, a) {
+		t.Fatalf("run with a chain error = %+v, %v", r, err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyFailures); got != failures+float64(len(r.Broken)) {
+		t.Errorf("verify failures %v, want %v (an outage is no broken chain)", got, failures+float64(len(r.Broken)))
+	}
+	j.verify = audit.VerifyAnchored
+	if r, err := j.Once(context.Background()); err != nil || !r.Full {
+		t.Errorf("the spoiled full run must be retried: %+v %v", r, err)
+	}
+	if r, err := j.Once(context.Background()); err != nil || r.Full {
+		t.Errorf("after a successful full run: %+v %v", r, err)
 	}
 }

@@ -58,6 +58,11 @@ spec:
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
               value: {{ printf ":%s" (include "licenseforge.metricsPort" .) | quote }}
+            # Periodic audit verification (ADR-0036); 0 minutes = off.
+            - name: LICENSEFORGE_AUDIT_VERIFY_INTERVAL
+              value: {{ printf "%dm" (int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict))) | quote }}
+            - name: LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL
+              value: {{ printf "%dh" (int (dig "fullIntervalHours" 168 (.Values.auditVerify | default dict))) | quote }}
             {{- with $sys.host }}
             # SIEM export (ADR-0036): RFC 5424 over TLS, verification always on.
             - name: LICENSEFORGE_AUDIT_SYSLOG_ADDR

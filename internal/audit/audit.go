@@ -245,19 +245,30 @@ var readAnchor = func(ctx context.Context, tx *ent.Tx, tenantID string) (Head, e
 // re-reads the anchor once and restarts if it moved. Truncation of the last
 // entries can't be seen here: compare the head with an exported one.
 func Verify(ctx context.Context, run Runner, tenantID string, from Head) (Head, error) {
-	h, err := verifyChain(ctx, run, tenantID, from)
-	if errors.Is(err, ErrBroken) {
-		metrics.AuditVerifyFailures.Inc()
-	}
+	h, _, err := VerifyAnchored(ctx, run, tenantID, from)
 	return h, err
 }
 
-func verifyChain(ctx context.Context, run Runner, tenantID string, from Head) (Head, error) {
+// VerifyAnchored is Verify that also returns the anchor the verified chain
+// starts from (zero if nothing was pruned), read in the same snapshot as the
+// chain's first page.
+func VerifyAnchored(ctx context.Context, run Runner, tenantID string, from Head) (head, anchor Head, err error) {
+	head, anchor, err = verifyChain(ctx, run, tenantID, from)
+	if errors.Is(err, ErrBroken) {
+		metrics.AuditVerifyFailures.Inc()
+	}
+	return head, anchor, err
+}
+
+func verifyChain(ctx context.Context, run Runner, tenantID string, from Head) (Head, Head, error) {
 	for restarted := false; ; restarted = true {
 		head, anchor, err := walk(ctx, run, tenantID, from)
 		var b boundaryError
 		if !errors.As(err, &b) {
-			return head, err
+			if err != nil {
+				return Head{}, Head{}, err
+			}
+			return head, anchor, nil
 		}
 		var now Head
 		if err := run(ctx, false, func(tx *ent.Tx) error {
@@ -265,10 +276,10 @@ func verifyChain(ctx context.Context, run Runner, tenantID string, from Head) (H
 			now, err = readAnchor(ctx, tx, tenantID)
 			return err
 		}); err != nil {
-			return Head{}, err
+			return Head{}, Head{}, err
 		}
 		if restarted || now.Seq <= anchor.Seq {
-			return Head{}, b.err
+			return Head{}, Head{}, b.err
 		}
 	}
 }

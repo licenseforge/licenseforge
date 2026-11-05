@@ -264,12 +264,22 @@ func (d *DB) WithPlatform(ctx context.Context, fn func(*ent.Tx) error) error {
 	return inTx(ctx, d.platform, nil, fn)
 }
 
+// unlockTimeout bounds Release's unlock; a var so tests can make it fail.
+var unlockTimeout = 10 * time.Second
+
+// SessionLock is a session advisory lock held on a platform-pool connection
+// of its own, for as long as that connection lives (TryPlatformLock).
+type SessionLock struct {
+	conn *sql.Conn
+	key  int64
+}
+
 // TryPlatformLock takes the session advisory lock key on a connection of
 // its own from the platform pool, unless another session holds it (ok
-// false). unlock releases the lock and the connection; a crashed process
-// releases it when its connection closes. For jobs one replica runs at a
-// time (internal/auditverify).
-func (d *DB) TryPlatformLock(ctx context.Context, key int64) (unlock func(), ok bool, err error) {
+// false). The lock lasts until Release, or until the connection drops (a
+// crashed process, a terminated backend): check with Alive. For a job one
+// replica runs (internal/auditverify).
+func (d *DB) TryPlatformLock(ctx context.Context, key int64) (l *SessionLock, ok bool, err error) {
 	conn, err := d.platformDB.Conn(ctx)
 	if err != nil {
 		return nil, false, err
@@ -277,12 +287,28 @@ func (d *DB) TryPlatformLock(ctx context.Context, key int64) (unlock func(), ok 
 	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&ok); err != nil || !ok {
 		return nil, false, errors.Join(err, conn.Close())
 	}
-	return func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, key) // DISCARD ALL on reuse would release it anyway
-		_ = conn.Close()
-	}, true, nil
+	return &SessionLock{conn: conn, key: key}, true, nil
+}
+
+// Alive reports whether the lock is still held: a session advisory lock
+// lasts until it is unlocked or its session ends, so a connection that
+// answers still holds it. An error means the session may be gone: Release,
+// then try again.
+func (l *SessionLock) Alive(ctx context.Context) error {
+	return l.conn.PingContext(ctx)
+}
+
+// Release unlocks and gives the connection back. If the unlock fails, the
+// connection is discarded instead (not pooled while possibly holding the
+// lock): closing the session releases it.
+func (l *SessionLock) Release() {
+	ctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
+	defer cancel()
+	var unlocked bool
+	if err := l.conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock($1)`, l.key).Scan(&unlocked); err != nil || !unlocked {
+		_ = l.conn.Raw(func(any) error { return driver.ErrBadConn }) // database/sql closes a connection that reports ErrBadConn
+	}
+	_ = l.conn.Close()
 }
 
 // ReadPlatform runs fn in a read-only transaction on the platform pool;

@@ -395,7 +395,7 @@
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
                 "control-id": "au-5",
-                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036). The server verifies every chain every 15 minutes, incrementally from its last verified heads and fully weekly, and records the heads in audit.checkpoint entries; the chart's PrometheusRule alerts on write failures, verification failures and export lag.",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036). The server verifies every chain every 15 minutes, incrementally from its last verified heads and fully weekly, and records the heads in audit.checkpoint entries; the chart's PrometheusRule alerts on write failures, verification failures, a stalled verifier (no completed run for two intervals) and export lag.",
                 "props": [
                   {
                     "name": "implementation-status",

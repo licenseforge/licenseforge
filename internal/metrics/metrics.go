@@ -65,6 +65,12 @@ var (
 	AuditWriteFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_audit_write_failures_total", Help: "Audit entries that couldn't be written (their action failed too), by chain.",
 	}, []string{"chain"})
+	// AuditVerifyLastSuccess is when the periodic verification
+	// (internal/auditverify) last completed a run, Unix seconds; 0 on
+	// replicas that never led one. Alert when it stops moving.
+	AuditVerifyLastSuccess = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_audit_verify_last_success_timestamp_seconds", Help: "When the periodic audit verification last completed a run (Unix seconds).",
+	})
 	// AuditVerifyFailures counts chains audit.Verify found broken.
 	AuditVerifyFailures = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "licenseforge_audit_verify_failures_total", Help: "Audit chain verifications that found a broken chain.",
@@ -91,7 +97,7 @@ var (
 func init() {
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
-	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
+	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

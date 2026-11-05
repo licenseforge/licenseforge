@@ -36,15 +36,16 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 ## Audit verification and alerts
 
-ADR-0036. Every `LICENSEFORGE_AUDIT_VERIFY_INTERVAL`, one replica (an advisory lock on the platform pool; the others skip that round) verifies every tenant chain and the platform chain. It starts from the head it verified last, held in its memory only, and from each chain's anchor at start and every `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL`. Each run appends `audit.checkpoint` entries to the platform chain: `details.heads` lists `{tenant_id, seq, hash}` per verified chain (up to 200 per entry; `batch` of `batches`), `details.mode` is `incremental` or `full`, and a broken chain makes the entry's outcome `failure` and is listed in `details.broken`. A broken chain is counted in `licenseforge_audit_verify_failures_total` on every run until it is repaired.
+ADR-0036. One replica leads the verification: the first to take a session advisory lock on the platform pool keeps it, with its database connection, for its lifetime, and checks that connection before each run; the others try again every interval and take over only once the leader's session is gone (pod stopped, connection dropped). Every `LICENSEFORGE_AUDIT_VERIFY_INTERVAL` (Helm `auditVerify.intervalMinutes`) the leader verifies every tenant chain and the platform chain from the head it verified last, held in its memory only, and from each chain's anchor at start and every `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL` (`auditVerify.fullIntervalHours`). A run is cut off after one interval. Each run appends `audit.checkpoint` entries to the platform chain: `details.heads` lists `{tenant_id, seq, hash, anchor: {seq, hash}}` (the anchor is where the chain starts after retention; seq 0 while nothing was pruned), up to 200 per entry (`batch` of `batches`), and `details.mode` is `incremental` or `full`. Incremental runs list only chains whose head moved; full runs list every chain. A broken chain makes the entry's outcome `failure` and is listed in `details.broken`; its head is forgotten, so every following run verifies it from the anchor and counts it in `licenseforge_audit_verify_failures_total` again, until it is repaired. Completed runs set `licenseforge_audit_verify_last_success_timestamp_seconds`.
 
-**Alerts.** With the Prometheus Operator's CRDs present, the chart installs a `PrometheusRule` (`metrics.alerts.*`; set `metrics.alerts.labels` to match your Prometheus's rule selector, and enable `metrics.serviceMonitor`):
+**Alerts.** With the Prometheus Operator's CRDs present and `metrics.serviceMonitor.enabled` on, the chart installs a `PrometheusRule` (`metrics.alerts.*`; set `metrics.alerts.labels` to match your Prometheus's rule selector). Without the ServiceMonitor nothing would scrape the metrics the rules watch, so they aren't installed and the install notes say so; then write equivalent rules for your monitoring:
 
 | Alert | Fires when | Severity |
 |---|---|---|
 | `LicenseForgeAuditWriteFailures` | an audit entry couldn't be written (its action was rolled back) | critical |
 | `LicenseForgeAuditExportLag` | a sink is more than `metrics.alerts.exportLagSeconds` (15 min) behind, for 5 min | warning |
 | `LicenseForgeAuditVerifyFailed` | a chain didn't verify in the last hour | critical |
+| `LicenseForgeAuditVerifyStalled` | no verification run completed for two intervals, or the metric is missing (a stuck, failing or absent verifier) | critical |
 | `LicenseForgeRateLimitTableFull` | the per-address rate limit let new addresses through untracked | warning |
 
 Route the critical alerts to whoever is responsible for the audit log (AU-5): the security or compliance owner, not only on-call operations.

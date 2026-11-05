@@ -80,14 +80,21 @@ jobs:
           if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi
           # The serving pods never get the owner login (ADR-0009).
           if helm template t . $s --show-only templates/deployment.yaml | grep -qE 'owner-database-url|OWNER_DATABASE_URL'; then echo "owner login in Deployment"; exit 1; fi
-          # Alert rules (ADR-0036): rendered only with the Prometheus Operator's CRD, unless turned off.
-          crd="--api-versions monitoring.coreos.com/v1/PrometheusRule"
+          # Alert rules (ADR-0036): rendered only with the Prometheus Operator's CRD and the
+          # chart's ServiceMonitor (else nothing scrapes what they watch), unless turned off.
+          crd="--api-versions monitoring.coreos.com/v1/PrometheusRule --set metrics.serviceMonitor.enabled=true"
           rules=$(helm template t . $s $crd --show-only templates/prometheusrule.yaml)
-          for alert in LicenseForgeAuditWriteFailures LicenseForgeAuditExportLag LicenseForgeAuditVerifyFailed LicenseForgeRateLimitTableFull; do
+          for alert in LicenseForgeAuditWriteFailures LicenseForgeAuditExportLag LicenseForgeAuditVerifyFailed LicenseForgeAuditVerifyStalled LicenseForgeRateLimitTableFull; do
             grep -qF "alert: $alert" <<<"$rules" || { echo "missing alert $alert"; exit 1; }
           done
+          grep -qF ' > 1800 or absent(licenseforge_audit_verify_last_success_timestamp_seconds' <<<"$rules" || { echo "stall alert not at 2x the interval"; exit 1; }
+          if helm template t . $s $crd --set auditVerify.intervalMinutes=0 | grep -qF LicenseForgeAuditVerifyStalled; then echo "stall alert with verification off"; exit 1; fi
           if helm template t . $s | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule without the CRD"; exit 1; fi
+          if helm template t . $s --api-versions monitoring.coreos.com/v1/PrometheusRule | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule without the ServiceMonitor"; exit 1; fi
           if helm template t . $s $crd --set metrics.alerts.enabled=false | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule while off"; exit 1; fi
+          helm install --dry-run=client t . $s | grep -qF 'audit alert rules (PrometheusRule) are not installed' || { echo "no NOTES about the alerts"; exit 1; }
+          if helm install --dry-run=client t . $s --set metrics.serviceMonitor.enabled=true | grep -qF 'are not installed'; then echo "NOTES warn with the ServiceMonitor on"; exit 1; fi
+          helm template t . $s --set auditVerify.intervalMinutes=30 --show-only templates/deployment.yaml | grep -A1 LICENSEFORGE_AUDIT_VERIFY_INTERVAL | grep -qF 'value: "30m"' || { echo "verify interval not rendered"; exit 1; }
           # Metrics: own port, env and Service port; ingress on it only from the scrapers.
           d=$(helm template t . $s --set metrics.port=9100 --show-only templates/deployment.yaml --show-only templates/service.yaml)
           for want in 'containerPort: 9100' 'value: ":9100"' 'targetPort: metrics' 'name: t-licenseforge-metrics'; do grep -qF -- "$want" <<<"$d" || { echo "metrics: missing $want"; exit 1; }; done
