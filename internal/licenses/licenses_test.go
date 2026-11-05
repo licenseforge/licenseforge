@@ -886,7 +886,7 @@ func TestArchivedProduct(t *testing.T) {
 	if _, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), f.req(f.a)); !errors.As(err, &inv) || strings.Contains(inv.Message, "archived") {
 		t.Errorf("hidden archived product: %v", err)
 	}
-	for _, step := range []func(context.Context, authz.Principal, string) (*ent.License, error){f.s.Suspend, f.s.Reinstate, f.s.Revoke} {
+	for _, step := range []func(context.Context, authz.Principal, string) (Changed, error){f.s.Suspend, f.s.Reinstate, f.s.Revoke} {
 		if _, err := step(ctx, mgr, existing.License.ID); err != nil {
 			t.Errorf("transition on an archived product's license: %v", err)
 		}
