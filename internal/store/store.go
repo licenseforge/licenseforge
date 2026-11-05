@@ -206,7 +206,20 @@ func (d *DB) WithTenant(ctx context.Context, tenantID string, fn func(*ent.Tx) e
 	if tenantID == "" {
 		return errors.New("store: empty tenant ID")
 	}
-	return inTx(ctx, d.tenant, func(tx *ent.Tx) error {
+	return d.tenantTx(ctx, tenantID, nil, fn)
+}
+
+// ReadTenant runs fn in a read-only transaction scoped like WithTenant;
+// snapshot makes it REPEATABLE READ (audit.Verify reads with it).
+func (d *DB) ReadTenant(ctx context.Context, tenantID string, snapshot bool, fn func(*ent.Tx) error) error {
+	if tenantID == "" {
+		return errors.New("store: empty tenant ID")
+	}
+	return d.tenantTx(ctx, tenantID, readOpts(snapshot), fn)
+}
+
+func (d *DB) tenantTx(ctx context.Context, tenantID string, opts *sql.TxOptions, fn func(*ent.Tx) error) error {
+	return inTx(ctx, d.tenant, opts, func(tx *ent.Tx) error {
 		// Transaction-local: can't leak to the next user of the pooled connection.
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
 			return err
@@ -219,7 +232,22 @@ func (d *DB) WithTenant(ctx context.Context, tenantID string, fn func(*ent.Tx) e
 // platform operations such as creating tenants (ADR-0019), never for requests
 // on behalf of a tenant.
 func (d *DB) WithPlatform(ctx context.Context, fn func(*ent.Tx) error) error {
-	return inTx(ctx, d.platform, fn)
+	return inTx(ctx, d.platform, nil, fn)
+}
+
+// ReadPlatform runs fn in a read-only transaction on the platform pool;
+// snapshot makes it REPEATABLE READ. It is an audit.Verify Runner for any
+// chain.
+func (d *DB) ReadPlatform(ctx context.Context, snapshot bool, fn func(*ent.Tx) error) error {
+	return inTx(ctx, d.platform, readOpts(snapshot), fn)
+}
+
+func readOpts(snapshot bool) *sql.TxOptions {
+	o := &sql.TxOptions{ReadOnly: true}
+	if snapshot {
+		o.Isolation = sql.LevelRepeatableRead
+	}
+	return o
 }
 
 // WithIdentity runs fn on the identity pool, the login path (ADR-0029): it
@@ -228,7 +256,7 @@ func (d *DB) WithPlatform(ctx context.Context, fn func(*ent.Tx) error) error {
 // login work); the database lets a membership and its audit entry be written
 // only there.
 func (d *DB) WithIdentity(ctx context.Context, tenantID string, fn func(*ent.Tx) error) error {
-	return inTx(ctx, d.identity, func(tx *ent.Tx) error {
+	return inTx(ctx, d.identity, nil, func(tx *ent.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
 			return err
 		}
@@ -236,8 +264,8 @@ func (d *DB) WithIdentity(ctx context.Context, tenantID string, fn func(*ent.Tx)
 	})
 }
 
-func inTx(ctx context.Context, client *ent.Client, fn func(*ent.Tx) error) (err error) {
-	tx, err := client.Tx(ctx)
+func inTx(ctx context.Context, client *ent.Client, opts *sql.TxOptions, fn func(*ent.Tx) error) (err error) {
+	tx, err := client.BeginTx(ctx, opts)
 	if err != nil {
 		return err
 	}

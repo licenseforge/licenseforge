@@ -156,10 +156,12 @@ func (f fixture) tx(t *testing.T, tenant string, fn func(tx *ent.Tx) error) {
 func (f fixture) lastEvent(t *testing.T, tenant string) *ent.AuditEvent {
 	t.Helper()
 	var e *ent.AuditEvent
+	if _, err := audit.Verify(context.Background(), func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		return f.db.ReadTenant(ctx, tenant, snap, fn)
+	}, tenant, audit.Head{}); err != nil {
+		t.Fatal(err)
+	}
 	f.tx(t, tenant, func(tx *ent.Tx) error {
-		if _, err := audit.Verify(context.Background(), tx, tenant); err != nil {
-			return err
-		}
 		var err error
 		e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
 		return err

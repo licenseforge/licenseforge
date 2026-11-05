@@ -60,6 +60,16 @@ var (
 		Name: "licenseforge_unknown_license_keys_total", Help: "Requests with a license key that doesn't exist (not audited, ADR-0034).",
 	})
 
+	// AuditWriteFailures counts audit.Record failures by chain ("tenant" or
+	// "platform"); each failed the action it records (AU-5, ADR-0036).
+	AuditWriteFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "licenseforge_audit_write_failures_total", Help: "Audit entries that couldn't be written (their action failed too), by chain.",
+	}, []string{"chain"})
+	// AuditVerifyFailures counts chains audit.Verify found broken.
+	AuditVerifyFailures = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "licenseforge_audit_verify_failures_total", Help: "Audit chain verifications that found a broken chain.",
+	})
+
 	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_http_requests_total", Help: "HTTP requests by route pattern and status class.",
 	}, []string{"route", "code"})
@@ -70,7 +80,9 @@ var (
 )
 
 func init() {
-	Registry.MustRegister(UnknownLicenseKeys, requests, duration, poolCollector{},
+	AuditWriteFailures.WithLabelValues("tenant")
+	AuditWriteFailures.WithLabelValues("platform")
+	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

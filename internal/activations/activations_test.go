@@ -122,6 +122,13 @@ func setup(t *testing.T) fixture {
 	return f
 }
 
+// readTenant is an audit.Verify runner for tenant's chain.
+func (f fixture) readTenant(tenant string) audit.Runner {
+	return func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		return f.db.ReadTenant(ctx, tenant, snap, fn)
+	}
+}
+
 func (f fixture) tx(t *testing.T, tenant string, fn func(*ent.Tx) error) {
 	t.Helper()
 	if err := f.db.WithTenant(context.Background(), tenant, fn); err != nil {
@@ -173,10 +180,10 @@ func (f fixture) activations(t *testing.T, licenseID string) []*ent.Activation {
 func (f fixture) events(t *testing.T) []*ent.AuditEvent {
 	t.Helper()
 	var es []*ent.AuditEvent
+	if _, err := audit.Verify(context.Background(), f.readTenant(f.a), f.a, audit.Head{}); err != nil {
+		t.Fatal(err)
+	}
 	f.tx(t, f.a, func(tx *ent.Tx) error {
-		if _, err := audit.Verify(context.Background(), tx, f.a); err != nil {
-			return err
-		}
 		var err error
 		es, err = tx.AuditEvent.Query().Order(ent.Asc(auditevent.FieldSeq)).All(context.Background())
 		return err

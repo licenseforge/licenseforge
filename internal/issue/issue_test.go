@@ -135,10 +135,12 @@ var all = authz.Scope{All: true}
 func (f fixture) lastEvent(t *testing.T) *ent.AuditEvent {
 	t.Helper()
 	var e *ent.AuditEvent
+	if _, err := audit.Verify(context.Background(), func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		return f.db.ReadTenant(ctx, f.tenant, snap, fn)
+	}, f.tenant, audit.Head{}); err != nil {
+		t.Fatal(err)
+	}
 	err := f.db.WithTenant(context.Background(), f.tenant, func(tx *ent.Tx) error {
-		if _, err := audit.Verify(context.Background(), tx, f.tenant); err != nil {
-			return err
-		}
 		var err error
 		e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
 		if ent.IsNotFound(err) {

@@ -88,13 +88,13 @@ func verify(d *store.DB, tenantID string) error {
 }
 
 func verifyHead(d *store.DB, tenantID string) (Head, error) {
-	var h Head
-	err := d.WithTenant(context.Background(), tenantID, func(tx *ent.Tx) error {
-		var err error
-		h, err = Verify(context.Background(), tx, tenantID)
-		return err
-	})
-	return h, err
+	return Verify(context.Background(), tenantRunner(d, tenantID), tenantID, Head{})
+}
+
+func tenantRunner(d *store.DB, tenantID string) Runner {
+	return func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		return d.ReadTenant(ctx, tenantID, snap, fn)
+	}
 }
 
 func TestChain(t *testing.T) {
@@ -442,12 +442,7 @@ func TestPlatformChain(t *testing.T) {
 	if second.Seq != first.Seq+1 || !bytes.Equal(second.PrevHash, first.Hash) {
 		t.Errorf("platform chain not linked: %+v %+v", first, second)
 	}
-	var head Head
-	if err := onPlatform(func(tx *ent.Tx) error {
-		var err error
-		head, err = Verify(ctx, tx, PlatformTenant)
-		return err
-	}); err != nil || head.Seq != second.Seq || !bytes.Equal(head.Hash, second.Hash) {
+	if head, err := Verify(ctx, d.ReadPlatform, PlatformTenant, Head{}); err != nil || head.Seq != second.Seq || !bytes.Equal(head.Hash, second.Hash) {
 		t.Errorf("Verify platform chain: %+v, %v", head, err)
 	}
 
