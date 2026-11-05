@@ -39,6 +39,7 @@ function useNames(tenant: string) {
     products: products.data?.items ?? [],
     customers: all, // the filter and names keep archived ones
     issuable: all.filter((c) => !c.archived_at), // archived customers get no new licenses
+    issuableProducts: (products.data?.items ?? []).filter((p) => !p.archived_at), // nor archived products (ADR-0015)
     complete: (products.data?.complete ?? true) && (customers.data?.complete ?? true),
     productName,
     customerName,
@@ -307,7 +308,7 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
     <Modal title={t("licenses.issue")} onClose={close}>
       {!names.complete && <p className="mb-3 text-sm">{t("licenses.listsIncomplete")}</p>}
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
-        {select("product_id", t("licenses.col.product"), names.products)}
+        {select("product_id", t("licenses.col.product"), names.issuableProducts)}
         {names.issuable.length > 0 ? (
           select("customer_id", t("licenses.col.customer"), names.issuable)
         ) : (

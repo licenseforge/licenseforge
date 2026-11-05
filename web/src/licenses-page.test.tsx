@@ -28,6 +28,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const acme = { id: "cus_1", name: "Acme", email: null, external_refs: {}, archived_at: null, created_at: "" };
 const names = {
   products: [{ id: "prd_1", slug: "db", name: "DB", archived_at: null, created_at: "" }],
+  issuableProducts: [{ id: "prd_1", slug: "db", name: "DB", archived_at: null, created_at: "" }],
   customers: [acme],
   issuable: [acme],
   complete: true,
@@ -241,7 +242,7 @@ it("the suspend confirmation mentions air-gapped activation files", async () => 
 });
 
 describe("the licenses page", () => {
-  async function page(role: string, opts: { customers?: object[]; endlessCustomers?: boolean } = {}) {
+  async function page(role: string, opts: { customers?: object[]; endlessCustomers?: boolean; products?: object[] } = {}) {
     const lists: URL[] = [];
     vi.stubGlobal(
       "fetch",
@@ -253,7 +254,7 @@ describe("the licenses page", () => {
           lists.push(u);
           return json({ items: [license] });
         }
-        if (u.pathname.endsWith("/products")) return json({ items: names.products });
+        if (u.pathname.endsWith("/products")) return json({ items: opts.products ?? names.products });
         if (u.pathname.endsWith("/customers")) return json({ items: opts.customers ?? [acme], ...(opts.endlessCustomers ? { next_cursor: "more" } : {}) });
         return json({ items: [] });
       }),
@@ -278,6 +279,15 @@ describe("the licenses page", () => {
     await pick("");
     await vi.waitFor(() => expect(lists.at(-1)!.searchParams.has("product_id")).toBe(false));
     expect([...lists.at(-1)!.searchParams.keys()]).toEqual([]);
+  });
+
+  it("the issue picker leaves out archived products; the filter keeps them", async () => {
+    const { el, button } = await page("manager", { products: [names.products[0]!, { id: "prd_old", slug: "old", name: "Old Product", archived_at: "2026-01-01T00:00:00Z", created_at: "" }] });
+    await act(async () => button("Issue license")!.click());
+    const picker = [...el.querySelectorAll('dialog select[name="product_id"] option')].map((o) => o.textContent);
+    expect(picker).toContain("DB");
+    expect(picker).not.toContain("Old Product");
+    expect([...el.querySelectorAll("main select option")].map((o) => o.textContent)).toContain("Old Product");
   });
 
   it("the issue picker leaves out archived customers the page loaded", async () => {

@@ -4,6 +4,7 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { fieldErrors } from "@/api/client";
 import {
   archiveCustomer,
+  archiveProduct,
   canCreateProducts,
   canRenameProducts,
   canWriteCustomers,
@@ -87,7 +88,7 @@ export function ProductsPage() {
   const { slug } = useParams({ from: "/app/t/$slug/products" });
   const caller = useCaller(slug);
   const list = useInfiniteQuery(productsQuery(slug));
-  const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "rename"; product: Product } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "rename" | "archive"; product: Product } | null>(null);
   const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <>
@@ -106,7 +107,8 @@ export function ProductsPage() {
                 <th scope="col" className={th}>{t("tokens.col.name")}</th>
                 <th scope="col" className={th}>{t("products.col.slug")}</th>
                 <th scope="col" className={th}>{t("products.col.created")}</th>
-                <th scope="col" className={th}><span className="sr-only">{t("products.rename")}</span></th>
+                <th scope="col" className={th}>{t("tokens.col.status")}</th>
+                <th scope="col" className={th}><span className="sr-only">{t("customers.actions")}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -115,10 +117,19 @@ export function ProductsPage() {
                   <td className={`${td} font-medium`}>{p.name}</td>
                   <td className={`${td} font-mono text-xs`}>{p.slug}</td>
                   <td className={td}>{date.format(new Date(p.created_at))}</td>
-                  <td className={`${td} text-right`}>
+                  <td className={td}>
+                    {p.archived_at ? t("products.archivedOn", { date: date.format(new Date(p.archived_at)) }) : t("tokens.status.active")}
+                  </td>
+                  <td className={`${td} whitespace-nowrap text-right`}>
                     {canRenameProducts(caller) && (
                       <Button variant="ghost" onClick={() => setDialog({ kind: "rename", product: p })}>
                         {t("products.rename")}
+                      </Button>
+                    )}
+                    {/* catalog:write on the product, as rename; archiving is one-way */}
+                    {canRenameProducts(caller) && !p.archived_at && (
+                      <Button variant="ghost" onClick={() => setDialog({ kind: "archive", product: p })}>
+                        {t("products.archive")}
                       </Button>
                     )}
                   </td>
@@ -133,7 +144,11 @@ export function ProductsPage() {
           {t("tokens.more")}
         </Button>
       )}
-      {dialog && <ProductDialog tenant={slug} product={dialog.kind === "rename" ? dialog.product : null} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "archive" ? (
+        <ArchiveProductDialog tenant={slug} product={dialog.product} onClose={() => setDialog(null)} />
+      ) : dialog ? (
+        <ProductDialog tenant={slug} product={dialog.kind === "rename" ? dialog.product : null} onClose={() => setDialog(null)} />
+      ) : null}
     </>
   );
 }
@@ -309,6 +324,28 @@ function ArchiveDialog({ tenant, customer, onClose }: { tenant: string; customer
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>{t("tokens.cancel")}</Button>
         <Button disabled={archive.isPending} onClick={() => archive.mutate()}>{t("customers.archive")}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+export function ArchiveProductDialog({ tenant, product, onClose }: { tenant: string; product: Product; onClose: () => void }) {
+  const qc = useQueryClient();
+  const archive = useMutation({
+    mutationFn: () => archiveProduct(tenant, product.id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
+      await qc.invalidateQueries({ queryKey: ["products-all", tenant] }); // the issue picker
+      onClose();
+    },
+  });
+  return (
+    <Modal title={t("products.archiveTitle", { name: product.name })} onClose={onClose}>
+      <p className="text-sm">{t("products.archiveBody")}</p>
+      {archive.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(archive.error)}</p>}
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>{t("tokens.cancel")}</Button>
+        <Button disabled={archive.isPending} onClick={() => archive.mutate()}>{t("products.archive")}</Button>
       </div>
     </Modal>
   );
