@@ -72,6 +72,33 @@ func (_u *TenantUpdate) SetNillableName(v *string) *TenantUpdate {
 	return _u
 }
 
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_u *TenantUpdate) SetAuditRetentionDays(v int) *TenantUpdate {
+	_u.mutation.ResetAuditRetentionDays()
+	_u.mutation.SetAuditRetentionDays(v)
+	return _u
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_u *TenantUpdate) SetNillableAuditRetentionDays(v *int) *TenantUpdate {
+	if v != nil {
+		_u.SetAuditRetentionDays(*v)
+	}
+	return _u
+}
+
+// AddAuditRetentionDays adds value to the "audit_retention_days" field.
+func (_u *TenantUpdate) AddAuditRetentionDays(v int) *TenantUpdate {
+	_u.mutation.AddAuditRetentionDays(v)
+	return _u
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (_u *TenantUpdate) ClearAuditRetentionDays() *TenantUpdate {
+	_u.mutation.ClearAuditRetentionDays()
+	return _u
+}
+
 // AddProductIDs adds the "products" edge to the Product entity by IDs.
 func (_u *TenantUpdate) AddProductIDs(ids ...string) *TenantUpdate {
 	_u.mutation.AddProductIDs(ids...)
@@ -508,6 +535,15 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAuditRetentionDays(); ok {
+		_spec.AddField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if _u.mutation.AuditRetentionDaysCleared() {
+		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1013,6 +1049,33 @@ func (_u *TenantUpdateOne) SetNillableName(v *string) *TenantUpdateOne {
 	return _u
 }
 
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_u *TenantUpdateOne) SetAuditRetentionDays(v int) *TenantUpdateOne {
+	_u.mutation.ResetAuditRetentionDays()
+	_u.mutation.SetAuditRetentionDays(v)
+	return _u
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_u *TenantUpdateOne) SetNillableAuditRetentionDays(v *int) *TenantUpdateOne {
+	if v != nil {
+		_u.SetAuditRetentionDays(*v)
+	}
+	return _u
+}
+
+// AddAuditRetentionDays adds value to the "audit_retention_days" field.
+func (_u *TenantUpdateOne) AddAuditRetentionDays(v int) *TenantUpdateOne {
+	_u.mutation.AddAuditRetentionDays(v)
+	return _u
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (_u *TenantUpdateOne) ClearAuditRetentionDays() *TenantUpdateOne {
+	_u.mutation.ClearAuditRetentionDays()
+	return _u
+}
+
 // AddProductIDs adds the "products" edge to the Product entity by IDs.
 func (_u *TenantUpdateOne) AddProductIDs(ids ...string) *TenantUpdateOne {
 	_u.mutation.AddProductIDs(ids...)
@@ -1479,6 +1542,15 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAuditRetentionDays(); ok {
+		_spec.AddField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if _u.mutation.AuditRetentionDaysCleared() {
+		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{

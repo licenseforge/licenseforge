@@ -36,7 +36,7 @@ const names = {
 };
 const license: License = {
   id: "lic_1", product_id: "prd_1", plan_id: "pln_1", plan_slug: "pro", customer_id: "cus_1", type: "paid", status: "active",
-  key_hint: "ABC123", expiry_basis: "from_issue", expires_at: null, max_activations: 3,
+  key_hint: "ABC123", expiry_basis: "from_issue", expires_at: null, max_activations: 3, active_activations: 0,
   entitlements: { features: ["sso"], limits: { seats: 10, nodes: -1 } }, external_refs: {},
   issued_at: "2026-11-01T00:00:00Z", suspended_at: null, revoked_at: null, created_at: "2026-11-01T00:00:00Z",
 };

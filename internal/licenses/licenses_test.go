@@ -522,7 +522,7 @@ func TestStateMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := got.License.ID
-	type op func(context.Context, authz.Principal, string) (*ent.License, error)
+	type op func(context.Context, authz.Principal, string) (Changed, error)
 	steps := []struct {
 		name   string
 		op     op
@@ -546,7 +546,7 @@ func TestStateMachine(t *testing.T) {
 		e := f.lastEvent(t, f.a.id)
 		row := f.get(t, f.a.id, id)
 		if st.want == "" {
-			if !errors.Is(err, ErrState) || l != nil || e.Outcome != auditevent.OutcomeFailure || row.Status != status {
+			if !errors.Is(err, ErrState) || l.License != nil || e.Outcome != auditevent.OutcomeFailure || row.Status != status {
 				t.Errorf("%s: err %v, license %v, event %+v, status %s", st.name, err, l, e, row.Status)
 			}
 		} else {
@@ -604,7 +604,7 @@ func TestTransitionRefusals(t *testing.T) {
 		{"viewer, unknown license", as(f.a.id, authz.Viewer, all), "lic_00000000000000000000000000", ErrNotFound, auditevent.OutcomeFailure, false},
 		{"sdk token", authz.Principal{Kind: authz.Token, ID: "tok_x", TenantID: f.a.id, Role: authz.SDK, Scope: all}, mine.License.ID, ErrNotFound, auditevent.OutcomeDenied, true},
 	} {
-		for name, op := range map[string]func(context.Context, authz.Principal, string) (*ent.License, error){
+		for name, op := range map[string]func(context.Context, authz.Principal, string) (Changed, error){
 			"suspend": f.s.Suspend, "reinstate": f.s.Reinstate, "revoke": f.s.Revoke,
 		} {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
@@ -886,7 +886,7 @@ func TestArchivedProduct(t *testing.T) {
 	if _, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), f.req(f.a)); !errors.As(err, &inv) || strings.Contains(inv.Message, "archived") {
 		t.Errorf("hidden archived product: %v", err)
 	}
-	for _, step := range []func(context.Context, authz.Principal, string) (*ent.License, error){f.s.Suspend, f.s.Reinstate, f.s.Revoke} {
+	for _, step := range []func(context.Context, authz.Principal, string) (Changed, error){f.s.Suspend, f.s.Reinstate, f.s.Revoke} {
 		if _, err := step(ctx, mgr, existing.License.ID); err != nil {
 			t.Errorf("transition on an archived product's license: %v", err)
 		}

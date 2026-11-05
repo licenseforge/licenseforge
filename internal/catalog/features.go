@@ -119,7 +119,14 @@ func activeProduct(ctx context.Context, tx *ent.Tx, id string) error {
 	if !ids.Valid("prd", id) {
 		return errNoProduct
 	}
-	p, err := tx.Product.Query().Where(product.ID(id)).ForShare().Only(ctx)
+	lock := func() (*ent.Product, error) { return tx.Product.Query().Where(product.ID(id)).ForShare().Only(ctx) }
+	p, err := lock()
+	if ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it archived.
+		p, err = lock()
+	}
 	if ent.IsNotFound(err) {
 		return errNoProduct
 	}

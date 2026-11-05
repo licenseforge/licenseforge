@@ -229,7 +229,8 @@ func TestFeatureCreateWaitsForArchive(t *testing.T) {
 	}
 	select {
 	case err := <-done:
-		if field(err) != "/product_id" {
+		var inv *InvalidError
+		if !errors.As(err, &inv) || inv.Field != "/product_id" || !strings.Contains(inv.Message, "archived") {
 			t.Errorf("create after a concurrent archive: %v", err)
 		}
 	case <-time.After(10 * time.Second):

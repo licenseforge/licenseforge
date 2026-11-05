@@ -118,11 +118,20 @@ func lookup(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Product
 	if !ids.Valid("prd", id) || authz.Require(ctx, authz.CatalogRead, id) != nil {
 		return nil, ErrNotFound
 	}
-	q := tx.Product.Query().Where(product.ID(id))
-	if lock {
-		q.ForUpdate()
+	q := func() (*ent.Product, error) {
+		q := tx.Product.Query().Where(product.ID(id))
+		if lock {
+			q.ForUpdate()
+		}
+		return q.Only(ctx)
 	}
-	p, err := q.Only(ctx)
+	p, err := q()
+	if lock && ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it.
+		p, err = q()
+	}
 	if ent.IsNotFound(err) {
 		return nil, ErrNotFound
 	}

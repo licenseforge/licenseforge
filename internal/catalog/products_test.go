@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"strings"
@@ -241,5 +242,62 @@ func TestProductArchive(t *testing.T) {
 	// Still readable and renamable.
 	if _, err := f.s.Update(admin, db.ID, Patch{Name: ptr("Old DB")}); err != nil {
 		t.Errorf("rename archived: %v", err)
+	}
+}
+
+// An archive or rename that waits for a concurrent archive sees the
+// archived product (it looks again after archive_once filters the row it
+// waited for): a second archive is ErrState, a rename succeeds.
+func TestChangeWaitsForArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin := as(f.a, authz.Admin)
+	adminDB, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminDB.Close() }()
+	for name, c := range map[string]struct {
+		slug string
+		op   func(id string) error
+		want error
+	}{
+		"archive": {"a", func(id string) error { _, err := f.s.Archive(admin, id); return err }, ErrState},
+		"rename":  {"r", func(id string) error { _, err := f.s.Update(admin, id, Patch{Name: ptr("Renamed")}); return err }, nil},
+	} {
+		p, err := f.s.Create(admin, c.slug, "P")
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`, p.ID); err != nil {
+				return err
+			}
+			go func() { done <- c.op(p.ID) }()
+			for i := 0; ; i++ {
+				var n int
+				if err := adminDB.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+					return err
+				}
+				if n > 0 {
+					return nil
+				}
+				if i == 100 {
+					return errors.New("never waited")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+				t.Errorf("%s after a concurrent archive: %v, want %v", name, err, c.want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s didn't finish", name)
+		}
 	}
 }
