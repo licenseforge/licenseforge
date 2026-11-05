@@ -99,10 +99,12 @@ func lookupFeature(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.
 		return q.Only(ctx)
 	}
 	f, err := q()
-	if lock && ent.IsNotFound(err) {
+	if lock && (ent.IsNotFound(err) || err == nil && authz.Require(ctx, authz.CatalogRead, f.ProductID) != nil) {
 		// Locked after waiting for a concurrent archive, the row is rechecked
 		// as its newer version, which archive_once filters (its subquery reads
-		// this statement's snapshot): a second statement sees it.
+		// this statement's snapshot): a second statement sees it. Out-of-scope
+		// rows take the second statement too, so missing and hidden do the
+		// same work.
 		f, err = q()
 	}
 	if ent.IsNotFound(err) {
