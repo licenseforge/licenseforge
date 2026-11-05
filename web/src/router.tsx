@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
+import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect, type RouterHistory } from "@tanstack/react-router";
 import { requireSession } from "@/api/session";
 import { tenantsQuery } from "@/api/tenants";
 import { AppShell } from "@/app-shell";
@@ -50,8 +50,8 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, tokensRoute, membersRoute])]),
 ]);
 
-export function createAppRouter(queryClient: QueryClient) {
-  return createRouter({ routeTree, context: { queryClient } });
+export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
+  return createRouter({ routeTree, context: { queryClient }, history });
 }
 
 declare module "@tanstack/react-router" {
