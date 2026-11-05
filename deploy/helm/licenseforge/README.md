@@ -95,7 +95,7 @@ URL, or without a port.
   `auditRetention.secret` (a Secret with `retention-database-url`, the
   `licenseforge_pruner` login) to run `licenseforge audit prune` on
   `auditRetention.schedule` (`concurrencyPolicy: Forbid`). Tenant owners set
-  their own retention (at least 365 days); `auditRetention.platformDays` sets
+  their own retention (365 to 36,500 days); `auditRetention.platformDays` sets
   the platform chain's (empty keeps everything). Nothing a registered SIEM
   sink hasn't received is pruned.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),

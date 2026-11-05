@@ -116,7 +116,7 @@ jobs:
           helm template t . $s $r --show-only templates/networkpolicy.yaml | grep -qF 'name: t-licenseforge-audit-prune' || { echo "no audit prune NetworkPolicy"; exit 1; }
           if helm template t . $s $r --show-only templates/deployment.yaml | grep -q retention; then echo "retention login in the Deployment"; exit 1; fi
           helm template t . $s --set auditRetention=null >/dev/null
-          for bad in auditRetention.platformDays=30 auditRetention.typo=1 'auditRetention.secret='; do
+          for bad in auditRetention.platformDays=30 auditRetention.platformDays=36501 auditRetention.typo=1 'auditRetention.secret='; do
             if helm template t . $s --set auditRetention.enabled=true --set auditRetention.secret=pruner --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           # Values of a release from before oidc.* (reused on upgrade) still render.

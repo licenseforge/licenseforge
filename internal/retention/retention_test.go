@@ -358,7 +358,9 @@ func TestPruneAfterAClockStep(t *testing.T) {
 }
 
 // Two prune runs at once on one chain: the chain's lock serializes them, so
-// there is exactly one cut and the chain verifies.
+// there is exactly one cut and the chain verifies. Without the lock the
+// unique (tenant_id, seq) anchor index would still block a double cut; the
+// test relies on neither run returning an error to catch that.
 func TestConcurrentPrunes(t *testing.T) {
 	f := setup(t)
 	tn := f.tenant(t, days(365))

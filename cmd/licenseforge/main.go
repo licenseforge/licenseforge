@@ -9,7 +9,7 @@
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
-//	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, at least 365; unset = keep everything
+//	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, 365 to 36,500 days; unset = keep everything
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
