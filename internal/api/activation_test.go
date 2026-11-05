@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
+	"licenseforge.io/licenseforge/sdk/go/fingerprint"
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
+	"licenseforge.io/licenseforge/sdk/go/online"
 )
 
 type actFixture struct {
@@ -486,5 +489,52 @@ func TestKeyLimiterReleaseOldWindow(t *testing.T) {
 	l.release("k", cur)
 	if n := l.counts[sha256.Sum256([]byte("k"))]; n != 1 {
 		t.Errorf("count %d after a current release", n)
+	}
+}
+
+// The Go SDK's online client against the real handler: activate, refresh,
+// a license check on the cached lease, deactivate.
+func TestSDKOnlineClient(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	srv := httptest.NewServer(a.srv)
+	defer srv.Close()
+	ctx := context.Background()
+	var kid string
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) (err error) { kid, err = tx.SigningKey.Query().OnlyID(ctx); return }); err != nil {
+		t.Fatal(err)
+	}
+	pk, err := a.keys.Public(ctx, a.a.ID, kid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpHash, err := fingerprint.Hash(a.a.ID, "db", "machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := online.New(online.Config{BaseURL: srv.URL, TenantID: a.a.ID, Product: "db", LicenseKey: is.Key,
+		Keys:        licensefile.KeySet{{KID: pk.KID, Alg: licensefile.AlgEd25519, Key: pk.Key}},
+		Fingerprint: fingerprint.Result{Fingerprint: fpHash, Source: fingerprint.SourceMachineID, Binding: "machine"}, AppVersion: "1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := c.Activate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if claims, st, err := c.Current(); err != nil || st != licensefile.StatusValid || claims.LicenseID != is.License.ID {
+		t.Errorf("Current = %v %v", st, err)
+	}
+	if as := a.activations(t, is.License.ID); len(as) != 1 || as[0].ID != l.ActivationID {
+		t.Errorf("activations %+v", as)
+	}
+	if err := c.Deactivate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Refresh(ctx); !errors.Is(err, online.ErrNotActivated) {
+		t.Errorf("refresh after deactivate: %v", err)
 	}
 }
