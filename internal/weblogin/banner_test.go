@@ -112,7 +112,7 @@ func TestBannerGate(t *testing.T) {
 	if !strings.Contains(f.logs.String(), `reason="banner not acknowledged"`) {
 		t.Error("banner refusal not logged")
 	}
-	// A pre-banner flow cookie (three parts) is refused too.
+	// A flow cookie missing parts is refused too.
 	q = f.start(t)
 	forgeFlowAck(t, f, "\x00drop")
 	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusBadRequest || f.session(t) != "" {
@@ -188,7 +188,7 @@ func forgeFlowAck(t *testing.T, f *fixture, acked string) {
 			continue
 		}
 		parts := strings.Split(c.Value, ".")
-		if len(parts) != 4 {
+		if len(parts) != 6 {
 			t.Fatalf("flow cookie has %d parts", len(parts))
 		}
 		if acked == "\x00drop" {

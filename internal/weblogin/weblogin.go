@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/ratelimit"
@@ -37,7 +39,7 @@ import (
 // Secure, Path=/ and without Domain, so a sibling subdomain can't plant them.
 const (
 	SessionCookie = "__Host-lf_session"
-	flowCookie    = "__Host-lf_login" // state, nonce and PKCE verifier of one login
+	flowCookie    = "__Host-lf_login" // state, nonce, PKCE verifier, banner, step-up level and return path of one login
 	flowTTL       = 10 * time.Minute
 )
 
@@ -215,24 +217,88 @@ func bannerChanged(w http.ResponseWriter, r *http.Request) {
 
 // login starts a login. With a banner configured it needs the banner's ID
 // (?banner=, sent once the user agreed on /login), so no login skips the
-// notice; anything else goes back to /login. The acknowledged ID rides in
-// the flow cookie, so the callback checks and logs the banner this user
-// agreed to, even if another server (other banner) finishes the login.
+// notice; anything else goes back to /login (keeping the step-up
+// parameters). The acknowledged ID rides in the flow cookie, so the
+// callback checks and logs the banner this user agreed to, even if another
+// server (other banner) finishes the login.
+//
+// ?assurance=mfa|phishing_resistant makes it a step-up (ADR-0038): it asks
+// the IdP for a fresh authentication (max_age=0) and the configured
+// acr_values. ?return= is where the callback sends the browser: a
+// same-origin path (safeReturn), "/" by default.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	ack := r.URL.Query().Get("banner")
+	q := r.URL.Query()
+	want := authz.Assurance(q.Get("assurance"))
+	if want != "" && (!want.Valid() || want == authz.AssuranceNone) {
+		h.fail(w, http.StatusBadRequest, "step-up level", nil)
+		return
+	}
+	ret, ok := safeReturn(q.Get("return"))
+	if !ok {
+		h.fail(w, http.StatusBadRequest, "return path", nil)
+		return
+	}
+	ack := q.Get("banner")
 	if !equal(ack, h.bannerID) {
 		if ack == "" {
 			w.Header().Set("Cache-Control", "no-store")
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			loc := "/login"
+			if keep := (url.Values{"assurance": q["assurance"], "return": q["return"]}).Encode(); keep != "" {
+				loc += "?" + keep
+			}
+			http.Redirect(w, r, loc, http.StatusSeeOther)
 			return
 		}
 		bannerChanged(w, r)
 		return
 	}
 	state, nonce, verifier := rand.Text(), rand.Text(), oauth2.GenerateVerifier()
-	setCookie(w, flowCookie, state+"."+nonce+"."+verifier+"."+ack, int(flowTTL.Seconds()))
+	setCookie(w, flowCookie, strings.Join([]string{state, nonce, verifier, ack, string(want), encodeReturn(ret)}, "."), int(flowTTL.Seconds()))
+	opts := []oauth2.AuthCodeOption{oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)}
+	if want != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("max_age", "0"))
+		if acr := h.assure.StepUpACR(want); len(acr) > 0 {
+			opts = append(opts, oauth2.SetAuthURLParam("acr_values", strings.Join(acr, " ")))
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, h.oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), http.StatusFound)
+	http.Redirect(w, r, h.oauth.AuthCodeURL(state, opts...), http.StatusFound)
+}
+
+// returnRE: a path of unreserved characters (RFC 3986) and single slashes.
+// No percent-encoding, backslash, query or fragment, so nothing a browser
+// could resolve to another origin ("//host", "/\host", a scheme) or that
+// hides one behind encoding.
+var returnRE = regexp.MustCompile(`^/([A-Za-z0-9._~-]+/?)*$`)
+
+// safeReturn validates a return path (ADR-0038): "" means "/".
+func safeReturn(p string) (string, bool) {
+	if p == "" {
+		return "/", true
+	}
+	if len(p) > 512 || !returnRE.MatchString(p) {
+		return "", false
+	}
+	return p, true
+}
+
+// encodeReturn puts a return path in the flow cookie, whose separator is
+// "." (allowed in paths).
+func encodeReturn(p string) string { return base64.RawURLEncoding.EncodeToString([]byte(p)) }
+
+// decodeFlow checks the step-up level and return path a flow cookie
+// carries (set by login, so tampering is the only way to fail).
+func decodeFlow(level, ret string) (authz.Assurance, string, bool) {
+	want := authz.Assurance(level)
+	if want != "" && (!want.Valid() || want == authz.AssuranceNone) {
+		return "", "", false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(ret)
+	if err != nil {
+		return "", "", false
+	}
+	p, ok := safeReturn(string(b))
+	return want, p, ok
 }
 
 func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
@@ -287,7 +353,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(c.Value, ".")
-	if len(parts) != 4 || !equal(parts[0], q.Get("state")) {
+	if len(parts) != 6 || !equal(parts[0], q.Get("state")) {
 		h.fail(w, http.StatusBadRequest, "state mismatch", nil)
 		return
 	}
@@ -296,6 +362,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	if !equal(acked, h.bannerID) { // agreed to another banner, or to none
 		h.log.Warn("login failed", "reason", "banner not acknowledged", "banner_id", h.bannerID)
 		bannerChanged(w, r)
+		return
+	}
+	want, ret, ok := decodeFlow(parts[4], parts[5])
+	if !ok {
+		h.fail(w, http.StatusBadRequest, "flow cookie", nil)
 		return
 	}
 	if e := q.Get("error"); e != "" {
@@ -392,7 +463,16 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	setCookie(w, SessionCookie, cookie, int(h.id.SessionMaxAge().Seconds()))
 	metrics.Logins.Inc(metrics.Success)
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// A step-up is judged by what the IdP proved, never by what was asked
+	// (ADR-0038). Short of it, the user is signed in at the proved level
+	// and the dashboard explains, rather than sending them back to the page
+	// that refused them (a loop).
+	if want != "" && !auth.Assurance.Meets(want) {
+		h.log.Warn("step-up not delivered", "user", u.ID, "wanted", want, "got", auth.Assurance)
+		http.Redirect(w, r, "/login?step_up_failed="+string(want), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, ret, http.StatusSeeOther)
 }
 
 // flexBool accepts true/false and "true"/"false": some providers (AWS
