@@ -65,3 +65,20 @@ func TestSessionLockReleaseDiscardsOnFailure(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// The lock's connection uses TCP keepalives, so a dead peer is noticed in
+// about a minute and a half, not after the OS default of hours.
+func TestSessionLockKeepalives(t *testing.T) {
+	d := openDB(t)
+	l, ok, err := d.TryPlatformLock(context.Background(), testLockKey)
+	if err != nil || !ok {
+		t.Fatalf("lock: %v %v", ok, err)
+	}
+	defer l.Release()
+	for name, want := range map[string]string{"tcp_keepalives_idle": "60", "tcp_keepalives_interval": "10"} {
+		var got string
+		if err := l.conn.QueryRowContext(context.Background(), `SELECT setting FROM pg_settings WHERE name = $1`, name).Scan(&got); err != nil || got != want {
+			t.Errorf("%s = %q, %v; want %s", name, got, err, want)
+		}
+	}
+}

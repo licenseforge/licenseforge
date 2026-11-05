@@ -276,8 +276,8 @@ func TestTamperedEntryFiresTheMetric(t *testing.T) {
 	if _, ok := headFor(cs, a); ok {
 		t.Errorf("broken chain listed as verified: %+v", cs)
 	}
-	if h, ok := j.heads[a]; ok {
-		t.Errorf("broken chain keeps a head (%+v): the next run must start from the anchor", h)
+	if h := j.heads[a]; h.Seq != 2 || !j.broken[a] {
+		t.Errorf("broken chain: head %+v, broken %v; want the last good head (seq 2) kept and the chain marked broken", h, j.broken[a])
 	}
 	failures = testutil.ToFloat64(metrics.AuditVerifyFailures)
 	if r, err := j.Once(context.Background()); err != nil || !contains(r.Broken, a) || testutil.ToFloat64(metrics.AuditVerifyFailures) < failures+1 {
@@ -523,11 +523,14 @@ func TestReleaseFreesTheLock(t *testing.T) {
 	}
 }
 
-// A run that takes longer than the interval is cut off; only completed runs
-// move the last-success gauge the stall alert watches.
+// An incremental run that takes longer than the interval is cut off; only
+// verified chains move the gauge the stall alert watches.
 func TestStuckRunTimesOutAndSuccessIsTimed(t *testing.T) {
 	d, j, _ := setup(t)
 	chain(t, d, 1)
+	if _, err := j.Once(context.Background()); err != nil { // the full pass, so the next run is incremental
+		t.Fatal(err)
+	}
 	j.Interval = 200 * time.Millisecond
 	j.verify = func(ctx context.Context, _ audit.Runner, _ string, _ audit.Head) (audit.Head, audit.Head, error) {
 		<-ctx.Done() // a hung query
@@ -565,11 +568,7 @@ func TestFailedFullRunIsRetried(t *testing.T) {
 		return audit.VerifyAnchored(ctx, run, c, from)
 	}
 	failures := testutil.ToFloat64(metrics.AuditVerifyFailures)
-	metrics.AuditVerifyLastSuccess.Set(0)
 	r, err := j.Once(context.Background())
-	if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) != 0 {
-		t.Error("a run with a chain error counted as a success")
-	}
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), a) || !r.Full || contains(r.Broken, a) {
 		t.Fatalf("run with a chain error = %+v, %v", r, err)
 	}
@@ -582,5 +581,182 @@ func TestFailedFullRunIsRetried(t *testing.T) {
 	}
 	if r, err := j.Once(context.Background()); err != nil || r.Full {
 		t.Errorf("after a successful full run: %+v %v", r, err)
+	}
+}
+
+// deleteTail removes a chain's entries from seq on, as someone with the
+// owner login could (truncation can't be seen from the table alone).
+func deleteTail(t *testing.T, owner *sql.DB, tn string, from int) {
+	t.Helper()
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq >= $2`, tn, from); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The reviewer's first scenario: entries removed below the verified head
+// are reported on every run, not once.
+func TestTruncationBelowHeadKeepsCounting(t *testing.T) {
+	d, j, owner := setup(t)
+	a := chain(t, d, 5)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deleteTail(t, owner, a, 4) // the chain now ends at 3, below the verified head 5
+	for i := range 3 {
+		failures := testutil.ToFloat64(metrics.AuditVerifyFailures)
+		r, err := j.Once(context.Background())
+		if err != nil || !contains(r.Broken, a) || testutil.ToFloat64(metrics.AuditVerifyFailures) < failures+1 {
+			t.Fatalf("run %d after the truncation = %+v, %v: must be reported every run", i, r, err)
+		}
+		if h := j.heads[a]; h.Seq != 5 {
+			t.Fatalf("run %d: the last good head moved to %+v", i, h)
+		}
+	}
+}
+
+// The reviewer's second scenario: a truncation just before the weekly full
+// run. The surviving chain verifies from the anchor on its own, so the full
+// run must also check the head it verified before.
+func TestTruncationBeforeFullRunIsReported(t *testing.T) {
+	d, j, owner := setup(t)
+	ck := time.Now()
+	j.now = func() time.Time { return ck }
+	a := chain(t, d, 5)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deleteTail(t, owner, a, 4)
+	ck = ck.Add(j.FullInterval)
+	r, err := j.Once(context.Background())
+	if err != nil || !r.Full || !contains(r.Broken, a) {
+		t.Fatalf("full run after a truncation = %+v, %v: want a broken", r, err)
+	}
+}
+
+// A full run gets more time than an incremental one.
+func TestFullRunGetsALongerLimit(t *testing.T) {
+	d, j, _ := setup(t)
+	chain(t, d, 1)
+	j.Interval = 100 * time.Millisecond
+	j.FullTimeout = 10 * time.Second
+	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
+		if c == audit.PlatformTenant { // one slow chain is enough
+			select {
+			case <-time.After(150 * time.Millisecond):
+			case <-ctx.Done():
+				return audit.Head{}, audit.Head{}, ctx.Err()
+			}
+		}
+		return audit.VerifyAnchored(ctx, run, c, from)
+	}
+	if r, err := j.Once(context.Background()); err != nil || !r.Full {
+		t.Fatalf("full run beyond the interval: %+v, %v (needs the full run's limit)", r, err)
+	}
+	if _, err := j.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("incremental run beyond the interval: %v, want it cut off", err)
+	}
+}
+
+// A full run that runs out of time keeps what it verified: the next run
+// continues the full pass with the remaining chains only (the others resume
+// from their new heads), and records progress meanwhile.
+func TestTimedOutFullRunResumes(t *testing.T) {
+	d, j, _ := setup(t)
+	x := chain(t, d, 1)
+	j.FullTimeout = 300 * time.Millisecond
+	stuck := true
+	froms := map[string]audit.Head{}
+	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
+		froms[c] = from
+		if c == x && stuck {
+			<-ctx.Done()
+			return audit.Head{}, audit.Head{}, ctx.Err()
+		}
+		return audit.VerifyAnchored(ctx, run, c, from)
+	}
+	metrics.AuditVerifyLastSuccess.Set(0)
+	before := platformHead(t, d)
+	r, err := j.Once(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) || !r.Full || r.Verified == 0 {
+		t.Fatalf("first full run = %+v, %v", r, err)
+	}
+	if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) == 0 {
+		t.Error("no progress recorded by the partial run")
+	}
+	if es, _ := checkpoints(t, d, before); len(es) == 0 {
+		t.Error("the partial run wrote no checkpoint")
+	}
+	done := map[string]bool{}
+	for c := range j.heads {
+		if c != x {
+			done[c] = true
+		}
+	}
+	stuck, froms = false, map[string]audit.Head{}
+	r, err = j.Once(context.Background())
+	if err != nil || !r.Full {
+		t.Fatalf("second run = %+v, %v: the full pass must continue", r, err)
+	}
+	if froms[x].Seq != 0 {
+		t.Errorf("the unfinished chain resumed from %+v, want its anchor", froms[x])
+	}
+	for c := range done {
+		if froms[c].Seq == 0 && j.heads[c].Seq > 0 {
+			t.Errorf("chain %s was verified from the anchor again", c)
+		}
+	}
+	if r, err := j.Once(context.Background()); err != nil || r.Full {
+		t.Errorf("after the full pass completed: %+v, %v", r, err)
+	}
+}
+
+// Incremental checkpoints also list a chain whose anchor moved (retention
+// cut it) even though its head didn't.
+func TestIncrementalListsAnchorChange(t *testing.T) {
+	d, j, owner := setup(t)
+	a := chain(t, d, 3)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var first []byte
+	if err := owner.QueryRow(`SELECT hash FROM audit_events WHERE tenant_id = $1 AND seq = 1`, a).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) VALUES ($1, $2, 1, $3, now())`, ids.AuditAnchor(), a, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq = 1`, a); err != nil {
+		t.Fatal(err)
+	}
+	before := platformHead(t, d)
+	if r, err := j.Once(context.Background()); err != nil || r.Full {
+		t.Fatalf("incremental run = %+v, %v", r, err)
+	}
+	_, cs := checkpoints(t, d, before)
+	if h, ok := headFor(cs, a); !ok || h.Seq != 3 || h.Anchor.Seq != 1 {
+		t.Errorf("chain with a moved anchor: %+v %v", h, ok)
+	}
+}
+
+// Run gives up the lead when it stops (shutdown).
+func TestRunReleasesTheLockOnShutdown(t *testing.T) {
+	_, j, _ := setup(t)
+	adm := admin(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- j.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(lockHolders(t, adm)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("Run never took the lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if pids := lockHolders(t, adm); len(pids) != 0 {
+		t.Errorf("lock still held after Run returned: %v", pids)
 	}
 }
