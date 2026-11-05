@@ -91,11 +91,20 @@ func lookupFeature(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.
 	if !ids.Valid("ftr", id) {
 		return nil, ErrNotFound
 	}
-	q := tx.Feature.Query().Where(feature.ID(id))
-	if lock {
-		q.ForUpdate()
+	q := func() (*ent.Feature, error) {
+		q := tx.Feature.Query().Where(feature.ID(id))
+		if lock {
+			q.ForUpdate()
+		}
+		return q.Only(ctx)
 	}
-	f, err := q.Only(ctx)
+	f, err := q()
+	if lock && ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it.
+		f, err = q()
+	}
 	if ent.IsNotFound(err) {
 		return nil, ErrNotFound
 	}

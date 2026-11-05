@@ -282,3 +282,65 @@ func TestFeatureCreateWaitsForArchive(t *testing.T) {
 		t.Fatal("create didn't finish")
 	}
 }
+
+// A feature change that waits for a concurrent archive of the feature sees
+// it archived (it looks again after archive_once filters the row it waited
+// for): a second archive is ErrState, an update succeeds.
+func TestFeatureChangeWaitsForArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin := as(f.a, authz.Admin)
+	db, err := f.s.Create(admin, "db", "Database")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := Features{DB: f.db}
+	adminDB, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminDB.Close() }()
+	for name, c := range map[string]struct {
+		key  string
+		op   func(id string) error
+		want error
+	}{
+		"archive": {"a", func(id string) error { _, err := fs.Archive(admin, id); return err }, ErrState},
+		"update":  {"u", func(id string) error { _, err := fs.Update(admin, id, FeaturePatch{Name: ptr("Renamed")}); return err }, nil},
+	} {
+		ft, err := fs.Create(admin, FeatureInput{ProductID: db.ID, Key: c.key, Name: "F", Type: feature.TypeBoolean})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = clock_timestamp() WHERE id = $1`, ft.ID); err != nil {
+				return err
+			}
+			go func() { done <- c.op(ft.ID) }()
+			for i := 0; ; i++ {
+				var n int
+				if err := adminDB.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+					return err
+				}
+				if n > 0 {
+					return nil
+				}
+				if i == 100 {
+					return errors.New("never waited")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+				t.Errorf("%s after a concurrent archive: %v, want %v", name, err, c.want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s didn't finish", name)
+		}
+	}
+}
