@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -210,5 +211,67 @@ func TestPlanRefusals(t *testing.T) {
 	var inv *InvalidError
 	if _, err := ps.Create(admin, in); !errors.As(err, &inv) || inv.Field != "/product_id" || !strings.Contains(inv.Message, "archived") {
 		t.Errorf("archived product: %v", err)
+	}
+}
+
+// A plan change that waits for a concurrent archive of the plan sees it
+// archived (it looks again after archive_once filters the row it waited
+// for): a second archive is ErrState, an update succeeds.
+func TestPlanChangeWaitsForArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin := as(f.a, authz.Admin)
+	db, err := f.s.Create(admin, "db", "Database")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := Plans{DB: f.db}
+	adminDB, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminDB.Close() }()
+	for name, c := range map[string]struct {
+		slug string
+		op   func(id string) error
+		want error
+	}{
+		"archive": {"a", func(id string) error { _, err := ps.Archive(admin, id); return err }, ErrState},
+		"update":  {"u", func(id string) error { _, err := ps.Update(admin, id, PlanPatch{Name: ptr("Renamed")}); return err }, nil},
+	} {
+		pl, err := ps.Create(admin, PlanInput{ProductID: db.ID, Slug: c.slug, Name: "P", Terms: defaultTerms()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE plans SET archived_at = clock_timestamp() WHERE id = $1`, pl.ID); err != nil {
+				return err
+			}
+			go func() { done <- c.op(pl.ID) }()
+			for i := 0; ; i++ {
+				var n int
+				if err := adminDB.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+					return err
+				}
+				if n > 0 {
+					return nil
+				}
+				if i == 100 {
+					return errors.New("never waited")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+				t.Errorf("%s after a concurrent archive: %v, want %v", name, err, c.want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s didn't finish", name)
+		}
 	}
 }

@@ -61,6 +61,7 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Features  catalog.Features
+	Plans     catalog.Plans
 	Customers customers.Service
 	// Audit reads the tenant's audit log (audit:read).
 	Audit audit.Log
@@ -278,6 +279,7 @@ var queryParams = map[string][]string{
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor", "archived"},
 	"ListFeatures":    {"limit", "cursor", "product_id"},
+	"ListPlans":       {"limit", "cursor", "product_id"},
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
