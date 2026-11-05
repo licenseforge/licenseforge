@@ -151,7 +151,7 @@
               {
                 "uuid": "93b3a4e2-7739-566f-8ff3-381fa11ea638",
                 "control-id": "ac-5",
-                "description": "Built-in tenant roles (owner, admin, manager, support, viewer; sdk for tokens) separate key management, access management, license operations and read-only support. Database duties are split across four logins: owner (migrations only), api (tenant requests), admin (platform operations) and login (the login path). The server refuses to start with the owner login in its environment.",
+                "description": "Built-in tenant roles (owner, admin, manager, support, viewer; sdk for tokens) separate key management, access management, license operations and read-only support. Database duties are split across five logins: owner (migrations only), api (tenant requests), admin (platform operations), login (the login path) and pruner (audit retention, the only login that deletes audit entries). The server refuses to start with the owner or the retention login in its environment.",
                 "props": [
                   {
                     "name": "implementation-status",

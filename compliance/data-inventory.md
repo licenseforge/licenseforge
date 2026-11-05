@@ -52,7 +52,7 @@ What LicenseForge stores, where, and how it is protected. It covers the GDPR rec
 
 | Where | Data | Protection |
 |---|---|---|
-| Kubernetes Secrets | Database URLs (four logins), `LICENSEFORGE_MASTER_KEYS`, OIDC client secret | Operator's secret manager ([Secure Configuration Guide](secure-configuration-guide.md#secrets-and-the-keyring)) |
+| Kubernetes Secrets | Database URLs (five logins), `LICENSEFORGE_MASTER_KEYS`, OIDC client secret | Operator's secret manager ([Secure Configuration Guide](secure-configuration-guide.md#secrets-and-the-keyring)) |
 | Browser cookie `__Host-lf_session` | Session secret | `HttpOnly; Secure; SameSite=Lax`, `__Host-` prefix, 12 h |
 | Browser cookie `__Host-lf_login` | OIDC state, nonce, PKCE verifier | Same flags, 10 minutes, single use |
 | License files (`lf1`) | Customer **ID** only by default, product, entitlements, expiry | Signed with Ed25519 (no personal data unless the vendor adds it) |

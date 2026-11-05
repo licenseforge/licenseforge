@@ -20,6 +20,8 @@ type Tx struct {
 	APITokenProduct *APITokenProductClient
 	// Activation is the client for interacting with the Activation builders.
 	Activation *ActivationClient
+	// AuditAnchor is the client for interacting with the AuditAnchor builders.
+	AuditAnchor *AuditAnchorClient
 	// AuditEvent is the client for interacting with the AuditEvent builders.
 	AuditEvent *AuditEventClient
 	// AuditExportCursor is the client for interacting with the AuditExportCursor builders.
@@ -192,6 +194,7 @@ func (tx *Tx) init() {
 	tx.APIToken = NewAPITokenClient(tx.config)
 	tx.APITokenProduct = NewAPITokenProductClient(tx.config)
 	tx.Activation = NewActivationClient(tx.config)
+	tx.AuditAnchor = NewAuditAnchorClient(tx.config)
 	tx.AuditEvent = NewAuditEventClient(tx.config)
 	tx.AuditExportCursor = NewAuditExportCursorClient(tx.config)
 	tx.AuditExportSink = NewAuditExportSinkClient(tx.config)

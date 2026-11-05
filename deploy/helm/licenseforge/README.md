@@ -7,7 +7,7 @@ Pods meet the Pod Security Standard **restricted**.
 
 ## Before installing
 
-1. PostgreSQL 17 or newer with the four logins from
+1. PostgreSQL 17 or newer with the logins from
    [`deploy/database-setup.sql`](../../database-setup.sql) (ADR-0009).
 2. Two Secrets, created by you or by External Secrets (never in values):
 
