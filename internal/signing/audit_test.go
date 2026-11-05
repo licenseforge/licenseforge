@@ -22,11 +22,14 @@ func entries(t *testing.T, l Local, tenantID string) []*ent.AuditEvent {
 	t.Helper()
 	ctx := context.Background()
 	var es []*ent.AuditEvent
-	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		head, err := audit.Verify(ctx, tx, tenantID)
-		if err != nil {
-			return err
-		}
+	head, err := audit.Verify(ctx, func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		return l.DB.ReadTenant(ctx, tenantID, snap, fn)
+	}, tenantID, audit.Head{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		var err error
 		es, err = tx.AuditEvent.Query().Order(ent.Asc(auditevent.FieldSeq)).All(ctx)
 		if err == nil && len(es) > 0 && head.Seq != es[len(es)-1].Seq {
 			t.Errorf("chain head %d, last entry %d", head.Seq, es[len(es)-1].Seq)

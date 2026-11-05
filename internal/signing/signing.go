@@ -141,9 +141,13 @@ func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err
 	return err
 }
 
-// record writes the success entry in tx, after the key rows are changed (lock
-// order: key rows, then the audit lock, as in internal/issue). details hold
-// the algorithm and states, never key material.
+// record writes the success entry in tx. Lock order: the tenant's audit lock
+// before any signing-key row lock, wherever a transaction takes both, so
+// every key operation calls audit.Lock first: activation holds the audit
+// lock and then share-locks the active key to sign (ActivateTx), and a
+// Promote holding the key rows while waiting for the audit lock would
+// deadlock with it. details hold the algorithm and states, never key
+// material.
 func record(ctx context.Context, tx *ent.Tx, tenantID string, ev audit.Event, details map[string]any) error {
 	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, details
 	_, err := recordAudit(ctx, tx, tenantID, ev)
@@ -188,28 +192,13 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 		return nil, err
 	}
 	var k *ent.SigningKey
-	// A concurrent first Create can win the tenant's only active slot; the
-	// loser retries once and then becomes the pending key (or gets
-	// ErrPendingExists), instead of reporting a pending key that doesn't exist.
-	for attempt := 0; ; attempt++ {
-		err = l.create(ctx, tenantID, kid, pub, ct, ev, attempt == 0, &k)
-		if !errors.Is(err, errLostFirstKey) {
-			break
+	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The audit lock first (see record). It also serializes Creates, so
+		// a tenant's first key can't race: the second Create sees it and
+		// makes the pending key.
+		if err := audit.Lock(ctx, tx, tenantID); err != nil {
+			return err
 		}
-	}
-	if err != nil {
-		ev.ObjectID = "" // the key doesn't exist
-		return nil, l.refused(ctx, tn, ev, err)
-	}
-	return k, nil
-}
-
-// errLostFirstKey means another Create made the tenant's first (active) key
-// at the same time.
-var errLostFirstKey = errors.New("signing: concurrent first key")
-
-func (l Local) create(ctx context.Context, tenantID, kid string, pub ed25519.PublicKey, ct string, ev audit.Event, retry bool, out **ent.SigningKey) error {
-	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		hasKeys, err := tx.SigningKey.Query().Exist(ctx)
 		if err != nil {
 			return err
@@ -219,22 +208,22 @@ func (l Local) create(ctx context.Context, tenantID, kid string, pub ed25519.Pub
 		if !hasKeys {
 			c.SetStatus(signingkey.StatusActive).SetActivatedAt(time.Now())
 		}
-		k, err := c.Save(ctx)
+		k, err = c.Save(ctx)
 		// Only the one-active / one-pending index; other violations (unknown
-		// tenant, CHECKs) are returned as they are. Inserting an active key
-		// can only collide with another active key: a concurrent first key.
+		// tenant, CHECKs) are returned as they are.
 		if sqlgraph.IsUniqueConstraintError(err) && strings.Contains(err.Error(), "signingkey_tenant_id_status") {
-			if !hasKeys && retry {
-				return errLostFirstKey
-			}
 			return ErrPendingExists
 		}
 		if err != nil {
 			return err
 		}
-		*out = k
 		return record(ctx, tx, tenantID, ev, map[string]any{"alg": string(k.Alg), "to": string(k.Status)})
 	})
+	if err != nil {
+		ev.ObjectID = "" // the key doesn't exist
+		return nil, l.refused(ctx, tn, ev, err)
+	}
+	return k, nil
 }
 
 // Promote makes the pending key kid active and retires the active one,
@@ -253,6 +242,9 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 		return l.refused(ctx, tn, ev, ErrNotPending)
 	}
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		if err := audit.Lock(ctx, tx, tenantID); err != nil { // before the key rows (see record)
+			return err
+		}
 		now := time.Now()
 		// Lock the tenant's active and pending keys, so concurrent promotions
 		// serialize instead of racing on the unique index.
@@ -311,6 +303,9 @@ func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
 		return l.refused(ctx, tn, ev, ErrNotPending)
 	}
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		if err := audit.Lock(ctx, tx, tenantID); err != nil { // before the key row (see record)
+			return err
+		}
 		// The write itself requires the key to be pending, so a concurrent
 		// Promote either commits first (nothing is retired: ErrNotPending) or
 		// waits for this transaction.
