@@ -51,9 +51,11 @@ type TenantEdges struct {
 	IdempotencyKeys []*IdempotencyKey `json:"idempotency_keys,omitempty"`
 	// AuditExportCursors holds the value of the audit_export_cursors edge.
 	AuditExportCursors []*AuditExportCursor `json:"audit_export_cursors,omitempty"`
+	// AuditAnchors holds the value of the audit_anchors edge.
+	AuditAnchors []*AuditAnchor `json:"audit_anchors,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [9]bool
+	loadedTypes [10]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -135,6 +137,15 @@ func (e TenantEdges) AuditExportCursorsOrErr() ([]*AuditExportCursor, error) {
 		return e.AuditExportCursors, nil
 	}
 	return nil, &NotLoadedError{edge: "audit_export_cursors"}
+}
+
+// AuditAnchorsOrErr returns the AuditAnchors value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) AuditAnchorsOrErr() ([]*AuditAnchor, error) {
+	if e.loadedTypes[9] {
+		return e.AuditAnchors, nil
+	}
+	return nil, &NotLoadedError{edge: "audit_anchors"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -247,6 +258,11 @@ func (_m *Tenant) QueryIdempotencyKeys() *IdempotencyKeyQuery {
 // QueryAuditExportCursors queries the "audit_export_cursors" edge of the Tenant entity.
 func (_m *Tenant) QueryAuditExportCursors() *AuditExportCursorQuery {
 	return NewTenantClient(_m.config).QueryAuditExportCursors(_m)
+}
+
+// QueryAuditAnchors queries the "audit_anchors" edge of the Tenant entity.
+func (_m *Tenant) QueryAuditAnchors() *AuditAnchorQuery {
+	return NewTenantClient(_m.config).QueryAuditAnchors(_m)
 }
 
 // Update returns a builder for updating this Tenant.

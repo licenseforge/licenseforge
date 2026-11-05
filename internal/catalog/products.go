@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
@@ -137,7 +139,8 @@ func (s Products) Create(ctx context.Context, slug, name string) (*ent.Product, 
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error
 		if p, err = tx.Product.Create().SetTenantID(tenantID).SetSlug(slug).SetName(name).Save(ctx); err != nil {
-			if ent.IsConstraintError(err) { // (tenant_id, slug) is the only unique key a new row can hit
+			var pe *pgconn.PgError
+			if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "product_tenant_id_slug" {
 				return &InvalidError{Field: "/slug", Message: "already used by a product of this tenant", Conflict: true}
 			}
 			return err
