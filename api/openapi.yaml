@@ -501,6 +501,184 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /tenants/{tenant}/products:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listProducts
+      summary: List products in the caller's product scope, newest first.
+      description: "Needs catalog:read; a product-scoped caller sees only its products."
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createProduct
+      summary: Add a product.
+      description: "Needs catalog:write on every product (creating is tenant-wide). The slug is the license's product claim and never changes; a taken slug answers 409."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductCreate" }
+      responses:
+        "201":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/products/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/ProductId"
+    get:
+      operationId: getProduct
+      summary: Get a product.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateProduct
+      summary: Rename a product (JSON Merge Patch). The slug is immutable.
+      description: Needs catalog:write on the product.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/ProductPatch" }
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/customers:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listCustomers
+      summary: List customers (archived included), newest first.
+      description: "Customers are tenant-wide: customer:read on every product; a product-scoped caller sees none."
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createCustomer
+      summary: Add a customer.
+      description: Needs customer:write (managers and up).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerCreate" }
+      responses:
+        "201":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/customers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      operationId: getCustomer
+      summary: Get a customer.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateCustomer
+      summary: "Change a customer (JSON Merge Patch): email null clears it; external_refs is replaced whole."
+      description: Needs customer:write.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/CustomerPatch" }
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/customers/{id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/CustomerId"
+    post:
+      operationId: archiveCustomer
+      summary: Archive a customer. Its licenses stay; no new license can be issued for it.
+      description: Needs customer:write. An archived customer answers 409 invalid_state.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     apiToken:
@@ -523,6 +701,16 @@ components:
       name: Authorization
       description: "Activation API only: `Authorization: License LF-XXXXX-…` (the license key as the user typed it)."
   parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: prd_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    CustomerId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: cus_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     LicenseId:
       name: id
       in: path
@@ -701,6 +889,64 @@ components:
           required: [key]
           properties:
             key: { type: string, description: The license key. Shown once (and on an idempotent replay to the same credential), stored only encrypted. }
+    Product:
+      type: object
+      required: [id, slug, name, created_at]
+      properties:
+        id: { type: string, example: prd_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        slug: { type: string, description: The license's product claim. Immutable. }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+    ProductPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Product" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    ProductCreate:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string, maxLength: 63, description: "Lowercase words joined by single dashes, e.g. db-server." }
+        name: { type: string, maxLength: 200 }
+    ProductPatch:
+      type: object
+      description: Absent fields stay; none is nullable (null answers 422).
+      properties:
+        name: { type: string, maxLength: 200 }
+    Customer:
+      type: object
+      required: [id, name, email, external_refs, archived_at, created_at]
+      properties:
+        id: { type: string, example: cus_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        name: { type: string }
+        email: { type: string, nullable: true }
+        external_refs: { type: object, additionalProperties: { type: string } }
+        archived_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    CustomerPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Customer" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    CustomerCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 200 }
+        email: { type: string, maxLength: 320 }
+        external_refs:
+          type: object
+          description: "Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-]."
+          additionalProperties: { type: string, maxLength: 255 }
+    CustomerPatch:
+      type: object
+      description: "Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422)."
+      properties:
+        name: { type: string, maxLength: 200 }
+        email: { type: string, maxLength: 320, nullable: true }
+        external_refs: { type: object, additionalProperties: { type: string, maxLength: 255 } }
     MemberRole:
       type: string
       enum: [owner, admin, manager, support, viewer]

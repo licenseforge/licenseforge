@@ -28,6 +28,8 @@ import (
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/catalog"
+	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -54,6 +56,9 @@ type Config struct {
 	Tokens   apitokens.Service
 	Members  members.Service
 	Licenses licenses.Service
+	// The catalog (slice 1: products) and customers.
+	Products  catalog.Products
+	Customers customers.Service
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
 	// Invitations: list, create, revoke, and accept (a user route).
@@ -263,6 +268,8 @@ var queryParams = map[string][]string{
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
+	"ListProducts":    {"limit", "cursor"},
+	"ListCustomers":   {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -440,8 +447,20 @@ func mapErr(err error) *problem {
 	var invalidMember *members.InvalidError
 	var invalidLicense *licenses.InvalidError
 	var invalidInvitation *invitations.InvalidError
+	var invalidCatalog *catalog.InvalidError
+	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound):
+		p = errNotFound
+	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
+		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}
+	case errors.As(err, &invalidCatalog):
+		p = invalid(fieldError{invalidCatalog.Field, invalidCatalog.Message})
+	case errors.As(err, &invalidCustomer):
+		p = invalid(fieldError{invalidCustomer.Field, invalidCustomer.Message})
+	case errors.Is(err, customers.ErrState):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The customer is already archived."}
 	case activationProblem(err) != nil:
 		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):

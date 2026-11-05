@@ -1,0 +1,205 @@
+package customers
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ids"
+	"licenseforge.io/licenseforge/internal/store/storetest"
+)
+
+var env storetest.Env
+
+func TestMain(m *testing.M) { os.Exit(storetest.Main(m, &env, store.Migrate)) }
+
+type fixture struct {
+	db   *store.DB
+	s    Service
+	a, b string
+}
+
+func setup(t *testing.T) fixture {
+	t.Helper()
+	d, err := store.Open(context.Background(), store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	f := fixture{db: d, s: Service{DB: d}}
+	if err := d.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		for _, tn := range []*string{&f.a, &f.b} {
+			t, err := tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(context.Background())
+			if err != nil {
+				return err
+			}
+			*tn = t.ID
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func as(tenant string, role authz.Role, products ...string) context.Context {
+	return authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.Token, ID: ids.APIToken(), TenantID: tenant, Role: role,
+		Scope: authz.Scope{All: len(products) == 0, Products: products}})
+}
+
+func (f fixture) lastEvent(t *testing.T) *ent.AuditEvent {
+	t.Helper()
+	var e *ent.AuditEvent
+	if err := f.db.WithTenant(context.Background(), f.a, func(tx *ent.Tx) error {
+		var err error
+		e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func field(err error) string {
+	var inv *InvalidError
+	if errors.As(err, &inv) {
+		return inv.Field
+	}
+	return ""
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestCustomers(t *testing.T) {
+	f := setup(t)
+	mgr := as(f.a, authz.Manager)
+	c, err := f.s.Create(mgr, Input{Name: "Contoso", Email: ptr("it@contoso.example"), ExternalRefs: map[string]string{"stripe": "cus_1"}})
+	if err != nil || c.Name != "Contoso" || *c.Email != "it@contoso.example" || c.ExternalRefs["stripe"] != "cus_1" {
+		t.Fatalf("create = %+v, %v", c, err)
+	}
+	e := f.lastEvent(t)
+	if e.Action != "customer.create" || e.Outcome != auditevent.OutcomeSuccess || strings.Contains(e.Details, "contoso") || strings.Contains(e.Details, "Contoso") {
+		t.Errorf("audit (no name or email) = %+v", e)
+	}
+	c2, err := f.s.Create(mgr, Input{Name: "Fabrikam"})
+	if err != nil || c2.Email != nil || len(c2.ExternalRefs) != 0 {
+		t.Fatalf("create minimal = %+v, %v", c2, err)
+	}
+	if _, err := f.s.Create(as(f.b, authz.Manager), Input{Name: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	// List newest first; tenant-wide: a product-scoped principal sees none.
+	l, err := f.s.List(as(f.a, authz.Viewer), 1, time.Time{}, "")
+	if err != nil || len(l) != 1 || l[0].ID != c2.ID {
+		t.Fatalf("page 1 = %v, %v", l, err)
+	}
+	if l, err := f.s.List(as(f.a, authz.Viewer), 5, l[0].CreatedAt, l[0].ID); err != nil || len(l) != 1 || l[0].ID != c.ID {
+		t.Fatalf("page 2 = %v, %v", l, err)
+	}
+	if l, err := f.s.List(as(f.a, authz.Support, ids.Product()), 5, time.Time{}, ""); err != nil || len(l) != 0 {
+		t.Errorf("scoped list = %v, %v", l, err)
+	}
+	// Hidden and missing alike, for get, update and archive.
+	for name, x := range map[string]struct {
+		ctx context.Context
+		id  string
+	}{
+		"missing":          {mgr, ids.Customer()},
+		"malformed":        {mgr, "x"},
+		"another tenant's": {as(f.b, authz.Manager), c.ID},
+		"product-scoped":   {as(f.a, authz.Manager, ids.Product()), c.ID},
+	} {
+		if _, err := f.s.Get(x.ctx, x.id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("get %s: %v", name, err)
+		}
+		if _, err := f.s.Update(x.ctx, x.id, Patch{Name: ptr("x")}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("update %s: %v", name, err)
+		}
+		if _, err := f.s.Archive(x.ctx, x.id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("archive %s: %v", name, err)
+		}
+	}
+	// Merge patch: absent stays; email is nullable (null clears it).
+	u, err := f.s.Update(mgr, c.ID, Patch{Name: ptr("Contoso Ltd"), ExternalRefs: &map[string]string{"crm": "42"}})
+	if err != nil || u.Name != "Contoso Ltd" || *u.Email != "it@contoso.example" || u.ExternalRefs["crm"] != "42" || u.ExternalRefs["stripe"] != "" {
+		t.Fatalf("update = %+v, %v", u, err)
+	}
+	if u, err = f.s.Update(mgr, c.ID, Patch{Null: []string{"email"}}); err != nil || u.Email != nil || u.Name != "Contoso Ltd" {
+		t.Fatalf("clear email = %+v, %v", u, err)
+	}
+	if e := f.lastEvent(t); e.Action != "customer.update" || !strings.Contains(e.Details, `"email"`) || strings.Contains(e.Details, "contoso") {
+		t.Errorf("update audit = %s", e.Details)
+	}
+	// Archive: once (409 after), still readable and editable.
+	a, err := f.s.Archive(mgr, c.ID)
+	if err != nil || a.ArchivedAt == nil {
+		t.Fatalf("archive = %+v, %v", a, err)
+	}
+	if _, err := f.s.Archive(mgr, c.ID); !errors.Is(err, ErrState) {
+		t.Errorf("archive twice: %v", err)
+	}
+	if g, err := f.s.Get(mgr, c.ID); err != nil || g.ArchivedAt == nil {
+		t.Errorf("get archived = %v, %v", g, err)
+	}
+}
+
+func TestCustomerRefusals(t *testing.T) {
+	f := setup(t)
+	mgr := as(f.a, authz.Manager)
+	c, err := f.s.Create(mgr, Input{Name: "Contoso"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rights before values: support and viewers read, managers write.
+	for name, ctx := range map[string]context.Context{"support": as(f.a, authz.Support), "viewer": as(f.a, authz.Viewer), "sdk": as(f.a, authz.SDK)} {
+		if _, err := f.s.Create(ctx, Input{Name: ""}); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("create as %s: %v", name, err)
+		}
+		if name == "sdk" {
+			continue // sdk can't read customers either: not found
+		}
+		if _, err := f.s.Update(ctx, c.ID, Patch{Name: ptr("")}); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("update as %s: %v", name, err)
+		}
+		if _, err := f.s.Archive(ctx, c.ID); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("archive as %s: %v", name, err)
+		}
+	}
+	if e := f.lastEvent(t); e.Outcome != auditevent.OutcomeDenied {
+		t.Errorf("denied audit = %+v", e)
+	}
+	for name, x := range map[string]struct {
+		in    Input
+		field string
+	}{
+		"blank name":        {Input{Name: " "}, "/name"},
+		"long name":         {Input{Name: strings.Repeat("n", 201)}, "/name"},
+		"email without @":   {Input{Name: "x", Email: ptr("nope")}, "/email"},
+		"email with space":  {Input{Name: "x", Email: ptr("a b@example.com")}, "/email"},
+		"ref key uppercase": {Input{Name: "x", ExternalRefs: map[string]string{"Stripe": "1"}}, "/external_refs"},
+		"ref value newline": {Input{Name: "x", ExternalRefs: map[string]string{"stripe": "a\nb"}}, "/external_refs"},
+	} {
+		if _, err := f.s.Create(mgr, x.in); field(err) != x.field || !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, x := range map[string]struct {
+		p     Patch
+		field string
+	}{
+		"null name":          {Patch{Null: []string{"name"}}, "/name"},
+		"null external_refs": {Patch{Null: []string{"external_refs"}}, "/external_refs"},
+		"bad email":          {Patch{Email: ptr("x")}, "/email"},
+	} {
+		if _, err := f.s.Update(mgr, c.ID, x.p); field(err) != x.field {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

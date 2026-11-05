@@ -93,7 +93,7 @@ type IssueRequest struct {
 	ProductID, PlanID, CustomerID string
 	Type                          license.Type        // "" = paid
 	Overrides                     map[string]Override // by feature key
-	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see validRefs
+	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see ValidRefs
 }
 
 // Issued is a new license. Key is the plaintext license key: returned here
@@ -253,7 +253,7 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		return refused(&InvalidError{"/customer_id", "no such customer"})
 	case license.TypeValidator(req.Type) != nil:
 		return refused(&InvalidError{"/type", "unknown license type"})
-	case !validRefs(req.ExternalRefs):
+	case !ValidRefs(req.ExternalRefs):
 		return refused(&InvalidError{"/external_refs", "at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes of UTF-8 without control characters"})
 	}
 	id, key := ids.License(), licensekey.New() // New returns the canonical form, which Normalize gives at lookup
@@ -616,10 +616,10 @@ func DBNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
 	return now.UTC().Truncate(time.Microsecond), nil
 }
 
-// validRefs: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
+// ValidRefs reports whether external refs (licenses, customers) are valid: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
 // of up to 255 bytes of valid UTF-8 without control, format or separator
 // characters (incl. NUL, zero-width and bidi controls).
-func validRefs(refs map[string]string) bool {
+func ValidRefs(refs map[string]string) bool {
 	if len(refs) > 20 {
 		return false
 	}
