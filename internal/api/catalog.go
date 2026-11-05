@@ -113,8 +113,14 @@ func (s *server) GetCustomer(ctx context.Context, req apigen.GetCustomerRequestO
 
 func (s *server) UpdateCustomer(ctx context.Context, req apigen.UpdateCustomerRequestObject) (apigen.UpdateCustomerResponseObject, error) {
 	b := req.Body
-	c, err := s.Customers.Update(ctx, req.Id, customers.Patch{Name: b.Name, Email: b.Email, ExternalRefs: b.ExternalRefs,
-		Null: nulls(ctx, "name", "email", "external_refs")})
+	patch := customers.Patch{Name: b.Name, Email: b.Email, Null: nulls(ctx, "name", "email", "external_refs")}
+	if b.ExternalRefs != nil { // merge per key (RFC 7396): a null member (nil) deletes its key
+		patch.ExternalRefs = *b.ExternalRefs
+		if patch.ExternalRefs == nil {
+			patch.ExternalRefs = map[string]*string{}
+		}
+	}
+	c, err := s.Customers.Update(ctx, req.Id, patch)
 	if err != nil {
 		return nil, err
 	}

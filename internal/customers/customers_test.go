@@ -3,6 +3,7 @@ package customers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -126,10 +127,18 @@ func TestCustomers(t *testing.T) {
 			t.Errorf("archive %s: %v", name, err)
 		}
 	}
-	// Merge patch: absent stays; email is nullable (null clears it).
-	u, err := f.s.Update(mgr, c.ID, Patch{Name: ptr("Contoso Ltd"), ExternalRefs: &map[string]string{"crm": "42"}})
-	if err != nil || u.Name != "Contoso Ltd" || *u.Email != "it@contoso.example" || u.ExternalRefs["crm"] != "42" || u.ExternalRefs["stripe"] != "" {
+	// Merge patch (RFC 7396): absent stays; refs merge per key; email is
+	// nullable (null clears it).
+	u, err := f.s.Update(mgr, c.ID, Patch{Name: ptr("Contoso Ltd"), ExternalRefs: map[string]*string{"crm": ptr("42")}})
+	if err != nil || u.Name != "Contoso Ltd" || *u.Email != "it@contoso.example" || u.ExternalRefs["crm"] != "42" || u.ExternalRefs["stripe"] != "cus_1" {
 		t.Fatalf("update = %+v, %v", u, err)
+	}
+	// A null value removes its key (not stored as "").
+	if u, err = f.s.Update(mgr, c.ID, Patch{ExternalRefs: map[string]*string{"stripe": nil, "gone": nil}}); err != nil || len(u.ExternalRefs) != 1 || u.ExternalRefs["crm"] != "42" {
+		t.Fatalf("remove ref = %+v, %v", u.ExternalRefs, err)
+	}
+	if _, ok := u.ExternalRefs["stripe"]; ok {
+		t.Error("a null ref was stored")
 	}
 	if u, err = f.s.Update(mgr, c.ID, Patch{Null: []string{"email"}}); err != nil || u.Email != nil || u.Name != "Contoso Ltd" {
 		t.Fatalf("clear email = %+v, %v", u, err)
@@ -145,8 +154,32 @@ func TestCustomers(t *testing.T) {
 	if _, err := f.s.Archive(mgr, c.ID); !errors.Is(err, ErrState) {
 		t.Errorf("archive twice: %v", err)
 	}
+	// Rights before state: a viewer is refused for its role, not told it's archived.
+	if _, err := f.s.Archive(as(f.a, authz.Viewer), c.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("viewer archives an archived customer: %v", err)
+	}
 	if g, err := f.s.Get(mgr, c.ID); err != nil || g.ArchivedAt == nil {
 		t.Errorf("get archived = %v, %v", g, err)
+	}
+}
+
+// The 20-entry limit applies to the merged refs.
+func TestMergedRefsLimit(t *testing.T) {
+	f := setup(t)
+	mgr := as(f.a, authz.Manager)
+	refs := map[string]string{}
+	for i := range 20 {
+		refs[fmt.Sprintf("k%d", i)] = "v"
+	}
+	c, err := f.s.Create(mgr, Input{Name: "Full", ExternalRefs: refs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Update(mgr, c.ID, Patch{ExternalRefs: map[string]*string{"one_more": ptr("v")}}); field(err) != "/external_refs" {
+		t.Errorf("21st ref: %v", err)
+	}
+	if _, err := f.s.Update(mgr, c.ID, Patch{ExternalRefs: map[string]*string{"k0": nil, "one_more": ptr("v")}}); err != nil {
+		t.Errorf("swap a ref: %v", err)
 	}
 }
 
@@ -183,6 +216,10 @@ func TestCustomerRefusals(t *testing.T) {
 		"long name":         {Input{Name: strings.Repeat("n", 201)}, "/name"},
 		"email without @":   {Input{Name: "x", Email: ptr("nope")}, "/email"},
 		"email with space":  {Input{Name: "x", Email: ptr("a b@example.com")}, "/email"},
+		"email two @":       {Input{Name: "x", Email: ptr("a@b@c")}, "/email"},
+		"email no local":    {Input{Name: "x", Email: ptr("@b")}, "/email"},
+		"email no domain":   {Input{Name: "x", Email: ptr("a@")}, "/email"},
+		"email @@":          {Input{Name: "x", Email: ptr("a@@b")}, "/email"},
 		"ref key uppercase": {Input{Name: "x", ExternalRefs: map[string]string{"Stripe": "1"}}, "/external_refs"},
 		"ref value newline": {Input{Name: "x", ExternalRefs: map[string]string{"stripe": "a\nb"}}, "/external_refs"},
 	} {
@@ -194,9 +231,11 @@ func TestCustomerRefusals(t *testing.T) {
 		p     Patch
 		field string
 	}{
-		"null name":          {Patch{Null: []string{"name"}}, "/name"},
-		"null external_refs": {Patch{Null: []string{"external_refs"}}, "/external_refs"},
-		"bad email":          {Patch{Email: ptr("x")}, "/email"},
+		"null name":           {Patch{Null: []string{"name"}}, "/name"},
+		"null external_refs":  {Patch{Null: []string{"external_refs"}}, "/external_refs"},
+		"bad email":           {Patch{Email: ptr("x")}, "/email"},
+		"two @ email":         {Patch{Email: ptr("a@b@c")}, "/email"},
+		"merged refs invalid": {Patch{ExternalRefs: map[string]*string{"Bad": ptr("1")}}, "/external_refs"},
 	} {
 		if _, err := f.s.Update(mgr, c.ID, x.p); field(err) != x.field {
 			t.Errorf("%s: %v", name, err)

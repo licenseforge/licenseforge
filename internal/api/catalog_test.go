@@ -103,8 +103,11 @@ func TestCustomerEndpoints(t *testing.T) {
 	}
 	// PATCH: email null clears it; name null is invalid; viewers can't.
 	if r := f.do(t, "PATCH", p+"/"+id, `{"email":null,"external_refs":{"crm":"42"}}`, mgr); r.code != 200 || r.body["email"] != nil ||
-		!reflect.DeepEqual(r.body["external_refs"], map[string]any{"crm": "42"}) || r.body["name"] != "Contoso" {
+		!reflect.DeepEqual(r.body["external_refs"], map[string]any{"stripe": "cus_1", "crm": "42"}) || r.body["name"] != "Contoso" {
 		t.Errorf("patch: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", p+"/"+id, `{"external_refs":{"stripe":null}}`, mgr); r.code != 200 || !reflect.DeepEqual(r.body["external_refs"], map[string]any{"crm": "42"}) {
+		t.Errorf("remove a ref: %d %s", r.code, r.raw)
 	}
 	for body, field := range map[string]string{`{"name":null}`: "/name", `{"external_refs":null}`: "/external_refs", `{"external_refs":{"A":"1"}}`: "/external_refs"} {
 		if r := f.do(t, "PATCH", p+"/"+id, body, mgr).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), field) {

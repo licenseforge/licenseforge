@@ -409,11 +409,11 @@ type CustomerPage struct {
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
-// CustomerPatch Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422).
+// CustomerPatch Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422). external_refs merges key by key (RFC 7396): a value sets its key, a null member removes it, absent keys stay; the merged refs are checked whole.
 type CustomerPatch struct {
-	Email        *string            `json:"email,omitempty"`
-	ExternalRefs *map[string]string `json:"external_refs,omitempty"`
-	Name         *string            `json:"name,omitempty"`
+	Email        *string             `json:"email,omitempty"`
+	ExternalRefs *map[string]*string `json:"external_refs,omitempty"`
+	Name         *string             `json:"name,omitempty"`
 }
 
 // DeactivationRequest defines model for DeactivationRequest.
@@ -940,7 +940,7 @@ type ServerInterface interface {
 	// GetCustomer Get a customer.
 	// (GET /tenants/{tenant}/customers/{id})
 	GetCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
-	// UpdateCustomer Change a customer (JSON Merge Patch): email null clears it; external_refs is replaced whole.
+	// UpdateCustomer Change a customer (JSON Merge Patch): email null clears it; external_refs merges key by key.
 	// (PATCH /tenants/{tenant}/customers/{id})
 	UpdateCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
@@ -6472,7 +6472,7 @@ type StrictServerInterface interface {
 	// GetCustomer Get a customer.
 	// (GET /tenants/{tenant}/customers/{id})
 	GetCustomer(ctx context.Context, request GetCustomerRequestObject) (GetCustomerResponseObject, error)
-	// UpdateCustomer Change a customer (JSON Merge Patch): email null clears it; external_refs is replaced whole.
+	// UpdateCustomer Change a customer (JSON Merge Patch): email null clears it; external_refs merges key by key.
 	// (PATCH /tenants/{tenant}/customers/{id})
 	UpdateCustomer(ctx context.Context, request UpdateCustomerRequestObject) (UpdateCustomerResponseObject, error)
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.

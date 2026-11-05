@@ -495,7 +495,7 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Change a customer (JSON Merge Patch): email null clears it; external_refs is replaced whole.
+         * Change a customer (JSON Merge Patch): email null clears it; external_refs merges key by key.
          * @description Needs customer:write.
          */
         patch: operations["updateCustomer"];
@@ -735,12 +735,12 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /** @description Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422). */
+        /** @description Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422). external_refs merges key by key (RFC 7396): a value sets its key, a null member removes it, absent keys stay; the merged refs are checked whole. */
         CustomerPatch: {
             name?: string;
             email?: string | null;
             external_refs?: {
-                [key: string]: string;
+                [key: string]: string | null;
             };
         };
         /** @enum {string} */

@@ -10,7 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/apitokens"
@@ -24,6 +26,14 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
+
+// validEmail: usable (identity.UsableEmail: printable, no spaces, at most
+// 320 bytes) and the customers_email_format CHECK's shape: exactly one "@",
+// with a non-empty local part and domain.
+func validEmail(e string) bool {
+	local, domain, ok := strings.Cut(e, "@")
+	return identity.UsableEmail(e) && ok && local != "" && domain != "" && !strings.Contains(domain, "@")
+}
 
 var (
 	// ErrNotFound means no such customer the caller can see.
@@ -47,12 +57,14 @@ type Input struct {
 	ExternalRefs map[string]string
 }
 
-// Patch is a merge patch: nil fields stay. Null lists fields set to null:
-// email is cleared; name and external_refs aren't nullable (invalid).
+// Patch is a merge patch (RFC 7396): nil fields stay. Null lists fields set
+// to null: email is cleared; name and external_refs aren't nullable
+// (invalid). ExternalRefs merges per key: a value sets the key, nil deletes
+// it, absent keys stay.
 type Patch struct {
 	Name         *string
 	Email        *string
-	ExternalRefs *map[string]string
+	ExternalRefs map[string]*string
 	Null         []string
 }
 
@@ -124,7 +136,7 @@ func (s Service) Create(ctx context.Context, in Input) (*ent.Customer, error) {
 	ev := audit.By(p, "customer.create", "customer", "")
 	err = authz.Require(ctx, authz.CustomerWrite, "")
 	if err == nil {
-		err = valid(&in.Name, in.Email, &in.ExternalRefs)
+		err = valid(&in.Name, in.Email, in.ExternalRefs)
 	}
 	if err != nil {
 		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid)
@@ -145,7 +157,8 @@ func (s Service) Create(ctx context.Context, in Input) (*ent.Customer, error) {
 		return err
 	})
 	if err != nil {
-		return nil, err
+		ev.ObjectID, ev.Details = "", nil
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid)
 	}
 	return c, nil
 }
@@ -160,7 +173,21 @@ func (s Service) Update(ctx context.Context, id string, patch Patch) (*ent.Custo
 				return nil, nil, &InvalidError{"/" + f, "can't be null"}
 			}
 		}
-		if err := valid(patch.Name, patch.Email, patch.ExternalRefs); err != nil {
+		var refs map[string]string
+		if patch.ExternalRefs != nil { // merged into the stored refs, then checked whole
+			refs = maps.Clone(c.ExternalRefs)
+			if refs == nil {
+				refs = map[string]string{}
+			}
+			for k, v := range patch.ExternalRefs {
+				if v == nil {
+					delete(refs, k)
+				} else {
+					refs[k] = *v
+				}
+			}
+		}
+		if err := valid(patch.Name, patch.Email, refs); err != nil {
 			return nil, nil, err
 		}
 		u := tx.Customer.UpdateOne(c)
@@ -177,8 +204,8 @@ func (s Service) Update(ctx context.Context, id string, patch Patch) (*ent.Custo
 			u.SetEmail(*patch.Email)
 			changed = append(changed, "email")
 		}
-		if patch.ExternalRefs != nil {
-			u.SetExternalRefs(*patch.ExternalRefs)
+		if refs != nil {
+			u.SetExternalRefs(refs)
 			changed = append(changed, "external_refs")
 		}
 		c, err := u.Save(ctx)
@@ -236,14 +263,14 @@ func (s Service) change(ctx context.Context, action, id string, fn func(*ent.Tx,
 }
 
 // valid checks the given values (nil: not given).
-func valid(name, email *string, refs *map[string]string) error {
+func valid(name, email *string, refs map[string]string) error {
 	if name != nil && apitokens.ValidName(*name) != nil {
 		return &InvalidError{"/name", "1 to 200 bytes of printable characters, not blank"}
 	}
-	if email != nil && !identity.UsableEmail(*email) {
+	if email != nil && !validEmail(*email) {
 		return &InvalidError{"/email", "must be an email address without spaces or invisible characters"}
 	}
-	if refs != nil && *refs != nil && !licenses.ValidRefs(*refs) {
+	if refs != nil && !licenses.ValidRefs(refs) {
 		return &InvalidError{"/external_refs", "at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes without control characters"}
 	}
 	return nil
