@@ -742,6 +742,30 @@ func TestLastMoveRace(t *testing.T) {
 	}
 }
 
+// An archived product's existing licenses keep working (ADR-0015: archiving
+// stops selling, it doesn't break customers): activation and refresh succeed,
+// while a new license for it is refused.
+func TestArchivedProductKeepsLicensesWorking(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "pro")
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`, f.product)
+		return err
+	})
+	machine := fp()
+	got, err := f.s.Activate(ctx, f.req(is.Key, machine))
+	if err != nil {
+		t.Fatalf("activate on an archived product: %v", err)
+	}
+	if _, _, err := f.open(t, got, machine); err != nil {
+		t.Errorf("lease: %v", err)
+	}
+	if _, err := f.lic.Issue(ctx, manager(f.a), licenses.IssueRequest{ProductID: f.product, PlanID: f.plans["pro"], CustomerID: f.customer}); !errors.Is(err, licenses.ErrInvalid) {
+		t.Errorf("new license on an archived product: %v", err)
+	}
+}
+
 // free changes an active activation once; the second time there is nothing
 // to free.
 func TestFreeOnce(t *testing.T) {

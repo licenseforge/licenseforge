@@ -27,6 +27,9 @@ func (Product) Fields() []ent.Field {
 		prefixedID(ids.Product),
 		field.String("slug").Immutable().NotEmpty().MaxLen(63).Match(SlugRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
+		// Archived: no new licenses, plans or features; existing licenses and
+		// activations keep working (ADR-0015: archived, never deleted).
+		field.Time("archived_at").Optional().Nillable(),
 	}
 }
 

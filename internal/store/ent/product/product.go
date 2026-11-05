@@ -24,6 +24,8 @@ const (
 	FieldSlug = "slug"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldArchivedAt holds the string denoting the archived_at field in the database.
+	FieldArchivedAt = "archived_at"
 	// EdgeTenant holds the string denoting the tenant edge name in mutations.
 	EdgeTenant = "tenant"
 	// EdgeFeatures holds the string denoting the features edge name in mutations.
@@ -72,6 +74,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldSlug,
 	FieldName,
+	FieldArchivedAt,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -134,6 +137,11 @@ func BySlug(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByArchivedAt orders the results by the archived_at field.
+func ByArchivedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldArchivedAt, opts...).ToFunc()
 }
 
 // ByTenantField orders the results by tenant field.
