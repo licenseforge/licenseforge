@@ -116,7 +116,8 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
 	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "SESSION_IDLE_TIMEOUT", "SESSION_MAX_AGE", "LOGIN_BANNER",
-		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID"} {
+		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID",
+		"AUDIT_VERIFY_INTERVAL", "AUDIT_VERIFY_FULL_INTERVAL"} {
 		t.Setenv("LICENSEFORGE_"+k, "")
 	}
 }
@@ -256,6 +257,8 @@ func TestServeRefuses(t *testing.T) {
 		"max age over a day":   {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
 		"max age below idle":   {env.TenantURL, env.PlatformURL, testKeys, "", "below the idle timeout"},
 		"bad banner":           {env.TenantURL, env.PlatformURL, testKeys, "", "login banner"},
+		"bad verify interval":  {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_INTERVAL"},
+		"no full verify":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -282,6 +285,10 @@ func TestServeRefuses(t *testing.T) {
 		case "max age below idle":
 			t.Setenv("LICENSEFORGE_SESSION_IDLE_TIMEOUT", "3h")
 			t.Setenv("LICENSEFORGE_SESSION_MAX_AGE", "2h")
+		case "bad verify interval":
+			t.Setenv("LICENSEFORGE_AUDIT_VERIFY_INTERVAL", "-1m")
+		case "no full verify":
+			t.Setenv("LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL", "0")
 		case "bad banner":
 			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
 			t.Setenv("LICENSEFORGE_LOGIN_BANNER", strings.Repeat("x", 4097))
@@ -358,4 +365,35 @@ func TestServeStartsAuditExport(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// serve starts the periodic audit verification: its first run writes a
+// checkpoint to the platform chain.
+func TestServeVerifiesAudit(t *testing.T) {
+	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
+	admin, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	count := func() (n int) {
+		if err := admin.QueryRow(`SELECT count(*) FROM audit_events WHERE action = 'audit.checkpoint'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := count()
+	_, _, stop := startServe(t)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	}()
+	for range 100 {
+		if count() > before {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("no audit.checkpoint written after start")
 }

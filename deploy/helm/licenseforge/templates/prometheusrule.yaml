@@ -1,0 +1,43 @@
+{{- $alerts := dig "alerts" dict (.Values.metrics | default dict) }}
+{{- if and (dig "enabled" true $alerts) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+{{- $ns := printf "namespace=%q" .Release.Namespace }}
+# Audit failure alerts (ADR-0036, AU-5): on by default when the Prometheus
+# Operator's CRDs exist. Route them to whoever must act on audit failures
+# (Secure Configuration Guide). Series carry the namespace label the
+# Operator's scrapes add; only this release's namespace is matched.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "licenseforge.fullname" . }}
+  labels:
+    {{- include "licenseforge.labels" . | nindent 4 }}
+    {{- with $alerts.labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  groups:
+    - name: licenseforge-audit
+      rules:
+        - alert: LicenseForgeAuditWriteFailures
+          # Each failure rolled back the action it records (fail closed).
+          expr: sum by (namespace, chain) (increase(licenseforge_audit_write_failures_total{ {{- $ns -}} }[5m])) > 0
+          labels: {severity: critical}
+          annotations:
+            summary: "Audit entries can't be written ({{ "{{" }} $labels.chain {{ "}}" }} chain); the actions they record fail."
+        - alert: LicenseForgeAuditExportLag
+          expr: max by (namespace, sink) (licenseforge_audit_export_lag_seconds{ {{- $ns -}} }) > {{ dig "exportLagSeconds" 900 $alerts }}
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "Audit export to {{ "{{" }} $labels.sink {{ "}}" }} is {{ "{{" }} $value | humanizeDuration {{ "}}" }} behind; entries wait in the database (retention won't prune them)."
+        - alert: LicenseForgeAuditVerifyFailed
+          # The periodic verification runs every 15 minutes and counts each broken chain, every run.
+          expr: sum by (namespace) (increase(licenseforge_audit_verify_failures_total{ {{- $ns -}} }[1h])) > 0
+          labels: {severity: critical}
+          annotations:
+            summary: "An audit hash chain doesn't verify: an entry was changed, removed or reordered. The server log and the latest audit.checkpoint entry name the chain."
+        - alert: LicenseForgeRateLimitTableFull
+          # Past its address bound the per-address limit lets new addresses through (fail open).
+          expr: sum by (namespace, surface) (increase(licenseforge_rate_limit_untracked_requests_total{ {{- $ns -}} }[5m])) > 0
+          labels: {severity: warning}
+          annotations:
+            summary: "The per-address rate limit's table is full on {{ "{{" }} $labels.surface {{ "}}" }}: new addresses pass unlimited."
+{{- end }}

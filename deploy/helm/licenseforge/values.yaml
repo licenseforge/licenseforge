@@ -94,6 +94,13 @@ metrics:
     enabled: false
     interval: 30s
     labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus
+  # Alert rules (PrometheusRule) for audit write failures, export lag,
+  # verification failures and a full rate-limit table (ADR-0036). Rendered
+  # only when the Prometheus Operator's CRDs exist.
+  alerts:
+    enabled: true
+    exportLagSeconds: 900
+    labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus's ruleSelector
 
 podDisruptionBudget:
   enabled: true

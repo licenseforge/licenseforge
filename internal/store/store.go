@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/jackc/pgx/v5"
@@ -233,6 +234,27 @@ func (d *DB) tenantTx(ctx context.Context, tenantID string, opts *sql.TxOptions,
 // on behalf of a tenant.
 func (d *DB) WithPlatform(ctx context.Context, fn func(*ent.Tx) error) error {
 	return inTx(ctx, d.platform, nil, fn)
+}
+
+// TryPlatformLock takes the session advisory lock key on a connection of
+// its own from the platform pool, unless another session holds it (ok
+// false). unlock releases the lock and the connection; a crashed process
+// releases it when its connection closes. For jobs one replica runs at a
+// time (internal/auditverify).
+func (d *DB) TryPlatformLock(ctx context.Context, key int64) (unlock func(), ok bool, err error) {
+	conn, err := d.platformDB.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&ok); err != nil || !ok {
+		return nil, false, errors.Join(err, conn.Close())
+	}
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, key) // DISCARD ALL on reuse would release it anyway
+		_ = conn.Close()
+	}, true, nil
 }
 
 // ReadPlatform runs fn in a read-only transaction on the platform pool;

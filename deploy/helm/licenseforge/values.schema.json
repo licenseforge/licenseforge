@@ -94,6 +94,15 @@
             "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
             "labels": {"type": "object", "additionalProperties": {"type": "string"}}
           }
+        },
+        "alerts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "exportLagSeconds": {"type": "integer", "minimum": 60},
+            "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
         }
       }
     }

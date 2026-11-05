@@ -28,9 +28,38 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_CA_FILE` | no | system roots | PEM roots for the collector's certificate (chart: `audit.export.syslog.caSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME` | no | the address's host | Name the collector's certificate must carry |
+| `LICENSEFORGE_AUDIT_VERIFY_INTERVAL` | no | `15m` | How often one replica verifies every audit chain from the head it last verified and writes an `audit.checkpoint` entry ([below](#audit-verification-and-alerts)). `0` turns it off |
+| `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL` | no | `168h` | How often the verification starts from each chain's anchor instead (a full check) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
+
+## Audit verification and alerts
+
+ADR-0036. Every `LICENSEFORGE_AUDIT_VERIFY_INTERVAL`, one replica (an advisory lock on the platform pool; the others skip that round) verifies every tenant chain and the platform chain. It starts from the head it verified last, held in its memory only, and from each chain's anchor at start and every `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL`. Each run appends `audit.checkpoint` entries to the platform chain: `details.heads` lists `{tenant_id, seq, hash}` per verified chain (up to 200 per entry; `batch` of `batches`), `details.mode` is `incremental` or `full`, and a broken chain makes the entry's outcome `failure` and is listed in `details.broken`. A broken chain is counted in `licenseforge_audit_verify_failures_total` on every run until it is repaired.
+
+**Alerts.** With the Prometheus Operator's CRDs present, the chart installs a `PrometheusRule` (`metrics.alerts.*`; set `metrics.alerts.labels` to match your Prometheus's rule selector, and enable `metrics.serviceMonitor`):
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `LicenseForgeAuditWriteFailures` | an audit entry couldn't be written (its action was rolled back) | critical |
+| `LicenseForgeAuditExportLag` | a sink is more than `metrics.alerts.exportLagSeconds` (15 min) behind, for 5 min | warning |
+| `LicenseForgeAuditVerifyFailed` | a chain didn't verify in the last hour | critical |
+| `LicenseForgeRateLimitTableFull` | the per-address rate limit let new addresses through untracked | warning |
+
+Route the critical alerts to whoever is responsible for the audit log (AU-5): the security or compliance owner, not only on-call operations.
+
+**SIEM correlation rule** (the SIEM is the verifier of record). Every exported event carries `id`, `tenant_id`, `seq`, `prev_hash` and `hash`. Delivery is at least once, so first deduplicate on `id`. Then, per `tenant_id`, ordered by `seq`:
+
+```text
+for each event e (after dedup on e.id), grouped by e.tenant_id, ordered by e.seq:
+  p = previous event of the same tenant_id
+  if p exists and (e.seq != p.seq + 1 or e.prev_hash != p.hash):
+      alert "audit chain gap or rewrite", tenant_id, p.seq, e.seq
+  # the first event of a chain in the SIEM may start at any seq (retention, a sink added later)
+```
+
+Also compare the heads in `audit.checkpoint` events (`details.heads[].seq` and `.hash`) with the events you hold for those chains: a checkpoint head you never received means events were lost on the way; a head below what you hold means the chain was truncated in the database.
 
 ## Database logins
 
@@ -145,4 +174,4 @@ spec:
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
 - **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
-- **Audit log**: kept in full until the retention job ships (*planned*). Export the chain head regularly to detect truncation once SIEM export exists (*planned*).
+- **Audit log**: kept in full until the retention job ships (*planned*). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.
