@@ -23,10 +23,12 @@ import (
 	"slices"
 	"strings"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
@@ -54,16 +56,21 @@ type Config struct {
 	// sessions. Empty: both everywhere (one hostname).
 	APIHost string
 	Log     *slog.Logger
+	// The activation API (activation.go).
+	Activations    activations.Service
+	Idempotency    idempotency.Store
+	ActivationRate int // requests per license key per minute, per replica; 0: DefaultActivationRate
 }
 
 type server struct {
 	Config
-	mux *http.ServeMux
+	mux     *http.ServeMux
+	limiter *keyLimiter
 }
 
 // New returns the API handler; mount it at Prefix + "/".
 func New(c Config) http.Handler {
-	s := &server{Config: c, mux: http.NewServeMux()}
+	s := &server{Config: c, mux: http.NewServeMux(), limiter: newKeyLimiter(c.ActivationRate)}
 	s.routes(s.mux)
 	return s
 }
@@ -101,6 +108,10 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			s.write(w, r, p)
 		}
 	}()
+	if strings.HasPrefix(r.URL.EscapedPath(), activationPrefix) {
+		s.activation(w, r)
+		return
+	}
 	p, prob := s.authenticate(w, r)
 	if prob != nil {
 		s.write(w, r, prob)
@@ -403,10 +414,16 @@ func (s *server) badRequest(w http.ResponseWriter, r *http.Request, err error) {
 
 // fail is the one error mapper for handler errors.
 func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	s.write(w, r, s.problemFor(err))
+}
+
+func (s *server) problemFor(err error) *problem {
 	var p *problem
 	var invalidField *members.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case activationProblem(err) != nil:
+		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):
 		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
 	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound):
@@ -418,7 +435,7 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		p = internal(err)
 	}
-	s.write(w, r, p)
+	return p
 }
 
 func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
@@ -430,11 +447,21 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 	s.Log.Log(r.Context(), level, "api refusal", "request_id", ri.id, "client_request_id", ri.client,
 		"method", r.Method, "path", r.URL.Path, "status", p.status, "code", p.code, "err", p.err)
 	if p.status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="licenseforge"`)
+		scheme := "Bearer"
+		if strings.HasPrefix(r.URL.EscapedPath(), activationPrefix) {
+			scheme = "License"
+		}
+		w.Header().Set("WWW-Authenticate", scheme+` realm="licenseforge"`)
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.status)
-	_ = json.NewEncoder(w).Encode(struct {
+	_, _ = w.Write(problemJSON(r.Context(), p))
+}
+
+// problemJSON is p's RFC 9457 body.
+func problemJSON(ctx context.Context, p *problem) []byte {
+	ri, _ := ctx.Value(reqKey{}).(reqInfo)
+	b, _ := json.Marshal(struct {
 		Type      string       `json:"type"`
 		Title     string       `json:"title"`
 		Status    int          `json:"status"`
@@ -443,4 +470,5 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 		RequestID string       `json:"request_id"`
 		Errors    []fieldError `json:"errors,omitempty"`
 	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, ri.id, p.fields})
+	return append(b, '\n')
 }

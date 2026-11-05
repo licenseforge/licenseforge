@@ -195,7 +195,7 @@ func (r resp) problem(t *testing.T, status int, code string) map[string]any {
 		r.body["type"] != "about:blank" || r.body["request_id"] != r.h.Get("X-Request-Id") {
 		t.Errorf("want %d %s, got %d %s %s", status, code, r.code, r.h.Get("Content-Type"), r.raw)
 	}
-	if status == http.StatusUnauthorized && r.h.Get("WWW-Authenticate") != `Bearer realm="licenseforge"` {
+	if status == http.StatusUnauthorized && !slices.Contains([]string{`Bearer realm="licenseforge"`, `License realm="licenseforge"`}, r.h.Get("WWW-Authenticate")) {
 		t.Errorf("401 without WWW-Authenticate")
 	}
 	delete(r.body, "request_id")
