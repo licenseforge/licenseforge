@@ -129,7 +129,8 @@ type TenantMembership struct {
 	TenantID, TenantSlug, TenantName string
 	Role                             membership.Role
 	ScopeAll                         bool
-	Products                         []string // the scope when not ScopeAll
+	Products                         []string        // the scope when not ScopeAll
+	MFAPolicy                        authz.Assurance // the tenant's (ADR-0038)
 }
 
 // Memberships lists the tenants userID belongs to, sorted by slug. Call it
@@ -143,7 +144,9 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 		// can't take a place under the cap.
 		ms, err := tx.Membership.Query().Where(membership.UserID(userID), membership.TenantIDNEQ(audit.PlatformTenant)).
 			Order(membership.ByTenantField(tenant.FieldSlug)).Limit(MaxMemberships).
-			WithTenant(func(q *ent.TenantQuery) { q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName) }).
+			WithTenant(func(q *ent.TenantQuery) {
+				q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy)
+			}).
 			WithProducts(func(q *ent.MembershipProductQuery) { q.Order(membershipproduct.ByProductID()) }).All(ctx)
 		if err != nil {
 			return err
@@ -153,7 +156,7 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 				continue
 			}
 			tm := TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
-				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll}
+				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll, MFAPolicy: authz.Assurance(m.Edges.Tenant.MfaPolicy)}
 			for _, p := range m.Edges.Products {
 				tm.Products = append(tm.Products, p.ProductID)
 			}
@@ -243,23 +246,39 @@ var ErrNotMember = errors.New("identity: not a member of that tenant")
 // slugs have no "_"), on the identity pool, whose tenants read excludes the
 // reserved platform tenant (ADR-0029). An unknown one is ErrNotMember.
 func (s Service) TenantID(ctx context.Context, ref string) (string, error) {
+	t, err := s.Tenant(ctx, ref)
+	return t.ID, err
+}
+
+// TenantRef is a resolved tenant: its ID, slug and MFA policy (ADR-0038).
+type TenantRef struct {
+	ID, Slug  string
+	MFAPolicy authz.Assurance
+}
+
+// Tenant resolves ref (a slug or ID) like TenantID, with the slug and MFA
+// policy the session check needs.
+func (s Service) Tenant(ctx context.Context, ref string) (TenantRef, error) {
 	p := tenant.Slug(ref)
 	switch {
 	case ids.Valid("tnt", ref):
 		p = tenant.ID(ref)
 	case len(ref) > 63 || !schema.SlugRE.MatchString(ref): // e.g. invalid UTF-8, which PostgreSQL refuses
-		return "", ErrNotMember
+		return TenantRef{}, ErrNotMember
 	}
-	var id string
+	var t *ent.Tenant
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		var err error
-		id, err = tx.Tenant.Query().Where(p).OnlyID(ctx)
+		t, err = tx.Tenant.Query().Where(p).Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldMfaPolicy).Only(ctx)
 		return err
 	})
 	if ent.IsNotFound(err) {
-		return "", ErrNotMember
+		return TenantRef{}, ErrNotMember
 	}
-	return id, err
+	if err != nil {
+		return TenantRef{}, err
+	}
+	return TenantRef{ID: t.ID, Slug: t.Slug, MFAPolicy: authz.Assurance(t.MfaPolicy)}, nil
 }
 
 // Grant returns userID's role and product scope in tenantID, or

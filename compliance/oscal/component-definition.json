@@ -747,7 +747,7 @@
                     "value": "partial"
                   }
                 ],
-                "remarks": "Not enforced yet: the policy is stored but sessions aren't checked against it per request, and there is no step-up login (ADR-0038 PR 2).",
+                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Not yet: the step-up login that asks the IdP for the stronger method, and the platform-admin policy (ADR-0038).",
                 "links": [
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
@@ -767,6 +767,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/tenants/tenants_test.go",
                     "rel": "reference",
                     "text": "TestSetMFAPolicy"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/mfa_test.go",
+                    "rel": "reference",
+                    "text": "TestMFAEnforcement"
                   }
                 ]
               },
@@ -816,7 +821,7 @@
                     "text": "TestAssess"
                   }
                 ],
-                "remarks": "As IA-2(1): recorded and settable, enforced with ADR-0038 PR 2. Each IdP's claims are verified by an integration test before support is claimed."
+                "remarks": "As IA-2(1). Each IdP's claims are verified by an integration test before support is claimed."
               },
               {
                 "uuid": "be29326b-aa2f-5724-bd6b-14a06044504a",
@@ -1225,7 +1230,7 @@
               {
                 "uuid": "8be7d414-abfc-58f2-a5b9-0138338d1542",
                 "control-id": "sc-12",
-                "description": "Master keyring (LICENSEFORGE_MASTER_KEYS): named 32-byte keys, the first active, all usable to decrypt, so rotation needs no downtime; HKDF-SHA256 derives separate encryption and lookup subkeys. Per-tenant Ed25519 signing keys go pending → active → retired, and a retired key's private key is erased from the live table.",
+                "description": "Master keyring (LICENSEFORGE_MASTER_KEYS): named 32-byte keys, the first active, all usable to decrypt, so rotation needs no downtime; HKDF-SHA256 derives separate encryption and lookup subkeys. Per-tenant Ed25519 signing keys go pending → active → retired, and a retired key's private key is erased from the live table. Owners manage the lifecycle through the REST API (create, promote, discard, each audited); every member with key:read lists the public keys, never private material.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1251,6 +1256,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/signing_test.go",
                     "rel": "reference",
                     "text": "TestLifecycle"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/keys_test.go",
+                    "rel": "reference",
+                    "text": "TestSigningKeyEndpoints"
                   }
                 ],
                 "remarks": "No re-encryption job after a master-key rotation: old keys must stay in the keyring (ADR-0025). Erased signing keys survive in backups and WAL until the master key is rotated out. KMS/HSM custody comes in v0.4 (Roadmap: KMS/HSM Signer)."

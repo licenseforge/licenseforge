@@ -52,6 +52,12 @@ func outcomeCounter(name, help string) OutcomeCounter {
 var (
 	// Logins counts dashboard logins (weblogin callback).
 	Logins = outcomeCounter("licenseforge_logins_total", "Dashboard logins by outcome.")
+	// MFARefusals counts requests refused because the session doesn't meet
+	// the tenant's MFA policy (ADR-0038), by the level required. Every one
+	// is counted; only the first per session and tenant is audited.
+	MFARefusals = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "licenseforge_mfa_refusals_total", Help: "Requests refused for a tenant's MFA policy, by required level.",
+	}, []string{"required"})
 	// Activations, LeaseRefreshes and UnknownLicenseKeys count the
 	// activation API (internal/activations, ADR-0034).
 	Activations        = outcomeCounter("licenseforge_activations_total", "License activations by outcome.")
@@ -95,9 +101,12 @@ var (
 )
 
 func init() {
+	for _, l := range []string{"mfa", "phishing_resistant"} {
+		MFARefusals.WithLabelValues(l) // export zeros
+	}
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
-	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
+	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

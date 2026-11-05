@@ -224,6 +224,14 @@ var (
 				Unique:  true,
 				Columns: []*schema.Column{AuditEventsColumns[14], AuditEventsColumns[1]},
 			},
+			{
+				Name:    "auditevent_tenant_id_object_id",
+				Unique:  false,
+				Columns: []*schema.Column{AuditEventsColumns[14], AuditEventsColumns[7]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "action = 'session.mfa_required'",
+				},
+			},
 		},
 	}
 	// AuditExportCursorsColumns holds the columns for the "audit_export_cursors" table.

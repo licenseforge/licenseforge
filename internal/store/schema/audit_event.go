@@ -74,5 +74,10 @@ func (AuditEvent) Annotations() []schema.Annotation {
 }
 
 func (AuditEvent) Indexes() []ent.Index {
-	return []ent.Index{index.Fields("tenant_id", "seq").Unique()}
+	return []ent.Index{
+		index.Fields("tenant_id", "seq").Unique(),
+		// The MFA refusal audited once per session and tenant (ADR-0038):
+		// found without scanning the chain.
+		index.Fields("tenant_id", "object_id").Annotations(entsql.IndexWhere("action = 'session.mfa_required'")),
+	}
 }
