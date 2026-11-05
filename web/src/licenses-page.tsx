@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
-import { fieldErrors, onAuthError } from "@/api/client";
-import { allCustomers, allProducts, parseRefs } from "@/api/catalog";
+import { ApiError, fieldErrors, onAuthError } from "@/api/client";
+import { allCustomers, allProducts, parseRefs, refsBody } from "@/api/catalog";
 import {
   actionsFor,
   canManageLicenses,
@@ -34,7 +34,15 @@ function useNames(tenant: string) {
   const customers = useQuery({ queryKey: ["customers-all", tenant], queryFn: () => allCustomers(tenant) });
   const productName = (id: string) => products.data?.items.find((p) => p.id === id)?.name ?? id;
   const customerName = (id: string) => customers.data?.items.find((c) => c.id === id)?.name ?? id;
-  return { products: products.data?.items ?? [], customers: customers.data?.items ?? [], productName, customerName };
+  const all = customers.data?.items ?? [];
+  return {
+    products: products.data?.items ?? [],
+    customers: all, // the filter and names keep archived ones
+    issuable: all.filter((c) => !c.archived_at), // archived customers get no new licenses
+    complete: (products.data?.complete ?? true) && (customers.data?.complete ?? true),
+    productName,
+    customerName,
+  };
 }
 
 export const expiryText = (l: Pick<License, "expires_at" | "expiry_basis">) =>
@@ -84,6 +92,7 @@ export function LicensesPage() {
           </select>
         </label>
       </div>
+      {!names.complete && <p className="mt-2 text-sm">{t("licenses.listsIncomplete")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
       {list.isSuccess && rows.length === 0 && <p className="mt-6 text-muted-foreground">{t("licenses.empty")}</p>}
       {rows.length > 0 && (
@@ -207,9 +216,21 @@ export function LicenseDialog({ tenant, license: l, manage, names, onClose, onCh
   );
 }
 
+/**
+ * Whether a failed issue may be retried with the same Idempotency-Key. The
+ * server keeps an answer for a key, 4xx included, so after a definitive 4xx
+ * (a fixable form error) the next attempt needs a new key; after a network
+ * error, a 5xx, or an idempotency conflict the same key must be reused, so a
+ * retry can never issue a second license.
+ */
+export function keepIdempotencyKey(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true; // the request may have reached the server
+  return e.status >= 500 || e.code === "idempotency_in_progress" || e.code === "idempotency_key_reused";
+}
+
 export function IssueDialog({ tenant, names, onClose }: { tenant: string; names: ReturnType<typeof useNames>; onClose: () => void }) {
   const qc = useQueryClient();
-  const [idempotencyKey] = useState(() => crypto.randomUUID()); // one per dialog: a retry can't issue twice
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID()); // a retry can't issue twice
   const [issued, setIssued] = useState<LicenseIssued | null>(null); // the key lives here only
   const [error, setError] = useState<unknown>(null);
   const [refsError, setRefsError] = useState<string | null>(null);
@@ -224,9 +245,9 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    let external_refs: Record<string, string>;
+    let refs: Map<string, string>;
     try {
-      external_refs = parseRefs(String(f.get("refs") ?? ""));
+      refs = parseRefs(String(f.get("refs") ?? ""));
     } catch (err) {
       setRefsError(t("customers.refsInvalid", { line: (err as Error).message }));
       return;
@@ -238,16 +259,17 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
       // Not a useMutation: its result (the key) would stay in the mutation cache.
       const l = await issueLicense(tenant, {
         product_id: String(f.get("product_id") ?? ""),
-        customer_id: String(f.get("customer_id") ?? ""),
+        customer_id: String(f.get("customer_id") ?? "").trim(),
         plan_id: String(f.get("plan_id") ?? "").trim(),
         type: String(f.get("type")) as LicenseIssue["type"],
-        ...(Object.keys(external_refs).length ? { external_refs } : {}),
+        ...(refs.size ? { external_refs: refsBody(refs) } : {}),
       }, idempotencyKey);
       setIssued(l);
       void qc.invalidateQueries({ queryKey: ["licenses", tenant] }); // metadata only
     } catch (err) {
       onAuthError(err);
       setError(err);
+      if (!keepIdempotencyKey(err)) setIdempotencyKey(crypto.randomUUID());
     } finally {
       setBusy(false);
     }
@@ -274,7 +296,7 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   const select = (name: string, label: string, options: { id: string; name: string }[]) => (
     <label className="flex flex-col gap-1 text-sm">
       {label}
-      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]} aria-describedby={`${name}-error`}>
+      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]} aria-describedby={fields[name] ? `${name}-error` : undefined}>
         <option value="" disabled>{t("licenses.choose")}</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
@@ -283,12 +305,23 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   );
   return (
     <Modal title={t("licenses.issue")} onClose={close}>
+      {!names.complete && <p className="mb-3 text-sm">{t("licenses.listsIncomplete")}</p>}
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
         {select("product_id", t("licenses.col.product"), names.products)}
-        {select("customer_id", t("licenses.col.customer"), names.customers)}
+        {names.issuable.length > 0 ? (
+          select("customer_id", t("licenses.col.customer"), names.issuable)
+        ) : (
+          // A product-scoped caller can't list customers (they're tenant-wide): it issues by customer ID.
+          <label className="flex flex-col gap-1 text-sm">
+            {t("licenses.customerId")}
+            <input name="customer_id" required className={`${input} font-mono`} placeholder="cus_…" aria-invalid={!!fields.customer_id} aria-describedby={fields.customer_id ? "customer-help customer_id-error" : "customer-help"} />
+            <span id="customer-help" className="text-xs text-muted-foreground">{t("licenses.customerHelp")}</span>
+            {fields.customer_id && <span id="customer_id-error">{fields.customer_id}</span>}
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-sm">
           {t("licenses.planId")}
-          <input name="plan_id" required className={`${input} font-mono`} placeholder="pln_…" aria-invalid={!!fields.plan_id} aria-describedby="plan_id-error plan-help" />
+          <input name="plan_id" required className={`${input} font-mono`} placeholder="pln_…" aria-invalid={!!fields.plan_id} aria-describedby={fields.plan_id ? "plan-help plan_id-error" : "plan-help"} />
           <span id="plan-help" className="text-xs text-muted-foreground">{t("licenses.planHelp")}</span>
           {fields.plan_id && <span id="plan_id-error">{fields.plan_id}</span>}
         </label>
@@ -300,7 +333,7 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
         </label>
         <label className="flex flex-col gap-1 text-sm">
           {t("customers.col.refs")}
-          <textarea name="refs" rows={2} placeholder="order=1234" className={`${input} h-auto py-1 font-mono`} aria-invalid={!!(refsError || fields.external_refs)} aria-describedby="refs-error" />
+          <textarea name="refs" rows={2} placeholder="order=1234" className={`${input} h-auto py-1 font-mono`} aria-invalid={!!(refsError || fields.external_refs)} aria-describedby={refsError || fields.external_refs ? "refs-error" : undefined} />
           {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
         </label>
         {error != null && <p role="alert" className="text-sm font-medium">{errorText(error)}</p>}

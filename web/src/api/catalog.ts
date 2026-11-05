@@ -63,26 +63,33 @@ export async function archiveCustomer(tenant: string, id: string): Promise<Custo
 
 /**
  * The JSON Merge Patch (RFC 7396) from a customer as it was to as edited:
- * only what changed. An emptied email is null (cleared), since absent would
- * mean "keep". external_refs merges key by key on the server: a new or
- * changed key carries its value, a removed key is null, and untouched keys
- * are left out (external_refs is absent if no key changed).
+ * only what changed. A field counts as changed only if its raw input differs
+ * from the stored value, so editing one field never rewrites another (a
+ * stored name with a trailing space stays as it is); a changed value is
+ * trimmed. An emptied email is null (cleared), since absent would mean
+ * "keep". external_refs merges key by key on the server: a new or changed
+ * key carries its value, a removed key is null, and untouched keys are left
+ * out (external_refs is absent if no key changed).
  */
 export function customerPatch(
   before: Pick<Customer, "name" | "email" | "external_refs">,
-  after: { name: string; email: string; refs?: Record<string, string> },
+  after: { name: string; email: string; refs?: Map<string, string> },
 ): CustomerPatch {
   const patch: CustomerPatch = {};
-  const name = after.name.trim();
-  const email = after.email.trim();
-  if (name !== before.name) patch.name = name;
-  if (email === "" && before.email !== null) patch.email = null;
-  else if (email !== "" && email !== before.email) patch.email = email;
+  if (after.name !== before.name) patch.name = after.name.trim();
+  if (after.email !== (before.email ?? "")) {
+    const email = after.email.trim();
+    if (email === "") {
+      if (before.email !== null) patch.email = null;
+    } else if (email !== before.email) patch.email = email;
+  }
   if (after.refs) {
-    const refs: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(after.refs)) if (before.external_refs[k] !== v) refs[k] = v;
-    for (const k of Object.keys(before.external_refs)) if (!(k in after.refs)) refs[k] = null;
-    if (Object.keys(refs).length > 0) patch.external_refs = refs;
+    const stored = (k: string) => (Object.hasOwn(before.external_refs, k) ? before.external_refs[k] : undefined);
+    const changes: [string, string | null][] = [];
+    for (const [k, raw] of after.refs) if (raw !== stored(k)) changes.push([k, raw.trim()]);
+    for (const k of Object.keys(before.external_refs)) if (!after.refs.has(k)) changes.push([k, null]);
+    // fromEntries defines own properties: "__proto__" or "constructor" are plain keys here.
+    if (changes.length > 0) patch.external_refs = Object.fromEntries(changes);
   }
   return patch;
 }
@@ -93,18 +100,26 @@ export const formatRefs = (refs: Record<string, string>) =>
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
 
-/** External references from "key=value" lines; blank lines are skipped. Throws on a line without "=". */
-export function parseRefs(text: string): Record<string, string> {
-  const refs: Record<string, string> = {};
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
+/**
+ * External references from "key=value" lines; blank lines are skipped.
+ * Keys are trimmed; values are kept raw (customerPatch compares them with
+ * the stored ones, refsBody trims them). A Map, so any key is a plain key.
+ * Throws on a line without a key.
+ */
+export function parseRefs(text: string): Map<string, string> {
+  const refs = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
     const at = line.indexOf("=");
-    if (at <= 0) throw new Error(line);
-    refs[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+    if (at < 0 || !line.slice(0, at).trim()) throw new Error(line.trim());
+    refs.set(line.slice(0, at).trim(), line.slice(at + 1));
   }
   return refs;
 }
+
+/** References for a create: trimmed values, as an object with own keys only. */
+export const refsBody = (refs: Map<string, string>): Record<string, string> =>
+  Object.fromEntries([...refs].map(([k, v]) => [k, v.trim()]));
 
 const rank = ["owner", "admin", "manager", "support", "viewer"];
 const atLeast = (m: Membership, role: string) => m.role !== "sdk" && rank.indexOf(m.role) <= rank.indexOf(role);
