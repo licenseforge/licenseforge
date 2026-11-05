@@ -66,6 +66,9 @@ export function TenantLayout() {
         <Link to="/t/$slug/customers" params={{ slug }} className={link}>
           {t("nav.customers")}
         </Link>
+        <Link to="/t/$slug/licenses" params={{ slug }} className={link}>
+          {t("nav.licenses")}
+        </Link>
         <Link to="/t/$slug/settings/members" params={{ slug }} className={link}>
           {t("nav.members")}
         </Link>
@@ -74,16 +77,6 @@ export function TenantLayout() {
         </Link>
       </nav>
       <Outlet />
-    </>
-  );
-}
-
-export function Overview() {
-  const { slug } = useParams({ from: "/app/t/$slug/" });
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">{t("overview.title")}</h1>
-      <p className="mt-2 text-muted-foreground">{t("overview.body", { tenant: slug })}</p>
     </>
   );
 }

@@ -299,6 +299,31 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/summary:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: getSummary
+      summary: Exact counts for the dashboard overview, within the caller's scope.
+      description: |
+        Needs license:read. License counts cover the products the caller
+        can see: a product-scoped caller gets the counts of its products.
+        `customers` is present only for callers with customer:read on every
+        product (customers are tenant-wide), and absent otherwise.
+
+        Lists carry no totals (ADR-0032); this resource is where counts
+        live. More counters (for example activations) may be added as new
+        members; clients must ignore members they don't know.
+      responses:
+        "200":
+          description: The counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -430,6 +455,81 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/activations:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    get:
+      operationId: listActivations
+      summary: List a license's activations (machines or clusters), deactivated ones included, newest first.
+      description: Needs activation:read on the license's product. A hidden license answers 404 like a missing one.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+      - $ref: "#/components/parameters/ActivationId"
+    post:
+      operationId: deactivateActivation
+      summary: Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+      description: |
+        Needs activation:manage on the license's product; audited. Allowed
+        whatever the license's status. Deactivating an activation that is
+        already deactivated changes nothing and answers 200 with it.
+        Deactivating doesn't count as a seat move; activating a new machine
+        afterwards may (ADR-0034).
+      responses:
+        "200":
+          description: The activation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/audit-events:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listAuditEvents
+      summary: Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+      description: |
+        Needs audit:read on every product (owners and admins). Pages run
+        by `seq`, the chain's order: newest first by default; with
+        `after_seq`, oldest first from the entry after it (self-export:
+        pass the last `seq` you hold). Each entry carries `prev_hash` and
+        `hash` so the chain can be checked: each entry's `prev_hash` is the
+        previous entry's `hash` (32 zero bytes for seq 1), and `hash` is
+        computed from the response alone, as described on
+        AuditEvent.hash. Reading is audited as `audit_event.read`, at most
+        once per reader per 15 minutes.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - { name: after_seq, in: query, description: "Oldest first, from the entry after this seq (0: from the start). Not with cursor.", schema: { type: integer, format: int64, minimum: 0 } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /me/tenants:
     get:
       operationId: listMyTenants
@@ -745,6 +845,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    ActivationId:
+      name: activation_id
+      in: path
+      required: true
+      schema: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
@@ -817,6 +922,66 @@ components:
         issued_at: { type: string, format: date-time, description: Server time (ADR-0018). }
         expires_at: { type: string, format: date-time }
         refresh_after: { type: string, format: date-time }
+    Activation:
+      type: object
+      required: [id, license_id, fingerprint, fp_source, binding, mode, hostname, app_version, sdk_version, first_seen_at, last_seen_at, deactivated_at, created_at]
+      properties:
+        id: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        license_id: { type: string }
+        fingerprint: { type: string, description: "The lease's bind.fp (a hash, never the raw machine ID)." }
+        fp_source: { type: string, enum: [override, env, kubernetes, machine-id] }
+        binding: { type: string, enum: [machine, cluster] }
+        mode: { type: string, enum: [online, offline] }
+        hostname: { type: string, nullable: true, description: As the SDK last reported it. }
+        app_version: { type: string, nullable: true }
+        sdk_version: { type: string, nullable: true }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        deactivated_at: { type: string, format: date-time, nullable: true, description: Null while it holds a seat. }
+        created_at: { type: string, format: date-time }
+    ActivationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Activation" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    AuditEvent:
+      type: object
+      description: One audit entry, the fields the SIEM export carries (ADR-0036).
+      required: [id, tenant_id, seq, occurred_at, actor_type, actor_id, action, object_type, object_id, outcome, source_ip, user_agent, details, prev_hash, hash]
+      properties:
+        id: { type: string, example: aud_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        tenant_id: { type: string }
+        seq: { type: integer, format: int64, description: "1, 2, … in the tenant's chain; retention removes a prefix." }
+        occurred_at: { type: string, format: date-time, description: "Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers." }
+        actor_type: { type: string, enum: [user, token, platform, system] }
+        actor_id: { type: string, nullable: true }
+        action: { type: string, example: license.issue }
+        object_type: { type: string, nullable: true }
+        object_id: { type: string, nullable: true }
+        outcome: { type: string, enum: [success, failure, denied] }
+        source_ip: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        details: { type: object, additionalProperties: true }
+        prev_hash: { type: string, description: Hex; the previous entry's hash (zeros for seq 1). }
+        hash:
+          type: string
+          description: |
+            Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+            as its length in bytes (4 bytes, big-endian unsigned) followed by
+            its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+            decimal), `occurred_at` (exactly as sent), `actor_type`,
+            `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+            `source_ip`, `user_agent`, `details` (the JSON text exactly as
+            sent, byte for byte: take it from the raw response, don't
+            re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+            A null field is the empty string (stored values are never empty).
+    AuditEventPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        next_cursor: { type: string, description: Absent on the last page. }
     Problem:
       type: object
       required: [type, title, status, code, request_id]
@@ -856,12 +1021,31 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time, nullable: true }
         revoked_at: { type: string, format: date-time, nullable: true }
+    Summary:
+      type: object
+      required: [licenses]
+      description: Each counter is an object, so a counter can gain members and new counters can be added without breaking clients.
+      properties:
+        licenses:
+          type: object
+          required: [active, suspended, revoked]
+          description: Licenses by status, in the caller's product scope.
+          properties:
+            active: { type: integer, format: int64 }
+            suspended: { type: integer, format: int64 }
+            revoked: { type: integer, format: int64 }
+        customers:
+          type: object
+          required: [active]
+          description: Present only for callers with customer:read on every product.
+          properties:
+            active: { type: integer, format: int64, description: Customers that aren't archived. }
     LicenseStatus:
       type: string
       enum: [active, suspended, revoked]
     License:
       type: object
-      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
+      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, active_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
       properties:
         id: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         product_id: { type: string }
@@ -874,6 +1058,7 @@ components:
         expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
         expires_at: { type: string, format: date-time, nullable: true, description: Null for a perpetual license, or until first activation. }
         max_activations: { type: integer, nullable: true }
+        active_activations: { type: integer, description: Seats taken now (activations not deactivated). }
         entitlements:
           type: object
           required: [features, limits]

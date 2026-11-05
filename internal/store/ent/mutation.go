@@ -20355,6 +20355,8 @@ type TenantMutation struct {
 	updated_at                  *time.Time
 	slug                        *string
 	name                        *string
+	audit_retention_days        *int
+	addaudit_retention_days     *int
 	mfa_policy                  *tenant.MfaPolicy
 	clearedFields               map[string]struct{}
 	products                    map[string]struct{}
@@ -20638,6 +20640,76 @@ func (m *TenantMutation) OldName(ctx context.Context) (v string, err error) {
 // ResetName resets all changes to the "name" field.
 func (m *TenantMutation) ResetName() {
 	m.name = nil
+}
+
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (m *TenantMutation) SetAuditRetentionDays(i int) {
+	m.audit_retention_days = &i
+	m.addaudit_retention_days = nil
+}
+
+// AuditRetentionDays returns the value of the "audit_retention_days" field in the mutation.
+func (m *TenantMutation) AuditRetentionDays() (r int, exists bool) {
+	v := m.audit_retention_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAuditRetentionDays returns the old "audit_retention_days" field's value of the Tenant entity.
+// If the Tenant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TenantMutation) OldAuditRetentionDays(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAuditRetentionDays is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAuditRetentionDays requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAuditRetentionDays: %w", err)
+	}
+	return oldValue.AuditRetentionDays, nil
+}
+
+// AddAuditRetentionDays adds i to the "audit_retention_days" field.
+func (m *TenantMutation) AddAuditRetentionDays(i int) {
+	if m.addaudit_retention_days != nil {
+		*m.addaudit_retention_days += i
+	} else {
+		m.addaudit_retention_days = &i
+	}
+}
+
+// AddedAuditRetentionDays returns the value that was added to the "audit_retention_days" field in this mutation.
+func (m *TenantMutation) AddedAuditRetentionDays() (r int, exists bool) {
+	v := m.addaudit_retention_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (m *TenantMutation) ClearAuditRetentionDays() {
+	m.audit_retention_days = nil
+	m.addaudit_retention_days = nil
+	m.clearedFields[tenant.FieldAuditRetentionDays] = struct{}{}
+}
+
+// AuditRetentionDaysCleared returns if the "audit_retention_days" field was cleared in this mutation.
+func (m *TenantMutation) AuditRetentionDaysCleared() bool {
+	_, ok := m.clearedFields[tenant.FieldAuditRetentionDays]
+	return ok
+}
+
+// ResetAuditRetentionDays resets all changes to the "audit_retention_days" field.
+func (m *TenantMutation) ResetAuditRetentionDays() {
+	m.audit_retention_days = nil
+	m.addaudit_retention_days = nil
+	delete(m.clearedFields, tenant.FieldAuditRetentionDays)
 }
 
 // SetMfaPolicy sets the "mfa_policy" field.
@@ -21250,7 +21322,7 @@ func (m *TenantMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TenantMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 6)
 	if m.created_at != nil {
 		fields = append(fields, tenant.FieldCreatedAt)
 	}
@@ -21262,6 +21334,9 @@ func (m *TenantMutation) Fields() []string {
 	}
 	if m.name != nil {
 		fields = append(fields, tenant.FieldName)
+	}
+	if m.audit_retention_days != nil {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
 	}
 	if m.mfa_policy != nil {
 		fields = append(fields, tenant.FieldMfaPolicy)
@@ -21282,6 +21357,8 @@ func (m *TenantMutation) Field(name string) (ent.Value, bool) {
 		return m.Slug()
 	case tenant.FieldName:
 		return m.Name()
+	case tenant.FieldAuditRetentionDays:
+		return m.AuditRetentionDays()
 	case tenant.FieldMfaPolicy:
 		return m.MfaPolicy()
 	}
@@ -21301,6 +21378,8 @@ func (m *TenantMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldSlug(ctx)
 	case tenant.FieldName:
 		return m.OldName(ctx)
+	case tenant.FieldAuditRetentionDays:
+		return m.OldAuditRetentionDays(ctx)
 	case tenant.FieldMfaPolicy:
 		return m.OldMfaPolicy(ctx)
 	}
@@ -21340,6 +21419,13 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetName(v)
 		return nil
+	case tenant.FieldAuditRetentionDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAuditRetentionDays(v)
+		return nil
 	case tenant.FieldMfaPolicy:
 		v, ok := value.(tenant.MfaPolicy)
 		if !ok {
@@ -21354,13 +21440,21 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 // AddedFields returns all numeric fields that were incremented/decremented during
 // this mutation.
 func (m *TenantMutation) AddedFields() []string {
-	return nil
+	var fields []string
+	if m.addaudit_retention_days != nil {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	return fields
 }
 
 // AddedField returns the numeric value that was incremented/decremented on a field
 // with the given name. The second boolean return value indicates that this field
 // was not set, or was not defined in the schema.
 func (m *TenantMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case tenant.FieldAuditRetentionDays:
+		return m.AddedAuditRetentionDays()
+	}
 	return nil, false
 }
 
@@ -21369,6 +21463,13 @@ func (m *TenantMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *TenantMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case tenant.FieldAuditRetentionDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAuditRetentionDays(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Tenant numeric field %s", name)
 }
@@ -21376,7 +21477,11 @@ func (m *TenantMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *TenantMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(tenant.FieldAuditRetentionDays) {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -21389,6 +21494,11 @@ func (m *TenantMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *TenantMutation) ClearField(name string) error {
+	switch name {
+	case tenant.FieldAuditRetentionDays:
+		m.ClearAuditRetentionDays()
+		return nil
+	}
 	return fmt.Errorf("unknown Tenant nullable field %s", name)
 }
 
@@ -21407,6 +21517,9 @@ func (m *TenantMutation) ResetField(name string) error {
 		return nil
 	case tenant.FieldName:
 		m.ResetName()
+		return nil
+	case tenant.FieldAuditRetentionDays:
+		m.ResetAuditRetentionDays()
 		return nil
 	case tenant.FieldMfaPolicy:
 		m.ResetMfaPolicy()

@@ -1,5 +1,6 @@
 import { infiniteQueryOptions } from "@tanstack/react-query";
 import { api, unwrap } from "./client";
+import { everyPage } from "./members";
 import type { components } from "./schema";
 import type { Membership } from "./tokens";
 
@@ -20,6 +21,14 @@ export const productsQuery = (tenant: string) =>
     getNextPageParam: (p) => p.next_cursor,
   });
 
+export async function getProduct(tenant: string, id: string): Promise<Product> {
+  return unwrap(await api.GET("/tenants/{tenant}/products/{id}", { params: { path: { tenant, id } } }));
+}
+
+export async function getCustomer(tenant: string, id: string): Promise<Customer> {
+  return unwrap(await api.GET("/tenants/{tenant}/customers/{id}", { params: { path: { tenant, id } } }));
+}
+
 export async function createProduct(tenant: string, slug: string, name: string): Promise<Product> {
   return unwrap(await api.POST("/tenants/{tenant}/products", { params: { path: { tenant } }, body: { slug, name } }));
 }
@@ -37,6 +46,16 @@ export const customersQuery = (tenant: string) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (p) => p.next_cursor,
   });
+
+/** Every product and customer the caller can see, for pickers and names (bounded paging). */
+export const allProducts = (tenant: string) =>
+  everyPage(async (cursor) =>
+    unwrap(await api.GET("/tenants/{tenant}/products", { params: { path: { tenant }, query: { cursor, limit: 200 } } })),
+  );
+export const allCustomers = (tenant: string) =>
+  everyPage(async (cursor) =>
+    unwrap(await api.GET("/tenants/{tenant}/customers", { params: { path: { tenant }, query: { cursor, limit: 200 } } })),
+  );
 
 export async function createCustomer(tenant: string, body: CustomerCreate): Promise<Customer> {
   return unwrap(await api.POST("/tenants/{tenant}/customers", { params: { path: { tenant } }, body }));

@@ -9,5 +9,7 @@ export default tseslint.config(
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended, reactHooks.configs.flat.recommended],
     languageOptions: { globals: globals.browser },
+    // No console output: secrets (license keys, tokens, invite links) must never be logged.
+    rules: { "no-console": "error" },
   },
 );

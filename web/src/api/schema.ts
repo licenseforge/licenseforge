@@ -208,6 +208,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Exact counts for the dashboard overview, within the caller's scope.
+         * @description Needs license:read. License counts cover the products the caller
+         *     can see: a product-scoped caller gets the counts of its products.
+         *     `customers` is present only for callers with customer:read on every
+         *     product (customers are tenant-wide), and absent otherwise.
+         *
+         *     Lists carry no totals (ADR-0032); this resource is where counts
+         *     live. More counters (for example activations) may be added as new
+         *     members; clients must ignore members they don't know.
+         */
+        get: operations["getSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses": {
         parameters: {
             query?: never;
@@ -326,6 +356,90 @@ export interface paths {
          * @description Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
          */
         post: operations["revokeLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/activations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a license's activations (machines or clusters), deactivated ones included, newest first.
+         * @description Needs activation:read on the license's product. A hidden license answers 404 like a missing one.
+         */
+        get: operations["listActivations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+                activation_id: components["parameters"]["ActivationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+         * @description Needs activation:manage on the license's product; audited. Allowed
+         *     whatever the license's status. Deactivating an activation that is
+         *     already deactivated changes nothing and answers 200 with it.
+         *     Deactivating doesn't count as a seat move; activating a new machine
+         *     afterwards may (ADR-0034).
+         */
+        post: operations["deactivateActivation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+         * @description Needs audit:read on every product (owners and admins). Pages run
+         *     by `seq`, the chain's order: newest first by default; with
+         *     `after_seq`, oldest first from the entry after it (self-export:
+         *     pass the last `seq` you hold). Each entry carries `prev_hash` and
+         *     `hash` so the chain can be checked: each entry's `prev_hash` is the
+         *     previous entry's `hash` (32 zero bytes for seq 1), and `hash` is
+         *     computed from the response alone, as described on
+         *     AuditEvent.hash. Reading is audited as `audit_event.read`, at most
+         *     once per reader per 15 minutes.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -593,6 +707,88 @@ export interface components {
             /** Format: date-time */
             refresh_after: string;
         };
+        Activation: {
+            /** @example act_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            license_id: string;
+            /** @description The lease's bind.fp (a hash, never the raw machine ID). */
+            fingerprint: string;
+            /** @enum {string} */
+            fp_source: "override" | "env" | "kubernetes" | "machine-id";
+            /** @enum {string} */
+            binding: "machine" | "cluster";
+            /** @enum {string} */
+            mode: "online" | "offline";
+            /** @description As the SDK last reported it. */
+            hostname: string | null;
+            app_version: string | null;
+            sdk_version: string | null;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /**
+             * Format: date-time
+             * @description Null while it holds a seat.
+             */
+            deactivated_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ActivationPage: {
+            items: components["schemas"]["Activation"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        /** @description One audit entry, the fields the SIEM export carries (ADR-0036). */
+        AuditEvent: {
+            /** @example aud_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            tenant_id: string;
+            /**
+             * Format: int64
+             * @description 1, 2, … in the tenant's chain; retention removes a prefix.
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers.
+             */
+            occurred_at: string;
+            /** @enum {string} */
+            actor_type: "user" | "token" | "platform" | "system";
+            actor_id: string | null;
+            /** @example license.issue */
+            action: string;
+            object_type: string | null;
+            object_id: string | null;
+            /** @enum {string} */
+            outcome: "success" | "failure" | "denied";
+            source_ip: string | null;
+            user_agent: string | null;
+            details: {
+                [key: string]: unknown;
+            };
+            /** @description Hex; the previous entry's hash (zeros for seq 1). */
+            prev_hash: string;
+            /**
+             * @description Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+             *     as its length in bytes (4 bytes, big-endian unsigned) followed by
+             *     its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+             *     decimal), `occurred_at` (exactly as sent), `actor_type`,
+             *     `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+             *     `source_ip`, `user_agent`, `details` (the JSON text exactly as
+             *     sent, byte for byte: take it from the raw response, don't
+             *     re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+             *     A null field is the empty string (stored values are never empty).
+             */
+            hash: string;
+        };
+        AuditEventPage: {
+            items: components["schemas"]["AuditEvent"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
         Problem: {
             /** @example about:blank */
             type: string;
@@ -636,6 +832,26 @@ export interface components {
             /** Format: date-time */
             revoked_at: string | null;
         };
+        /** @description Each counter is an object, so a counter can gain members and new counters can be added without breaking clients. */
+        Summary: {
+            /** @description Licenses by status, in the caller's product scope. */
+            licenses: {
+                /** Format: int64 */
+                active: number;
+                /** Format: int64 */
+                suspended: number;
+                /** Format: int64 */
+                revoked: number;
+            };
+            /** @description Present only for callers with customer:read on every product. */
+            customers?: {
+                /**
+                 * Format: int64
+                 * @description Customers that aren't archived.
+                 */
+                active: number;
+            };
+        };
         /** @enum {string} */
         LicenseStatus: "active" | "suspended" | "revoked";
         License: {
@@ -659,6 +875,8 @@ export interface components {
              */
             expires_at: string | null;
             max_activations: number | null;
+            /** @description Seats taken now (activations not deactivated). */
+            active_activations: number;
             entitlements: {
                 features: string[];
                 limits: {
@@ -937,6 +1155,7 @@ export interface components {
         ProductId: string;
         CustomerId: string;
         LicenseId: string;
+        ActivationId: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
         /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
@@ -1310,6 +1529,33 @@ export interface operations {
             422: components["responses"]["Problem"];
         };
     };
+    getSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Summary"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     listLicenses: {
         parameters: {
             query?: {
@@ -1496,6 +1742,100 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listActivations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deactivateActivation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+                activation_id: components["parameters"]["ActivationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The activation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Oldest first, from the entry after this seq (0: from the start). Not with cursor. */
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listMyTenants: {

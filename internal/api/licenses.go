@@ -51,6 +51,10 @@ func (s *server) ListLicenses(ctx context.Context, req apigen.ListLicensesReques
 	if err != nil {
 		return nil, err
 	}
+	seats, err := s.seats(ctx, rows[:min(len(rows), limit)]...)
+	if err != nil {
+		return nil, err
+	}
 	page := apigen.ListLicenses200JSONResponse{Items: []apigen.License{}}
 	for i, l := range rows {
 		if i == limit {
@@ -58,9 +62,34 @@ func (s *server) ListLicenses(ctx context.Context, req apigen.ListLicensesReques
 			page.NextCursor = &c
 			break
 		}
-		page.Items = append(page.Items, licenseView(l))
+		page.Items = append(page.Items, licenseView(l, seats[l.ID]))
 	}
 	return page, nil
+}
+
+// GetSummary answers exact counts for the dashboard overview. Lists carry no
+// totals (ADR-0032); this resource is where counts live. License counts are
+// in the caller's product scope; customers only for callers who see every
+// product (absent otherwise, never a partial count).
+func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObject) (apigen.GetSummaryResponseObject, error) {
+	byStatus, err := s.Licenses.Counts(ctx, principal(ctx))
+	if err != nil {
+		return nil, err
+	}
+	var out apigen.GetSummary200JSONResponse
+	out.Licenses.Active = int64(byStatus[license.StatusActive])
+	out.Licenses.Suspended = int64(byStatus[license.StatusSuspended])
+	out.Licenses.Revoked = int64(byStatus[license.StatusRevoked])
+	n, ok, err := s.Customers.CountActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		out.Customers = &struct {
+			Active int64 `json:"active"`
+		}{int64(n)}
+	}
+	return out, nil
 }
 
 func (s *server) GetLicense(ctx context.Context, req apigen.GetLicenseRequestObject) (apigen.GetLicenseResponseObject, error) {
@@ -68,31 +97,32 @@ func (s *server) GetLicense(ctx context.Context, req apigen.GetLicenseRequestObj
 	if err != nil {
 		return nil, err
 	}
-	return apigen.GetLicense200JSONResponse(licenseView(l)), nil
+	v, err := s.view(ctx, l)
+	return apigen.GetLicense200JSONResponse(v), err
 }
 
 func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRequestObject) (apigen.SuspendLicenseResponseObject, error) {
-	l, err := s.Licenses.Suspend(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Suspend(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.SuspendLicense200JSONResponse(licenseView(l)), nil
+	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 func (s *server) ReinstateLicense(ctx context.Context, req apigen.ReinstateLicenseRequestObject) (apigen.ReinstateLicenseResponseObject, error) {
-	l, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.ReinstateLicense200JSONResponse(licenseView(l)), nil
+	return apigen.ReinstateLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 func (s *server) RevokeLicense(ctx context.Context, req apigen.RevokeLicenseRequestObject) (apigen.RevokeLicenseResponseObject, error) {
-	l, err := s.Licenses.Revoke(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Revoke(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.RevokeLicense200JSONResponse(licenseView(l)), nil
+	return apigen.RevokeLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 // IssueLicense issues a license; with Idempotency-Key, at most once per key
@@ -186,7 +216,25 @@ func issueRequest(b *apigen.IssueLicenseJSONRequestBody) licenses.IssueRequest {
 	return r
 }
 
-func licenseView(l *ent.License) apigen.License {
+// seats counts the active activations of ls (activations.ActiveSeats).
+func (s *server) seats(ctx context.Context, ls ...*ent.License) (map[string]int, error) {
+	ids := make([]string, len(ls))
+	for i, l := range ls {
+		ids[i] = l.ID
+	}
+	return s.Activations.ActiveSeats(ctx, principal(ctx), ids...)
+}
+
+// view is l's License view, with its seats counted.
+func (s *server) view(ctx context.Context, l *ent.License) (apigen.License, error) {
+	seats, err := s.seats(ctx, l)
+	if err != nil {
+		return apigen.License{}, err
+	}
+	return licenseView(l, seats[l.ID]), nil
+}
+
+func licenseView(l *ent.License, seats int) apigen.License {
 	utc := func(t *time.Time) *time.Time {
 		if t == nil {
 			return nil
@@ -196,7 +244,7 @@ func licenseView(l *ent.License) apigen.License {
 	}
 	v := apigen.License{Id: l.ID, ProductId: l.ProductID, PlanId: l.PlanID, PlanSlug: l.PlanSlug, CustomerId: l.CustomerID,
 		Type: apigen.LicenseType(l.Type), Status: apigen.LicenseStatus(l.Status), KeyHint: l.KeyHint,
-		ExpiryBasis: apigen.LicenseExpiryBasis(l.ExpiryBasis), ExpiresAt: utc(l.ExpiresAt), MaxActivations: l.MaxActivations,
+		ExpiryBasis: apigen.LicenseExpiryBasis(l.ExpiryBasis), ExpiresAt: utc(l.ExpiresAt), MaxActivations: l.MaxActivations, ActiveActivations: seats,
 		ExternalRefs: l.ExternalRefs, IssuedAt: l.IssuedAt.UTC(), SuspendedAt: utc(l.SuspendedAt), RevokedAt: utc(l.RevokedAt),
 		CreatedAt: l.CreatedAt.UTC()}
 	v.Entitlements.Features, v.Entitlements.Limits = l.Entitlements.Features, l.Entitlements.Limits
@@ -213,10 +261,51 @@ func licenseView(l *ent.License) apigen.License {
 }
 
 func issuedView(i licenses.Issued) apigen.LicenseIssued {
-	v := licenseView(i.License)
+	v := licenseView(i.License, 0) // new: no activations yet
 	return apigen.LicenseIssued{Id: v.Id, ProductId: v.ProductId, PlanId: v.PlanId, PlanSlug: v.PlanSlug, CustomerId: v.CustomerId,
 		Type: apigen.LicenseIssuedType(v.Type), Status: v.Status, KeyHint: v.KeyHint,
-		ExpiryBasis: apigen.LicenseIssuedExpiryBasis(v.ExpiryBasis), ExpiresAt: v.ExpiresAt, MaxActivations: v.MaxActivations,
+		ExpiryBasis: apigen.LicenseIssuedExpiryBasis(v.ExpiryBasis), ExpiresAt: v.ExpiresAt, MaxActivations: v.MaxActivations, ActiveActivations: v.ActiveActivations,
 		Entitlements: v.Entitlements, ExternalRefs: v.ExternalRefs, IssuedAt: v.IssuedAt, SuspendedAt: v.SuspendedAt,
 		RevokedAt: v.RevokedAt, CreatedAt: v.CreatedAt, Key: i.Key}
+}
+
+func (s *server) ListActivations(ctx context.Context, req apigen.ListActivationsRequestObject) (apigen.ListActivationsResponseObject, error) {
+	limit, at, after, err := pageParams(req.Params.Limit, req.Params.Cursor, "act")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.Activations.List(ctx, principal(ctx), req.Id, limit+1, at, after)
+	if err != nil {
+		return nil, err
+	}
+	page := apigen.ListActivations200JSONResponse{Items: []apigen.Activation{}}
+	for i, a := range rows {
+		if i == limit {
+			c := encodeCursor(rows[i-1].CreatedAt, rows[i-1].ID)
+			page.NextCursor = &c
+			break
+		}
+		page.Items = append(page.Items, activationView(a))
+	}
+	return page, nil
+}
+
+func (s *server) DeactivateActivation(ctx context.Context, req apigen.DeactivateActivationRequestObject) (apigen.DeactivateActivationResponseObject, error) {
+	a, err := s.Activations.DeactivateByID(ctx, principal(ctx), req.Id, req.ActivationId)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.DeactivateActivation200JSONResponse(activationView(a)), nil
+}
+
+func activationView(a *ent.Activation) apigen.Activation {
+	v := apigen.Activation{Id: a.ID, LicenseId: a.LicenseID, Fingerprint: a.Fingerprint, FpSource: apigen.ActivationFpSource(a.FpSource),
+		Binding: apigen.ActivationBinding(a.Binding), Mode: apigen.ActivationMode(a.Mode), Hostname: a.Hostname,
+		AppVersion: a.AppVersion, SdkVersion: a.SdkVersion, FirstSeenAt: a.FirstSeenAt.UTC(), LastSeenAt: a.LastSeenAt.UTC(),
+		CreatedAt: a.CreatedAt.UTC()}
+	if a.DeactivatedAt != nil {
+		t := a.DeactivatedAt.UTC()
+		v.DeactivatedAt = &t
+	}
+	return v
 }

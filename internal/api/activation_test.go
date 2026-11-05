@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -26,8 +28,12 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
+	"licenseforge.io/licenseforge/internal/store/ids"
+	"licenseforge.io/licenseforge/sdk/go/fingerprint"
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
+	"licenseforge.io/licenseforge/sdk/go/online"
 )
 
 type actFixture struct {
@@ -292,6 +298,9 @@ func TestActivationRateLimitIgnoresUnknownKeys(t *testing.T) {
 	a := actSetup(t)
 	a.srv.limiter = newKeyLimiter(3)
 	a.srv.limiter.maxKeys = 5
+	// A fixed clock: a minute boundary mid-test would reset the counts.
+	now := time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)
+	a.srv.limiter.now = func() time.Time { return now }
 	for _, tc := range []struct {
 		name, op, body string
 		o              []opt
@@ -486,5 +495,286 @@ func TestKeyLimiterReleaseOldWindow(t *testing.T) {
 	l.release("k", cur)
 	if n := l.counts[sha256.Sum256([]byte("k"))]; n != 1 {
 		t.Errorf("count %d after a current release", n)
+	}
+}
+
+// The dashboard's activation API: list a license's seats, deactivate one
+// (activation:manage, audited, the seat freed as the SDK's deactivate frees
+// it), and the License view's active_activations.
+func TestActivationManagement(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is, other := a.issue(t, "pro"), a.issue(t, "pro")
+	fps := []string{newFP(), newFP()}
+	for _, fp := range fps {
+		if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(fp), licenseAuth(is.Key)); r.code != 200 {
+			t.Fatalf("activate: %s", r.raw)
+		}
+	}
+	otherAct := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(other.Key)).body["activation_id"].(string)
+	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(is.Key)).problem(t, 409, "activation_limit_reached")
+	var prodQ string
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		p, err := tx.Product.Create().SetTenantID(a.a.ID).SetSlug("other").SetName("Other").Save(ctx)
+		if err == nil {
+			prodQ = p.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	viewer, support := a.session(t, a.viewerA, true), a.session(t, a.join(t, a.a.ID, invitation.RoleSupport, a.ownerA), true)
+	scoped := a.session(t, a.join(t, a.a.ID, invitation.RoleSupport, a.ownerA, prodQ), true)
+	lp := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + is.License.ID
+	list := func(q string, o opt) []any {
+		t.Helper()
+		r := a.do(t, "GET", lp+"/activations"+q, "", o)
+		if r.code != 200 {
+			t.Fatalf("list: %d %s", r.code, r.raw)
+		}
+		var out []any
+		for _, it := range r.body["items"].([]any) {
+			out = append(out, it.(map[string]any)["fingerprint"])
+		}
+		if c, ok := r.body["next_cursor"].(string); ok {
+			out = append(out, "cursor:"+c)
+		}
+		return out
+	}
+	// Newest first, paged.
+	if got := list("", viewer); !reflect.DeepEqual(got, []any{fps[1], fps[0]}) {
+		t.Errorf("list: %v", got)
+	}
+	page := list("?limit=1", viewer)
+	if len(page) != 2 || page[0] != fps[1] {
+		t.Fatalf("page 1: %v", page)
+	}
+	if got := list("?limit=1&cursor="+strings.TrimPrefix(page[1].(string), "cursor:"), viewer); !reflect.DeepEqual(got, []any{fps[0]}) {
+		t.Errorf("page 2: %v", got)
+	}
+	a.do(t, "GET", lp+"/activations?cursor=x", "", viewer).problem(t, 400, "invalid_cursor")
+	a.do(t, "GET", lp+"/activations?status=active", "", viewer).problem(t, 400, "invalid_request")
+	seats := func(o opt) any {
+		t.Helper()
+		got := a.do(t, "GET", lp, "", o).body["active_activations"]
+		l := a.do(t, "GET", Prefix+"/tenants/"+a.a.Slug+"/licenses?limit=1", "", o).body["items"].([]any)[0].(map[string]any)
+		if l["id"] != other.License.ID || l["active_activations"] != 1.0 {
+			t.Errorf("license list: %v", l)
+		}
+		return got
+	}
+	if n := seats(viewer); n != 2.0 {
+		t.Errorf("active_activations = %v", n)
+	}
+
+	// Hidden, missing, malformed and another tenant's answer alike; an
+	// activation of another license is missing too.
+	acts := a.activations(t, is.License.ID)
+	act := acts[0].ID
+	missing := a.do(t, "GET", Prefix+"/tenants/"+a.a.Slug+"/licenses/"+ids.License()+"/activations", "", viewer).problem(t, 404, "not_found")
+	bOwner := a.session(t, a.ownerB, true)
+	for name, c := range map[string]struct {
+		method, path string
+		o            opt
+	}{
+		"hidden list":                  {"GET", lp + "/activations", scoped},
+		"malformed list":               {"GET", Prefix + "/tenants/" + a.a.Slug + "/licenses/x/activations", viewer},
+		"another tenant's list":        {"GET", Prefix + "/tenants/" + a.b.Slug + "/licenses/" + is.License.ID + "/activations", bOwner},
+		"hidden deactivate":            {"POST", lp + "/activations/" + act + "/deactivate", scoped},
+		"missing license deactivate":   {"POST", Prefix + "/tenants/" + a.a.Slug + "/licenses/" + ids.License() + "/activations/" + act + "/deactivate", support},
+		"another license's activation": {"POST", lp + "/activations/" + otherAct + "/deactivate", support},
+		"missing activation":           {"POST", lp + "/activations/" + ids.New("act") + "/deactivate", support},
+		"malformed activation":         {"POST", lp + "/activations/x/deactivate", support},
+		"another tenant's deactivate":  {"POST", Prefix + "/tenants/" + a.b.Slug + "/licenses/" + is.License.ID + "/activations/" + act + "/deactivate", bOwner},
+	} {
+		if got := a.do(t, c.method, c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	// Refusals are audited: missing as failed, hidden as denied.
+	a.do(t, "POST", lp+"/activations/"+otherAct+"/deactivate", "", support)
+	if e := a.lastEvent(t, a.a.ID); e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeFailure {
+		t.Errorf("refused deactivate audit = %+v", e)
+	}
+	a.do(t, "POST", lp+"/activations/"+act+"/deactivate", "", scoped)
+	if e := a.lastEvent(t, a.a.ID); e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeDenied {
+		t.Errorf("hidden deactivate audit = %+v", e)
+	}
+	// Seen but not changeable: 403, audited as denied.
+	a.do(t, "POST", lp+"/activations/"+act+"/deactivate", "", viewer).problem(t, 403, "forbidden")
+	if e := a.lastEvent(t, a.a.ID); e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeDenied || *e.ActorID != a.viewerA || *e.ObjectID != act {
+		t.Errorf("denied deactivate audit = %+v", e)
+	}
+	if n := len(a.activations(t, other.License.ID)); n != 1 || a.activations(t, other.License.ID)[0].DeactivatedAt != nil {
+		t.Errorf("another license's activation changed")
+	}
+
+	// Deactivate: the seat is free, the SDK sees it, and it is audited.
+	before := a.events(t, "activation.deactivate")
+	r := a.do(t, "POST", lp+"/activations/"+act+"/deactivate", "", support)
+	if r.code != 200 || r.body["id"] != act || r.body["deactivated_at"] == nil || r.body["license_id"] != is.License.ID {
+		t.Fatalf("deactivate: %d %s", r.code, r.raw)
+	}
+	e := a.lastEvent(t, a.a.ID)
+	if e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeSuccess || e.ActorType != auditevent.ActorTypeUser ||
+		*e.ObjectID != act || !strings.Contains(e.Details, is.License.ID) {
+		t.Errorf("deactivate audit = %+v", e)
+	}
+	if n := seats(viewer); n != 1.0 {
+		t.Errorf("active_activations after deactivate = %v", n)
+	}
+	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(acts[0].Fingerprint), licenseAuth(is.Key)).problem(t, 404, "not_activated")
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(is.Key)); r.code != 200 {
+		t.Errorf("seat not freed: %s", r.raw)
+	}
+	// Again: nothing changes, the same answer, no second entry.
+	again := a.do(t, "POST", lp+"/activations/"+act+"/deactivate", "", support)
+	if again.code != 200 || again.body["deactivated_at"] != r.body["deactivated_at"] {
+		t.Errorf("repeat: %d %s", again.code, again.raw)
+	}
+	if n := a.events(t, "activation.deactivate"); n != before+1 {
+		t.Errorf("deactivate entries %d, want %d", n, before+1)
+	}
+	// A status change answers with the seats counted in its transaction.
+	if r := a.do(t, "POST", lp+"/suspend", "", a.session(t, a.ownerA, true)); r.code != 200 || r.body["active_activations"] != 2.0 {
+		t.Errorf("suspend: %d %s", r.code, r.raw)
+	}
+	// Activations created at the same instant page by ID: both come back.
+	tie := a.issue(t, "pro")
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		at := time.Now().UTC().Truncate(time.Microsecond)
+		for range 2 {
+			if _, err := tx.Activation.Create().SetTenantID(a.a.ID).SetLicenseID(tie.License.ID).SetFingerprint(newFP()).
+				SetFpSource(activation.FpSourceMachineID).SetBinding(activation.BindingMachine).SetMode(activation.ModeOnline).
+				SetFirstSeenAt(at).SetLastSeenAt(at).SetCreatedAt(at).SetUpdatedAt(at).Save(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tp := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + tie.License.ID + "/activations?limit=1"
+	r1 := a.do(t, "GET", tp, "", viewer)
+	c, _ := r1.body["next_cursor"].(string)
+	r2 := a.do(t, "GET", tp+"&cursor="+c, "", viewer)
+	i1, _ := r1.body["items"].([]any)
+	i2, _ := r2.body["items"].([]any)
+	if c == "" || len(i1) != 1 || len(i2) != 1 || i1[0].(map[string]any)["id"] == i2[0].(map[string]any)["id"] {
+		t.Errorf("tied pages: %s / %s", r1.raw, r2.raw)
+	}
+	// Seats are counted only in the caller's product scope.
+	q := authz.Principal{Kind: authz.User, ID: "usr_q", TenantID: a.a.ID, Role: authz.Viewer, Scope: authz.Scope{Products: []string{prodQ}}}
+	if got, err := a.srv.Activations.ActiveSeats(ctx, q, is.License.ID); err != nil || len(got) != 0 {
+		t.Errorf("out-of-scope seats: %v %v", got, err)
+	}
+}
+
+// A dashboard deactivate waits for the license lock, as the SDK's does, so
+// one landing while the SDK deactivates the same machine answers with the
+// activation, deactivated, instead of failing on the row.
+func TestDeactivateActivationWaitsForLicenseLock(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is := a.issue(t, "pro")
+	act := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(is.Key)).body["activation_id"].(string)
+	path := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + is.License.ID + "/activations/" + act + "/deactivate"
+	locked, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+			// What the SDK's Deactivate does: the license lock, then the seat.
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM licenses WHERE id = $1 FOR NO KEY UPDATE`, is.License.ID); err != nil {
+				close(locked)
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE activations SET deactivated_at = clock_timestamp() WHERE id = $1`, act)
+			close(locked)
+			<-release
+			return err
+		})
+	}()
+	<-locked
+	res := make(chan resp, 1)
+	go func() { res <- a.do(t, "POST", path, "", a.session(t, a.ownerA, true)) }()
+	// Commit once the request waits on a lock (the license's; without it,
+	// the activation row's).
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		var n int
+		if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+			rows, err := tx.QueryContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rows.Close() }()
+			rows.Next()
+			return rows.Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("the request never waited on a lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if r := <-res; r.code != 200 || r.body["deactivated_at"] == nil {
+		t.Errorf("deactivate: %d %s", r.code, r.raw)
+	}
+	if n := a.events(t, "activation.deactivate"); n != 0 { // the change was the other transaction's
+		t.Errorf("%d entries", n)
+	}
+}
+
+// The Go SDK's online client against the real handler: activate, refresh,
+// a license check on the cached lease, deactivate.
+func TestSDKOnlineClient(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	srv := httptest.NewServer(a.srv)
+	defer srv.Close()
+	ctx := context.Background()
+	var kid string
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) (err error) { kid, err = tx.SigningKey.Query().OnlyID(ctx); return }); err != nil {
+		t.Fatal(err)
+	}
+	pk, err := a.keys.Public(ctx, a.a.ID, kid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpHash, err := fingerprint.Hash(a.a.ID, "db", "machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := online.New(online.Config{BaseURL: srv.URL, TenantID: a.a.ID, Product: "db", LicenseKey: is.Key,
+		Keys:        licensefile.KeySet{{KID: pk.KID, Alg: licensefile.AlgEd25519, Key: pk.Key}},
+		Fingerprint: fingerprint.Result{Fingerprint: fpHash, Source: fingerprint.SourceMachineID, Binding: "machine"}, AppVersion: "1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := c.Activate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if claims, st, err := c.Current(); err != nil || st != licensefile.StatusValid || claims.LicenseID != is.License.ID {
+		t.Errorf("Current = %v %v", st, err)
+	}
+	if as := a.activations(t, is.License.ID); len(as) != 1 || as[0].ID != l.ActivationID {
+		t.Errorf("activations %+v", as)
+	}
+	if err := c.Deactivate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Refresh(ctx); !errors.Is(err, online.ErrNotActivated) {
+		t.Errorf("refresh after deactivate: %v", err)
 	}
 }

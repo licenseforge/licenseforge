@@ -85,6 +85,11 @@ func Name(v string) predicate.Tenant {
 	return predicate.Tenant(sql.FieldEQ(FieldName, v))
 }
 
+// AuditRetentionDays applies equality check predicate on the "audit_retention_days" field. It's identical to AuditRetentionDaysEQ.
+func AuditRetentionDays(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldEQ(FieldAuditRetentionDays, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Tenant {
 	return predicate.Tenant(sql.FieldEQ(FieldCreatedAt, v))
@@ -293,6 +298,56 @@ func NameEqualFold(v string) predicate.Tenant {
 // NameContainsFold applies the ContainsFold predicate on the "name" field.
 func NameContainsFold(v string) predicate.Tenant {
 	return predicate.Tenant(sql.FieldContainsFold(FieldName, v))
+}
+
+// AuditRetentionDaysEQ applies the EQ predicate on the "audit_retention_days" field.
+func AuditRetentionDaysEQ(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldEQ(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysNEQ applies the NEQ predicate on the "audit_retention_days" field.
+func AuditRetentionDaysNEQ(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldNEQ(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysIn applies the In predicate on the "audit_retention_days" field.
+func AuditRetentionDaysIn(vs ...int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldIn(FieldAuditRetentionDays, vs...))
+}
+
+// AuditRetentionDaysNotIn applies the NotIn predicate on the "audit_retention_days" field.
+func AuditRetentionDaysNotIn(vs ...int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldNotIn(FieldAuditRetentionDays, vs...))
+}
+
+// AuditRetentionDaysGT applies the GT predicate on the "audit_retention_days" field.
+func AuditRetentionDaysGT(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldGT(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysGTE applies the GTE predicate on the "audit_retention_days" field.
+func AuditRetentionDaysGTE(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldGTE(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysLT applies the LT predicate on the "audit_retention_days" field.
+func AuditRetentionDaysLT(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldLT(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysLTE applies the LTE predicate on the "audit_retention_days" field.
+func AuditRetentionDaysLTE(v int) predicate.Tenant {
+	return predicate.Tenant(sql.FieldLTE(FieldAuditRetentionDays, v))
+}
+
+// AuditRetentionDaysIsNil applies the IsNil predicate on the "audit_retention_days" field.
+func AuditRetentionDaysIsNil() predicate.Tenant {
+	return predicate.Tenant(sql.FieldIsNull(FieldAuditRetentionDays))
+}
+
+// AuditRetentionDaysNotNil applies the NotNil predicate on the "audit_retention_days" field.
+func AuditRetentionDaysNotNil() predicate.Tenant {
+	return predicate.Tenant(sql.FieldNotNull(FieldAuditRetentionDays))
 }
 
 // MfaPolicyEQ applies the EQ predicate on the "mfa_policy" field.

@@ -27,6 +27,7 @@ import (
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/catalog"
 	"licenseforge.io/licenseforge/internal/customers"
@@ -60,6 +61,8 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Customers customers.Service
+	// Audit reads the tenant's audit log (audit:read).
+	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
 	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
@@ -107,6 +110,7 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w := &tracked{ResponseWriter: rw}
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
 	if _, pattern := s.mux.Handler(r); pattern != "" { // before auth, so refusals get the route too
 		metrics.SetRoute(r.Context(), pattern)
@@ -281,6 +285,8 @@ var queryParams = map[string][]string{
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor"},
 	"ListCustomers":   {"limit", "cursor"},
+	"ListAuditEvents": {"limit", "cursor", "after_seq"},
+	"ListActivations": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -463,7 +469,7 @@ func mapErr(err error) *problem {
 	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound):
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound):
 		p = errNotFound
 	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
 		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}

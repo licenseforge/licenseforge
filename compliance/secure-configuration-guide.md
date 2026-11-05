@@ -29,6 +29,13 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME` | no | the address's host | Name the collector's certificate must carry |
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
+| `LICENSEFORGE_AUDIT_OTLP_ENDPOINT` | no | unset = no OTLP export | OTLP/HTTP logs URL with the JSON encoding, `https://…/v1/logs` (http only on loopback; ADR-0036). TLS 1.2+, verified. A batch is delivered only on a 2xx with an empty body or an OTLP JSON body rejecting no record. No HTTP proxy is used |
+| `LICENSEFORGE_AUDIT_OTLP_CA_FILE`, `_CERT_FILE`, `_KEY_FILE` | no | system roots, no client certificate | As for syslog (chart: `audit.export.otlp.caSecret`, `clientSecret`) |
+| `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: pass it with `secretKeyRef` (chart: `headersSecret`) |
+| `LICENSEFORGE_TRUSTED_PROXIES` | no | unset = no proxy trusted | Comma-separated CIDRs or addresses of your ingress/load balancer. Only their `X-Forwarded-For` is believed, read from the right: the client is the right-most hop that isn't a trusted proxy. List proxies only, never client networks. Prefixes broader than /8 (IPv4) or /32 (IPv6) are refused at start |
+| `LICENSEFORGE_RATE_LIMIT_ACTIVATION` | no | `1200` | Requests per client address per minute, per replica, on `/api/v1/activation/` (`0` = off). Many installs can share a customer's egress address; each license key is limited separately (60/min) |
+| `LICENSEFORGE_RATE_LIMIT_MANAGEMENT` | no | `600` | The same for the rest of `/api/v1` and `/auth/` except login |
+| `LICENSEFORGE_RATE_LIMIT_LOGIN` | no | `60` | The same for `/auth/login` and `/auth/callback` |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 
@@ -43,6 +50,8 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 | `licenseforge_admin` | `licenseforge_platform` | Platform-admin work | All tenants, through explicit grants |
 | `licenseforge_login` | `licenseforge_identity` | Login, sessions, invitation acceptance | Identity tables only; no licensing data |
 | `licenseforge_pruner` | `licenseforge_retention` | Audit retention only (ADR-0036) | The only login that deletes audit entries. The database lets it delete only entries at least 365 days old and at or below its chain's newest anchor, and lets it anchor only on a real entry that is at least 365 days old and not the chain's last. That the deleted entries form a prefix is checked by the job's count check (a mismatch rolls the batch back) and detected by Verify and the SIEM's continuity check if bypassed, not enforced by the database. No other table. Upgrading: create the group before `licenseforge migrate` |
+
+**Upgrading to audit retention (ADR-0036).** Before running `licenseforge migrate` (the Helm migration Job) on an install that predates it, create the group role as a database admin: `CREATE ROLE licenseforge_retention NOLOGIN;`, then the pruner login (`deploy/database-setup.sql`). The migration stops with that message otherwise. Retention runs as `licenseforge audit prune` (the chart's `auditRetention` CronJob) with `LICENSEFORGE_RETENTION_DATABASE_URL`; `LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS` (365 to 36,500, unset keeps everything) sets the platform chain's retention, and tenant owners set their own chain's (365 to 36,500 days, audited). Every cut is recorded in the chain as an `audit.retention` entry with the retention period in force (AU-11), and nothing a registered SIEM sink hasn't received is pruned.
 
 **Why the server must never hold the owner login.** Tenant isolation is enforced by forced row-level security, and RLS is a backstop only if the serving process can't turn it off. The owner sees every row, can alter or drop policies and switch RLS off, and can rewrite the audit chain. A serving pod with the owner login would turn any bug or compromise in the internet-facing process into full access to every tenant. So:
 
@@ -63,7 +72,9 @@ The server speaks plain HTTP on 8080 and has no TLS settings. The chart creates 
 - Terminate TLS at your ingress controller, gateway or service mesh, with TLS 1.2 or newer (1.3 preferred) and a certificate for the public host. For FIPS deployments, the terminating proxy must use a FIPS-validated TLS module. FIPS-only suites in the server are *planned* (Roadmap v0.1).
 - Set HSTS at the ingress. Login cookies use the `__Host-` prefix and `Secure`, so login works only over https (or on localhost).
 - Route only what users need: `/auth/*` and, later, the API and dashboard. `/healthz` and `/readyz` are for the kubelet. They reveal nothing, but needn't be public.
-- Rate-limit and size-limit requests at the ingress: the server has timeouts but no rate limiting.
+- **Set `LICENSEFORGE_TRUSTED_PROXIES` to your ingress's addresses** (e.g. the pod CIDR of the ingress controller). Otherwise every client counts as the proxy for the rate limit and in audit entries. The server logs one warning naming the peer the first time it ignores an `X-Forwarded-For`, and counts every ignored header in `licenseforge_forwarded_headers_ignored_total`; the Helm chart's install notes warn while `trustedProxies` is empty. Health checks and the dashboard's static files aren't limited.
+- IPv6 clients are counted per /64. A client holding a larger block gets one bucket per /64 in it (a /48 is 65,536 buckets), so the per-address limit doesn't bound an attacker with a large IPv6 allocation; the address table's bound (fail open past it) and the ingress do.
+- The server's per-address limit is per replica and fails open for new addresses once 100,000 are tracked in a minute (`licenseforge_rate_limit_untracked_requests_total`); `licenseforge_rate_limited_requests_total` counts 429s by surface. Keep volumetric and connection limits at the ingress. Request bodies are limited to 1 MB; the server cuts requests that take over 30 s to send and responses over 60 s.
 - If the proxy rewrites `Host`, keep the browser-facing origin equal to `LICENSEFORGE_OIDC_REDIRECT_URL`'s.
 
 ## Secrets and the keyring

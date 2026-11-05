@@ -420,7 +420,7 @@
               {
                 "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",
                 "control-id": "au-6",
-                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics.",
+                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS) and/or OTLP logs over HTTP (JSON; delivered only on a 2xx rejecting no record), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics. Tenants read and self-export their own chain through the REST API (audit:read, owners and admins; under RLS, the platform chain never visible) with the same fields, so they can check it themselves; reading is itself audited, once per reader per 15 minutes.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -438,9 +438,19 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/auditexport/export_test.go",
                     "rel": "reference",
                     "text": "TestAtLeastOnceAfterACrash"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestAuditEventEndpoints"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/read_test.go",
+                    "rel": "reference",
+                    "text": "TestListRecordsReads"
                   }
                 ],
-                "remarks": "Not yet: OTLP export, the SIEM correlation rule in the docs, and the dashboard audit viewer (v0.2)."
+                "remarks": "Not yet: the SIEM correlation rule in the docs, and the dashboard audit viewer screen (v0.2)."
               },
               {
                 "uuid": "73f6ddcd-57bc-5f54-b68b-66d9640e06f2",
@@ -498,15 +508,27 @@
               {
                 "uuid": "b0fd6354-21b0-5995-be78-5caea53ea53d",
                 "control-id": "au-11",
-                "description": "A per-tenant retention setting; the retention job deletes only a prefix of the chain. The default keeps everything.",
+                "description": "A per-tenant retention setting (owners only, 365 to 36,500 days; every change and every refused change is audited) and an install setting for the platform chain; the `licenseforge audit prune` CronJob, with its own login, cuts the prefix of entries older than the period in batches behind an anchor, never the chain's last entry and never what a registered SIEM sink hasn't received, and records each cut as a chained audit.retention entry with the period in force. The database enforces the 365-day floor and the anchor bound. The default keeps everything (ADR-0036).",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "partial"
                   }
                 ],
-                "remarks": "No retention job yet: everything is kept (Roadmap v0.1: audit log configurable retention)."
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/retention/retention_test.go",
+                    "rel": "reference",
+                    "text": "TestPruneCutsTheOldPrefix"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/retention_test.go",
+                    "rel": "reference",
+                    "text": "TestRetentionFloorAndAnchors"
+                  }
+                ],
+                "remarks": "No REST endpoint for the tenant setting yet (it is a service function); long-term retention beyond the active store is the SIEM's (e.g. OMB M-21-31)."
               },
               {
                 "uuid": "00e192a5-5cfe-5c0c-ae45-c044db63d4cf",
@@ -1114,7 +1136,7 @@
               {
                 "uuid": "671b5971-8004-5f3a-a71a-2771bed5a4e3",
                 "control-id": "sc-5",
-                "description": "Bounded timeouts: HTTP read-header (10 s) and idle (60 s), IdP calls (10 s), the startup database connect (30 s) and the readiness check (2 s). Chart resource limits; optional HPA.",
+                "description": "A per-client-address rate limit runs before anything else on the public listener (ADR-0032 step 0): fixed one-minute windows per address (IPv6 per /64) and surface (activation 1200, management 600, login 60 by default), 429 with Retry-After and RateLimit headers, bounded memory. Bounded timeouts: HTTP read-header (10 s), read (30 s), write (60 s) and idle (60 s), IdP calls (10 s), the startup database connect (30 s) and the readiness check (2 s). Chart resource limits; optional HPA.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1128,12 +1150,22 @@
                     "rel": "reference"
                   },
                   {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/ratelimit/ratelimit_test.go",
+                    "rel": "reference",
+                    "text": "TestLimitThen429"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/ratelimit/ratelimit_test.go",
+                    "rel": "reference",
+                    "text": "TestSpoofedForwardedForDoesNotEscape"
+                  },
+                  {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/weblogin_test.go",
                     "rel": "reference",
                     "text": "TestKeyFetchTimesOut"
                   }
                 ],
-                "remarks": "No request rate limiting in the server: configure it at the ingress (Secure Configuration Guide)."
+                "remarks": "The limit is per replica (N replicas allow N times the quota) and fails open for new addresses once 100,000 are tracked in a window (counted in licenseforge_rate_limit_untracked_requests_total). Volumetric attacks belong to the ingress or network (Secure Configuration Guide)."
               },
               {
                 "uuid": "1085c3b2-eb7f-54de-8357-9cc26371ca4a",
