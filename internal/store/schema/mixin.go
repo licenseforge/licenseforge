@@ -47,6 +47,9 @@ var (
 	bindPolicies = []string{"none", "machine", "cluster"} // what a plan/license requires; none = site license
 	fpSources    = []string{"override", "env", "kubernetes", "machine-id"}
 	modes        = []string{"online", "offline"}
+	// assuranceLevels: a session's assurance and a tenant's MFA policy
+	// (ADR-0038), as authz.Assurance.
+	assuranceLevels = []string{"none", "mfa", "phishing_resistant"}
 )
 
 // stringMapCheck: a JSON object whose values are all strings (external_refs),
