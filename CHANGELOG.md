@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 - Per-tenant MFA policy, step 2 (ADR-0038): every tenant request from a session checks its assurance against the tenant's policy right after the membership check (non-members still get 404); a member falling short gets `403 mfa_required` with `required_assurance`, `session_assurance` and a `step_up_url` (until step 2b, the step-up login, it leads to a normal login: the IdP isn't asked for the stronger method), audited once per session and tenant (`session.mfa_required`, found through a partial index without taking the chain lock first) and counted in `licenseforge_mfa_refusals_total`. Creating API tokens therefore needs a qualifying session; tokens are exempt at use. `GET /me/tenants` adds `mfa_policy` and `accessible`. Migrations `20261105160000_tenant_mfa_enforce_security.sql` (the login path reads the policy) and `20261105215658_mfa_refusal_index.sql` (a partial index on `audit_events (tenant_id, object_id)` for `session.mfa_required`; built `CONCURRENTLY` outside a transaction, so audited writes continue while it builds).
+- Dashboard audit log viewer at `/t/{slug}/settings/audit` (ADR-0020, ADR-0027).
+  - A paged table, newest first: seq, time, actor, action, outcome, object, source IP. The details view shows every field and `details` as escaped, indented JSON text, never HTML.
+  - The nav entry appears only for owners and admins with every product (`audit:read`).
+  - "Verify loaded entries" recomputes each loaded entry's hash in the browser, as `AuditEvent.hash` documents, over `details` cut raw from the response. It also checks the links, that no entries are missing, and seq 1's zero start. It reports only that the loaded entries are consistent with each other: the chain is unkeyed, so the head hash is shown for comparison with a SIEM export. A page that can't be read exactly is still listed and reported as unverifiable.
+  - Request IDs aren't shown yet: audit entries don't record them.
 - Dashboard product archive (ADR-0015).
   - The products screen shows when a product was archived, and offers Archive (admin or owner, `catalog:write` on the product) with a one-way confirmation.
   - The license issue picker leaves archived products out; the licenses filter keeps them.
