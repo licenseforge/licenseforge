@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
@@ -69,13 +71,21 @@ func readAuditPage(t *testing.T, r resp) ([]auditItem, string) {
 	}
 	var page struct {
 		Items []struct {
-			ID       string          `json:"id"`
-			TenantID string          `json:"tenant_id"`
-			Seq      int64           `json:"seq"`
-			Action   string          `json:"action"`
-			Details  json.RawMessage `json:"details"`
-			PrevHash string          `json:"prev_hash"`
-			Hash     string          `json:"hash"`
+			ID         string          `json:"id"`
+			TenantID   string          `json:"tenant_id"`
+			Seq        int64           `json:"seq"`
+			OccurredAt string          `json:"occurred_at"`
+			ActorType  string          `json:"actor_type"`
+			ActorID    *string         `json:"actor_id"`
+			Action     string          `json:"action"`
+			ObjectType *string         `json:"object_type"`
+			ObjectID   *string         `json:"object_id"`
+			Outcome    string          `json:"outcome"`
+			SourceIP   *string         `json:"source_ip"`
+			UserAgent  *string         `json:"user_agent"`
+			Details    json.RawMessage `json:"details"`
+			PrevHash   string          `json:"prev_hash"`
+			Hash       string          `json:"hash"`
 		} `json:"items"`
 		Next string `json:"next_cursor"`
 	}
@@ -84,6 +94,29 @@ func readAuditPage(t *testing.T, r resp) ([]auditItem, string) {
 	}
 	var out []auditItem
 	for _, it := range page.Items {
+		// The hash as the spec documents it, from the response alone (not
+		// audit.Hash): "lf-audit-v1" and the fields in order, each after its
+		// length as 4 bytes big-endian; null as empty; occurred_at and
+		// details as sent; prev_hash as its raw 32 bytes.
+		s := func(p *string) string {
+			if p == nil {
+				return ""
+			}
+			return *p
+		}
+		prev, err := hex.DecodeString(it.PrevHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.New()
+		for _, v := range []string{"lf-audit-v1", it.ID, it.TenantID, strconv.FormatInt(it.Seq, 10), it.OccurredAt, it.ActorType, s(it.ActorID),
+			it.Action, s(it.ObjectType), s(it.ObjectID), it.Outcome, s(it.SourceIP), s(it.UserAgent), string(it.Details), string(prev)} {
+			_, _ = h.Write(binary.BigEndian.AppendUint32(nil, uint32(len(v))))
+			_, _ = h.Write([]byte(v))
+		}
+		if got := hex.EncodeToString(h.Sum(nil)); got != it.Hash {
+			t.Errorf("seq %d: hash from the response %s, sent %s", it.Seq, got, it.Hash)
+		}
 		out = append(out, auditItem{it.ID, it.TenantID, it.Action, it.PrevHash, it.Hash, it.Seq, it.Details})
 	}
 	return out, page.Next
@@ -194,6 +227,9 @@ func TestAuditEventEndpoints(t *testing.T) {
 	f.do(t, "GET", p, "", f.session(t, f.ownerB, true)).problem(t, 404, "not_found")
 	// Tenant b's owner sees only b's chain.
 	bItems, _ := readAuditPage(t, f.do(t, "GET", auditPath(f.b.Slug)+"?after_seq=0", "", f.session(t, f.ownerB, true)))
+	if len(bItems) == 0 {
+		t.Fatal("tenant b sees none of its own entries")
+	}
 	for _, it := range bItems {
 		if it.TenantID != f.b.ID || strings.HasPrefix(it.Action, "test.thing") {
 			t.Errorf("tenant b sees %+v", it)

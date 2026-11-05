@@ -535,7 +535,15 @@ type AuditEvent struct {
 	ActorType AuditEventActorType    `json:"actor_type"`
 	Details   map[string]interface{} `json:"details"`
 
-	// Hash Hex.
+	// Hash Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+	// as its length in bytes (4 bytes, big-endian unsigned) followed by
+	// its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+	// decimal), `occurred_at` (exactly as sent), `actor_type`,
+	// `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+	// `source_ip`, `user_agent`, `details` (the JSON text exactly as
+	// sent, byte for byte: take it from the raw response, don't
+	// re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+	// A null field is the empty string (stored values are never empty).
 	Hash string `json:"hash"`
 
 	// Id Example: aud_01jcz5b2y3c4d5e6f7g8h9j0k1
@@ -543,7 +551,7 @@ type AuditEvent struct {
 	ObjectId   *string `json:"object_id"`
 	ObjectType *string `json:"object_type"`
 
-	// OccurredAt Database clock
+	// OccurredAt Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers.
 	OccurredAt time.Time         `json:"occurred_at"`
 	Outcome    AuditEventOutcome `json:"outcome"`
 

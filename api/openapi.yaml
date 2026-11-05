@@ -457,10 +457,11 @@ paths:
         by `seq`, the chain's order: newest first by default; with
         `after_seq`, oldest first from the entry after it (self-export:
         pass the last `seq` you hold). Each entry carries `prev_hash` and
-        `hash` so the chain can be checked: `hash` is SHA-256 over the
-        entry's fields as stored, `details` byte for byte as sent here.
-        Reading is audited as `audit_event.read`, at most once per reader
-        per 15 minutes.
+        `hash` so the chain can be checked: each entry's `prev_hash` is the
+        previous entry's `hash` (32 zero bytes for seq 1), and `hash` is
+        computed from the response alone, as described on
+        AuditEvent.hash. Reading is audited as `audit_event.read`, at most
+        once per reader per 15 minutes.
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -898,7 +899,7 @@ components:
         id: { type: string, example: aud_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         tenant_id: { type: string }
         seq: { type: integer, format: int64, description: "1, 2, … in the tenant's chain; retention removes a prefix." }
-        occurred_at: { type: string, format: date-time, description: Database clock, microseconds. }
+        occurred_at: { type: string, format: date-time, description: "Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers." }
         actor_type: { type: string, enum: [user, token, platform, system] }
         actor_id: { type: string, nullable: true }
         action: { type: string, example: license.issue }
@@ -909,7 +910,18 @@ components:
         user_agent: { type: string, nullable: true }
         details: { type: object, additionalProperties: true }
         prev_hash: { type: string, description: Hex; the previous entry's hash (zeros for seq 1). }
-        hash: { type: string, description: Hex. }
+        hash:
+          type: string
+          description: |
+            Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+            as its length in bytes (4 bytes, big-endian unsigned) followed by
+            its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+            decimal), `occurred_at` (exactly as sent), `actor_type`,
+            `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+            `source_ip`, `user_agent`, `details` (the JSON text exactly as
+            sent, byte for byte: take it from the raw response, don't
+            re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+            A null field is the empty string (stored values are never empty).
     AuditEventPage:
       type: object
       required: [items]

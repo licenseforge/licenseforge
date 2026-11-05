@@ -23,6 +23,10 @@ type Page struct {
 	Limit int
 }
 
+// recordRead is Record; a test replaces it to check that a read whose entry
+// can't be written returns nothing.
+var recordRead = Record
+
 // readWindow: a reader's next read within it isn't recorded again, so
 // paging and polling don't flood the chain. A variable for tests.
 var readWindow = "15 minutes"
@@ -56,13 +60,21 @@ func (l Log) List(ctx context.Context, p authz.Principal, pg Page) ([]*ent.Audit
 		if out, err = q.All(ctx); err != nil {
 			return err
 		}
+		// Checked without the chain's lock (most reads find their entry),
+		// then again under it, so concurrent first reads record one entry.
 		recent, err := recentRead(ctx, tx, tenantID, ev)
 		if err != nil || recent {
 			return err
 		}
+		if err := Lock(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		if recent, err = recentRead(ctx, tx, tenantID, ev); err != nil || recent {
+			return err
+		}
 		ev.Outcome = auditevent.OutcomeSuccess
 		ev.Details = map[string]any{"asc": pg.Asc, "from_seq": pg.Seq}
-		_, err = Record(ctx, tx, tenantID, ev)
+		_, err = recordRead(ctx, tx, tenantID, ev)
 		return err
 	})
 	if err != nil {

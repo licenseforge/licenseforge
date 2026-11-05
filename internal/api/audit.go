@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/audit"
@@ -63,7 +62,7 @@ type auditEventView struct {
 	ID         string          `json:"id"`
 	TenantID   string          `json:"tenant_id"`
 	Seq        int64           `json:"seq"`
-	OccurredAt time.Time       `json:"occurred_at"`
+	OccurredAt string          `json:"occurred_at"` // as hashed (audit.TimeFormat)
 	ActorType  string          `json:"actor_type"`
 	ActorID    *string         `json:"actor_id"`
 	Action     string          `json:"action"`
@@ -85,13 +84,11 @@ type auditPage struct {
 func (p auditPage) VisitListAuditEventsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false) // details go out as stored
-	return enc.Encode(p)
+	return json.NewEncoder(w).Encode(p) // stored details are already escaped as the encoder would: unchanged
 }
 
 func auditView(e *ent.AuditEvent) auditEventView {
-	return auditEventView{ID: e.ID, TenantID: e.TenantID, Seq: e.Seq, OccurredAt: e.OccurredAt.UTC(), ActorType: string(e.ActorType),
+	return auditEventView{ID: e.ID, TenantID: e.TenantID, Seq: e.Seq, OccurredAt: e.OccurredAt.UTC().Format(audit.TimeFormat), ActorType: string(e.ActorType),
 		ActorID: e.ActorID, Action: e.Action, ObjectType: e.ObjectType, ObjectID: e.ObjectID, Outcome: string(e.Outcome),
 		SourceIP: e.SourceIP, UserAgent: e.UserAgent, Details: json.RawMessage(e.Details),
 		PrevHash: hex.EncodeToString(e.PrevHash), Hash: hex.EncodeToString(e.Hash)}

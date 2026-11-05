@@ -375,10 +375,11 @@ export interface paths {
          *     by `seq`, the chain's order: newest first by default; with
          *     `after_seq`, oldest first from the entry after it (self-export:
          *     pass the last `seq` you hold). Each entry carries `prev_hash` and
-         *     `hash` so the chain can be checked: `hash` is SHA-256 over the
-         *     entry's fields as stored, `details` byte for byte as sent here.
-         *     Reading is audited as `audit_event.read`, at most once per reader
-         *     per 15 minutes.
+         *     `hash` so the chain can be checked: each entry's `prev_hash` is the
+         *     previous entry's `hash` (32 zero bytes for seq 1), and `hash` is
+         *     computed from the response alone, as described on
+         *     AuditEvent.hash. Reading is audited as `audit_event.read`, at most
+         *     once per reader per 15 minutes.
          */
         get: operations["listAuditEvents"];
         put?: never;
@@ -695,7 +696,7 @@ export interface components {
             seq: number;
             /**
              * Format: date-time
-             * @description Database clock
+             * @description Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers.
              */
             occurred_at: string;
             /** @enum {string} */
@@ -714,7 +715,17 @@ export interface components {
             };
             /** @description Hex; the previous entry's hash (zeros for seq 1). */
             prev_hash: string;
-            /** @description Hex. */
+            /**
+             * @description Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+             *     as its length in bytes (4 bytes, big-endian unsigned) followed by
+             *     its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+             *     decimal), `occurred_at` (exactly as sent), `actor_type`,
+             *     `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+             *     `source_ip`, `user_agent`, `details` (the JSON text exactly as
+             *     sent, byte for byte: take it from the raw response, don't
+             *     re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+             *     A null field is the empty string (stored values are never empty).
+             */
             hash: string;
         };
         AuditEventPage: {

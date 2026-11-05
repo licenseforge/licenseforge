@@ -200,8 +200,8 @@ func (f *fixture) do(t *testing.T, method, path, body string, opts ...opt) resp 
 	f.srv.ServeHTTP(rec, r)
 	out := resp{code: rec.Code, h: rec.Header(), raw: rec.Body.String()}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out.body)
-	if out.h.Get("X-Request-Id") == "" || out.h.Get("Cache-Control") != "no-store" {
-		t.Errorf("%s %s: X-Request-Id %q, Cache-Control %q", method, path, out.h.Get("X-Request-Id"), out.h.Get("Cache-Control"))
+	if out.h.Get("X-Request-Id") == "" || out.h.Get("Cache-Control") != "no-store" || out.h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("%s %s: X-Request-Id %q, Cache-Control %q, X-Content-Type-Options %q", method, path, out.h.Get("X-Request-Id"), out.h.Get("Cache-Control"), out.h.Get("X-Content-Type-Options"))
 	}
 	return out
 }

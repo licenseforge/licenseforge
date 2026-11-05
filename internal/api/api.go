@@ -106,6 +106,7 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w := &tracked{ResponseWriter: rw}
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
 	if _, pattern := s.mux.Handler(r); pattern != "" { // before auth, so refusals get the route too
 		metrics.SetRoute(r.Context(), pattern)
