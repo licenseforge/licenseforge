@@ -48,3 +48,8 @@ readOnlyRootFilesystem: true
 capabilities:
   drop: [ALL]
 {{- end -}}
+
+{{/* metrics.port, nil-safe: values reused from a release older than metrics.* have no metrics key (the server's default then). */}}
+{{- define "licenseforge.metricsPort" -}}
+{{- dig "port" 9090 (.Values.metrics | default dict) | int -}}
+{{- end -}}
