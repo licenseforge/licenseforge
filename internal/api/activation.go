@@ -146,11 +146,12 @@ func (s *server) Activate(ctx context.Context, req apigen.ActivateRequestObject)
 		func(ctx context.Context, tx *ent.Tx) (idempotency.Outcome, error) {
 			l, err := s.Activations.ActivateTx(ctx, tx, ar)
 			if err != nil {
-				p := s.problemFor(err)
+				p := mapErr(err)
 				if p.status/100 != 4 {
 					return idempotency.Outcome{}, err
 				}
-				return idempotency.Outcome{Status: p.status, Body: problemJSON(ctx, p)}, nil // stored and committed with its audit entry
+				ri, _ := ctx.Value(reqKey{}).(reqInfo)
+				return idempotency.Outcome{Status: p.status, Body: p.body(ri.id)}, nil // stored and committed with its audit entry
 			}
 			body, err := json.Marshal(leaseView(l))
 			return idempotency.Outcome{Status: http.StatusOK, Body: body}, err
@@ -202,8 +203,8 @@ func (o stored) VisitActivateResponse(w http.ResponseWriter) error {
 	return err
 }
 
-// activationProblem maps the activation and idempotency errors (nil if err
-// is neither). Codes are stable: SDKs switch on them.
+// activationProblem maps the activation errors (nil for others; mapErr
+// maps the idempotency errors). Codes are stable: SDKs switch on them.
 func activationProblem(err error) *problem {
 	for _, m := range []struct {
 		err    error
@@ -220,9 +221,6 @@ func activationProblem(err error) *problem {
 		{activations.ErrRehostLimit, http.StatusConflict, "rehost_limit_reached", "The license's machines have moved as often as it allows."},
 		{activations.ErrBinding, http.StatusUnprocessableEntity, "binding_mismatch", "The fingerprint doesn't bind what the license requires."},
 		{activations.ErrNotActivated, http.StatusNotFound, "not_activated", "This machine isn't activated; activate it."},
-		{idempotency.ErrInvalidKey, http.StatusBadRequest, "invalid_request", "Idempotency-Key must be 1 to 255 printable ASCII characters."},
-		{idempotency.ErrKeyReused, http.StatusUnprocessableEntity, "idempotency_key_reused", "This Idempotency-Key was used with another request."},
-		{idempotency.ErrInProgress, http.StatusConflict, "idempotency_in_progress", "A request with this Idempotency-Key is still in progress."},
 	} {
 		if errors.Is(err, m.err) {
 			return &problem{status: m.status, code: m.code, detail: m.detail, err: err}

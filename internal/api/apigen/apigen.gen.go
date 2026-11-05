@@ -41,6 +41,183 @@ func (e ActivationRequestFpSource) Valid() bool {
 	}
 }
 
+// Defines values for InvitationStatus.
+const (
+	InvitationStatusAccepted InvitationStatus = "accepted"
+	InvitationStatusExpired  InvitationStatus = "expired"
+	InvitationStatusPending  InvitationStatus = "pending"
+	InvitationStatusRevoked  InvitationStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the InvitationStatus enum.
+func (e InvitationStatus) Valid() bool {
+	switch e {
+	case InvitationStatusAccepted:
+		return true
+	case InvitationStatusExpired:
+		return true
+	case InvitationStatusPending:
+		return true
+	case InvitationStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvitationCreatedStatus.
+const (
+	InvitationCreatedStatusAccepted InvitationCreatedStatus = "accepted"
+	InvitationCreatedStatusExpired  InvitationCreatedStatus = "expired"
+	InvitationCreatedStatusPending  InvitationCreatedStatus = "pending"
+	InvitationCreatedStatusRevoked  InvitationCreatedStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the InvitationCreatedStatus enum.
+func (e InvitationCreatedStatus) Valid() bool {
+	switch e {
+	case InvitationCreatedStatusAccepted:
+		return true
+	case InvitationCreatedStatusExpired:
+		return true
+	case InvitationCreatedStatusPending:
+		return true
+	case InvitationCreatedStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseExpiryBasis.
+const (
+	LicenseExpiryBasisFromFirstActivation LicenseExpiryBasis = "from_first_activation"
+	LicenseExpiryBasisFromIssue           LicenseExpiryBasis = "from_issue"
+)
+
+// Valid indicates whether the value is a known member of the LicenseExpiryBasis enum.
+func (e LicenseExpiryBasis) Valid() bool {
+	switch e {
+	case LicenseExpiryBasisFromFirstActivation:
+		return true
+	case LicenseExpiryBasisFromIssue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseType.
+const (
+	LicenseTypeCommunity LicenseType = "community"
+	LicenseTypeDev       LicenseType = "dev"
+	LicenseTypePaid      LicenseType = "paid"
+	LicenseTypeTrial     LicenseType = "trial"
+)
+
+// Valid indicates whether the value is a known member of the LicenseType enum.
+func (e LicenseType) Valid() bool {
+	switch e {
+	case LicenseTypeCommunity:
+		return true
+	case LicenseTypeDev:
+		return true
+	case LicenseTypePaid:
+		return true
+	case LicenseTypeTrial:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseIssueType.
+const (
+	LicenseIssueTypeCommunity LicenseIssueType = "community"
+	LicenseIssueTypeDev       LicenseIssueType = "dev"
+	LicenseIssueTypePaid      LicenseIssueType = "paid"
+	LicenseIssueTypeTrial     LicenseIssueType = "trial"
+)
+
+// Valid indicates whether the value is a known member of the LicenseIssueType enum.
+func (e LicenseIssueType) Valid() bool {
+	switch e {
+	case LicenseIssueTypeCommunity:
+		return true
+	case LicenseIssueTypeDev:
+		return true
+	case LicenseIssueTypePaid:
+		return true
+	case LicenseIssueTypeTrial:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseIssuedExpiryBasis.
+const (
+	LicenseIssuedExpiryBasisFromFirstActivation LicenseIssuedExpiryBasis = "from_first_activation"
+	LicenseIssuedExpiryBasisFromIssue           LicenseIssuedExpiryBasis = "from_issue"
+)
+
+// Valid indicates whether the value is a known member of the LicenseIssuedExpiryBasis enum.
+func (e LicenseIssuedExpiryBasis) Valid() bool {
+	switch e {
+	case LicenseIssuedExpiryBasisFromFirstActivation:
+		return true
+	case LicenseIssuedExpiryBasisFromIssue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseIssuedType.
+const (
+	LicenseIssuedTypeCommunity LicenseIssuedType = "community"
+	LicenseIssuedTypeDev       LicenseIssuedType = "dev"
+	LicenseIssuedTypePaid      LicenseIssuedType = "paid"
+	LicenseIssuedTypeTrial     LicenseIssuedType = "trial"
+)
+
+// Valid indicates whether the value is a known member of the LicenseIssuedType enum.
+func (e LicenseIssuedType) Valid() bool {
+	switch e {
+	case LicenseIssuedTypeCommunity:
+		return true
+	case LicenseIssuedTypeDev:
+		return true
+	case LicenseIssuedTypePaid:
+		return true
+	case LicenseIssuedTypeTrial:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LicenseStatus.
+const (
+	LicenseStatusActive    LicenseStatus = "active"
+	LicenseStatusRevoked   LicenseStatus = "revoked"
+	LicenseStatusSuspended LicenseStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the LicenseStatus enum.
+func (e LicenseStatus) Valid() bool {
+	switch e {
+	case LicenseStatusActive:
+		return true
+	case LicenseStatusRevoked:
+		return true
+	case LicenseStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MemberRole.
 const (
 	MemberRoleAdmin   MemberRole = "admin"
@@ -96,6 +273,16 @@ func (e Role) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AcceptedInvitation defines model for AcceptedInvitation.
+type AcceptedInvitation struct {
+	AllProducts  bool       `json:"all_products"`
+	MembershipId string     `json:"membership_id"`
+	Role         MemberRole `json:"role"`
+
+	// TenantId Usable as {tenant} in paths.
+	TenantId string `json:"tenant_id"`
 }
 
 // ActivationRequest defines model for ActivationRequest.
@@ -198,6 +385,73 @@ type DeactivationRequest struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
+// Invitation defines model for Invitation.
+type Invitation struct {
+	AcceptedAt  *time.Time `json:"accepted_at"`
+	AcceptedBy  *string    `json:"accepted_by"`
+	AllProducts bool       `json:"all_products"`
+	CreatedAt   time.Time  `json:"created_at"`
+	Email       string     `json:"email"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+
+	// Id Example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// InvitedBy User ID; null once the user is erased.
+	InvitedBy  *string          `json:"invited_by"`
+	ProductIds []string         `json:"product_ids"`
+	RevokedAt  *time.Time       `json:"revoked_at"`
+	Role       MemberRole       `json:"role"`
+	Status     InvitationStatus `json:"status"`
+}
+
+// InvitationStatus defines model for Invitation.Status.
+type InvitationStatus string
+
+// InvitationCreate defines model for InvitationCreate.
+type InvitationCreate struct {
+	AllProducts bool   `json:"all_products"`
+	Email       string `json:"email"`
+
+	// ProductIds Required, non-empty, when all_products is false; absent otherwise.
+	ProductIds *[]string  `json:"product_ids,omitempty"`
+	Role       MemberRole `json:"role"`
+}
+
+// InvitationCreated defines model for InvitationCreated.
+type InvitationCreated struct {
+	AcceptedAt  *time.Time `json:"accepted_at"`
+	AcceptedBy  *string    `json:"accepted_by"`
+	AllProducts bool       `json:"all_products"`
+	CreatedAt   time.Time  `json:"created_at"`
+	Email       string     `json:"email"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+
+	// Id Example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// InvitedBy User ID; null once the user is erased.
+	InvitedBy  *string                 `json:"invited_by"`
+	ProductIds []string                `json:"product_ids"`
+	RevokedAt  *time.Time              `json:"revoked_at"`
+	Role       MemberRole              `json:"role"`
+	Status     InvitationCreatedStatus `json:"status"`
+
+	// Token For the invite link. Shown once
+	Token string `json:"token"`
+}
+
+// InvitationCreatedStatus defines model for InvitationCreated.Status.
+type InvitationCreatedStatus string
+
+// InvitationPage defines model for InvitationPage.
+type InvitationPage struct {
+	Items []Invitation `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
 // Lease defines model for Lease.
 type Lease struct {
 	// ActivationId Example: act_01jcz5b2y3c4d5e6f7g8h9j0k1
@@ -214,6 +468,119 @@ type Lease struct {
 	Lease        string    `json:"lease"`
 	RefreshAfter time.Time `json:"refresh_after"`
 }
+
+// License defines model for License.
+type License struct {
+	CreatedAt    time.Time `json:"created_at"`
+	CustomerId   string    `json:"customer_id"`
+	Entitlements struct {
+		Features []string         `json:"features"`
+		Limits   map[string]int64 `json:"limits"`
+	} `json:"entitlements"`
+
+	// ExpiresAt Null for a perpetual license
+	ExpiresAt    *time.Time         `json:"expires_at"`
+	ExpiryBasis  LicenseExpiryBasis `json:"expiry_basis"`
+	ExternalRefs map[string]string  `json:"external_refs"`
+
+	// Id Example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id       string    `json:"id"`
+	IssuedAt time.Time `json:"issued_at"`
+
+	// KeyHint The key's last 6 characters
+	KeyHint        string `json:"key_hint"`
+	MaxActivations *int   `json:"max_activations"`
+	PlanId         string `json:"plan_id"`
+
+	// PlanSlug The plan's slug when issued.
+	PlanSlug    string        `json:"plan_slug"`
+	ProductId   string        `json:"product_id"`
+	RevokedAt   *time.Time    `json:"revoked_at"`
+	Status      LicenseStatus `json:"status"`
+	SuspendedAt *time.Time    `json:"suspended_at"`
+	Type        LicenseType   `json:"type"`
+}
+
+// LicenseExpiryBasis defines model for License.ExpiryBasis.
+type LicenseExpiryBasis string
+
+// LicenseType defines model for License.Type.
+type LicenseType string
+
+// LicenseIssue defines model for LicenseIssue.
+type LicenseIssue struct {
+	CustomerId string `json:"customer_id"`
+
+	// ExternalRefs Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-].
+	ExternalRefs *map[string]string `json:"external_refs,omitempty"`
+
+	// Overrides Per-license feature changes by feature key (an enterprise deal).
+	Overrides *map[string]struct {
+		// Limit For a limit feature (required for one)
+		Limit *int64 `json:"limit,omitempty"`
+
+		// Remove Drop the feature.
+		Remove *bool `json:"remove,omitempty"`
+	} `json:"overrides,omitempty"`
+	PlanId    string            `json:"plan_id"`
+	ProductId string            `json:"product_id"`
+	Type      *LicenseIssueType `json:"type,omitempty"`
+}
+
+// LicenseIssueType defines model for LicenseIssue.Type.
+type LicenseIssueType string
+
+// LicenseIssued defines model for LicenseIssued.
+type LicenseIssued struct {
+	CreatedAt    time.Time `json:"created_at"`
+	CustomerId   string    `json:"customer_id"`
+	Entitlements struct {
+		Features []string         `json:"features"`
+		Limits   map[string]int64 `json:"limits"`
+	} `json:"entitlements"`
+
+	// ExpiresAt Null for a perpetual license
+	ExpiresAt    *time.Time               `json:"expires_at"`
+	ExpiryBasis  LicenseIssuedExpiryBasis `json:"expiry_basis"`
+	ExternalRefs map[string]string        `json:"external_refs"`
+
+	// Id Example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id       string    `json:"id"`
+	IssuedAt time.Time `json:"issued_at"`
+
+	// Key The license key. Shown once (and on an idempotent replay to the same credential)
+	Key string `json:"key"`
+
+	// KeyHint The key's last 6 characters
+	KeyHint        string `json:"key_hint"`
+	MaxActivations *int   `json:"max_activations"`
+	PlanId         string `json:"plan_id"`
+
+	// PlanSlug The plan's slug when issued.
+	PlanSlug    string            `json:"plan_slug"`
+	ProductId   string            `json:"product_id"`
+	RevokedAt   *time.Time        `json:"revoked_at"`
+	Status      LicenseStatus     `json:"status"`
+	SuspendedAt *time.Time        `json:"suspended_at"`
+	Type        LicenseIssuedType `json:"type"`
+}
+
+// LicenseIssuedExpiryBasis defines model for LicenseIssued.ExpiryBasis.
+type LicenseIssuedExpiryBasis string
+
+// LicenseIssuedType defines model for LicenseIssued.Type.
+type LicenseIssuedType string
+
+// LicensePage defines model for LicensePage.
+type LicensePage struct {
+	Items []License `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// LicenseStatus defines model for LicenseStatus.
+type LicenseStatus string
 
 // Member defines model for Member.
 type Member struct {
@@ -264,10 +631,34 @@ type MemberUpdated struct {
 	Name       *string  `json:"name"`
 	ProductIds []string `json:"product_ids"`
 
+	// RevokedInvitationIds Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids).
+	RevokedInvitationIds []string `json:"revoked_invitation_ids"`
+
 	// RevokedTokenIds API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids).
 	RevokedTokenIds []string   `json:"revoked_token_ids"`
 	Role            MemberRole `json:"role"`
 	UserId          string     `json:"user_id"`
+}
+
+// MyTenant defines model for MyTenant.
+type MyTenant struct {
+	AllProducts bool   `json:"all_products"`
+	Name        string `json:"name"`
+
+	// ProductIds The scope when all_products is false; empty otherwise.
+	ProductIds []string   `json:"product_ids"`
+	Role       MemberRole `json:"role"`
+
+	// Slug The dashboard's /t/{slug}/.
+	Slug string `json:"slug"`
+
+	// TenantId Usable as {tenant} in paths.
+	TenantId string `json:"tenant_id"`
+}
+
+// MyTenantPage defines model for MyTenantPage.
+type MyTenantPage struct {
+	Items []MyTenant `json:"items"`
 }
 
 // Problem defines model for Problem.
@@ -302,6 +693,9 @@ type Cursor = string
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
+// LicenseId Example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1
+type LicenseId = string
+
 // Limit defines model for Limit.
 type Limit = int
 
@@ -317,12 +711,45 @@ type ActivateParams struct {
 	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// AcceptInvitationJSONBody defines parameters for AcceptInvitation.
+type AcceptInvitationJSONBody struct {
+	// Token The invite link's token.
+	Token string `json:"token"`
+}
+
 // ListApiTokensParams defines parameters for ListApiTokens.
 type ListApiTokensParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Cursor Opaque; `next_cursor` of the previous page.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListInvitationsParams defines parameters for ListInvitations.
+type ListInvitationsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListLicensesParams defines parameters for ListLicenses.
+type ListLicensesParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor        *Cursor        `form:"cursor,omitempty" json:"cursor,omitempty"`
+	ProductId     *string        `form:"product_id,omitempty" json:"product_id,omitempty"`
+	CustomerId    *string        `form:"customer_id,omitempty" json:"customer_id,omitempty"`
+	Status        *LicenseStatus `form:"status,omitempty" json:"status,omitempty"`
+	CreatedAfter  *time.Time     `form:"created_after,omitempty" json:"created_after,omitempty"`
+	CreatedBefore *time.Time     `form:"created_before,omitempty" json:"created_before,omitempty"`
+}
+
+// IssueLicenseParams defines parameters for IssueLicense.
+type IssueLicenseParams struct {
+	// IdempotencyKey 1-255 printable ASCII characters; scoped to the tenant and the credential.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
 // ListMembersParams defines parameters for ListMembers.
@@ -337,12 +764,18 @@ type ListMembersParams struct {
 type RemoveMemberParams struct {
 	// RevokeTokens Also revoke every active API token the member created, each audited.
 	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+
+	// RevokeInvitations Also revoke every pending invitation the member sent, each audited.
+	RevokeInvitations *bool `form:"revoke_invitations,omitempty" json:"revoke_invitations,omitempty"`
 }
 
 // UpdateMemberParams defines parameters for UpdateMember.
 type UpdateMemberParams struct {
 	// RevokeTokens Revoke the member's active API tokens above the new role or outside the new scope, each audited.
 	RevokeTokens *bool `form:"revoke_tokens,omitempty" json:"revoke_tokens,omitempty"`
+
+	// RevokeInvitations Revoke the member's pending invitations the new grant couldn't have sent, each audited.
+	RevokeInvitations *bool `form:"revoke_invitations,omitempty" json:"revoke_invitations,omitempty"`
 }
 
 // ActivateJSONRequestBody defines body for Activate for application/json ContentType.
@@ -354,8 +787,17 @@ type DeactivateJSONRequestBody = DeactivationRequest
 // RefreshLeaseJSONRequestBody defines body for RefreshLease for application/json ContentType.
 type RefreshLeaseJSONRequestBody = ActivationRequest
 
+// AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
+type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
+
+// CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
+type CreateInvitationJSONRequestBody = InvitationCreate
+
+// IssueLicenseJSONRequestBody defines body for IssueLicense for application/json ContentType.
+type IssueLicenseJSONRequestBody = LicenseIssue
 
 // UpdateMemberApplicationMergePatchPlusJSONRequestBody defines body for UpdateMember for application/merge-patch+json ContentType.
 type UpdateMemberApplicationMergePatchPlusJSONRequestBody = MemberPatch
@@ -371,6 +813,12 @@ type ServerInterface interface {
 	// RefreshLease Refresh an active activation's lease (also validate). Never takes a seat.
 	// (POST /activation/tenants/{tenant}/refresh)
 	RefreshLease(w http.ResponseWriter, r *http.Request, tenant ActivationTenant)
+	// AcceptInvitation Accept an invitation as the signed-in user.
+	// (POST /invitations/accept)
+	AcceptInvitation(w http.ResponseWriter, r *http.Request)
+	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+	// (GET /me/tenants)
+	ListMyTenants(w http.ResponseWriter, r *http.Request)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams)
@@ -380,10 +828,37 @@ type ServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
+	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
+	// (GET /tenants/{tenant}/invitations)
+	ListInvitations(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListInvitationsParams)
+	// CreateInvitation Invite someone by email. The link token is in this response only.
+	// (POST /tenants/{tenant}/invitations)
+	CreateInvitation(w http.ResponseWriter, r *http.Request, tenant Tenant)
+	// RevokeInvitation Revoke an open invitation. One-way.
+	// (POST /tenants/{tenant}/invitations/{id}/revoke)
+	RevokeInvitation(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
+	// ListLicenses List licenses in the caller's product scope, newest first.
+	// (GET /tenants/{tenant}/licenses)
+	ListLicenses(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListLicensesParams)
+	// IssueLicense Issue a license from a plan. The license key is in this response only.
+	// (POST /tenants/{tenant}/licenses)
+	IssueLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, params IssueLicenseParams)
+	// GetLicense Get a license (never its key).
+	// (GET /tenants/{tenant}/licenses/{id})
+	GetLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
+	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
+	ReinstateLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// RevokeLicense Revoke an active or suspended license. Final.
+	// (POST /tenants/{tenant}/licenses/{id}/revoke)
+	RevokeLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// SuspendLicense Suspend an active license.
+	// (POST /tenants/{tenant}/licenses/{id}/suspend)
+	SuspendLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListMembersParams)
-	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// RemoveMember Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
 	// (DELETE /tenants/{tenant}/members/{id})
 	RemoveMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params RemoveMemberParams)
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
@@ -493,6 +968,34 @@ func (siw *ServerInterfaceWrapper) RefreshLease(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RefreshLease(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptInvitation operation middleware
+func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptInvitation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyTenants operation middleware
+func (siw *ServerInterfaceWrapper) ListMyTenants(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyTenants(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -618,6 +1121,432 @@ func (siw *ServerInterfaceWrapper) RevokeApiToken(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListInvitations operation middleware
+func (siw *ServerInterfaceWrapper) ListInvitations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInvitationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvitations(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInvitation operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInvitation(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeInvitation operation middleware
+func (siw *ServerInterfaceWrapper) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeInvitation(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLicenses operation middleware
+func (siw *ServerInterfaceWrapper) ListLicenses(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLicensesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "product_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "product_id", r.URL.Query(), &params.ProductId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "product_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "product_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "customer_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customer_id", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customer_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "created_after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "created_after", r.URL.Query(), &params.CreatedAfter, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "created_after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "created_after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "created_before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "created_before", r.URL.Query(), &params.CreatedBefore, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "created_before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "created_before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLicenses(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueLicense operation middleware
+func (siw *ServerInterfaceWrapper) IssueLicense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params IssueLicenseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueLicense(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLicense operation middleware
+func (siw *ServerInterfaceWrapper) GetLicense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLicense(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReinstateLicense operation middleware
+func (siw *ServerInterfaceWrapper) ReinstateLicense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReinstateLicense(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeLicense operation middleware
+func (siw *ServerInterfaceWrapper) RevokeLicense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeLicense(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SuspendLicense operation middleware
+func (siw *ServerInterfaceWrapper) SuspendLicense(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuspendLicense(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMembers operation middleware
 func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Request) {
 
@@ -713,6 +1642,19 @@ func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Optional query parameter "revoke_invitations" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_invitations", r.URL.Query(), &params.RevokeInvitations, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_invitations"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_invitations", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveMember(w, r, tenant, id, params)
 	}))
@@ -760,6 +1702,19 @@ func (siw *ServerInterfaceWrapper) UpdateMember(w http.ResponseWriter, r *http.R
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_tokens"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_tokens", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "revoke_invitations" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "revoke_invitations", r.URL.Query(), &params.RevokeInvitations, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "revoke_invitations"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revoke_invitations", Err: err})
 		}
 		return
 	}
@@ -901,6 +1856,17 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/members", wrapper.ListMembers)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tenants/{tenant}/members/{id}", wrapper.RemoveMember)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/members/{id}", wrapper.UpdateMember)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/invitations", wrapper.ListInvitations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations", wrapper.CreateInvitation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations/{id}/revoke", wrapper.RevokeInvitation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invitations/accept", wrapper.AcceptInvitation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.ListLicenses)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.IssueLicense)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/deactivate", wrapper.Deactivate)
@@ -1470,6 +2436,207 @@ func (response RefreshLease429ApplicationProblemPlusJSONResponse) VisitRefreshLe
 	return err
 }
 
+type AcceptInvitationRequestObject struct {
+	Body *AcceptInvitationJSONRequestBody
+}
+
+type AcceptInvitationResponseObject interface {
+	VisitAcceptInvitationResponse(w http.ResponseWriter) error
+}
+
+type AcceptInvitation200JSONResponse AcceptedInvitation
+
+func (response AcceptInvitation200JSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptInvitation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response AcceptInvitation400ApplicationProblemPlusJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptInvitation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type AcceptInvitation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers AcceptInvitation401ResponseHeaders
+}
+
+func (response AcceptInvitation401ApplicationProblemPlusJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptInvitation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type AcceptInvitation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers AcceptInvitation403ResponseHeaders
+}
+
+func (response AcceptInvitation403ApplicationProblemPlusJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptInvitation413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type AcceptInvitation413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers AcceptInvitation413ResponseHeaders
+}
+
+func (response AcceptInvitation413ApplicationProblemPlusJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptInvitation422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type AcceptInvitation422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers AcceptInvitation422ResponseHeaders
+}
+
+func (response AcceptInvitation422ApplicationProblemPlusJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenantsRequestObject struct {
+}
+
+type ListMyTenantsResponseObject interface {
+	VisitListMyTenantsResponse(w http.ResponseWriter) error
+}
+
+type ListMyTenants200JSONResponse MyTenantPage
+
+func (response ListMyTenants200JSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenants400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListMyTenants400ApplicationProblemPlusJSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyTenants401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListMyTenants401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListMyTenants401ResponseHeaders
+}
+
+func (response ListMyTenants401ApplicationProblemPlusJSONResponse) VisitListMyTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListApiTokensRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListApiTokensParams
@@ -1860,6 +3027,1225 @@ func (response RevokeApiToken404ApplicationProblemPlusJSONResponse) VisitRevokeA
 	return err
 }
 
+type ListInvitationsRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListInvitationsParams
+}
+
+type ListInvitationsResponseObject interface {
+	VisitListInvitationsResponse(w http.ResponseWriter) error
+}
+
+type ListInvitations200JSONResponse InvitationPage
+
+func (response ListInvitations200JSONResponse) VisitListInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvitations400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListInvitations400ApplicationProblemPlusJSONResponse) VisitListInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvitations401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListInvitations401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListInvitations401ResponseHeaders
+}
+
+func (response ListInvitations401ApplicationProblemPlusJSONResponse) VisitListInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvitations403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListInvitations403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListInvitations403ResponseHeaders
+}
+
+func (response ListInvitations403ApplicationProblemPlusJSONResponse) VisitListInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvitations404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListInvitations404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListInvitations404ResponseHeaders
+}
+
+func (response ListInvitations404ApplicationProblemPlusJSONResponse) VisitListInvitationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitationRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Body   *CreateInvitationJSONRequestBody
+}
+
+type CreateInvitationResponseObject interface {
+	VisitCreateInvitationResponse(w http.ResponseWriter) error
+}
+
+type CreateInvitation201JSONResponse InvitationCreated
+
+func (response CreateInvitation201JSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInvitation400ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateInvitation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateInvitation401ResponseHeaders
+}
+
+func (response CreateInvitation401ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateInvitation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateInvitation403ResponseHeaders
+}
+
+func (response CreateInvitation403ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateInvitation404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateInvitation404ResponseHeaders
+}
+
+func (response CreateInvitation404ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateInvitation413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateInvitation413ResponseHeaders
+}
+
+func (response CreateInvitation413ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvitation422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateInvitation422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateInvitation422ResponseHeaders
+}
+
+func (response CreateInvitation422ApplicationProblemPlusJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInvitationRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     string `json:"id"`
+}
+
+type RevokeInvitationResponseObject interface {
+	VisitRevokeInvitationResponse(w http.ResponseWriter) error
+}
+
+type RevokeInvitation200JSONResponse Invitation
+
+func (response RevokeInvitation200JSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInvitation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeInvitation400ApplicationProblemPlusJSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInvitation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeInvitation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeInvitation401ResponseHeaders
+}
+
+func (response RevokeInvitation401ApplicationProblemPlusJSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInvitation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeInvitation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeInvitation403ResponseHeaders
+}
+
+func (response RevokeInvitation403ApplicationProblemPlusJSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInvitation404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeInvitation404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeInvitation404ResponseHeaders
+}
+
+func (response RevokeInvitation404ApplicationProblemPlusJSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLicensesRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListLicensesParams
+}
+
+type ListLicensesResponseObject interface {
+	VisitListLicensesResponse(w http.ResponseWriter) error
+}
+
+type ListLicenses200JSONResponse LicensePage
+
+func (response ListLicenses200JSONResponse) VisitListLicensesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLicenses400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListLicenses400ApplicationProblemPlusJSONResponse) VisitListLicensesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLicenses401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListLicenses401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListLicenses401ResponseHeaders
+}
+
+func (response ListLicenses401ApplicationProblemPlusJSONResponse) VisitListLicensesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLicenses403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListLicenses403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListLicenses403ResponseHeaders
+}
+
+func (response ListLicenses403ApplicationProblemPlusJSONResponse) VisitListLicensesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLicenses404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListLicenses404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListLicenses404ResponseHeaders
+}
+
+func (response ListLicenses404ApplicationProblemPlusJSONResponse) VisitListLicensesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicenseRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params IssueLicenseParams
+	Body   *IssueLicenseJSONRequestBody
+}
+
+type IssueLicenseResponseObject interface {
+	VisitIssueLicenseResponse(w http.ResponseWriter) error
+}
+
+type IssueLicense201JSONResponse LicenseIssued
+
+func (response IssueLicense201JSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response IssueLicense400ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense401ResponseHeaders
+}
+
+func (response IssueLicense401ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense403ResponseHeaders
+}
+
+func (response IssueLicense403ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense404ResponseHeaders
+}
+
+func (response IssueLicense404ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense409ResponseHeaders
+}
+
+func (response IssueLicense409ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense413ResponseHeaders
+}
+
+func (response IssueLicense413ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueLicense422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type IssueLicense422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers IssueLicense422ResponseHeaders
+}
+
+func (response IssueLicense422ApplicationProblemPlusJSONResponse) VisitIssueLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLicenseRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type GetLicenseResponseObject interface {
+	VisitGetLicenseResponse(w http.ResponseWriter) error
+}
+
+type GetLicense200JSONResponse License
+
+func (response GetLicense200JSONResponse) VisitGetLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLicense400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetLicense400ApplicationProblemPlusJSONResponse) VisitGetLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLicense401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetLicense401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetLicense401ResponseHeaders
+}
+
+func (response GetLicense401ApplicationProblemPlusJSONResponse) VisitGetLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLicense403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetLicense403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetLicense403ResponseHeaders
+}
+
+func (response GetLicense403ApplicationProblemPlusJSONResponse) VisitGetLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLicense404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetLicense404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetLicense404ResponseHeaders
+}
+
+func (response GetLicense404ApplicationProblemPlusJSONResponse) VisitGetLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicenseRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type ReinstateLicenseResponseObject interface {
+	VisitReinstateLicenseResponse(w http.ResponseWriter) error
+}
+
+type ReinstateLicense200JSONResponse License
+
+func (response ReinstateLicense200JSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicense400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ReinstateLicense400ApplicationProblemPlusJSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicense401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinstateLicense401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinstateLicense401ResponseHeaders
+}
+
+func (response ReinstateLicense401ApplicationProblemPlusJSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicense403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinstateLicense403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinstateLicense403ResponseHeaders
+}
+
+func (response ReinstateLicense403ApplicationProblemPlusJSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicense404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinstateLicense404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinstateLicense404ResponseHeaders
+}
+
+func (response ReinstateLicense404ApplicationProblemPlusJSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinstateLicense409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinstateLicense409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinstateLicense409ResponseHeaders
+}
+
+func (response ReinstateLicense409ApplicationProblemPlusJSONResponse) VisitReinstateLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicenseRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type RevokeLicenseResponseObject interface {
+	VisitRevokeLicenseResponse(w http.ResponseWriter) error
+}
+
+type RevokeLicense200JSONResponse License
+
+func (response RevokeLicense200JSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicense400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeLicense400ApplicationProblemPlusJSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicense401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeLicense401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeLicense401ResponseHeaders
+}
+
+func (response RevokeLicense401ApplicationProblemPlusJSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicense403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeLicense403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeLicense403ResponseHeaders
+}
+
+func (response RevokeLicense403ApplicationProblemPlusJSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicense404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeLicense404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeLicense404ResponseHeaders
+}
+
+func (response RevokeLicense404ApplicationProblemPlusJSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeLicense409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeLicense409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RevokeLicense409ResponseHeaders
+}
+
+func (response RevokeLicense409ApplicationProblemPlusJSONResponse) VisitRevokeLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicenseRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type SuspendLicenseResponseObject interface {
+	VisitSuspendLicenseResponse(w http.ResponseWriter) error
+}
+
+type SuspendLicense200JSONResponse License
+
+func (response SuspendLicense200JSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicense400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SuspendLicense400ApplicationProblemPlusJSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicense401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SuspendLicense401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SuspendLicense401ResponseHeaders
+}
+
+func (response SuspendLicense401ApplicationProblemPlusJSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicense403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SuspendLicense403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SuspendLicense403ResponseHeaders
+}
+
+func (response SuspendLicense403ApplicationProblemPlusJSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicense404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SuspendLicense404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SuspendLicense404ResponseHeaders
+}
+
+func (response SuspendLicense404ApplicationProblemPlusJSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendLicense409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SuspendLicense409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SuspendLicense409ResponseHeaders
+}
+
+func (response SuspendLicense409ApplicationProblemPlusJSONResponse) VisitSuspendLicenseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMembersRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListMembersParams
@@ -1985,7 +4371,8 @@ type RemoveMemberResponseObject interface {
 }
 
 type RemoveMember204ResponseHeaders struct {
-	XRevokedTokenIds *string
+	XRevokedInvitationIds *string
+	XRevokedTokenIds      *string
 }
 
 type RemoveMember204Response struct {
@@ -1993,6 +4380,9 @@ type RemoveMember204Response struct {
 }
 
 func (response RemoveMember204Response) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+	if response.Headers.XRevokedInvitationIds != nil {
+		w.Header().Set("X-Revoked-Invitation-Ids", fmt.Sprint(*response.Headers.XRevokedInvitationIds))
+	}
 	if response.Headers.XRevokedTokenIds != nil {
 		w.Header().Set("X-Revoked-Token-Ids", fmt.Sprint(*response.Headers.XRevokedTokenIds))
 	}
@@ -2314,6 +4704,12 @@ type StrictServerInterface interface {
 	// RefreshLease Refresh an active activation's lease (also validate). Never takes a seat.
 	// (POST /activation/tenants/{tenant}/refresh)
 	RefreshLease(ctx context.Context, request RefreshLeaseRequestObject) (RefreshLeaseResponseObject, error)
+	// AcceptInvitation Accept an invitation as the signed-in user.
+	// (POST /invitations/accept)
+	AcceptInvitation(ctx context.Context, request AcceptInvitationRequestObject) (AcceptInvitationResponseObject, error)
+	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+	// (GET /me/tenants)
+	ListMyTenants(ctx context.Context, request ListMyTenantsRequestObject) (ListMyTenantsResponseObject, error)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
@@ -2323,10 +4719,37 @@ type StrictServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(ctx context.Context, request RevokeApiTokenRequestObject) (RevokeApiTokenResponseObject, error)
+	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
+	// (GET /tenants/{tenant}/invitations)
+	ListInvitations(ctx context.Context, request ListInvitationsRequestObject) (ListInvitationsResponseObject, error)
+	// CreateInvitation Invite someone by email. The link token is in this response only.
+	// (POST /tenants/{tenant}/invitations)
+	CreateInvitation(ctx context.Context, request CreateInvitationRequestObject) (CreateInvitationResponseObject, error)
+	// RevokeInvitation Revoke an open invitation. One-way.
+	// (POST /tenants/{tenant}/invitations/{id}/revoke)
+	RevokeInvitation(ctx context.Context, request RevokeInvitationRequestObject) (RevokeInvitationResponseObject, error)
+	// ListLicenses List licenses in the caller's product scope, newest first.
+	// (GET /tenants/{tenant}/licenses)
+	ListLicenses(ctx context.Context, request ListLicensesRequestObject) (ListLicensesResponseObject, error)
+	// IssueLicense Issue a license from a plan. The license key is in this response only.
+	// (POST /tenants/{tenant}/licenses)
+	IssueLicense(ctx context.Context, request IssueLicenseRequestObject) (IssueLicenseResponseObject, error)
+	// GetLicense Get a license (never its key).
+	// (GET /tenants/{tenant}/licenses/{id})
+	GetLicense(ctx context.Context, request GetLicenseRequestObject) (GetLicenseResponseObject, error)
+	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
+	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
+	ReinstateLicense(ctx context.Context, request ReinstateLicenseRequestObject) (ReinstateLicenseResponseObject, error)
+	// RevokeLicense Revoke an active or suspended license. Final.
+	// (POST /tenants/{tenant}/licenses/{id}/revoke)
+	RevokeLicense(ctx context.Context, request RevokeLicenseRequestObject) (RevokeLicenseResponseObject, error)
+	// SuspendLicense Suspend an active license.
+	// (POST /tenants/{tenant}/licenses/{id}/suspend)
+	SuspendLicense(ctx context.Context, request SuspendLicenseRequestObject) (SuspendLicenseResponseObject, error)
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
-	// RemoveMember Remove a member, by default revoking the API tokens they created (ADR-0029).
+	// RemoveMember Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
 	// (DELETE /tenants/{tenant}/members/{id})
 	RemoveMember(ctx context.Context, request RemoveMemberRequestObject) (RemoveMemberResponseObject, error)
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
@@ -2473,6 +4896,61 @@ func (sh *strictHandler) RefreshLease(w http.ResponseWriter, r *http.Request, te
 	}
 }
 
+// AcceptInvitation operation middleware
+func (sh *strictHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	var request AcceptInvitationRequestObject
+
+	var body AcceptInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptInvitation(ctx, request.(AcceptInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptInvitationResponseObject); ok {
+		if err := validResponse.VisitAcceptInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyTenants operation middleware
+func (sh *strictHandler) ListMyTenants(w http.ResponseWriter, r *http.Request) {
+	var request ListMyTenantsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyTenants(ctx, request.(ListMyTenantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyTenants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyTenantsResponseObject); ok {
+		if err := validResponse.VisitListMyTenantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListApiTokens operation middleware
 func (sh *strictHandler) ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams) {
 	var request ListApiTokensRequestObject
@@ -2553,6 +5031,262 @@ func (sh *strictHandler) RevokeApiToken(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeApiTokenResponseObject); ok {
 		if err := validResponse.VisitRevokeApiTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInvitations operation middleware
+func (sh *strictHandler) ListInvitations(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListInvitationsParams) {
+	var request ListInvitationsRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInvitations(ctx, request.(ListInvitationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInvitations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInvitationsResponseObject); ok {
+		if err := validResponse.VisitListInvitationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateInvitation operation middleware
+func (sh *strictHandler) CreateInvitation(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request CreateInvitationRequestObject
+
+	request.Tenant = tenant
+
+	var body CreateInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInvitation(ctx, request.(CreateInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInvitationResponseObject); ok {
+		if err := validResponse.VisitCreateInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeInvitation operation middleware
+func (sh *strictHandler) RevokeInvitation(w http.ResponseWriter, r *http.Request, tenant Tenant, id string) {
+	var request RevokeInvitationRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInvitation(ctx, request.(RevokeInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeInvitationResponseObject); ok {
+		if err := validResponse.VisitRevokeInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLicenses operation middleware
+func (sh *strictHandler) ListLicenses(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListLicensesParams) {
+	var request ListLicensesRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLicenses(ctx, request.(ListLicensesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLicenses")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLicensesResponseObject); ok {
+		if err := validResponse.VisitListLicensesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IssueLicense operation middleware
+func (sh *strictHandler) IssueLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, params IssueLicenseParams) {
+	var request IssueLicenseRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	var body IssueLicenseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IssueLicense(ctx, request.(IssueLicenseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IssueLicense")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IssueLicenseResponseObject); ok {
+		if err := validResponse.VisitIssueLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLicense operation middleware
+func (sh *strictHandler) GetLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request GetLicenseRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLicense(ctx, request.(GetLicenseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLicense")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLicenseResponseObject); ok {
+		if err := validResponse.VisitGetLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReinstateLicense operation middleware
+func (sh *strictHandler) ReinstateLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request ReinstateLicenseRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReinstateLicense(ctx, request.(ReinstateLicenseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReinstateLicense")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReinstateLicenseResponseObject); ok {
+		if err := validResponse.VisitReinstateLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeLicense operation middleware
+func (sh *strictHandler) RevokeLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request RevokeLicenseRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeLicense(ctx, request.(RevokeLicenseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeLicense")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeLicenseResponseObject); ok {
+		if err := validResponse.VisitRevokeLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SuspendLicense operation middleware
+func (sh *strictHandler) SuspendLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request SuspendLicenseRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SuspendLicense(ctx, request.(SuspendLicenseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SuspendLicense")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SuspendLicenseResponseObject); ok {
+		if err := validResponse.VisitSuspendLicenseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

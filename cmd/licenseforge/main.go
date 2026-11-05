@@ -45,7 +45,9 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/invitations"
 	"licenseforge.io/licenseforge/internal/issue"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
@@ -192,12 +194,13 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
-	// API tokens need only the tenant pool (hashes, no keyring); the
-	// activation API decrypts license keys and signs leases.
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Identity: ids,
-		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log,
+	// API tokens need only the tenant pool (hashes, no keyring); license keys
+	// and stored idempotent responses (which can hold one) are encrypted, and
+	// the activation API decrypts license keys and signs leases.
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},
-		Idempotency: idempotency.Store{DB: db, Keys: keyring}}))
+		Sessions:    sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")
 	}

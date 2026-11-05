@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,20 +15,28 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 	"licenseforge.io/licenseforge/internal/weblogin"
@@ -60,7 +70,12 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{db: d, tokens: apitokens.Service{DB: d}, mem: map[string]string{}}
-	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+	kr, err := secrets.ParseKeyring("k1=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
@@ -732,4 +747,293 @@ func TestMemberPatchCapsTokens(t *testing.T) {
 		t.Fatalf("patch: %d %s", r.code, r.raw)
 	}
 	f.do(t, "GET", tokensPath(f.a.Slug), "", bearer(kept)).problem(t, 401, "unauthenticated")
+}
+
+func (f *fixture) user(t *testing.T, email string) string {
+	t.Helper()
+	var uid string
+	if err := f.db.WithIdentity(context.Background(), "", func(tx *ent.Tx) error {
+		u, err := tx.User.Create().SetIssuer("https://idp.example").SetSubject(ids.New("sub")).SetEmail(email).SetEmailVerified(true).Save(context.Background())
+		if err == nil {
+			uid = u.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return uid
+}
+
+func TestInvitationEndpoints(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/invitations"
+	email := strings.ToLower(ids.New("e")[2:14]) + "@example.com"
+	created := f.do(t, "POST", p, `{"email":"`+email+`","role":"support","all_products":false,"product_ids":["`+f.prodA+`"]}`, owner)
+	tok, _ := created.body["token"].(string)
+	if created.code != 201 || tok == "" || created.body["status"] != "pending" || created.body["invited_by"] != f.ownerA {
+		t.Fatalf("create: %d %s", created.code, created.raw)
+	}
+	second := f.do(t, "POST", p, `{"email":"x`+email+`","role":"viewer","all_products":true}`, owner)
+	// Listed newest first, paginated; the token never again.
+	r1 := f.do(t, "GET", p+"?limit=1", "", owner)
+	items, _ := r1.body["items"].([]any)
+	next, _ := r1.body["next_cursor"].(string)
+	if r1.code != 200 || len(items) != 1 || items[0].(map[string]any)["id"] != second.body["id"] || next == "" {
+		t.Fatalf("page 1: %s", r1.raw)
+	}
+	r2 := f.do(t, "GET", p+"?limit=1&cursor="+next, "", owner)
+	if items, _ := r2.body["items"].([]any); r2.code != 200 || len(items) != 1 || items[0].(map[string]any)["id"] != created.body["id"] {
+		t.Fatalf("page 2: %s", r2.raw)
+	}
+	if strings.Contains(r1.raw+r2.raw, tok) || strings.Contains(r1.raw+r2.raw, second.body["token"].(string)) || strings.Contains(r1.raw+r2.raw, "hash") {
+		t.Fatal("list shows a token or hash")
+	}
+	// Rights before values; values with a field.
+	f.do(t, "POST", p, `{"email":"nope","role":"root","all_products":true}`, f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"owner","all_products":true}`, f.session(t, f.adminA, true)).problem(t, 403, "forbidden")
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"viewer","all_products":true}`, bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 403, "forbidden")
+	bad := f.do(t, "POST", p, `{"email":"a b@example.com","role":"viewer","all_products":true}`, owner).problem(t, 422, "validation_failed")
+	if !strings.Contains(fmt.Sprint(bad["errors"]), "/email") {
+		t.Errorf("bad email: %v", bad)
+	}
+	f.do(t, "POST", p, `{"email":"`+email+`","role":"viewer","all_products":true,"issuer":"x"}`, owner).problem(t, 400, "invalid_request")
+	// Revoke: hidden and missing alike; visible but not the caller's to take back: 403.
+	sid := second.body["id"].(string)
+	missing := f.do(t, "POST", p+"/"+ids.Invitation()+"/revoke", "", owner).problem(t, 404, "not_found")
+	bInv := f.do(t, "POST", Prefix+"/tenants/"+f.b.Slug+"/invitations", `{"email":"b`+email+`","role":"viewer","all_products":true}`, f.session(t, f.ownerB, true))
+	for name, c := range map[string]struct {
+		path string
+		o    opt
+	}{
+		"another tenant's": {p + "/" + bInv.body["id"].(string) + "/revoke", owner},
+		"scoped caller":    {p + "/" + sid + "/revoke", f.session(t, f.scoped, true)},
+	} {
+		if got := f.do(t, "POST", c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	f.do(t, "POST", p+"/"+sid+"/revoke", "", f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	if r := f.do(t, "POST", p+"/"+sid+"/revoke", "", owner); r.code != 200 || r.body["status"] != "revoked" {
+		t.Errorf("revoke: %d %s", r.code, r.raw)
+	}
+	// Accept: session only, outside the tenant path, CSRF-protected; one
+	// answer for every reason it can't be accepted.
+	accept := Prefix + "/invitations/accept"
+	invitee := f.user(t, email)
+	body := `{"token":"` + tok + `"}`
+	f.do(t, "POST", accept, body).problem(t, 401, "unauthenticated")
+	f.do(t, "POST", accept, body, bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 401, "unauthenticated")
+	f.do(t, "POST", accept, body, f.session(t, invitee, false)).problem(t, 403, "csrf_failed")
+	unknown := f.do(t, "POST", accept, `{"token":"nope"}`, f.session(t, invitee, true)).problem(t, 422, "validation_failed")
+	for _, tok := range []string{"", strings.Repeat("a", 65), strings.Repeat("a", 1<<16)} {
+		if got := f.do(t, "POST", accept, `{"token":"`+tok+`"}`, f.session(t, invitee, true)).problem(t, 422, "validation_failed"); !reflect.DeepEqual(got, unknown) {
+			t.Errorf("token of %d bytes: %v", len(tok), got)
+		}
+	}
+	wrongUser := f.do(t, "POST", accept, body, f.session(t, f.user(t, "y"+email), true)).problem(t, 422, "validation_failed")
+	if !reflect.DeepEqual(unknown, wrongUser) {
+		t.Errorf("wrong user %v, unknown token %v", wrongUser, unknown)
+	}
+	f.srv.APIHost = "api.lf.example"
+	f.do(t, "POST", accept, body, f.session(t, invitee, true), func(r *http.Request) { r.Host = "api.lf.example" }).problem(t, 401, "unauthenticated")
+	f.srv.APIHost = ""
+	r := f.do(t, "POST", accept, body, f.session(t, invitee, true))
+	if r.code != 200 || r.body["tenant_id"] != f.a.ID || r.body["role"] != "support" || r.body["all_products"] != false {
+		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "GET", Prefix+"/tenants/"+f.a.ID+"/invitations", "", f.session(t, invitee, false)); r.code != 200 {
+		t.Errorf("new member's access: %d %s", r.code, r.raw)
+	}
+	if got := f.do(t, "POST", accept, body, f.session(t, invitee, true)).problem(t, 422, "validation_failed"); !reflect.DeepEqual(got, unknown) {
+		t.Errorf("used twice: %v", got)
+	}
+	// Other paths outside a tenant stay 404 for sessions.
+	f.do(t, "POST", Prefix+"/invitations/nope", body, f.session(t, invitee, true)).problem(t, 404, "not_found")
+}
+
+// Member changes report the pending invitations they revoked, and
+// revoke_invitations=false keeps them.
+func TestMemberChangesRevokeInvitations(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	admin := f.session(t, f.adminA, true)
+	inv := func() string {
+		r := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/invitations", `{"email":"`+strings.ToLower(ids.New("i")[2:14])+`@example.com","role":"viewer","all_products":true}`, admin)
+		if r.code != 201 {
+			t.Fatalf("invite: %d %s", r.code, r.raw)
+		}
+		return r.body["id"].(string)
+	}
+	m := membersPath(f.a.Slug) + "/" + f.mem[f.adminA]
+	gone := inv()
+	if r := f.do(t, "PATCH", m, `{"product_ids":["`+f.prodA+`"]}`, owner); r.code != 200 || !reflect.DeepEqual(r.body["revoked_invitation_ids"], []any{gone}) {
+		t.Fatalf("narrowing: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", m, `{"all_products":true}`, owner); r.code != 200 {
+		t.Fatalf("widen: %d %s", r.code, r.raw)
+	}
+	kept := inv()
+	if r := f.do(t, "PATCH", m+"?revoke_invitations=false", `{"role":"manager"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_invitation_ids"]) != "[]" {
+		t.Fatalf("opt-out: %d %s", r.code, r.raw)
+	}
+	// A later change that doesn't newly exclude it keeps it.
+	if r := f.do(t, "PATCH", m, `{"role":"support"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_invitation_ids"]) != "[]" {
+		t.Fatalf("later demotion: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "DELETE", m, "", owner); r.code != 204 || r.h.Get("X-Revoked-Invitation-Ids") != kept {
+		t.Errorf("delete: %d %v", r.code, r.h)
+	}
+}
+
+// GET /me/tenants: session only, outside a tenant path; the user's own
+// memberships with role and scope, and nobody else's.
+func TestMyTenants(t *testing.T) {
+	f := setup(t)
+	path := Prefix + "/me/tenants"
+	items := func(r resp) []map[string]any {
+		t.Helper()
+		if r.code != 200 {
+			t.Fatalf("GET %s: %d %s", path, r.code, r.raw)
+		}
+		raw, ok := r.body["items"].([]any)
+		if !ok || len(r.body) != 1 {
+			t.Fatalf("body %s: want only an items array", r.raw)
+		}
+		var out []map[string]any
+		for _, it := range raw {
+			out = append(out, it.(map[string]any))
+		}
+		return out
+	}
+	f.do(t, "GET", path, "").problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path, "", bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path+"?limit=1", "", f.session(t, f.ownerA, false)).problem(t, 400, "invalid_request")
+	f.srv.APIHost = "api.lf.example"
+	f.do(t, "GET", path, "", f.session(t, f.ownerA, false), func(r *http.Request) { r.Host = "api.lf.example" }).problem(t, 401, "unauthenticated")
+	f.srv.APIHost = ""
+
+	want := map[string]any{"tenant_id": f.a.ID, "slug": f.a.Slug, "name": f.a.Name, "role": "owner", "all_products": true, "product_ids": []any{}}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.ownerA, false))); !reflect.DeepEqual(got, []map[string]any{want}) {
+		t.Errorf("owner of a: %v", got)
+	}
+	scoped := items(f.do(t, "GET", path, "", f.session(t, f.scoped, false)))
+	if len(scoped) != 1 || scoped[0]["role"] != "admin" || scoped[0]["all_products"] != false || !reflect.DeepEqual(scoped[0]["product_ids"], []any{f.prodA}) {
+		t.Errorf("scoped admin: %v", scoped)
+	}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.outsider, false))); len(got) != 1 || got[0]["tenant_id"] != f.b.ID {
+		t.Errorf("member of b only: %v", got)
+	}
+	if got := items(f.do(t, "GET", path, "", f.session(t, f.user(t, "lonely@example.com"), false))); len(got) != 0 {
+		t.Errorf("no memberships: %v", got)
+	}
+	f.do(t, "POST", path, "", f.session(t, f.ownerA, true)).problem(t, 405, "method_not_allowed")
+	// The handler itself refuses a principal that isn't a tenant-less user.
+	for _, p := range []authz.Principal{{}, {Kind: authz.Token, ID: "tok_1"}, {Kind: authz.User, ID: f.ownerA, TenantID: f.a.ID, Role: authz.Owner}} {
+		if _, err := f.srv.ListMyTenants(authz.WithPrincipal(context.Background(), p), apigen.ListMyTenantsRequestObject{}); err != errUnauthenticated {
+			t.Errorf("principal %+v: %v", p, err)
+		}
+	}
+}
+
+// GET /me/tenants never lists the reserved platform tenant, orders a scope's
+// product IDs, and returns at most identity.MaxMemberships, first by slug.
+func TestMyTenantsEdges(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	path := Prefix + "/me/tenants"
+	// Two more products of a, joined in reverse ID order.
+	var prods []string
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		for _, slug := range []string{"p1", "p2"} {
+			p, err := tx.Product.Create().SetTenantID(f.a.ID).SetSlug(slug).SetName(slug).Save(ctx)
+			if err != nil {
+				return err
+			}
+			prods = append(prods, p.ID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(prods)
+	u := f.join(t, f.a.ID, invitation.RoleViewer, f.ownerA, prods[1], prods[0])
+	// Also a member of b and of the platform tenant (direct rows, platform pool).
+	email := "edges-" + storetest.Suffix() + "@example.com"
+	if err := f.db.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		return tx.User.UpdateOneID(u).SetEmail(email).Exec(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tenant := range []string{f.b.ID, audit.PlatformTenant} {
+		if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+			inv, err := tx.Invitation.Create().SetTenantID(tenant).SetEmail(email).SetRole(invitation.RoleViewer).SetScopeAll(true).
+				SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
+				SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx)
+			if err != nil {
+				return err
+			}
+			return tx.Membership.Create().SetTenantID(tenant).SetUserID(u).SetInvitationID(inv.ID).
+				SetRole(membership.RoleViewer).SetScopeAll(true).Exec(ctx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func() []any {
+		t.Helper()
+		r := f.do(t, "GET", path, "", f.session(t, u, false))
+		items, ok := r.body["items"].([]any)
+		if r.code != 200 || !ok {
+			t.Fatalf("GET %s: %d %s", path, r.code, r.raw)
+		}
+		return items
+	}
+	first, second := f.a, f.b
+	if second.Slug < first.Slug {
+		first, second = second, first
+	}
+	items := list()
+	if len(items) != 2 {
+		t.Fatalf("want a and b, not the platform tenant: %v", items)
+	}
+	for i, want := range []*ent.Tenant{first, second} {
+		if got := items[i].(map[string]any); got["tenant_id"] != want.ID {
+			t.Errorf("item %d = %v, want %s (sorted by slug)", i, got, want.Slug)
+		}
+		if items[i].(map[string]any)["tenant_id"] == f.a.ID && fmt.Sprint(items[i].(map[string]any)["product_ids"]) != fmt.Sprint(prods) {
+			t.Errorf("product_ids %v, want sorted %v", items[i].(map[string]any)["product_ids"], prods)
+		}
+	}
+	// Scope rows stored in reverse ID order still come back sorted.
+	w := f.user(t, "rev-"+storetest.Suffix()+"@example.com")
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		wu, err := tx.User.Get(ctx, w)
+		if err != nil {
+			return err
+		}
+		inv, err := tx.Invitation.Create().SetTenantID(f.a.ID).SetEmail(*wu.Email).SetRole(invitation.RoleViewer).SetScopeAll(false).
+			SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
+			SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx)
+		if err != nil {
+			return err
+		}
+		m, err := tx.Membership.Create().SetTenantID(f.a.ID).SetUserID(w).SetInvitationID(inv.ID).
+			SetRole(membership.RoleViewer).SetScopeAll(false).Save(ctx)
+		for _, p := range []string{prods[1], prods[0]} {
+			if err == nil {
+				err = tx.MembershipProduct.Create().SetTenantID(f.a.ID).SetMembershipID(m.ID).SetProductID(p).Exec(ctx)
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do(t, "GET", path, "", f.session(t, w, false)); r.code != 200 || fmt.Sprint(r.body["items"].([]any)[0].(map[string]any)["product_ids"]) != fmt.Sprint(prods) {
+		t.Errorf("reverse-stored scope: %d %s, want %v", r.code, r.raw, prods)
+	}
+	defer func(n int) { identity.MaxMemberships = n }(identity.MaxMemberships)
+	identity.MaxMemberships = 1
+	if items := list(); len(items) != 1 || items[0].(map[string]any)["tenant_id"] != first.ID {
+		t.Errorf("capped at 1: %v, want only %s", items, first.Slug)
+	}
 }
