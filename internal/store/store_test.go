@@ -736,3 +736,40 @@ func TestAuditExportPrivileges(t *testing.T) {
 		}
 	}
 }
+
+// Products are archived, never deleted (ADR-0015): the serving pools may
+// rename them and set archived_at, nothing else; slugs and ownership stay.
+func TestProductPrivileges(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	for _, role := range []string{AppRole, PlatformRole} {
+		for _, c := range []struct {
+			column, priv string
+			want         bool
+		}{
+			{"name", "UPDATE", true},
+			{"archived_at", "UPDATE", true},
+			{"updated_at", "UPDATE", true},
+			{"slug", "UPDATE", false},
+			{"tenant_id", "UPDATE", false},
+			{"id", "UPDATE", false},
+			{"created_at", "UPDATE", false},
+			{"", "DELETE", false},
+		} {
+			var got bool
+			q, args := `SELECT has_table_privilege($1, 'products', $2)`, []any{role, c.priv}
+			if c.column != "" {
+				q, args = `SELECT has_column_privilege($1, 'products', $2, $3)`, []any{role, c.column, c.priv}
+			}
+			if err := owner.QueryRow(q, args...).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("%s %s products.%s = %v, want %v", role, c.priv, c.column, got, c.want)
+			}
+		}
+	}
+}

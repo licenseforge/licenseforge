@@ -3,6 +3,7 @@ package licenses
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -856,5 +857,83 @@ func TestRecordKeyRevealRefusesMalformedIDs(t *testing.T) {
 	}
 	if e := f.lastEvent(t, f.a.id); e.Action != "license.key_reveal" || !strings.Contains(e.Details, f.a.prodP) {
 		t.Errorf("audit = %+v", e)
+	}
+}
+
+// No new license on an archived product (ADR-0015); existing ones can still
+// be suspended, reinstated and revoked, and listed.
+func TestArchivedProduct(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	existing, err := f.s.Issue(ctx, mgr, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`, f.a.prodP)
+		return err
+	})
+	var inv *InvalidError
+	if _, err := f.s.Issue(ctx, mgr, f.req(f.a)); !errors.As(err, &inv) || inv.Field != "/product_id" || !strings.Contains(inv.Message, "archived") {
+		t.Errorf("issue on an archived product: %v", err)
+	}
+	// Rights come first: a viewer is still refused for its role.
+	if _, err := f.s.Issue(ctx, as(f.a.id, authz.Viewer, all), f.req(f.a)); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("viewer: %v", err)
+	}
+	// A hidden archived product answers like a missing one, never "archived".
+	if _, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), f.req(f.a)); !errors.As(err, &inv) || strings.Contains(inv.Message, "archived") {
+		t.Errorf("hidden archived product: %v", err)
+	}
+	for _, step := range []func(context.Context, authz.Principal, string) (*ent.License, error){f.s.Suspend, f.s.Reinstate, f.s.Revoke} {
+		if _, err := step(ctx, mgr, existing.License.ID); err != nil {
+			t.Errorf("transition on an archived product's license: %v", err)
+		}
+	}
+}
+
+// An issue racing an archive: the issue waits for the archive's row lock and
+// then sees the product archived (it locks the product FOR SHARE).
+func TestIssueWaitsForArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	done := make(chan error, 1)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM products WHERE id = $1 FOR UPDATE`, f.a.prodP); err != nil {
+			return err
+		}
+		go func() {
+			_, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), f.req(f.a))
+			done <- err
+		}()
+		for i := 0; ; i++ {
+			var n int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				break
+			}
+			if i == 100 {
+				return errors.New("the issue never waited")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`, f.a.prodP)
+		return err
+	})
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("issue after a concurrent archive: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("issue didn't finish")
 	}
 }

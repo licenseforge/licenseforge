@@ -268,7 +268,7 @@ var queryParams = map[string][]string{
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
-	"ListProducts":    {"limit", "cursor"},
+	"ListProducts":    {"limit", "cursor", "archived"},
 	"ListCustomers":   {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
@@ -459,8 +459,8 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{invalidCatalog.Field, invalidCatalog.Message})
 	case errors.As(err, &invalidCustomer):
 		p = invalid(fieldError{invalidCustomer.Field, invalidCustomer.Message})
-	case errors.Is(err, customers.ErrState):
-		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The customer is already archived."}
+	case errors.Is(err, customers.ErrState), errors.Is(err, catalog.ErrState):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "Already archived."}
 	case activationProblem(err) != nil:
 		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):

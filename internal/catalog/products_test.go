@@ -95,14 +95,14 @@ func TestProducts(t *testing.T) {
 		t.Errorf("slugs are per tenant: %v", err)
 	}
 	// List newest first; a product-scoped principal sees only its products.
-	l, err := f.s.List(as(f.a, authz.Viewer), 1, time.Time{}, "")
+	l, err := f.s.List(as(f.a, authz.Viewer), nil, 1, time.Time{}, "")
 	if err != nil || len(l) != 1 || l[0].ID != cache.ID {
 		t.Fatalf("page 1 = %v, %v", l, err)
 	}
-	if l, err := f.s.List(as(f.a, authz.Viewer), 5, l[0].CreatedAt, l[0].ID); err != nil || len(l) != 1 || l[0].ID != db.ID {
+	if l, err := f.s.List(as(f.a, authz.Viewer), nil, 5, l[0].CreatedAt, l[0].ID); err != nil || len(l) != 1 || l[0].ID != db.ID {
 		t.Fatalf("page 2 = %v, %v", l, err)
 	}
-	if l, err := f.s.List(as(f.a, authz.Support, db.ID), 5, time.Time{}, ""); err != nil || len(l) != 1 || l[0].ID != db.ID {
+	if l, err := f.s.List(as(f.a, authz.Support, db.ID), nil, 5, time.Time{}, ""); err != nil || len(l) != 1 || l[0].ID != db.ID {
 		t.Errorf("scoped list = %v, %v", l, err)
 	}
 	// Get: hidden and missing alike.
@@ -185,3 +185,61 @@ func TestProductRefusals(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestProductArchive(t *testing.T) {
+	f := setup(t)
+	admin := as(f.a, authz.Admin)
+	db, err := f.s.Create(admin, "db", "Database")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := f.s.Create(admin, "cache", "Cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rights: catalog:write on that product; hidden and missing are not found.
+	if _, err := f.s.Archive(as(f.a, authz.Manager), db.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("manager: %v", err)
+	}
+	for name, c := range map[string]struct {
+		ctx context.Context
+		id  string
+	}{
+		"missing":          {admin, ids.Product()},
+		"another tenant's": {as(f.b, authz.Admin), db.ID},
+		"out of scope":     {as(f.a, authz.Admin, cache.ID), db.ID},
+	} {
+		if _, err := f.s.Archive(c.ctx, c.id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	a, err := f.s.Archive(as(f.a, authz.Admin, db.ID), db.ID) // a scoped admin may archive its own product
+	if err != nil || a.ArchivedAt == nil || a.Slug != "db" {
+		t.Fatalf("archive = %+v, %v", a, err)
+	}
+	if e := f.lastEvent(t, f.a); e.Action != "product.archive" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != db.ID {
+		t.Errorf("audit = %+v", e)
+	}
+	if _, err := f.s.Archive(admin, db.ID); !errors.Is(err, ErrState) {
+		t.Errorf("archive twice: %v", err)
+	}
+	// Archived products stay listed; ?archived filters.
+	no, yes := false, true
+	for name, c := range map[string]struct {
+		archived *bool
+		want     []string
+	}{"all": {nil, []string{cache.ID, db.ID}}, "active": {&no, []string{cache.ID}}, "archived": {&yes, []string{db.ID}}} {
+		l, err := f.s.List(as(f.a, authz.Viewer), c.archived, 10, time.Time{}, "")
+		var got []string
+		for _, p := range l {
+			got = append(got, p.ID)
+		}
+		if err != nil || strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s: %v, %v", name, got, err)
+		}
+	}
+	// Still readable and renamable.
+	if _, err := f.s.Update(admin, db.ID, Patch{Name: ptr("Old DB")}); err != nil {
+		t.Errorf("rename archived: %v", err)
+	}
+}
