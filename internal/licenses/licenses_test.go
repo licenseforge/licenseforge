@@ -840,3 +840,19 @@ func TestListAndGet(t *testing.T) {
 }
 
 func newLicenseID() string { return storeids.License() }
+
+func TestRecordKeyRevealRefusesMalformedIDs(t *testing.T) {
+	f := setup(t)
+	mgr := as(f.a.id, authz.Manager, all)
+	for _, c := range [][2]string{{"", f.a.prodP}, {"lic_x", f.a.prodP}, {newLicenseID(), ""}, {newLicenseID(), "x"}} {
+		if err := f.s.RecordKeyReveal(context.Background(), mgr, c[0], c[1]); err == nil {
+			t.Errorf("reveal %q/%q recorded", c[0], c[1])
+		}
+	}
+	if err := f.s.RecordKeyReveal(context.Background(), mgr, newLicenseID(), f.a.prodP); err != nil {
+		t.Error(err)
+	}
+	if e := f.lastEvent(t, f.a.id); e.Action != "license.key_reveal" || !strings.Contains(e.Details, f.a.prodP) {
+		t.Errorf("audit = %+v", e)
+	}
+}

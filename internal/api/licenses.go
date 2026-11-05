@@ -132,12 +132,14 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 	}
 	if replayed && out.Status == http.StatusCreated { // the key is shown again: audited, or not shown (ADR-0025)
 		var lic struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			ProductID string `json:"product_id"`
 		}
 		if err := json.Unmarshal(out.Body, &lic); err != nil {
 			return nil, err
 		}
-		if err := s.Licenses.RecordKeyReveal(ctx, p, lic.ID); err != nil {
+		// RecordKeyReveal refuses malformed IDs (a 500: never an unaudited reveal).
+		if err := s.Licenses.RecordKeyReveal(ctx, p, lic.ID, lic.ProductID); err != nil {
 			return nil, err
 		}
 	}

@@ -194,6 +194,7 @@ func TestIssueLicenseIdempotency(t *testing.T) {
 		t.Fatalf("replay: %d %s", again.code, again.raw)
 	}
 	if e := f.lastEvent(t, f.a.ID); e.Action != "license.key_reveal" || *e.ObjectID != first.body["id"] || *e.ActorID != f.ownerA ||
+		!strings.Contains(e.Details, `"product_id":"`+f.prodA+`"`) ||
 		strings.Contains(e.Details, first.body["key"].(string)) {
 		t.Errorf("replay audit = %+v", e)
 	}

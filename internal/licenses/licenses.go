@@ -179,14 +179,17 @@ func (s Service) RecheckIssue(ctx context.Context, tx *ent.Tx, p authz.Principal
 
 // RecordKeyReveal records that p was shown licenseID's key again (a replayed
 // idempotent issue), as every key reveal is (ADR-0025): no key material.
-func (s Service) RecordKeyReveal(ctx context.Context, p authz.Principal, licenseID string) error {
+func (s Service) RecordKeyReveal(ctx context.Context, p authz.Principal, licenseID, productID string) error {
+	if !ids.Valid("lic", licenseID) || !ids.Valid("prd", productID) {
+		return errors.New("licenses: key reveal of a malformed license or product ID")
+	}
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 	ev := event(p, "license.key_reveal", licenseID)
-	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": "idempotent_replay"}
+	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": "idempotent_replay", "product_id": productID}
 	return s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		_, err := audit.Record(ctx, tx, tenantID, ev)
 		return err
@@ -671,7 +674,10 @@ func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, e
 		_, err := audit.Record(ctx, tx, tenantID, ev)
 		return err
 	}); rerr != nil {
-		return errors.Join(err, rerr)
+		// Fail closed: an outage (500), never the refusal without its entry.
+		// Not covered by a test: the audit write can't be made to fail here
+		// without a fault-injection hook.
+		return fmt.Errorf("licenses: recording a refusal: %w", rerr)
 	}
 	return err
 }
