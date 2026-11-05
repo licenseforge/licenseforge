@@ -14,6 +14,7 @@ import {
   customersQuery,
   formatRefs,
   parseRefs,
+  refsBody,
   type Product,
   productsQuery,
   renameProduct,
@@ -29,9 +30,11 @@ const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2";
 
-function useCaller(slug: string): Membership {
-  const { data: tenants = [] } = useQuery(tenantsQuery);
-  return tenants.find((tn) => tn.slug === slug) ?? { role: "viewer", scope: { all: false, products: [] } };
+/** The caller's membership here, and whether it has loaded (no notices or actions before). */
+function useCaller(slug: string): Membership & { loaded: boolean } {
+  const { data: tenants, isSuccess } = useQuery(tenantsQuery);
+  const m = tenants?.find((tn) => tn.slug === slug) ?? { role: "viewer" as const, scope: { all: false, products: [] } };
+  return { ...m, loaded: isSuccess };
 }
 
 /** A form in a dialog: fields, a submit with the problem's message and field errors. */
@@ -67,11 +70,14 @@ function FormDialog({ title, submit, onClose, onSubmit, error, busy, children }:
   );
 }
 
-function Field({ label, name, error, ...rest }: { label: string; name: string; error?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+/** A labelled input; aria-describedby names only help and error text that is on the page. */
+function Field({ label, name, error, help, ...rest }: { label: string; name: string; error?: string; help?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  const describedBy = [help && `${name}-help`, error && `${name}-error`].filter(Boolean).join(" ") || undefined;
   return (
     <label className="flex flex-col gap-1 text-sm">
       {label}
-      <input name={name} className={input} aria-invalid={!!error} aria-describedby={`${name}-error`} {...rest} />
+      <input name={name} className={input} aria-invalid={!!error} aria-describedby={describedBy} {...rest} />
+      {help && <span id={`${name}-help`} className="text-xs text-muted-foreground">{help}</span>}
       {error && <span id={`${name}-error`}>{error}</span>}
     </label>
   );
@@ -89,7 +95,7 @@ export function ProductsPage() {
         <h1 className="text-2xl font-semibold">{t("products.title")}</h1>
         {canCreateProducts(caller) && <Button onClick={() => setDialog({ kind: "create" })}>{t("products.new")}</Button>}
       </div>
-      {!caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("products.scoped")}</p>}
+      {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("products.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
       {list.isSuccess && rows.length === 0 && <p className="mt-6 text-muted-foreground">{t("products.empty")}</p>}
       {rows.length > 0 && (
@@ -136,7 +142,11 @@ function ProductDialog({ tenant, product, onClose }: { tenant: string; product: 
   const qc = useQueryClient();
   const save = useMutation({
     mutationFn: (f: FormData) =>
-      product ? renameProduct(tenant, product.id, String(f.get("name") ?? "").trim()) : createProduct(tenant, String(f.get("slug") ?? "").trim(), String(f.get("name") ?? "").trim()),
+      product
+        ? String(f.get("name") ?? "") === product.name
+          ? Promise.resolve(null) // unchanged: no request
+          : renameProduct(tenant, product.id, String(f.get("name") ?? "").trim())
+        : createProduct(tenant, String(f.get("slug") ?? "").trim(), String(f.get("name") ?? "").trim()),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
       onClose();
@@ -153,7 +163,7 @@ function ProductDialog({ tenant, product, onClose }: { tenant: string; product: 
       busy={save.isPending}
     >
       {!product && (
-        <Field label={t("products.col.slug")} name="slug" required maxLength={63} pattern="[a-z0-9]+(-[a-z0-9]+)*" error={fields.slug} aria-description={t("products.slugHelp")} />
+        <Field label={t("products.col.slug")} name="slug" required maxLength={63} pattern="[a-z0-9]+(-[a-z0-9]+)*" error={fields.slug} help={t("products.slugHelp")} />
       )}
       <Field label={t("tokens.col.name")} name="name" required maxLength={200} defaultValue={product?.name} error={fields.name} />
     </FormDialog>
@@ -173,7 +183,7 @@ export function CustomersPage() {
         <h1 className="text-2xl font-semibold">{t("customers.title")}</h1>
         {write && <Button onClick={() => setDialog({ kind: "create" })}>{t("customers.new")}</Button>}
       </div>
-      {!caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("customers.scoped")}</p>}
+      {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("customers.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
       {list.isSuccess && rows.length === 0 && caller.scope.all && <p className="mt-6 text-muted-foreground">{t("customers.empty")}</p>}
       {rows.length > 0 && (
@@ -230,9 +240,13 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
     mutationFn: async (f: FormData) => {
       const name = String(f.get("name") ?? "");
       const email = String(f.get("email") ?? "");
-      const external_refs = parseRefs(String(f.get("refs") ?? ""));
-      if (customer) return updateCustomer(tenant, customer.id, customerPatch(customer, { name, email, refs: external_refs }));
-      return createCustomer(tenant, { name: name.trim(), ...(email.trim() ? { email: email.trim() } : {}), ...(Object.keys(external_refs).length ? { external_refs } : {}) });
+      const refs = parseRefs(String(f.get("refs") ?? ""));
+      if (customer) {
+        const patch = customerPatch(customer, { name, email, refs });
+        if (Object.keys(patch).length === 0) return null; // nothing changed: no request
+        return updateCustomer(tenant, customer.id, patch);
+      }
+      return createCustomer(tenant, { name: name.trim(), ...(email.trim() ? { email: email.trim() } : {}), ...(refs.size ? { external_refs: refsBody(refs) } : {}) });
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: customersQuery(tenant).queryKey });
@@ -270,7 +284,7 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
           defaultValue={customer ? formatRefs(customer.external_refs) : ""}
           className={`${input} h-auto py-1 font-mono`}
           aria-invalid={!!(refsError || fields.external_refs)}
-          aria-describedby="refs-help refs-error"
+          aria-describedby={refsError || fields.external_refs ? "refs-help refs-error" : "refs-help"}
         />
         <span id="refs-help" className="text-xs text-muted-foreground">{t("customers.refsHelp")}</span>
         {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
