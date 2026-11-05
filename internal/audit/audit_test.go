@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
@@ -498,5 +500,54 @@ func TestPlatformChain(t *testing.T) {
 	var n int
 	if err := sqlDB(t, env.OwnerURL).QueryRow(`SELECT count(*) FROM tenants WHERE id = $1 AND slug = 'platform'`, PlatformTenant).Scan(&n); err != nil || n != 1 {
 		t.Errorf("reserved row: %d %v", n, err)
+	}
+}
+
+func TestRefused(t *testing.T) {
+	d := openDB(t)
+	tn := newTenant(t, d)
+	ctx := context.Background()
+	errMissing, errOutage := errors.New("missing"), errors.New("outage")
+	count := func() int {
+		var n int
+		if err := d.WithTenant(ctx, tn, func(tx *ent.Tx) error {
+			var err error
+			n, err = tx.AuditEvent.Query().Count(ctx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ev := By(authz.Principal{Kind: authz.Token, ID: "tok_x"}, "x.do", "x", "")
+	if ev.ActorType != auditevent.ActorTypeToken {
+		t.Errorf("token actor = %s", ev.ActorType)
+	}
+	for _, c := range []struct {
+		err  error
+		want auditevent.Outcome
+	}{
+		{fmt.Errorf("wrapped: %w", authz.ErrDenied), auditevent.OutcomeDenied},
+		{fmt.Errorf("wrapped: %w", errMissing), auditevent.OutcomeFailure},
+		{errOutage, ""},
+	} {
+		before := count()
+		if err := Refused(ctx, d, tn, ev, c.err, errMissing); !errors.Is(err, c.err) {
+			t.Errorf("%v: returned %v", c.err, err)
+		}
+		if c.want == "" {
+			if count() != before {
+				t.Errorf("%v recorded", c.err)
+			}
+			continue
+		}
+		var e *ent.AuditEvent
+		if err := d.WithTenant(ctx, tn, func(tx *ent.Tx) error {
+			var err error
+			e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(ctx)
+			return err
+		}); err != nil || e.Outcome != c.want || e.Action != "x.do" {
+			t.Errorf("%v: recorded %+v, %v", c.err, e, err)
+		}
 	}
 }

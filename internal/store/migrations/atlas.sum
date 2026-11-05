@@ -1,4 +1,4 @@
-h1:zFm3YEzURm2k8OxXFksqT/hxj2mXaG6vV6p6djFAzqI=
+h1:dVsrOvZXtftL/ENH89Nq9AlDrF+tc7gsVJQO8WhhofU=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -21,5 +21,6 @@ h1:zFm3YEzURm2k8OxXFksqT/hxj2mXaG6vV6p6djFAzqI=
 20261104214810_platform_tenant_security.sql h1:F1yUaecRIAFM5c5E1kgH7oN9YP7SzmZJy7pk29HxsnE=
 20261104220042_idempotency_keys.sql h1:0KAWXUskCDgN+W1vJ2LvNS+QCMx7b6at+dr14q4ISe4=
 20261104220043_idempotency_keys_security.sql h1:/WgvEUlR8z6Eb3sieXXZbw2otiVVwoxu3wSWCy2fV10=
-20261105001846_audit_export.sql h1:mFfGlhcuOHODgCumbWnySiVixQYKypKMQnh/7+ID/Jo=
-20261105001847_audit_export_security.sql h1:bvJsEYzSPs+fjHQcBxNBYuBoLMcg1dLu2dcMARD2clE=
+20261105001019_activation_api.sql h1:A6f5ctug9WfNN8tpBdJrtxSeKW/CM5rT1lniJpPc6WY=
+20261105001846_audit_export.sql h1:oofUA34EQyq8RS1DhAzdRvndPNDoC49f0KCdtfL78Ic=
+20261105001847_audit_export_security.sql h1:8gsxCuDlZsyzfBh1e0OI4RAnfqkxjZE4Jx1Ko48/Umc=

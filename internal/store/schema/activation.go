@@ -59,5 +59,8 @@ func (Activation) Indexes() []ent.Index {
 	return []ent.Index{
 		// One active activation per machine per license.
 		index.Fields("license_id", "fingerprint").Unique().Annotations(entsql.IndexWhere("deactivated_at IS NULL")),
+		// Every activation ever, deactivated included: the seat-move history
+		// (ADR-0034: was this machine seen, how many machines).
+		index.Fields("license_id", "fingerprint").StorageKey("activation_history"),
 	}
 }

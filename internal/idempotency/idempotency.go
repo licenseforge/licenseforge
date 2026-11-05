@@ -11,7 +11,7 @@
 //
 // How the API layer uses it (one wrapper per idempotent operation): after
 // authentication and tenant resolution (ADR-0032 steps 1-3), build a Request
-// from the resolved tenant ID, the credential (token ID or user ID), the
+// from the resolved tenant ID, the credential (token, user or license ID), the
 // header, the operation ID, the resolved path parameter IDs and the raw
 // body, and call Do with
 //   - recheck: the operation's object lookup and permission checks (steps
@@ -85,7 +85,8 @@ type Store struct {
 }
 
 // Request identifies a request. TenantID is the resolved tenant ID (not the
-// slug from the path), Credential the API token or user ID, Operation the
+// slug from the path), Credential the API token, user or license ID (the
+// activation API, authenticated by license key), Operation the
 // OpenAPI operation ID, Params the resolved path parameter IDs in route
 // order (e.g. the license ID of POST …/licenses/{id}/activations).
 type Request struct {
@@ -125,7 +126,7 @@ func (r Request) binding(rowID string) secrets.Binding {
 // recheck passed). See the package documentation.
 func (s Store) Do(ctx context.Context, r Request, recheck func(context.Context, *ent.Tx) error,
 	op func(context.Context, *ent.Tx) (Outcome, error)) (out Outcome, replayed bool, err error) {
-	credential := ids.Valid("tok", r.Credential) || ids.Valid("usr", r.Credential)
+	credential := ids.Valid("tok", r.Credential) || ids.Valid("usr", r.Credential) || ids.Valid("lic", r.Credential)
 	if !keyRE.MatchString(r.Key) || !ids.Valid("tnt", r.TenantID) || !credential || r.Operation == "" {
 		return Outcome{}, false, ErrInvalidKey
 	}

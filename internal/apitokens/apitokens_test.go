@@ -381,7 +381,7 @@ func TestCreateRacesRemoval(t *testing.T) {
 	testHookCreated = func() { // the token is inserted, not committed
 		testHookCreated = nil
 		go func() {
-			_, err := members.Service{DB: f.db}.Remove(f.as(f.a, f.ownerA, authz.Owner), memberID, true)
+			_, err := members.Service{DB: f.db}.Remove(f.as(f.a, f.ownerA, authz.Owner), memberID, members.Revoke{Tokens: true, Invitations: true})
 			removed <- err
 		}()
 		select { // give a removal that doesn't wait the chance to finish first
