@@ -30,6 +30,7 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -247,14 +248,16 @@ type leaseResponse struct {
 // Activate activates this machine and returns the verified lease. Retries
 // reuse one Idempotency-Key, so a retry never takes a second seat.
 func (c *Client) Activate(ctx context.Context) (*Lease, error) {
-	return c.leaseCall(ctx, "activate", rand.Text())
+	l, _, err := c.leaseCall(ctx, "activate", rand.Text(), c.cfg.MaxAttempts)
+	return l, err
 }
 
 // Refresh gets a new lease for this machine (also the SDK's validate).
 // ErrNotActivated means the activation is gone (deactivated or reset):
 // activate again.
 func (c *Client) Refresh(ctx context.Context) (*Lease, error) {
-	return c.leaseCall(ctx, "refresh", "")
+	l, _, err := c.leaseCall(ctx, "refresh", "", c.cfg.MaxAttempts)
+	return l, err
 }
 
 // Deactivate frees this machine's seat and drops the cached lease. A
@@ -262,7 +265,7 @@ func (c *Client) Refresh(ctx context.Context) (*Lease, error) {
 // the first attempt's answer was lost) is success too.
 func (c *Client) Deactivate(ctx context.Context) error {
 	body, _ := json.Marshal(map[string]string{"fingerprint": c.cfg.Fingerprint.Fingerprint})
-	if _, err := c.call(ctx, "deactivate", body, "", http.StatusNoContent); err != nil && !errors.Is(err, ErrNotActivated) {
+	if _, err := c.call(ctx, "deactivate", body, "", http.StatusNoContent, c.cfg.MaxAttempts); err != nil && !errors.Is(err, ErrNotActivated) {
 		return err
 	}
 	return c.Forget()
@@ -273,10 +276,21 @@ func (c *Client) Deactivate(ctx context.Context) error {
 // far-future iat by a server whose clock was wrong makes every correct
 // later lease look older (a replay) and be refused. Forget, then Refresh
 // (or Activate).
-func (c *Client) Forget() error {
+func (c *Client) Forget() error { return c.forget(nil) }
+
+// forgetIf forgets only if no lease was committed or forgotten since
+// generation gen: a refusal of an older call mustn't drop a lease an
+// Activate committed meanwhile.
+func (c *Client) forgetIf(gen uint64) error { return c.forget(&gen) }
+
+func (c *Client) forget(ifGen *uint64) error {
 	c.commit.Lock()
 	defer c.commit.Unlock()
 	c.mu.Lock()
+	if ifGen != nil && c.gen != *ifGen {
+		c.mu.Unlock()
+		return nil
+	}
 	c.lease, c.claims, c.offset = "", nil, 0
 	c.gen++
 	c.mu.Unlock()
@@ -286,7 +300,9 @@ func (c *Client) Forget() error {
 	return nil
 }
 
-func (c *Client) leaseCall(ctx context.Context, op, idemKey string) (*Lease, error) {
+// leaseCall makes the call (up to attempts) and commits its lease. It
+// returns the generation the call started from.
+func (c *Client) leaseCall(ctx context.Context, op, idemKey string, attempts int) (*Lease, uint64, error) {
 	body, _ := json.Marshal(map[string]string{
 		"fingerprint": c.cfg.Fingerprint.Fingerprint, "fp_source": string(c.cfg.Fingerprint.Source),
 		"hostname": c.cfg.Hostname, "app_version": c.cfg.AppVersion, "sdk_version": SDKVersion,
@@ -294,18 +310,18 @@ func (c *Client) leaseCall(ctx context.Context, op, idemKey string) (*Lease, err
 	c.mu.Lock()
 	gen := c.gen
 	c.mu.Unlock()
-	raw, err := c.call(ctx, op, body, idemKey, http.StatusOK)
+	raw, err := c.call(ctx, op, body, idemKey, http.StatusOK, attempts)
 	if err != nil {
-		return nil, err
+		return nil, gen, err
 	}
 	var r leaseResponse
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBadLease, err)
+		return nil, gen, fmt.Errorf("%w: %w", ErrBadLease, err)
 	}
 	local := c.now()
 	claims, err := c.verifyFresh(r.Lease)
 	if err != nil {
-		return nil, err
+		return nil, gen, err
 	}
 	// One commit at a time, so the comparison, the cache, the clock and the
 	// store all end with the same lease.
@@ -314,13 +330,13 @@ func (c *Client) leaseCall(ctx context.Context, op, idemKey string) (*Lease, err
 	c.mu.Lock()
 	if c.gen != gen { // forgotten (or deactivated) meanwhile: don't bring it back
 		c.mu.Unlock()
-		return nil, ErrSuperseded
+		return nil, gen, ErrSuperseded
 	}
 	if c.claims != nil && claims.IssuedAt.Before(c.claims.IssuedAt) {
 		// An older lease than the one held: a replay, which could otherwise
 		// wind the clock guard back (ADR-0018).
 		c.mu.Unlock()
-		return nil, fmt.Errorf("%w: issued before the current lease", ErrBadLease)
+		return nil, gen, fmt.Errorf("%w: issued before the current lease", ErrBadLease)
 	}
 	c.lease, c.claims, c.offset = r.Lease, claims, claims.IssuedAt.Sub(local)
 	c.mu.Unlock()
@@ -336,7 +352,7 @@ func (c *Client) leaseCall(ctx context.Context, op, idemKey string) (*Lease, err
 			c.warn(fmt.Errorf("online: lease not stored: %w", err))
 		}
 	}
-	return &Lease{File: r.Lease, Claims: cloneClaims(claims), ActivationID: r.ActivationID}, nil
+	return &Lease{File: r.Lease, Claims: cloneClaims(claims), ActivationID: r.ActivationID}, gen, nil
 }
 
 // verifyFresh checks a lease: the signature against the trusted keys, the
@@ -437,10 +453,12 @@ func (c *Client) ServerOffset() time.Duration {
 const MinRefreshInterval = time.Minute
 
 // Run refreshes the lease until ctx ends: from refresh_after on (without
-// one, at half the time to exp, at most backoffMax), at once when the
-// cached lease doesn't pass Current and the last refresh didn't succeed (a
-// skewed clock after a restart), never sooner than MinRefreshInterval after
-// a success, always with jitter. Failures are retried with exponential
+// one, at half the time to exp, at most backoffMax), and on its first pass
+// at once if the cached lease doesn't pass Current (a skewed clock after a
+// restart); never sooner than MinRefreshInterval after a success, always
+// with jitter. Times are scheduled in server time (the local clock plus the
+// offset from the last lease), as refresh_after and exp are. Each pass is
+// one request: failures are retried by the next pass, with exponential
 // backoff and jitter, not sooner than the server's Retry-After. Every
 // failure and warning goes to onErr.
 //
@@ -448,7 +466,8 @@ const MinRefreshInterval = time.Minute
 // fresh; or with a refusal retrying can't fix, which the app must act on:
 // ErrNotActivated (the seat was freed: Activate again), ErrRevoked,
 // ErrUnauthenticated or ErrBindingMismatch (stop running as licensed). On
-// ErrRevoked and ErrNotActivated it forgets the lease first: the server has
+// ErrRevoked (403) and ErrNotActivated (404) from the API it forgets the
+// lease first, unless a newer one was committed meanwhile: the server has
 // said this machine is no longer licensed, so Current fails from then on.
 func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 	report := func(err error) {
@@ -468,7 +487,7 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 			return ErrNoLease
 		}
 		var wait time.Duration
-		now := c.checkOptions().Now
+		now := c.now().Add(c.ServerOffset()) // refresh_after and exp are server times
 		_, _, invalid := c.Current()
 		switch {
 		case failures > 0:
@@ -490,28 +509,31 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 		if err := c.sleep(ctx, wait); err != nil {
 			return err
 		}
-		_, err := c.Refresh(ctx)
+		_, gen, err := c.leaseCall(ctx, "refresh", "", 1) // one attempt: this loop retries
 		if err == nil {
 			failures, retry, refreshed = 0, 0, true
 			continue
 		}
-		refreshed = false
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		report(err)
-		if errors.Is(err, ErrRevoked) || errors.Is(err, ErrNotActivated) {
-			if ferr := c.Forget(); ferr != nil {
+		var ae *APIError
+		isAPI := errors.As(err, &ae)
+		if isAPI && (ae.Status == http.StatusForbidden && errors.Is(err, ErrRevoked) || ae.Status == http.StatusNotFound && errors.Is(err, ErrNotActivated)) {
+			if ferr := c.forgetIf(gen); ferr != nil {
 				report(ferr)
 			}
 			return err
+		}
+		if errors.Is(err, ErrRevoked) || errors.Is(err, ErrNotActivated) {
+			return err // claimed with an unexpected status: stop, but keep the lease
 		}
 		if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrBindingMismatch) {
 			return err
 		}
 		failures, retry = failures+1, 0
-		var ae *APIError
-		if errors.As(err, &ae) {
+		if isAPI {
 			retry = ae.RetryAfter
 		}
 	}
@@ -522,22 +544,25 @@ const (
 	backoffMax  = 5 * time.Minute
 )
 
-// backoff is the wait after n consecutive failures: exponential, capped,
-// with full jitter in its upper half.
+// backoff is the wait after n consecutive failures: exponential with
+// jitter in its upper half, until it reaches backoffMax, which is never
+// shortened (a long outage costs one request per backoffMax).
 func (c *Client) backoff(n int) time.Duration {
 	d := backoffBase << min(n-1, 20)
-	d = min(d, backoffMax)
+	if d >= backoffMax {
+		return backoffMax
+	}
 	return d/2 + time.Duration(c.rand(int64(d/2)+1))
 }
 
 // call POSTs body to op and returns the response body when the status is
 // want. Network errors, 429, 5xx and idempotency_in_progress are retried up
 // to MaxAttempts, waiting Retry-After when the server sends it.
-func (c *Client) call(ctx context.Context, op string, body []byte, idemKey string, want int) ([]byte, error) {
+func (c *Client) call(ctx context.Context, op string, body []byte, idemKey string, want, attempts int) ([]byte, error) {
 	u := c.base.JoinPath("api/v1/activation/tenants", c.cfg.TenantID, op).String()
 	for attempt := 1; ; attempt++ {
 		raw, retryAfter, err := c.once(ctx, u, body, idemKey, want)
-		if err == nil || !retryable(err) || attempt >= c.cfg.MaxAttempts || ctx.Err() != nil {
+		if err == nil || !retryable(err) || attempt >= attempts || ctx.Err() != nil {
 			return raw, err
 		}
 		wait := c.backoff(attempt)
@@ -586,9 +611,13 @@ func (c *Client) once(ctx context.Context, u string, body []byte, idemKey string
 		Detail    string `json:"detail"`
 		RequestID string `json:"request_id"`
 	}
-	_ = json.Unmarshal(raw, &p)
-	ae := &APIError{Status: resp.StatusCode, Code: p.Code, Detail: p.Detail, RequestID: p.RequestID,
-		RetryAfter: retryAfter(resp.Header.Get("Retry-After"), c.now()), kind: codes[p.Code]}
+	ae := &APIError{Status: resp.StatusCode, RetryAfter: retryAfter(resp.Header.Get("Retry-After"), c.now())}
+	// The stable codes count only in a problem answer with a 4xx status: a
+	// proxy's error page or a garbled 5xx must not read as "revoked".
+	if mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mt == "application/problem+json" &&
+		resp.StatusCode >= 400 && resp.StatusCode < 500 && json.Unmarshal(raw, &p) == nil {
+		ae.Code, ae.Detail, ae.RequestID, ae.kind = p.Code, p.Detail, p.RequestID, codes[p.Code]
+	}
 	switch {
 	case ae.kind != nil:
 	case resp.StatusCode >= 500:

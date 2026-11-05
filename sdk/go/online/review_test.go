@@ -254,11 +254,12 @@ func TestClaimsAreCopies(t *testing.T) {
 	l.Claims.Entitlements.Limits["seats"] = 999
 	exp := *l.Claims.Expires
 	*l.Claims.Expires = exp.Add(1000 * time.Hour)
+	*l.Claims.MaxOffline = time.Nanosecond
 	got, _, _ := c.Current()
 	got.Product = "y"
 	*got.Expires = exp.Add(2000 * time.Hour)
 	again, _, _ := c.Current()
-	if !slices.Equal(again.Entitlements.Features, []string{"sso"}) || again.Entitlements.Limits["seats"] != 5 || again.Product != product || !again.Expires.Equal(exp) {
+	if !slices.Equal(again.Entitlements.Features, []string{"sso"}) || again.Entitlements.Limits["seats"] != 5 || again.Product != product || !again.Expires.Equal(exp) || *again.MaxOffline != 2*time.Hour {
 		t.Errorf("cache changed: %+v", again)
 	}
 }
@@ -331,9 +332,17 @@ func TestDeactivateNotActivated(t *testing.T) {
 // (the build is newer than updates_until): Run refreshes on the lease's
 // schedule, not every minute.
 func TestRunBoundedWhenRefreshCantHelp(t *testing.T) {
+	for _, skew := range []time.Duration{0, 45 * time.Minute, -2 * time.Hour} {
+		t.Run(skew.String(), func(t *testing.T) { runBounded(t, skew) })
+	}
+}
+
+// runBounded runs Run for a simulated day with the local clock skew ahead
+// of the server.
+func runBounded(t *testing.T, skew time.Duration) {
 	f := newFake(t)
 	var mu sync.Mutex
-	sim := f.iat
+	sim := f.iat // server time
 	f.claims = func(c *licensefile.Claims) {
 		mu.Lock()
 		now := sim.Truncate(time.Second)
@@ -343,7 +352,7 @@ func TestRunBoundedWhenRefreshCantHelp(t *testing.T) {
 		c.IssuedAt, c.UpdatesUntil, c.Expires, c.RefreshAfter = now, &u, &e, &r
 	}
 	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.BuildDate = f.iat })
-	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim }
+	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim.Add(skew) }
 	ctx, cancel := context.WithCancel(context.Background())
 	c.sleep = func(ctx context.Context, d time.Duration) error {
 		mu.Lock()
@@ -505,20 +514,88 @@ func TestForgetSupersedesInFlight(t *testing.T) {
 // Run forgets the lease when the server says this machine is no longer
 // licensed (revoked, or the seat moved).
 func TestRunForgetsOnRevocation(t *testing.T) {
-	for _, code := range []string{"license_revoked", "not_activated"} {
+	for _, tc := range []struct {
+		code   string
+		status int
+		forget bool
+	}{
+		{"license_revoked", 403, true}, {"not_activated", 404, true},
+		{"license_revoked", 404, false}, {"not_activated", 403, false}, // the code with an unexpected status
+	} {
 		f := newFake(t)
 		store := &memStore{}
 		c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.Store = store })
 		if _, err := c.Activate(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, code); return true }
-		if err := c.Run(context.Background(), nil); err == nil {
-			t.Fatalf("%s: Run returned nil", code)
+		f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, tc.status, tc.code); return true }
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a regression fails, doesn't hang
+		err := c.Run(ctx, nil)
+		cancel()
+		if err == nil || errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s %d: Run = %v", tc.code, tc.status, err)
 		}
-		if _, _, err := c.Current(); !errors.Is(err, ErrNoLease) || *store.saved != "" {
-			t.Errorf("%s: lease kept: %v", code, err)
+		_, _, cur := c.Current()
+		if forgot := errors.Is(cur, ErrNoLease) && *store.saved == ""; forgot != tc.forget {
+			t.Errorf("%s %d: forgot %v", tc.code, tc.status, forgot)
 		}
+	}
+}
+
+// A spoofed or garbled answer isn't an API refusal: its code is ignored
+// unless it is a problem+json with a 4xx status.
+func TestCodesOnlyFromProblems(t *testing.T) {
+	f := newFake(t)
+	for name, respond := range map[string]func(string, int, http.ResponseWriter) bool{
+		"plain JSON": func(_ string, _ int, w http.ResponseWriter) bool {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"code":"license_revoked"}`))
+			return true
+		},
+		"5xx problem": func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 503, "license_revoked"); return true },
+	} {
+		f.respond = respond
+		c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.MaxAttempts = 1 })
+		_, err := c.Activate(context.Background())
+		if err == nil || errors.Is(err, ErrRevoked) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A refusal of an older refresh doesn't drop a lease an Activate committed
+// meanwhile.
+func TestRunKeepsNewerLease(t *testing.T) {
+	f := newFake(t)
+	c, _ := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	f.respond = func(op string, _ int, w http.ResponseWriter) bool {
+		if op != "refresh" {
+			return false
+		}
+		once.Do(func() { // the app re-activates while this refresh is answered
+			f.respond = nil
+			if err := c.Forget(); err != nil { // a commit of another lease: bump the generation
+				t.Error(err)
+			}
+			if _, err := c.Activate(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		problem(w, 404, "not_activated")
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Run(ctx, nil); !errors.Is(err, ErrNotActivated) {
+		t.Fatalf("Run = %v", err)
+	}
+	if _, _, err := c.Current(); err != nil {
+		t.Errorf("newer lease dropped: %v", err)
 	}
 }
 
@@ -539,5 +616,51 @@ func TestClockTolerance(t *testing.T) {
 		if (name == "default") != errors.Is(err, licensefile.ErrClockSkew) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// A persistent outage: Run makes one request per pass, so a day costs a few
+// hundred requests, not thousands.
+func TestRunOutageBounded(t *testing.T) {
+	f := newFake(t)
+	c, _ := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 503, ""); return true }
+	var mu sync.Mutex
+	sim := f.iat
+	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim }
+	ctx, cancel := context.WithCancel(context.Background())
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		sim = sim.Add(d)
+		over := sim.Sub(f.iat) > 24*time.Hour
+		mu.Unlock()
+		if over {
+			cancel()
+		}
+		return ctx.Err()
+	}
+	before := len(f.reqs)
+	_ = c.Run(ctx, nil)
+	if n := len(f.reqs) - before; n > 300 { // backoff capped at 5 minutes: 288 a day
+		t.Errorf("%d requests in a simulated day of outage", n)
+	}
+}
+
+// Without refresh_after and exp under 10 minutes away, Run waits half of it.
+func TestRunHalfOfShortExp(t *testing.T) {
+	f := newFake(t)
+	f.claims = func(c *licensefile.Claims) { e := c.IssuedAt.Add(4 * time.Minute); c.Expires, c.RefreshAfter = &e, nil }
+	c, sleeps := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = c.Run(ctx, nil)
+	if len(*sleeps) != 1 || (*sleeps)[0] != 2*time.Minute {
+		t.Errorf("sleeps %v", *sleeps)
 	}
 }
