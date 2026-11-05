@@ -248,7 +248,17 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 	}
 	// No new license on an archived product (ADR-0015). FOR SHARE: an archive
 	// (FOR UPDATE, internal/catalog) waits for this issue, or wins first.
-	if pr, err := tx.Product.Query().Where(product.ID(req.ProductID)).ForShare().Only(ctx); err != nil {
+	lock := func() (*ent.Product, error) {
+		return tx.Product.Query().Where(product.ID(req.ProductID)).ForShare().Only(ctx)
+	}
+	pr, err := lock()
+	if ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it archived.
+		pr, err = lock()
+	}
+	if err != nil {
 		return Issued{}, ev, err
 	} else if pr.ArchivedAt != nil {
 		return refused(&InvalidError{"/product_id", "the product is archived"})
