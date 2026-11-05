@@ -126,7 +126,17 @@ func TestRetentionFloorAndAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Anchors name a real, aged entry that isn't the last, and move forward.
+	// The other tenant has its own old entries 1..5 (other hashes): only the
+	// chain clause can refuse an anchor that names this chain's entry 3 there.
 	other := createTenants(t, f.d, 1)[0].ID
+	for seq := int64(1); seq <= 5; seq++ {
+		h := make([]byte, 32)
+		h[0], h[1] = byte(seq), 0xcd
+		if _, err := f.owner.Exec(`INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, action, outcome, details, prev_hash, hash)
+			VALUES ($1, $2, $3, now() - interval '400 days', 'system', 'test.entry', 'success', '{}', $4, $5)`, ids.AuditEvent(), other, seq, make([]byte, 32), h); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for name, err := range map[string]error{
 		"wrong hash":       f.anchor(3, f.hashes[4]),
 		"no such entry":    f.anchor(9, f.hashes[3]),
@@ -219,6 +229,10 @@ func TestRetentionLoginLimits(t *testing.T) {
 	if _, err := f.ret.Exec(`INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, action, outcome, details, prev_hash, hash)
 		VALUES ($1, $2, 8, now() - interval '1 day', 'system', 'audit.retention', 'success', '{}', $3, $3)`, ids.AuditEvent(), f.tenant, f.hashes[7]); err == nil {
 		t.Error("retention login wrote a backdated entry")
+	}
+	if _, err := f.ret.Exec(`INSERT INTO audit_events (id, tenant_id, seq, occurred_at, actor_type, action, outcome, details, prev_hash, hash)
+		VALUES ($1, $2, 8, now() + interval '1 day', 'system', 'audit.retention', 'success', '{}', $3, $3)`, ids.AuditEvent(), f.tenant, f.hashes[7]); err == nil {
+		t.Error("retention login wrote a future-dated entry")
 	}
 	if err := record("audit.retention", "system"); err != nil {
 		t.Errorf("retention login can't record its own entry: %v", err)

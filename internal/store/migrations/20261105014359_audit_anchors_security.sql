@@ -1,9 +1,3 @@
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_retention') THEN
-    RAISE EXCEPTION 'create role licenseforge_retention NOLOGIN before migrating (as a database admin; see deploy/database-setup.sql, ADR-0036)';
-  END IF;
-END $$;
-
 -- Audit retention (ADR-0036): the fifth login's privileges and policies, and
 -- anchors. Needs the group role licenseforge_retention, which the operator
 -- creates before migrating (deploy/database-setup.sql; the owner can't create
@@ -17,7 +11,8 @@ GRANT USAGE ON SCHEMA public TO licenseforge_retention;
 GRANT SELECT, INSERT, DELETE ON "audit_events" TO licenseforge_retention;
 CREATE POLICY retention_read ON "audit_events" FOR SELECT TO licenseforge_retention USING (true);
 CREATE POLICY retention_record ON "audit_events" FOR INSERT TO licenseforge_retention
-  WITH CHECK ("action" = 'audit.retention' AND "actor_type" = 'system' AND "occurred_at" >= now()); -- never backdated
+  WITH CHECK ("action" = 'audit.retention' AND "actor_type" = 'system'
+    AND "occurred_at" BETWEEN now() AND clock_timestamp()); -- neither backdated nor future-dated
 CREATE POLICY retention_delete ON "audit_events" FOR DELETE TO licenseforge_retention USING (true);
 CREATE POLICY retention_floor ON "audit_events" AS RESTRICTIVE FOR DELETE TO licenseforge_retention
   USING ("occurred_at" < now() - interval '365 days'
