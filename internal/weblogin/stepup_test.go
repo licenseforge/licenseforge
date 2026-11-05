@@ -145,7 +145,7 @@ func TestStepUpRefusals(t *testing.T) {
 	for _, field := range []struct {
 		i int
 		v string
-	}{{5, encodeReturn("//evil.example")}, {5, "!!"}, {4, "none"}, {4, "root"}} {
+	}{{5, encodeReturn("//evil.example")}, {5, "!!"}, {5, encodeReturn("/") + ".x"}, {4, "none"}, {4, "root"}} {
 		q := authorizeQuery(t, f.startWith(t, url.Values{"assurance": {"mfa"}, "return": {"/t/acme/"}}))
 		setFlowPart(t, f, field.i, field.v)
 		if code := f.finish(t, q, q.Get("state"), map[string]any{"amr": []string{"otp"}}); code != http.StatusBadRequest || f.session(t) != "" {
