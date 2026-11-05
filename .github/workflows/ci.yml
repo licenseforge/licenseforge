@@ -74,6 +74,7 @@ jobs:
           helm template t . $s --set 'trustedProxies=10.0.0.0/8\,fd00::/8' --show-only templates/deployment.yaml | grep -qF 'value: "10.0.0.0/8,fd00::/8"' || { echo "trustedProxies not rendered"; exit 1; }
           # NOTES warn while no proxy is trusted, and only then.
           helm install --dry-run=client t . $s | grep -qF 'WARNING: trustedProxies is empty' || { echo "no trustedProxies warning"; exit 1; }
+          helm install --dry-run=client t . $s --set-string 'trustedProxies=  ' | grep -qF 'WARNING: trustedProxies is empty' || { echo "no warning for blank trustedProxies"; exit 1; }
           if helm install --dry-run=client t . $s --set trustedProxies=10.0.0.0/8 | grep -qF 'WARNING: trustedProxies'; then echo "warning with trustedProxies set"; exit 1; fi
           # Bad values fail the render instead of producing a broken release.
           for bad in drainSeconds=5s terminationGracePeriodSeconds=20 'networkPolicy.dns.ports=null' 'networkPolicy.dns.ports={}' \

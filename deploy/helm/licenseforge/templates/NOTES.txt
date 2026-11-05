@@ -1,5 +1,5 @@
 LicenseForge {{ .Chart.AppVersion }} is installed as {{ include "licenseforge.fullname" . }} in {{ .Release.Namespace }}.
-{{- if not .Values.trustedProxies }}
+{{- if not (trim (.Values.trustedProxies | default "")) }}
 
 WARNING: trustedProxies is empty, so X-Forwarded-For is ignored. Behind an
 ingress or load balancer every client then counts as the proxy: they share
