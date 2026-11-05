@@ -306,6 +306,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+         * @description Dashboard sessions only (outside any tenant path; API tokens get 401):
+         *     the dashboard's tenant switcher. Always one page (a user belongs to
+         *     few tenants), so there is no `next_cursor`.
+         */
+        get: operations["listMyTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -487,6 +509,20 @@ export interface components {
             tenant_id: string;
             role: components["schemas"]["MemberRole"];
             all_products: boolean;
+        };
+        MyTenant: {
+            /** @description Usable as {tenant} in paths. */
+            tenant_id: string;
+            /** @description The dashboard's /t/{slug}/. */
+            slug: string;
+            name: string;
+            role: components["schemas"]["MemberRole"];
+            all_products: boolean;
+            /** @description The scope when all_products is false; empty otherwise. */
+            product_ids: string[];
+        };
+        MyTenantPage: {
+            items: components["schemas"]["MyTenant"][];
         };
         MemberUpdated: components["schemas"]["Member"] & {
             /** @description API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids). */
@@ -1066,6 +1102,28 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listMyTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every tenant the user is a member of. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyTenantPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
         };
     };
 }

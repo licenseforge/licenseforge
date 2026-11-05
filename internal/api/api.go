@@ -215,7 +215,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 // userRoutes are session-only paths outside a tenant, acting for the
 // signed-in user (tokens belong to tenants: 401 there, as on any
 // non-tenant path).
-var userRoutes = map[string]bool{Prefix + "/invitations/accept": true}
+var userRoutes = map[string]bool{Prefix + "/invitations/accept": true, Prefix + "/me/tenants": true}
 
 // tenantRef is the {tenant} segment of /api/v1/tenants/{tenant}/…, split
 // from the escaped path as ServeMux does.

@@ -68,6 +68,27 @@ func (s *server) AcceptInvitation(ctx context.Context, req apigen.AcceptInvitati
 	return apigen.AcceptInvitation200JSONResponse{MembershipId: m.ID, TenantId: m.TenantID, Role: apigen.MemberRole(m.Role), AllProducts: m.ScopeAll}, nil
 }
 
+// ListMyTenants is a user route (userRoutes): the signed-in user's own
+// memberships, for the tenant switcher.
+func (s *server) ListMyTenants(ctx context.Context, _ apigen.ListMyTenantsRequestObject) (apigen.ListMyTenantsResponseObject, error) {
+	p, ok := authz.FromContext(ctx)
+	if !ok || p.Kind != authz.User || p.ID == "" || p.TenantID != "" {
+		return nil, errUnauthenticated // only reachable through userRoutes
+	}
+	ms, err := s.Identity.Memberships(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	page := apigen.ListMyTenants200JSONResponse{Items: []apigen.MyTenant{}}
+	for _, m := range ms {
+		page.Items = append(page.Items, apigen.MyTenant{
+			TenantId: m.TenantID, Slug: m.TenantSlug, Name: m.TenantName, Role: apigen.MemberRole(m.Role),
+			AllProducts: m.ScopeAll, ProductIds: append([]string{}, m.Products...),
+		})
+	}
+	return page, nil
+}
+
 func invitationView(i *ent.Invitation) apigen.Invitation {
 	status := apigen.InvitationStatusPending
 	switch {

@@ -401,6 +401,24 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /me/tenants:
+    get:
+      operationId: listMyTenants
+      summary: The signed-in user's tenants, with their role and product scope in each, sorted by slug.
+      description: |
+        Dashboard sessions only (outside any tenant path; API tokens get 401):
+        the dashboard's tenant switcher. Always one page (a user belongs to
+        few tenants), so there is no `next_cursor`.
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Every tenant the user is a member of.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyTenantPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     apiToken:
@@ -613,6 +631,21 @@ components:
         tenant_id: { type: string, description: "Usable as {tenant} in paths." }
         role: { $ref: "#/components/schemas/MemberRole" }
         all_products: { type: boolean }
+    MyTenant:
+      type: object
+      required: [tenant_id, slug, name, role, all_products, product_ids]
+      properties:
+        tenant_id: { type: string, description: "Usable as {tenant} in paths." }
+        slug: { type: string, description: "The dashboard's /t/{slug}/." }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/MemberRole" }
+        all_products: { type: boolean }
+        product_ids: { type: array, items: { type: string }, description: The scope when all_products is false; empty otherwise. }
+    MyTenantPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MyTenant" } }
     MemberUpdated:
       allOf:
         - $ref: "#/components/schemas/Member"
