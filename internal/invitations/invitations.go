@@ -154,6 +154,11 @@ func (s Service) Revoke(ctx context.Context, id string) (*ent.Invitation, error)
 	}
 	var row *ent.Invitation
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The caller's membership before the invitation: the lock order of a
+		// member change (memberships, then invitations; members.lockHeld).
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
 		var err error
 		row, err = tx.Invitation.Query().Where(invitation.ID(id), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil()).
 			WithProducts().ForUpdate().Only(ctx)
@@ -171,12 +176,13 @@ func (s Service) Revoke(ctx context.Context, id string) (*ent.Invitation, error)
 		if err := authz.CanAssign(ctx, authz.User, &g, nil); err != nil {
 			return err
 		}
-		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+		// The database clock; the revoke_only policy allows nothing else.
+		res, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, row.ID)
+		if err != nil {
 			return err
 		}
-		// The database clock; the revoke_only policy allows nothing else.
-		if _, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, row.ID); err != nil {
-			return err
+		if n, err := res.RowsAffected(); err != nil || n != 1 { // locked above: can't change meanwhile
+			return errors.Join(errors.New("invitations: invitation changed while locked"), err)
 		}
 		if row, err = tx.Invitation.Query().Where(invitation.ID(id)).WithProducts().Only(ctx); err != nil {
 			return err

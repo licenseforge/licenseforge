@@ -704,3 +704,103 @@ func TestInvitationRevocationAllOrNothing(t *testing.T) {
 		t.Error("refused removal changed something")
 	}
 }
+
+// waitForLockWaiter returns once a backend of the test database waits on a
+// lock (at most 2 s).
+func waitForLockWaiter(t *testing.T) {
+	t.Helper()
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for range 100 {
+		var n int
+		if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("nothing waited on a lock")
+}
+
+func auditLock(ctx context.Context, tx *ent.Tx, tenant string) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenant)
+	return err
+}
+
+// Lock order (owners, memberships, tokens, invitations, audit): a demotion
+// that revokes a token and waits on an invitation lock holds no audit lock,
+// so the invitation's holder (an acceptance or revocation, which audits
+// next) can finish. With the audit lock taken before the invitation lock,
+// this deadlocks (40P01).
+func TestMemberChangeVsInvitationLock(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := (apitokens.Service{DB: f.db}).Create(as(f.a, f.owner2A, authz.Owner), "CI", authz.Owner, authz.Scope{All: true}, 0); err != nil {
+		t.Fatal(err)
+	}
+	inv := f.invite(t, f.owner2A, authz.Owner, authz.Owner)
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM invitations WHERE id = $1 FOR UPDATE`, inv); err != nil {
+			return err
+		}
+		go func() {
+			_, _, err := f.s.Update(as(f.a, f.ownerA, authz.Owner), f.mem[f.owner2A], Change{Role: role(authz.Admin)}, both)
+			done <- err
+		}()
+		waitForLockWaiter(t)
+		return auditLock(ctx, tx, f.a) // as accept or revoke would next
+	}); err != nil {
+		t.Fatalf("invitation holder: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("demotion: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("demotion didn't finish")
+	}
+	if f.pending(t, inv) {
+		t.Error("the demotion didn't revoke the owner invitation")
+	}
+}
+
+// A member revoking their own invitation while being changed: the revoke
+// re-checks the member's membership before locking the invitation (the
+// member change's order), so it can't hold the invitation while waiting
+// for the membership.
+func TestOwnInvitationRevokeVsMemberChange(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	inv := f.invite(t, f.adminA, authz.Admin, authz.Viewer)
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		// As a member change does: the membership, then its invitations.
+		if _, err := tx.ExecContext(ctx, `SELECT id FROM memberships WHERE id = $1 FOR UPDATE`, f.mem[f.adminA]); err != nil {
+			return err
+		}
+		go func() {
+			_, err := invitations.Service{DB: f.db}.Revoke(as(f.a, f.adminA, authz.Admin), inv)
+			done <- err
+		}()
+		waitForLockWaiter(t)
+		_, err := tx.ExecContext(ctx, `SELECT id FROM invitations WHERE id = $1 FOR UPDATE`, inv)
+		return err
+	}); err != nil {
+		t.Fatalf("member change: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("revoke didn't finish")
+	}
+}

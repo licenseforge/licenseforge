@@ -120,11 +120,14 @@ func (s Service) Update(ctx context.Context, memberID string, c Change, opts Rev
 		if from.Role == authz.Owner && to.Role != authz.Owner && owners == 1 {
 			return nil, ErrLastOwner
 		}
-		var err error
-		if revoked.Tokens, _, err = revokeTokens(ctx, tx, m, "member.update", opts.Tokens, func(g authz.Grant) bool { return !exceeds(g, to) || exceeds(g, from) }); err != nil {
+		h, err := lockHeld(ctx, tx, m)
+		if err != nil {
 			return nil, err
 		}
-		if revoked.Invitations, _, err = revokeInvitations(ctx, tx, m, "member.update", opts.Invitations, func(g authz.Grant) bool { return canInvite(to, g) || !canInvite(from, g) }); err != nil {
+		if revoked.Tokens, _, err = revokeTokens(ctx, tx, m, h.tokens, "member.update", opts.Tokens, func(g authz.Grant) bool { return !exceeds(g, to) || exceeds(g, from) }); err != nil {
+			return nil, err
+		}
+		if revoked.Invitations, _, err = revokeInvitations(ctx, tx, m, h.invitations, "member.update", opts.Invitations, func(g authz.Grant) bool { return canInvite(to, g) || !canInvite(from, g) }); err != nil {
 			return nil, err
 		}
 		// Product rows first: they reference (membership, scope_all = false).
@@ -195,11 +198,14 @@ func (s Service) Remove(ctx context.Context, memberID string, opts Revoke) (Revo
 			return nil, ErrLastOwner
 		}
 		var keptTokens, keptInvitations int
-		var err error
-		if revoked.Tokens, keptTokens, err = revokeTokens(ctx, tx, m, "member.remove", opts.Tokens, nil); err != nil {
+		h, err := lockHeld(ctx, tx, m)
+		if err != nil {
 			return nil, err
 		}
-		if revoked.Invitations, keptInvitations, err = revokeInvitations(ctx, tx, m, "member.remove", opts.Invitations, nil); err != nil {
+		if revoked.Tokens, keptTokens, err = revokeTokens(ctx, tx, m, h.tokens, "member.remove", opts.Tokens, nil); err != nil {
+			return nil, err
+		}
+		if revoked.Invitations, keptInvitations, err = revokeInvitations(ctx, tx, m, h.invitations, "member.remove", opts.Invitations, nil); err != nil {
 			return nil, err
 		}
 		if _, err := tx.MembershipProduct.Delete().Where(membershipproduct.MembershipID(m.ID)).Exec(ctx); err != nil {
@@ -218,17 +224,40 @@ func (s Service) Remove(ctx context.Context, memberID string, opts Revoke) (Revo
 	return revoked, nil
 }
 
-// revokeTokens revokes m's user's active, unexpired API tokens in this
-// tenant, except those keep accepts (nil: none), if revoke; it counts the
-// rest as kept. The caller must be allowed to revoke each one
-// (authz.CanAssign), else nothing is revoked: the error rolls back.
-func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason string, revoke bool, keep func(authz.Grant) bool) (revoked []string, kept int, err error) {
-	p, _ := authz.FromContext(ctx)
+// held is what a member change may revoke along with it, locked.
+type held struct {
+	tokens      []*ent.APIToken
+	invitations []*ent.Invitation
+}
+
+// lockHeld locks m's user's active, unexpired API tokens, then their pending
+// invitations, FOR UPDATE, before the change writes any audit entry. The
+// global lock order is owners, memberships, tokens, invitations, then the
+// audit lock (audit.Record): apitokens.Revoke takes a token then the audit
+// lock, invitation acceptance and revocation an invitation then the audit
+// lock, so taking the audit lock between tokens and invitations here would
+// deadlock with them.
+func lockHeld(ctx context.Context, tx *ent.Tx, m *ent.Membership) (held, error) {
 	toks, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
 		Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
 	if err != nil {
-		return nil, 0, err
+		return held{}, err
 	}
+	invs, err := tx.Invitation.Query().Where(invitation.InvitedBy(m.UserID), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil(),
+		func(s *entsql.Selector) { s.Where(entsql.ExprP(s.C(invitation.FieldExpiresAt) + " > now()")) }).
+		Order(ent.Asc(invitation.FieldID)).WithProducts().ForUpdate().All(ctx)
+	if err != nil {
+		return held{}, err
+	}
+	return held{tokens: toks, invitations: invs}, nil
+}
+
+// revokeTokens revokes toks (locked by lockHeld), except those keep accepts
+// (nil: none), if revoke; it counts the rest as kept. The caller must be
+// allowed to revoke each one (authz.CanAssign), else nothing is revoked:
+// the error rolls back.
+func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, toks []*ent.APIToken, reason string, revoke bool, keep func(authz.Grant) bool) (revoked []string, kept int, err error) {
+	p, _ := authz.FromContext(ctx)
 	for _, t := range toks {
 		g := authz.Grant{Role: authz.Role(t.Role), Scope: authz.Scope{All: t.ScopeAll}}
 		for _, tp := range t.Edges.Products {
@@ -254,16 +283,10 @@ func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason str
 	return revoked, kept, nil
 }
 
-// revokeInvitations is revokeTokens for the pending (open, unexpired)
-// invitations m's user sent.
-func revokeInvitations(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason string, revoke bool, keep func(authz.Grant) bool) (revoked []string, kept int, err error) {
+// revokeInvitations is revokeTokens for the pending invitations m's user
+// sent (locked by lockHeld).
+func revokeInvitations(ctx context.Context, tx *ent.Tx, m *ent.Membership, invs []*ent.Invitation, reason string, revoke bool, keep func(authz.Grant) bool) (revoked []string, kept int, err error) {
 	p, _ := authz.FromContext(ctx)
-	invs, err := tx.Invitation.Query().Where(invitation.InvitedBy(m.UserID), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil(),
-		func(s *entsql.Selector) { s.Where(entsql.ExprP(s.C(invitation.FieldExpiresAt) + " > now()")) }).
-		Order(ent.Asc(invitation.FieldID)).WithProducts().ForUpdate().All(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
 	for _, inv := range invs {
 		g := authz.Grant{Role: authz.Role(inv.Role), Scope: authz.Scope{All: inv.ScopeAll}}
 		for _, ip := range inv.Edges.Products {
@@ -276,9 +299,13 @@ func revokeInvitations(ctx context.Context, tx *ent.Tx, m *ent.Membership, reaso
 		if err := authz.CanAssign(ctx, authz.User, &g, nil); err != nil {
 			return nil, 0, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
-			WHERE id = $1 AND revoked_at IS NULL AND accepted_at IS NULL`, inv.ID); err != nil {
+		res, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+			WHERE id = $1 AND revoked_at IS NULL AND accepted_at IS NULL`, inv.ID)
+		if err != nil {
 			return nil, 0, err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 { // locked above: can't change meanwhile
+			return nil, 0, errors.Join(errors.New("members: invitation changed while locked"), err)
 		}
 		if err := recordRevocation(ctx, tx, m, p, "invitation", inv.ID, reason); err != nil {
 			return nil, 0, err
