@@ -401,6 +401,51 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/activations:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    get:
+      operationId: listActivations
+      summary: List a license's activations (machines or clusters), deactivated ones included, newest first.
+      description: Needs activation:read on the license's product. A hidden license answers 404 like a missing one.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivationPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+      - $ref: "#/components/parameters/ActivationId"
+    post:
+      operationId: deactivateActivation
+      summary: Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+      description: |
+        Needs activation:manage on the license's product; audited. Allowed
+        whatever the license's status. Deactivating an activation that is
+        already deactivated changes nothing and answers 200 with it.
+        Deactivating doesn't count as a seat move; activating a new machine
+        afterwards may (ADR-0034).
+      responses:
+        "200":
+          description: The activation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /me/tenants:
     get:
       operationId: listMyTenants
@@ -716,6 +761,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    ActivationId:
+      name: activation_id
+      in: path
+      required: true
+      schema: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
@@ -788,6 +838,29 @@ components:
         issued_at: { type: string, format: date-time, description: Server time (ADR-0018). }
         expires_at: { type: string, format: date-time }
         refresh_after: { type: string, format: date-time }
+    Activation:
+      type: object
+      required: [id, license_id, fingerprint, fp_source, binding, mode, hostname, app_version, sdk_version, first_seen_at, last_seen_at, deactivated_at, created_at]
+      properties:
+        id: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        license_id: { type: string }
+        fingerprint: { type: string, description: "The lease's bind.fp (a hash, never the raw machine ID)." }
+        fp_source: { type: string, enum: [override, env, kubernetes, machine-id] }
+        binding: { type: string, enum: [machine, cluster] }
+        mode: { type: string, enum: [online, offline] }
+        hostname: { type: string, nullable: true, description: As the SDK last reported it. }
+        app_version: { type: string, nullable: true }
+        sdk_version: { type: string, nullable: true }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        deactivated_at: { type: string, format: date-time, nullable: true, description: Null while it holds a seat. }
+        created_at: { type: string, format: date-time }
+    ActivationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Activation" } }
+        next_cursor: { type: string, description: Absent on the last page. }
     Problem:
       type: object
       required: [type, title, status, code, request_id]
@@ -832,7 +905,7 @@ components:
       enum: [active, suspended, revoked]
     License:
       type: object
-      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
+      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, active_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
       properties:
         id: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         product_id: { type: string }
@@ -845,6 +918,7 @@ components:
         expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
         expires_at: { type: string, format: date-time, nullable: true, description: Null for a perpetual license, or until first activation. }
         max_activations: { type: integer, nullable: true }
+        active_activations: { type: integer, description: Seats taken now (activations not deactivated). }
         entitlements:
           type: object
           required: [features, limits]
