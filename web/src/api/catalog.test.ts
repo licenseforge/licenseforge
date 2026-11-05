@@ -8,6 +8,7 @@ import {
   customerPatch,
   formatRefs,
   parseRefs,
+  refsBody,
   renameProduct,
   updateCustomer,
 } from "./catalog";
@@ -46,12 +47,26 @@ describe("customerPatch (JSON Merge Patch)", () => {
 describe("customerPatch: external_refs merge key by key", () => {
   const before = { ...customer, external_refs: { stripe: "cus_1", crm: "42" } };
   it("sends a new or changed key with its value, a removed key as null, and leaves the rest out", () => {
-    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: { stripe: "cus_2", erp: "9" } })).toEqual({
+    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: new Map([["stripe", "cus_2"], ["erp", "9"]]) })).toEqual({
       external_refs: { stripe: "cus_2", erp: "9", crm: null },
     });
   });
   it("omits external_refs when no key changed", () => {
-    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: { crm: "42", stripe: "cus_1" } })).toEqual({});
+    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: new Map([["crm", "42"], ["stripe", "cus_1"]]) })).toEqual({});
+  });
+  it("editing one field never rewrites another stored with spaces", () => {
+    const spaced = { ...customer, name: "Acme ", external_refs: { crm: " 42" } };
+    expect(customerPatch(spaced, { name: "Acme ", email: "b@acme.example", refs: new Map([["crm", " 42"]]) })).toEqual({ email: "b@acme.example" });
+    // a value that did change is trimmed
+    expect(customerPatch(spaced, { name: "Acme ", email: "a@acme.example", refs: new Map([["crm", " 43 "]]) })).toEqual({ external_refs: { crm: "43" } });
+  });
+  it("treats __proto__ and constructor as plain keys", () => {
+    const refs = parseRefs("__proto__=x\nconstructor=y");
+    expect([...refs]).toEqual([["__proto__", "x"], ["constructor", "y"]]);
+    const patch = customerPatch({ ...customer, external_refs: {} }, { name: "Acme", email: "a@acme.example", refs });
+    expect(JSON.stringify(patch)).toBe('{"external_refs":{"__proto__":"x","constructor":"y"}}');
+    // a stored key named like an Object.prototype member isn't "already there"
+    expect(customerPatch({ ...customer, external_refs: {} }, { name: "Acme", email: "a@acme.example", refs: new Map([["toString", "z"]]) })).toEqual({ external_refs: { toString: "z" } });
   });
 });
 
@@ -89,10 +104,12 @@ describe("catalog calls", () => {
 
 describe("parseRefs", () => {
   it("reads back what formatRefs writes", () => {
-    expect(parseRefs(formatRefs({ stripe: "cus_1", crm: "a=b" }))).toEqual({ stripe: "cus_1", crm: "a=b" });
+    expect(Object.fromEntries(parseRefs(formatRefs({ stripe: "cus_1", crm: "a=b" })))).toEqual({ stripe: "cus_1", crm: "a=b" });
   });
   it("reads key=value lines, skipping blanks", () => {
-    expect(parseRefs("stripe=cus_1\n\n crm = 42 \n")).toEqual({ stripe: "cus_1", crm: "42" });
+    // keys trimmed, values raw (refsBody trims them for a create)
+    expect(Object.fromEntries(parseRefs("stripe=cus_1\n\n crm = 42 \n"))).toEqual({ stripe: "cus_1", crm: " 42 " });
+    expect(refsBody(parseRefs("stripe=cus_1\n crm = 42 "))).toEqual({ stripe: "cus_1", crm: "42" });
   });
   it("refuses a line without a key", () => {
     expect(() => parseRefs("stripe")).toThrow("stripe");
