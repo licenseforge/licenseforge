@@ -522,9 +522,6 @@ type Filter struct {
 	CreatedAfter, CreatedBefore *time.Time
 }
 
-// List returns up to limit of p's tenant's licenses in p's product scope
-// (silently filtered), matching f, newest first, after (afterAt, afterID)
-// or from the start if afterID is "".
 // Counts returns how many licenses p can see have each status, exactly
 // (license:read; a product-scoped principal counts its products only), with
 // every status present. One GROUP BY query under the tenant's RLS. Lists
@@ -563,6 +560,9 @@ func (s Service) Counts(ctx context.Context, p authz.Principal) (map[license.Sta
 	return out, nil
 }
 
+// List returns up to limit of p's tenant's licenses in p's product scope
+// (silently filtered), matching f, newest first, after (afterAt, afterID)
+// or from the start if afterID is "".
 func (s Service) List(ctx context.Context, p authz.Principal, f Filter, limit int, afterAt time.Time, afterID string) ([]*ent.License, error) {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
