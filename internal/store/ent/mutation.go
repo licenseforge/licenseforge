@@ -18640,6 +18640,11 @@ type SessionMutation struct {
 	created_at    *time.Time
 	expires_at    *time.Time
 	last_seen_at  *time.Time
+	assurance     *session.Assurance
+	amr           *string
+	acr           *string
+	acrs          *string
+	auth_time     *time.Time
 	clearedFields map[string]struct{}
 	user          *string
 	cleareduser   bool
@@ -18932,6 +18937,212 @@ func (m *SessionMutation) ResetLastSeenAt() {
 	m.last_seen_at = nil
 }
 
+// SetAssurance sets the "assurance" field.
+func (m *SessionMutation) SetAssurance(s session.Assurance) {
+	m.assurance = &s
+}
+
+// Assurance returns the value of the "assurance" field in the mutation.
+func (m *SessionMutation) Assurance() (r session.Assurance, exists bool) {
+	v := m.assurance
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAssurance returns the old "assurance" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAssurance(ctx context.Context) (v session.Assurance, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAssurance is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAssurance requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAssurance: %w", err)
+	}
+	return oldValue.Assurance, nil
+}
+
+// ResetAssurance resets all changes to the "assurance" field.
+func (m *SessionMutation) ResetAssurance() {
+	m.assurance = nil
+}
+
+// SetAmr sets the "amr" field.
+func (m *SessionMutation) SetAmr(s string) {
+	m.amr = &s
+}
+
+// Amr returns the value of the "amr" field in the mutation.
+func (m *SessionMutation) Amr() (r string, exists bool) {
+	v := m.amr
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAmr returns the old "amr" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAmr(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAmr is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAmr requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAmr: %w", err)
+	}
+	return oldValue.Amr, nil
+}
+
+// ResetAmr resets all changes to the "amr" field.
+func (m *SessionMutation) ResetAmr() {
+	m.amr = nil
+}
+
+// SetAcr sets the "acr" field.
+func (m *SessionMutation) SetAcr(s string) {
+	m.acr = &s
+}
+
+// Acr returns the value of the "acr" field in the mutation.
+func (m *SessionMutation) Acr() (r string, exists bool) {
+	v := m.acr
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAcr returns the old "acr" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAcr(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAcr is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAcr requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAcr: %w", err)
+	}
+	return oldValue.Acr, nil
+}
+
+// ClearAcr clears the value of the "acr" field.
+func (m *SessionMutation) ClearAcr() {
+	m.acr = nil
+	m.clearedFields[session.FieldAcr] = struct{}{}
+}
+
+// AcrCleared returns if the "acr" field was cleared in this mutation.
+func (m *SessionMutation) AcrCleared() bool {
+	_, ok := m.clearedFields[session.FieldAcr]
+	return ok
+}
+
+// ResetAcr resets all changes to the "acr" field.
+func (m *SessionMutation) ResetAcr() {
+	m.acr = nil
+	delete(m.clearedFields, session.FieldAcr)
+}
+
+// SetAcrs sets the "acrs" field.
+func (m *SessionMutation) SetAcrs(s string) {
+	m.acrs = &s
+}
+
+// Acrs returns the value of the "acrs" field in the mutation.
+func (m *SessionMutation) Acrs() (r string, exists bool) {
+	v := m.acrs
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAcrs returns the old "acrs" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAcrs(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAcrs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAcrs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAcrs: %w", err)
+	}
+	return oldValue.Acrs, nil
+}
+
+// ResetAcrs resets all changes to the "acrs" field.
+func (m *SessionMutation) ResetAcrs() {
+	m.acrs = nil
+}
+
+// SetAuthTime sets the "auth_time" field.
+func (m *SessionMutation) SetAuthTime(t time.Time) {
+	m.auth_time = &t
+}
+
+// AuthTime returns the value of the "auth_time" field in the mutation.
+func (m *SessionMutation) AuthTime() (r time.Time, exists bool) {
+	v := m.auth_time
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAuthTime returns the old "auth_time" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAuthTime(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAuthTime is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAuthTime requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAuthTime: %w", err)
+	}
+	return oldValue.AuthTime, nil
+}
+
+// ClearAuthTime clears the value of the "auth_time" field.
+func (m *SessionMutation) ClearAuthTime() {
+	m.auth_time = nil
+	m.clearedFields[session.FieldAuthTime] = struct{}{}
+}
+
+// AuthTimeCleared returns if the "auth_time" field was cleared in this mutation.
+func (m *SessionMutation) AuthTimeCleared() bool {
+	_, ok := m.clearedFields[session.FieldAuthTime]
+	return ok
+}
+
+// ResetAuthTime resets all changes to the "auth_time" field.
+func (m *SessionMutation) ResetAuthTime() {
+	m.auth_time = nil
+	delete(m.clearedFields, session.FieldAuthTime)
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *SessionMutation) ClearUser() {
 	m.cleareduser = true
@@ -18993,7 +19204,7 @@ func (m *SessionMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *SessionMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 10)
 	if m.user != nil {
 		fields = append(fields, session.FieldUserID)
 	}
@@ -19008,6 +19219,21 @@ func (m *SessionMutation) Fields() []string {
 	}
 	if m.last_seen_at != nil {
 		fields = append(fields, session.FieldLastSeenAt)
+	}
+	if m.assurance != nil {
+		fields = append(fields, session.FieldAssurance)
+	}
+	if m.amr != nil {
+		fields = append(fields, session.FieldAmr)
+	}
+	if m.acr != nil {
+		fields = append(fields, session.FieldAcr)
+	}
+	if m.acrs != nil {
+		fields = append(fields, session.FieldAcrs)
+	}
+	if m.auth_time != nil {
+		fields = append(fields, session.FieldAuthTime)
 	}
 	return fields
 }
@@ -19027,6 +19253,16 @@ func (m *SessionMutation) Field(name string) (ent.Value, bool) {
 		return m.ExpiresAt()
 	case session.FieldLastSeenAt:
 		return m.LastSeenAt()
+	case session.FieldAssurance:
+		return m.Assurance()
+	case session.FieldAmr:
+		return m.Amr()
+	case session.FieldAcr:
+		return m.Acr()
+	case session.FieldAcrs:
+		return m.Acrs()
+	case session.FieldAuthTime:
+		return m.AuthTime()
 	}
 	return nil, false
 }
@@ -19046,6 +19282,16 @@ func (m *SessionMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldExpiresAt(ctx)
 	case session.FieldLastSeenAt:
 		return m.OldLastSeenAt(ctx)
+	case session.FieldAssurance:
+		return m.OldAssurance(ctx)
+	case session.FieldAmr:
+		return m.OldAmr(ctx)
+	case session.FieldAcr:
+		return m.OldAcr(ctx)
+	case session.FieldAcrs:
+		return m.OldAcrs(ctx)
+	case session.FieldAuthTime:
+		return m.OldAuthTime(ctx)
 	}
 	return nil, fmt.Errorf("unknown Session field %s", name)
 }
@@ -19090,6 +19336,41 @@ func (m *SessionMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetLastSeenAt(v)
 		return nil
+	case session.FieldAssurance:
+		v, ok := value.(session.Assurance)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAssurance(v)
+		return nil
+	case session.FieldAmr:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAmr(v)
+		return nil
+	case session.FieldAcr:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAcr(v)
+		return nil
+	case session.FieldAcrs:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAcrs(v)
+		return nil
+	case session.FieldAuthTime:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAuthTime(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Session field %s", name)
 }
@@ -19119,7 +19400,14 @@ func (m *SessionMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *SessionMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(session.FieldAcr) {
+		fields = append(fields, session.FieldAcr)
+	}
+	if m.FieldCleared(session.FieldAuthTime) {
+		fields = append(fields, session.FieldAuthTime)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -19132,6 +19420,14 @@ func (m *SessionMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *SessionMutation) ClearField(name string) error {
+	switch name {
+	case session.FieldAcr:
+		m.ClearAcr()
+		return nil
+	case session.FieldAuthTime:
+		m.ClearAuthTime()
+		return nil
+	}
 	return fmt.Errorf("unknown Session nullable field %s", name)
 }
 
@@ -19153,6 +19449,21 @@ func (m *SessionMutation) ResetField(name string) error {
 		return nil
 	case session.FieldLastSeenAt:
 		m.ResetLastSeenAt()
+		return nil
+	case session.FieldAssurance:
+		m.ResetAssurance()
+		return nil
+	case session.FieldAmr:
+		m.ResetAmr()
+		return nil
+	case session.FieldAcr:
+		m.ResetAcr()
+		return nil
+	case session.FieldAcrs:
+		m.ResetAcrs()
+		return nil
+	case session.FieldAuthTime:
+		m.ResetAuthTime()
 		return nil
 	}
 	return fmt.Errorf("unknown Session field %s", name)
@@ -20122,6 +20433,7 @@ type TenantMutation struct {
 	name                        *string
 	audit_retention_days        *int
 	addaudit_retention_days     *int
+	mfa_policy                  *tenant.MfaPolicy
 	clearedFields               map[string]struct{}
 	products                    map[string]struct{}
 	removedproducts             map[string]struct{}
@@ -20474,6 +20786,42 @@ func (m *TenantMutation) ResetAuditRetentionDays() {
 	m.audit_retention_days = nil
 	m.addaudit_retention_days = nil
 	delete(m.clearedFields, tenant.FieldAuditRetentionDays)
+}
+
+// SetMfaPolicy sets the "mfa_policy" field.
+func (m *TenantMutation) SetMfaPolicy(tp tenant.MfaPolicy) {
+	m.mfa_policy = &tp
+}
+
+// MfaPolicy returns the value of the "mfa_policy" field in the mutation.
+func (m *TenantMutation) MfaPolicy() (r tenant.MfaPolicy, exists bool) {
+	v := m.mfa_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMfaPolicy returns the old "mfa_policy" field's value of the Tenant entity.
+// If the Tenant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TenantMutation) OldMfaPolicy(ctx context.Context) (v tenant.MfaPolicy, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMfaPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMfaPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMfaPolicy: %w", err)
+	}
+	return oldValue.MfaPolicy, nil
+}
+
+// ResetMfaPolicy resets all changes to the "mfa_policy" field.
+func (m *TenantMutation) ResetMfaPolicy() {
+	m.mfa_policy = nil
 }
 
 // AddProductIDs adds the "products" edge to the Product entity by ids.
@@ -21050,7 +21398,7 @@ func (m *TenantMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TenantMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 6)
 	if m.created_at != nil {
 		fields = append(fields, tenant.FieldCreatedAt)
 	}
@@ -21065,6 +21413,9 @@ func (m *TenantMutation) Fields() []string {
 	}
 	if m.audit_retention_days != nil {
 		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	if m.mfa_policy != nil {
+		fields = append(fields, tenant.FieldMfaPolicy)
 	}
 	return fields
 }
@@ -21084,6 +21435,8 @@ func (m *TenantMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case tenant.FieldAuditRetentionDays:
 		return m.AuditRetentionDays()
+	case tenant.FieldMfaPolicy:
+		return m.MfaPolicy()
 	}
 	return nil, false
 }
@@ -21103,6 +21456,8 @@ func (m *TenantMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldName(ctx)
 	case tenant.FieldAuditRetentionDays:
 		return m.OldAuditRetentionDays(ctx)
+	case tenant.FieldMfaPolicy:
+		return m.OldMfaPolicy(ctx)
 	}
 	return nil, fmt.Errorf("unknown Tenant field %s", name)
 }
@@ -21146,6 +21501,13 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAuditRetentionDays(v)
+		return nil
+	case tenant.FieldMfaPolicy:
+		v, ok := value.(tenant.MfaPolicy)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMfaPolicy(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)
@@ -21234,6 +21596,9 @@ func (m *TenantMutation) ResetField(name string) error {
 		return nil
 	case tenant.FieldAuditRetentionDays:
 		m.ResetAuditRetentionDays()
+		return nil
+	case tenant.FieldMfaPolicy:
+		m.ResetMfaPolicy()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)

@@ -21,6 +21,14 @@ export const productsQuery = (tenant: string) =>
     getNextPageParam: (p) => p.next_cursor,
   });
 
+export async function getProduct(tenant: string, id: string): Promise<Product> {
+  return unwrap(await api.GET("/tenants/{tenant}/products/{id}", { params: { path: { tenant, id } } }));
+}
+
+export async function getCustomer(tenant: string, id: string): Promise<Customer> {
+  return unwrap(await api.GET("/tenants/{tenant}/customers/{id}", { params: { path: { tenant, id } } }));
+}
+
 export async function createProduct(tenant: string, slug: string, name: string): Promise<Product> {
   return unwrap(await api.POST("/tenants/{tenant}/products", { params: { path: { tenant } }, body: { slug, name } }));
 }

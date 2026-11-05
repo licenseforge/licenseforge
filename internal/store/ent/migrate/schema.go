@@ -867,6 +867,11 @@ var (
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "expires_at", Type: field.TypeTime},
 		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "assurance", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
+		{Name: "amr", Type: field.TypeString, Size: 1040, Default: ""},
+		{Name: "acr", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "acrs", Type: field.TypeString, Size: 4095, Default: ""},
+		{Name: "auth_time", Type: field.TypeTime, Nullable: true},
 		{Name: "user_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// SessionsTable holds the schema information for the "sessions" table.
@@ -877,7 +882,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "sessions_users_sessions",
-				Columns:    []*schema.Column{SessionsColumns[5]},
+				Columns:    []*schema.Column{SessionsColumns[10]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
@@ -891,7 +896,7 @@ var (
 			{
 				Name:    "session_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{SessionsColumns[5]},
+				Columns: []*schema.Column{SessionsColumns[10]},
 			},
 		},
 	}
@@ -950,6 +955,7 @@ var (
 		{Name: "slug", Type: field.TypeString, Unique: true, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
 		{Name: "audit_retention_days", Type: field.TypeInt, Nullable: true},
+		{Name: "mfa_policy", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
 	}
 	// TenantsTable holds the schema information for the "tenants" table.
 	TenantsTable = &schema.Table{
@@ -1219,6 +1225,10 @@ func init() {
 	SessionsTable.ForeignKeys[0].RefTable = UsersTable
 	SessionsTable.Annotation = &entsql.Annotation{}
 	SessionsTable.Annotation.Checks = map[string]string{
+		"sessions_acr":       "acr ~ '^[!-~]{1,255}$'",
+		"sessions_acrs":      "acrs ~ '^$|^[!-~]{1,255}( [!-~]{1,255}){0,15}$'",
+		"sessions_amr":       "amr ~ '^$|^[A-Za-z0-9_.:-]{1,64}( [A-Za-z0-9_.:-]{1,64}){0,15}$'",
+		"sessions_assurance": "(assurance)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
 		"sessions_expiry":    "expires_at > created_at AND expires_at <= (created_at + '1 day'::interval)",
 		"sessions_hash_len":  "length(token_hash) = 32",
 		"sessions_id_format": "id ~ '^ses_[a-z2-7]{26}$'",
@@ -1239,6 +1249,7 @@ func init() {
 	TenantsTable.Annotation.Checks = map[string]string{
 		"tenants_audit_retention": "audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)",
 		"tenants_id_format":       "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_mfa_policy":      "(mfa_policy)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
 		"tenants_name_not_blank":  "btrim(name) <> ''",
 		"tenants_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}

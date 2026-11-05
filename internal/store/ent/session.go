@@ -28,6 +28,16 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 	// LastSeenAt holds the value of the "last_seen_at" field.
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+	// Assurance holds the value of the "assurance" field.
+	Assurance session.Assurance `json:"assurance,omitempty"`
+	// space-separated RFC 8176 values, at most 16
+	Amr string `json:"amr,omitempty"`
+	// Acr holds the value of the "acr" field.
+	Acr *string `json:"acr,omitempty"`
+	// Entra acrs, space-separated, at most 16
+	Acrs string `json:"acrs,omitempty"`
+	// AuthTime holds the value of the "auth_time" field.
+	AuthTime *time.Time `json:"auth_time,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the SessionQuery when eager-loading is set.
 	Edges        SessionEdges `json:"edges"`
@@ -61,9 +71,9 @@ func (*Session) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case session.FieldTokenHash:
 			values[i] = new([]byte)
-		case session.FieldID, session.FieldUserID:
+		case session.FieldID, session.FieldUserID, session.FieldAssurance, session.FieldAmr, session.FieldAcr, session.FieldAcrs:
 			values[i] = new(sql.NullString)
-		case session.FieldCreatedAt, session.FieldExpiresAt, session.FieldLastSeenAt:
+		case session.FieldCreatedAt, session.FieldExpiresAt, session.FieldLastSeenAt, session.FieldAuthTime:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -115,6 +125,38 @@ func (_m *Session) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field last_seen_at", values[i])
 			} else if value.Valid {
 				_m.LastSeenAt = value.Time
+			}
+		case session.FieldAssurance:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field assurance", values[i])
+			} else if value.Valid {
+				_m.Assurance = session.Assurance(value.String)
+			}
+		case session.FieldAmr:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field amr", values[i])
+			} else if value.Valid {
+				_m.Amr = value.String
+			}
+		case session.FieldAcr:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field acr", values[i])
+			} else if value.Valid {
+				_m.Acr = new(string)
+				*_m.Acr = value.String
+			}
+		case session.FieldAcrs:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field acrs", values[i])
+			} else if value.Valid {
+				_m.Acrs = value.String
+			}
+		case session.FieldAuthTime:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field auth_time", values[i])
+			} else if value.Valid {
+				_m.AuthTime = new(time.Time)
+				*_m.AuthTime = value.Time
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -170,6 +212,25 @@ func (_m *Session) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("last_seen_at=")
 	builder.WriteString(_m.LastSeenAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	builder.WriteString("assurance=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Assurance))
+	builder.WriteString(", ")
+	builder.WriteString("amr=")
+	builder.WriteString(_m.Amr)
+	builder.WriteString(", ")
+	if v := _m.Acr; v != nil {
+		builder.WriteString("acr=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("acrs=")
+	builder.WriteString(_m.Acrs)
+	builder.WriteString(", ")
+	if v := _m.AuthTime; v != nil {
+		builder.WriteString("auth_time=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
 	builder.WriteByte(')')
 	return builder.String()
 }

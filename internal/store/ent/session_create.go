@@ -67,6 +67,76 @@ func (_c *SessionCreate) SetNillableLastSeenAt(v *time.Time) *SessionCreate {
 	return _c
 }
 
+// SetAssurance sets the "assurance" field.
+func (_c *SessionCreate) SetAssurance(v session.Assurance) *SessionCreate {
+	_c.mutation.SetAssurance(v)
+	return _c
+}
+
+// SetNillableAssurance sets the "assurance" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableAssurance(v *session.Assurance) *SessionCreate {
+	if v != nil {
+		_c.SetAssurance(*v)
+	}
+	return _c
+}
+
+// SetAmr sets the "amr" field.
+func (_c *SessionCreate) SetAmr(v string) *SessionCreate {
+	_c.mutation.SetAmr(v)
+	return _c
+}
+
+// SetNillableAmr sets the "amr" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableAmr(v *string) *SessionCreate {
+	if v != nil {
+		_c.SetAmr(*v)
+	}
+	return _c
+}
+
+// SetAcr sets the "acr" field.
+func (_c *SessionCreate) SetAcr(v string) *SessionCreate {
+	_c.mutation.SetAcr(v)
+	return _c
+}
+
+// SetNillableAcr sets the "acr" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableAcr(v *string) *SessionCreate {
+	if v != nil {
+		_c.SetAcr(*v)
+	}
+	return _c
+}
+
+// SetAcrs sets the "acrs" field.
+func (_c *SessionCreate) SetAcrs(v string) *SessionCreate {
+	_c.mutation.SetAcrs(v)
+	return _c
+}
+
+// SetNillableAcrs sets the "acrs" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableAcrs(v *string) *SessionCreate {
+	if v != nil {
+		_c.SetAcrs(*v)
+	}
+	return _c
+}
+
+// SetAuthTime sets the "auth_time" field.
+func (_c *SessionCreate) SetAuthTime(v time.Time) *SessionCreate {
+	_c.mutation.SetAuthTime(v)
+	return _c
+}
+
+// SetNillableAuthTime sets the "auth_time" field if the given value is not nil.
+func (_c *SessionCreate) SetNillableAuthTime(v *time.Time) *SessionCreate {
+	if v != nil {
+		_c.SetAuthTime(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *SessionCreate) SetID(v string) *SessionCreate {
 	_c.mutation.SetID(v)
@@ -129,6 +199,18 @@ func (_c *SessionCreate) defaults() {
 		v := session.DefaultLastSeenAt()
 		_c.mutation.SetLastSeenAt(v)
 	}
+	if _, ok := _c.mutation.Assurance(); !ok {
+		v := session.DefaultAssurance
+		_c.mutation.SetAssurance(v)
+	}
+	if _, ok := _c.mutation.Amr(); !ok {
+		v := session.DefaultAmr
+		_c.mutation.SetAmr(v)
+	}
+	if _, ok := _c.mutation.Acrs(); !ok {
+		v := session.DefaultAcrs
+		_c.mutation.SetAcrs(v)
+	}
 	if _, ok := _c.mutation.ID(); !ok {
 		v := session.DefaultID()
 		_c.mutation.SetID(v)
@@ -161,6 +243,35 @@ func (_c *SessionCreate) check() error {
 	}
 	if _, ok := _c.mutation.LastSeenAt(); !ok {
 		return &ValidationError{Name: "last_seen_at", err: errors.New(`ent: missing required field "Session.last_seen_at"`)}
+	}
+	if _, ok := _c.mutation.Assurance(); !ok {
+		return &ValidationError{Name: "assurance", err: errors.New(`ent: missing required field "Session.assurance"`)}
+	}
+	if v, ok := _c.mutation.Assurance(); ok {
+		if err := session.AssuranceValidator(v); err != nil {
+			return &ValidationError{Name: "assurance", err: fmt.Errorf(`ent: validator failed for field "Session.assurance": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.Amr(); !ok {
+		return &ValidationError{Name: "amr", err: errors.New(`ent: missing required field "Session.amr"`)}
+	}
+	if v, ok := _c.mutation.Amr(); ok {
+		if err := session.AmrValidator(v); err != nil {
+			return &ValidationError{Name: "amr", err: fmt.Errorf(`ent: validator failed for field "Session.amr": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.Acr(); ok {
+		if err := session.AcrValidator(v); err != nil {
+			return &ValidationError{Name: "acr", err: fmt.Errorf(`ent: validator failed for field "Session.acr": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.Acrs(); !ok {
+		return &ValidationError{Name: "acrs", err: errors.New(`ent: missing required field "Session.acrs"`)}
+	}
+	if v, ok := _c.mutation.Acrs(); ok {
+		if err := session.AcrsValidator(v); err != nil {
+			return &ValidationError{Name: "acrs", err: fmt.Errorf(`ent: validator failed for field "Session.acrs": %w`, err)}
+		}
 	}
 	if v, ok := _c.mutation.ID(); ok {
 		if err := session.IDValidator(v); err != nil {
@@ -220,6 +331,26 @@ func (_c *SessionCreate) createSpec() (*Session, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LastSeenAt(); ok {
 		_spec.SetField(session.FieldLastSeenAt, field.TypeTime, value)
 		_node.LastSeenAt = value
+	}
+	if value, ok := _c.mutation.Assurance(); ok {
+		_spec.SetField(session.FieldAssurance, field.TypeEnum, value)
+		_node.Assurance = value
+	}
+	if value, ok := _c.mutation.Amr(); ok {
+		_spec.SetField(session.FieldAmr, field.TypeString, value)
+		_node.Amr = value
+	}
+	if value, ok := _c.mutation.Acr(); ok {
+		_spec.SetField(session.FieldAcr, field.TypeString, value)
+		_node.Acr = &value
+	}
+	if value, ok := _c.mutation.Acrs(); ok {
+		_spec.SetField(session.FieldAcrs, field.TypeString, value)
+		_node.Acrs = value
+	}
+	if value, ok := _c.mutation.AuthTime(); ok {
+		_spec.SetField(session.FieldAuthTime, field.TypeTime, value)
+		_node.AuthTime = &value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
