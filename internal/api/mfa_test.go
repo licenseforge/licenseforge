@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,6 +158,66 @@ func TestMFARefusalRepeatSkipsChainLock(t *testing.T) {
 	if n := len(f.mfaEvents(t, f.a.ID)); n != 1 {
 		t.Errorf("%d entries", n)
 	}
+}
+
+// Refusals racing on several replicas record one entry: the check is
+// repeated under the chain lock.
+func TestMFARefusalRaceRecordsOnce(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	f.setPolicy(t, f.a.ID, authz.AssuranceMFA)
+	s := f.sessionAt(t, f.viewerA, false, authz.AssuranceNone)
+	locked, release, held := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		held <- f.db.WithTenant(ctx, f.a.ID, func(tx *ent.Tx) error {
+			if err := audit.Lock(ctx, tx, f.a.ID); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	const n = 4
+	var wg sync.WaitGroup
+	for range n { // all past the unlocked check, then queued on the lock
+		wg.Go(func() { f.do(t, "GET", tokensPath(f.a.Slug), "", s) })
+	}
+	for deadline := time.Now().Add(5 * time.Second); waitingAdvisory(t, f, f.a.ID) < n; {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d refusals waiting for the chain lock", waitingAdvisory(t, f, f.a.ID))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	wg.Wait()
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.mfaEvents(t, f.a.ID)); got != 1 {
+		t.Errorf("%d entries", got)
+	}
+}
+
+// waitingAdvisory counts the transactions waiting for tenantID's chain lock.
+func waitingAdvisory(t *testing.T, f *fixture, tenantID string) (n int) {
+	t.Helper()
+	if err := f.db.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		rows, err := tx.QueryContext(context.Background(), `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND (classid::bigint << 32 | objid::bigint) = hashtextextended('licenseforge.audit:' || $1, 0)`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err = rows.Scan(&n)
+		}
+		return errors.Join(err, rows.Err())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // One session refused by two tenants: one entry on each tenant's chain.
