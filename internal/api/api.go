@@ -108,7 +108,7 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			s.write(w, r, p)
 		}
 	}()
-	if strings.HasPrefix(r.URL.EscapedPath(), activationPrefix) {
+	if strings.HasPrefix(r.URL.Path, activationPrefix) { // decoded, as ServeMux matches it
 		s.activation(w, r)
 		return
 	}
@@ -448,7 +448,7 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 		"method", r.Method, "path", r.URL.Path, "status", p.status, "code", p.code, "err", p.err)
 	if p.status == http.StatusUnauthorized {
 		scheme := "Bearer"
-		if strings.HasPrefix(r.URL.EscapedPath(), activationPrefix) {
+		if strings.HasPrefix(r.URL.Path, activationPrefix) {
 			scheme = "License"
 		}
 		w.Header().Set("WWW-Authenticate", scheme+` realm="licenseforge"`)

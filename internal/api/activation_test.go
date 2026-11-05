@@ -189,10 +189,21 @@ func TestActivationAuth(t *testing.T) {
 	if n := len(a.activations(t, is.License.ID)); n != 0 {
 		t.Errorf("%d activations", n)
 	}
+	// A percent-encoded prefix is the same route (ServeMux decodes it): the
+	// activation entry with its License challenge, never the management auth.
+	encoded := Prefix + "/%61ctivation/tenants/" + a.a.ID + "/activate"
+	for name, o := range map[string]opt{"API token": bearer(a.token(t, a.a.ID, a.ownerA, authz.Admin).Token), "session": a.session(t, a.ownerA, true)} {
+		r := a.do(t, "POST", encoded, body, o)
+		r.problem(t, 401, "unauthenticated")
+		if r.h.Get("WWW-Authenticate") != `License realm="licenseforge"` {
+			t.Errorf("encoded prefix with %s: %q", name, r.h.Get("WWW-Authenticate"))
+		}
+	}
 	// With an API host, the activation API is served there only.
 	a.srv.APIHost = "api.lf.example"
 	onHost := func(h string) opt { return func(r *http.Request) { r.Host = h } }
 	a.do(t, "POST", path, body, licenseAuth(is.Key), onHost("lf.example")).problem(t, 404, "not_found")
+	a.do(t, "POST", encoded, body, a.session(t, a.ownerA, true), onHost("lf.example")).problem(t, 404, "not_found")
 	if r := a.do(t, "POST", path, body, licenseAuth(is.Key), onHost("api.lf.example")); r.code != 200 {
 		t.Errorf("on the API host: %d %s", r.code, r.raw)
 	}
@@ -272,6 +283,76 @@ func TestActivationRateLimit(t *testing.T) {
 	now = now.Add(30 * time.Second)
 	if r := a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)); r.code != 200 || r.h.Get("RateLimit") != `"license-key";r=2;t=60` {
 		t.Errorf("next window: %d %q", r.code, r.h.Get("RateLimit"))
+	}
+}
+
+// Unknown keys don't stay in the limiter, so a flood of them can't push a
+// real key past its bound.
+func TestActivationRateLimitIgnoresUnknownKeys(t *testing.T) {
+	a := actSetup(t)
+	a.srv.limiter = newKeyLimiter(3)
+	a.srv.limiter.maxKeys = 5
+	for _, tc := range []struct {
+		name, op, body string
+		o              []opt
+		status         int
+		code           string
+	}{
+		{"activate", "activate", actBody(newFP()), nil, 401, "unauthenticated"},
+		{"idempotent activate", "activate", actBody(newFP()), []opt{header("Idempotency-Key", "k")}, 401, "unauthenticated"},
+		{"refresh", "refresh", actBody(newFP()), nil, 401, "unauthenticated"},
+		{"deactivate", "deactivate", `{"fingerprint":"` + newFP() + `"}`, nil, 401, "unauthenticated"},
+		{"bad body", "activate", `{"x":1}`, nil, 400, "invalid_request"},
+		{"bad fingerprint", "activate", `{"fingerprint":"x","fp_source":"env"}`, nil, 400, "invalid_request"},
+		{"unknown route", "nope", actBody(newFP()), nil, 404, "not_found"},
+	} {
+		name := tc.name
+		for range 6 {
+			a.do(t, "POST", actPath(a.a.ID, tc.op), tc.body, append(tc.o, licenseAuth(licensekey.New()))...).problem(t, tc.status, tc.code)
+		}
+		if n := len(a.srv.limiter.counts); n != 0 {
+			t.Fatalf("%s: %d unknown keys tracked", name, n)
+		}
+	}
+	is := a.issue(t, "pro")
+	fp := newFP()
+	for i := range 3 {
+		if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(fp), licenseAuth(is.Key)); r.code != 200 {
+			t.Fatalf("request %d: %d", i, r.code)
+		}
+	}
+	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)).problem(t, 429, "rate_limited")
+	// Refusals of a real license count, and so do idempotent replays.
+	m := authz.Principal{Kind: authz.User, ID: "usr_mgr", TenantID: a.a.ID, Role: authz.Manager, Scope: authz.Scope{All: true}}
+	susp, idem := a.issue(t, "pro"), a.issue(t, "pro")
+	if _, err := a.lic.Suspend(context.Background(), m, susp.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(susp.Key)).problem(t, 403, "license_suspended")
+	}
+	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(susp.Key)).problem(t, 429, "rate_limited")
+	body := actBody(newFP())
+	for range 3 {
+		if r := a.do(t, "POST", actPath(a.a.ID, "activate"), body, licenseAuth(idem.Key), header("Idempotency-Key", "k")); r.code != 200 {
+			t.Fatal(r.raw)
+		}
+	}
+	a.do(t, "POST", actPath(a.a.ID, "activate"), body, licenseAuth(idem.Key), header("Idempotency-Key", "k")).problem(t, 429, "rate_limited")
+}
+
+// Idempotent activation signs in Do's transaction: one pool connection is
+// enough (a signer with its own transactions would wait for a second one
+// forever).
+func TestIdempotentActivateOneConnection(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	a.db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	withCtx := func(r *http.Request) { *r = *r.WithContext(ctx) }
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(is.Key), header("Idempotency-Key", "k1"), withCtx); r.code != 200 {
+		t.Fatalf("activate: %d %s", r.code, r.raw)
 	}
 }
 
@@ -363,4 +444,24 @@ func TestActivationIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(fp), licenseAuth(is.Key), key).problem(t, 403, "license_revoked")
+
+	// Suspended, and expired past grace, answer the same way.
+	susp, exp := a.issue(t, "pro"), a.issue(t, "pro")
+	sfp, efp := newFP(), newFP()
+	for _, l := range []struct{ key, fp string }{{susp.Key, sfp}, {exp.Key, efp}} {
+		if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(l.fp), licenseAuth(l.key), key); r.code != 200 {
+			t.Fatal(r.raw)
+		}
+	}
+	if _, err := a.lic.Suspend(ctx, m, susp.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET expires_at = issued_at + interval '1 microsecond', grace_seconds = 0 WHERE id = $1`, exp.License.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(sfp), licenseAuth(susp.Key), key).problem(t, 403, "license_suspended")
+	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(efp), licenseAuth(exp.Key), key).problem(t, 403, "license_expired")
 }

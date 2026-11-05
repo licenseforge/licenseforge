@@ -87,6 +87,13 @@ func (d *DB) Ping(ctx context.Context) error {
 	return errors.Join(d.tenantDB.PingContext(ctx), d.platformDB.PingContext(ctx), d.identityDB.PingContext(ctx))
 }
 
+// SetMaxOpenConns limits each pool to n open connections (0: unlimited).
+func (d *DB) SetMaxOpenConns(n int) {
+	for _, db := range []*sql.DB{d.tenantDB, d.platformDB, d.identityDB} {
+		db.SetMaxOpenConns(n)
+	}
+}
+
 // Stats are the connection pool stats by pool name (metrics).
 func (d *DB) Stats() map[string]sql.DBStats {
 	return map[string]sql.DBStats{"tenant": d.tenantDB.Stats(), "platform": d.platformDB.Stats(), "identity": d.identityDB.Stats()}

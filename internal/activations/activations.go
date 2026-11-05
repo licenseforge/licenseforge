@@ -29,6 +29,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
@@ -249,6 +250,11 @@ func (s Service) ActivateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease
 }
 
 func (s Service) activateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease, error) {
+	// Sign in tx too: a signer opening its own transactions would need a
+	// second pool connection while tx holds the license and key locks.
+	if l, ok := s.Issuer.Keys.(signing.Local); ok {
+		s.Issuer.Keys = l.WithTx(tx)
+	}
 	g, err := s.grant(ctx, tx, req, true)
 	if err != nil {
 		if ev, ok := refusal(g.ev, err); ok {

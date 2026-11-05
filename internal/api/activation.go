@@ -59,7 +59,14 @@ func (s *server) activation(w http.ResponseWriter, r *http.Request) {
 		s.badRequest(w, r, err)
 		return
 	}
-	r = r.WithContext(context.WithValue(context.WithValue(r.Context(), bodyKey{}, body), licenseKeyKey{}, key))
+	mark := &keyMark{}
+	defer func() {
+		if !mark.ok {
+			s.limiter.release(key)
+		}
+	}()
+	ctx := context.WithValue(context.WithValue(r.Context(), bodyKey{}, body), licenseKeyKey{}, key)
+	r = r.WithContext(context.WithValue(ctx, keyMarkKey{}, mark))
 	r.Body = io.NopCloser(strings.NewReader(string(body)))
 	if _, pattern := s.mux.Handler(r); pattern == "" {
 		s.unrouted(w, r)
@@ -85,15 +92,43 @@ func leaseView(l activations.Lease) apigen.Lease {
 		IssuedAt: l.Claims.IssuedAt, ExpiresAt: *l.Claims.Expires, RefreshAfter: *l.Claims.RefreshAfter}
 }
 
+// keyMark records that the request's key authenticated: activation then
+// keeps its rate-limit count. Every other request (unknown key, malformed
+// body or fingerprint, unknown route) is released, so junk keys never
+// occupy the limiter beyond their own request and can't fill it to push
+// real keys past its bound (fail open).
+type keyMark struct{ ok bool }
+
+type keyMarkKey struct{}
+
+// authenticated marks the key as known when err shows the service matched
+// it to a license (success, or a refusal of that license), and returns err.
+func authenticated(ctx context.Context, err error) error {
+	m, _ := ctx.Value(keyMarkKey{}).(*keyMark)
+	if m == nil {
+		return err
+	}
+	for _, known := range []error{activations.ErrSuspended, activations.ErrRevoked, activations.ErrExpired, activations.ErrLimit,
+		activations.ErrRehostLimit, activations.ErrBinding, activations.ErrNotActivated} {
+		if errors.Is(err, known) {
+			m.ok = true
+		}
+	}
+	if err == nil {
+		m.ok = true
+	}
+	return err
+}
+
 func (s *server) Activate(ctx context.Context, req apigen.ActivateRequestObject) (apigen.ActivateResponseObject, error) {
 	b := req.Body
 	ar := activationRequest(ctx, req.Tenant, b.Fingerprint, b.FpSource, b.Hostname, b.AppVersion, b.SdkVersion)
 	if req.Params.IdempotencyKey == nil {
 		l, err := s.Activations.Activate(ctx, ar)
 		if err != nil {
-			return nil, err
+			return nil, authenticated(ctx, err)
 		}
-		return apigen.Activate200JSONResponse(leaseView(l)), nil
+		return apigen.Activate200JSONResponse(leaseView(l)), authenticated(ctx, nil)
 	}
 	// The license is the credential (ADR-0032: keys are scoped to the
 	// credential); Identify finds it before Do's transaction.
@@ -101,6 +136,7 @@ func (s *server) Activate(ctx context.Context, req apigen.ActivateRequestObject)
 	if err != nil {
 		return nil, err
 	}
+	_ = authenticated(ctx, nil) // the key is a license's
 	raw, _ := ctx.Value(bodyKey{}).([]byte)
 	out, _, err := s.Idempotency.Do(ctx, idempotency.Request{TenantID: ar.TenantID, Credential: licenseID, Key: *req.Params.IdempotencyKey, Operation: "activate", Body: raw},
 		func(ctx context.Context, tx *ent.Tx) error { return s.Activations.Recheck(ctx, tx, ar) },
@@ -136,16 +172,16 @@ func (s *server) RefreshLease(ctx context.Context, req apigen.RefreshLeaseReques
 	b := req.Body
 	l, err := s.Activations.Refresh(ctx, activationRequest(ctx, req.Tenant, b.Fingerprint, b.FpSource, b.Hostname, b.AppVersion, b.SdkVersion))
 	if err != nil {
-		return nil, err
+		return nil, authenticated(ctx, err)
 	}
-	return apigen.RefreshLease200JSONResponse(leaseView(l)), nil
+	return apigen.RefreshLease200JSONResponse(leaseView(l)), authenticated(ctx, nil)
 }
 
 func (s *server) Deactivate(ctx context.Context, req apigen.DeactivateRequestObject) (apigen.DeactivateResponseObject, error) {
 	if err := s.Activations.Deactivate(ctx, activationRequest(ctx, req.Tenant, req.Body.Fingerprint, "", nil, nil, nil)); err != nil {
-		return nil, err
+		return nil, authenticated(ctx, err)
 	}
-	return apigen.Deactivate204Response{}, nil
+	return apigen.Deactivate204Response{}, authenticated(ctx, nil)
 }
 
 // stored writes an outcome as idempotency.Store.Do returned it: a fresh
@@ -195,11 +231,13 @@ func activationProblem(err error) *problem {
 // keyLimiter is the per-license-key rate limit (ADR-0034): quota requests
 // per key per fixed minute, counted in this process, so per replica (N
 // replicas allow N × quota). Keys are held as SHA-256, never in plaintext,
-// and forgotten when the minute ends. At most maxKeys distinct keys are
-// tracked per minute, so memory is bounded; past that, new keys pass
-// untracked (fail open) rather than locking every new key out for the rest
-// of the minute, which a flood of random keys could otherwise do. Flooding
-// is the job of the per-client-address limit (ADR-0032 step 0).
+// and forgotten when the minute ends. A request is counted before it
+// reaches the service and released unless its key authenticated (keyMark),
+// so only real keys stay tracked. At most maxKeys distinct keys are
+// tracked per minute, so memory is bounded; past that (only reachable with
+// that many real keys, or junk keys in flight at once) new keys pass
+// untracked (fail open). Flooding is the job of the per-client-address
+// limit (ADR-0032 step 0).
 // ponytail: per replica and fixed windows; a shared limiter (Redis, the
 // database) when per-cluster limits matter.
 type keyLimiter struct {
@@ -245,4 +283,18 @@ func (l *keyLimiter) take(w http.ResponseWriter, key string) (ok bool, retry int
 	w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"license-key";q=%d;w=%d`, l.quota, int(limiterWindow/time.Second)))
 	w.Header().Set("RateLimit", fmt.Sprintf(`"license-key";r=%d;t=%d`, remaining, reset))
 	return ok, reset
+}
+
+// release undoes take's count for key (an unknown key), forgetting it when
+// nothing is left.
+func (l *keyLimiter) release(key string) {
+	h := sha256.Sum256([]byte(key))
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch n := l.counts[h]; {
+	case n > 1:
+		l.counts[h] = n - 1
+	case n == 1:
+		delete(l.counts, h)
+	}
 }
