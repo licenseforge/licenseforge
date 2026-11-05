@@ -68,15 +68,19 @@ type Job struct {
 	lastFull time.Time
 	lock     *store.SessionLock          // held while this replica leads
 	ping     func(context.Context) error // the lock's liveness check; nil: lock.Alive (tests replace it)
-	now      func() time.Time
-	verify   func(ctx context.Context, run audit.Runner, tenantID string, from audit.Head) (head, anchor audit.Head, err error)
+
+	hasFullCheckpoint func(context.Context) (bool, error) // tests replace it
+	now               func() time.Time
+	verify            func(ctx context.Context, run audit.Runner, tenantID string, from audit.Head) (head, anchor audit.Head, err error)
 }
 
 // New returns a Job with the default schedule.
 func New(db *store.DB, log *slog.Logger) *Job {
-	return &Job{DB: db, Log: log, Interval: DefaultInterval, FullInterval: DefaultFullInterval,
+	j := &Job{DB: db, Log: log, Interval: DefaultInterval, FullInterval: DefaultFullInterval,
 		heads: map[string]audit.Head{}, anchors: map[string]audit.Head{}, broken: map[string]bool{},
 		now: time.Now, verify: audit.VerifyAnchored}
+	j.hasFullCheckpoint = j.fullCheckpointExists
+	return j
 }
 
 // Close gives up the lead, if this replica has it.
@@ -104,6 +108,7 @@ func (j *Job) Run(ctx context.Context) error {
 		return fmt.Errorf("auditverify: invalid schedule (interval %v, full %v)", j.Interval, j.FullInterval)
 	}
 	defer j.Close()
+	j.seed(ctx)
 	t := time.NewTicker(j.Interval)
 	defer t.Stop()
 	for {
@@ -120,6 +125,41 @@ func (j *Job) Run(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+// seed starts the full-pass gauge at the job's start on a new install (no
+// full-mode checkpoint on the platform chain yet), so the first pass gets
+// the overdue alert's grace (two full intervals) and a first pass that
+// never completes is still caught. An install that ran full passes before
+// isn't seeded: a restart must not hide a pass that keeps failing (the
+// alert's max_over_time still sees the last completed pass of any replica).
+func (j *Job) seed(ctx context.Context) {
+	has, err := j.hasFullCheckpoint(ctx)
+	switch {
+	case err != nil:
+		j.Log.Warn("audit verify: can't tell whether full passes ran before; not seeding the full-pass gauge", "err", err)
+	case !has:
+		metrics.AuditVerifyLastFull.Set(float64(j.now().Unix()))
+	}
+}
+
+// fullCheckpointExists reports whether the platform chain has a full-mode
+// audit.checkpoint.
+func (j *Job) fullCheckpointExists(ctx context.Context) (bool, error) {
+	var has bool
+	err := j.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT EXISTS (SELECT 1 FROM audit_events WHERE tenant_id = $1
+			AND action = 'audit.checkpoint' AND details->>'mode' = 'full')`, audit.PlatformTenant)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		if !rows.Next() {
+			return errors.Join(errors.New("auditverify: checkpoint query returned no row"), rows.Err())
+		}
+		return rows.Scan(&has)
+	})
+	return has, err
 }
 
 // lead reports whether this replica leads: it holds the lock and its

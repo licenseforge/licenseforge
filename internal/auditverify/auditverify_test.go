@@ -749,9 +749,16 @@ func TestIncrementalListsAnchorChange(t *testing.T) {
 func TestRunReleasesTheLockOnShutdown(t *testing.T) {
 	_, j, _ := setup(t)
 	adm := admin(t)
+	seeded := make(chan struct{}, 1)
+	j.hasFullCheckpoint = func(context.Context) (bool, error) { seeded <- struct{}{}; return true, nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- j.Run(ctx) }()
+	select { // Run seeds the full-pass gauge (or decides not to) first
+	case <-seeded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run didn't check whether to seed the full-pass gauge")
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for len(lockHolders(t, adm)) == 0 {
 		if time.Now().After(deadline) {
@@ -887,5 +894,62 @@ func TestHungPingIsCutOff(t *testing.T) {
 	_, _ = j.Once(context.Background())
 	if took := time.Since(start); took > 5*time.Second {
 		t.Errorf("a hung ping held the run for %v", took)
+	}
+}
+
+// On a new install (no full-mode checkpoint yet) the full-pass gauge starts
+// at the job's start, so the first pass gets the overdue alert's grace; it
+// then moves only when a pass completes.
+func TestSeedOnNewInstall(t *testing.T) {
+	d, j, _ := setup(t)
+	a := chain(t, d, 1)
+	ck := time.Unix(time.Now().Unix(), 0)
+	j.now = func() time.Time { return ck }
+	j.hasFullCheckpoint = func(context.Context) (bool, error) { return false, nil } // a fresh database
+	metrics.AuditVerifyLastFull.Set(0)
+	j.seed(context.Background())
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != float64(ck.Unix()) {
+		t.Fatalf("gauge at start = %v, want the start time %v", got, ck.Unix())
+	}
+	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
+		if c == a {
+			return audit.Head{}, audit.Head{}, errors.New("statement timeout")
+		}
+		return audit.VerifyAnchored(ctx, run, c, from)
+	}
+	ck = ck.Add(time.Hour)
+	if _, err := j.Once(context.Background()); err == nil {
+		t.Fatal("the failing pass completed")
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != float64(ck.Add(-time.Hour).Unix()) {
+		t.Errorf("an incomplete pass moved the gauge to %v", got)
+	}
+	j.verify = audit.VerifyAnchored
+	ck = ck.Add(time.Hour)
+	if _, err := j.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != float64(ck.Unix()) {
+		t.Errorf("gauge after the pass completed = %v, want %v", got, ck.Unix())
+	}
+}
+
+// An install that has run full passes before isn't re-seeded on restart:
+// otherwise every restart would hide a pass that keeps failing.
+func TestNoSeedAfterEarlierFullPasses(t *testing.T) {
+	d, j, _ := setup(t)
+	chain(t, d, 1)
+	if _, err := j.Once(context.Background()); err != nil { // writes a full-mode checkpoint
+		t.Fatal(err)
+	}
+	restarted := New(d, j.Log)
+	t.Cleanup(restarted.Close)
+	if has, err := restarted.hasFullCheckpoint(context.Background()); err != nil || !has {
+		t.Fatalf("hasFullCheckpoint = %v, %v; want true after a full run", has, err)
+	}
+	metrics.AuditVerifyLastFull.Set(0)
+	restarted.seed(context.Background())
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != 0 {
+		t.Errorf("restart re-seeded the full-pass gauge to %v", got)
 	}
 }
