@@ -91,7 +91,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Remove a member, by default revoking the API tokens they created (ADR-0029).
+         * Remove a member, by default revoking the API tokens they created and the invitations they sent (ADR-0029, ADR-0035).
          * @description Their access ends at once. The last owner can't be removed (409).
          */
         delete: operations["removeMember"];
@@ -102,10 +102,84 @@ export interface paths {
          * @description Dashboard sessions with member:write on every product. The caller may
          *     only give or take away a role it holds itself; the last owner can't
          *     be demoted (409). A demotion or narrower scope also revokes the
-         *     member's tokens the new grant wouldn't allow (ADR-0035), unless
-         *     revoke_tokens=false.
+         *     member's tokens the new grant wouldn't allow, and the pending
+         *     invitations it couldn't have sent (ADR-0035), unless
+         *     revoke_tokens=false / revoke_invitations=false.
          */
         patch: operations["updateMember"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tenant's invitations (open, accepted, revoked, expired), newest first.
+         * @description Needs member:read on every product; a product-scoped caller sees none. Never returns the link token.
+         */
+        get: operations["listInvitations"];
+        put?: never;
+        /**
+         * Invite someone by email. The link token is in this response only.
+         * @description Dashboard sessions with member:write on every product; the role can't
+         *     exceed the caller's. Open for 7 days. Accepting needs the token, a
+         *     signed-in user whose verified email matches, and an open invitation
+         *     (POST /invitations/accept).
+         */
+        post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/invitations/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke an open invitation. One-way. */
+        post: operations["revokeInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation as the signed-in user.
+         * @description Dashboard sessions only (outside any tenant path; API tokens get 401).
+         *     An unknown, revoked, expired or used token, and a user whose verified
+         *     email doesn't match, all answer the same 422.
+         */
+        post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -170,9 +244,55 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        Invitation: {
+            /** @example inv_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            email: string;
+            role: components["schemas"]["MemberRole"];
+            all_products: boolean;
+            product_ids: string[];
+            /** @enum {string} */
+            status: "pending" | "accepted" | "revoked" | "expired";
+            /** @description User ID; null once the user is erased. */
+            invited_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            accepted_at: string | null;
+            accepted_by: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+        };
+        InvitationPage: {
+            items: components["schemas"]["Invitation"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        InvitationCreate: {
+            email: string;
+            role: components["schemas"]["MemberRole"];
+            all_products: boolean;
+            /** @description Required, non-empty, when all_products is false; absent otherwise. */
+            product_ids?: string[];
+        };
+        InvitationCreated: components["schemas"]["Invitation"] & {
+            /** @description For the invite link. Shown once */
+            token: string;
+        };
+        AcceptedInvitation: {
+            membership_id: string;
+            /** @description Usable as {tenant} in paths. */
+            tenant_id: string;
+            role: components["schemas"]["MemberRole"];
+            all_products: boolean;
+        };
         MemberUpdated: components["schemas"]["Member"] & {
             /** @description API tokens this change revoked (ADR-0035); preview them from the token list (created_by, role, product_ids). */
             revoked_token_ids: string[];
+            /** @description Pending invitations this change revoked; preview them from the invitation list (invited_by, role, product_ids). */
+            revoked_invitation_ids: string[];
         };
         MemberPage: {
             items: components["schemas"]["Member"][];
@@ -364,6 +484,8 @@ export interface operations {
             query?: {
                 /** @description Also revoke every active API token the member created, each audited. */
                 revoke_tokens?: boolean;
+                /** @description Also revoke every pending invitation the member sent, each audited. */
+                revoke_invitations?: boolean;
             };
             header?: never;
             path: {
@@ -380,6 +502,8 @@ export interface operations {
                 headers: {
                     /** @description Comma-separated IDs of the API tokens the removal revoked; absent if none. */
                     "X-Revoked-Token-Ids"?: string;
+                    /** @description Comma-separated IDs of the pending invitations the removal revoked; absent if none. */
+                    "X-Revoked-Invitation-Ids"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -396,6 +520,8 @@ export interface operations {
             query?: {
                 /** @description Revoke the member's active API tokens above the new role or outside the new scope, each audited. */
                 revoke_tokens?: boolean;
+                /** @description Revoke the member's pending invitations the new grant couldn't have sent, each audited. */
+                revoke_invitations?: boolean;
             };
             header?: never;
             path: {
@@ -425,6 +551,130 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    revokeInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The invite link's token. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new membership. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedInvitation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
         };

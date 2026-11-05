@@ -57,7 +57,7 @@ func (s Service) Login(ctx context.Context, c Claims) (*ent.User, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
-	if c.EmailVerified && !usableEmail(c.Email) {
+	if c.EmailVerified && !UsableEmail(c.Email) {
 		c.Email, c.EmailVerified = "", false
 	}
 	u, err := s.login(ctx, c)
@@ -179,11 +179,11 @@ func (c Claims) check() error {
 	return nil
 }
 
-// usableEmail reports whether a verified email can be stored and shown in
+// UsableEmail reports whether an email can be stored and shown in
 // member lists: no spaces or invisible/spoofing characters. One that isn't is
 // treated as unverified (the user still signs in, but can't accept
 // invitations or bootstrap by email with it).
-func usableEmail(email string) bool {
+func UsableEmail(email string) bool {
 	return email != "" && len(email) <= 320 && utf8.ValidString(email) && strings.Contains(email, "@") && graphic(email)
 }
 

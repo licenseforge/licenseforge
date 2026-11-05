@@ -69,17 +69,17 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 		return Created{}, err
 	}
 	p, _ := authz.FromContext(ctx)
-	ev := event(p, "api_token.create", "")
+	ev := audit.By(p, "api_token.create", "api_token", "")
 	// Authorization first: a caller who may not create tokens learns nothing
 	// about its input.
 	if err := authz.CanAssign(ctx, authz.Token, nil, &authz.Grant{Role: role, Scope: scope}); err != nil {
-		return Created{}, s.refused(ctx, tenantID, ev, err)
+		return Created{}, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound)
 	}
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
 	if err := ValidName(name); err != nil || ttl < MinTTL || ttl > MaxTTL || !validProducts(scope.Products) {
-		return Created{}, s.refused(ctx, tenantID, ev, fmt.Errorf("%w: name of up to 200 bytes of graphic characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid))
+		return Created{}, audit.Refused(ctx, s.DB, tenantID, ev, fmt.Errorf("%w: name of up to 200 bytes of graphic characters, lifetime 1 minute to a year, distinct product IDs", ErrInvalid), ErrInvalid, ErrNotFound)
 	}
 	expires := time.Now().Add(min(ttl, MaxTTL-skew))
 	tok := apitoken.New()
@@ -114,7 +114,7 @@ func (s Service) Create(ctx context.Context, name string, role authz.Role, scope
 	})
 	if err != nil {
 		ev.ObjectID, ev.Details = "", nil
-		return Created{}, s.refused(ctx, tenantID, ev, err)
+		return Created{}, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound)
 	}
 	return Created{Token: tok, Row: row}, nil
 }
@@ -253,9 +253,9 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 		return nil, err
 	}
 	p, _ := authz.FromContext(ctx)
-	ev := event(p, "api_token.revoke", "")
+	ev := audit.By(p, "api_token.revoke", "api_token", "")
 	if authz.Require(ctx, authz.TokenRead, "") != nil || !ids.Valid("tok", tokenID) {
-		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, ErrNotFound, ErrInvalid, ErrNotFound)
 	}
 	var row *ent.APIToken
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
@@ -294,38 +294,10 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 		return err
 	})
 	if err != nil {
-		return nil, s.refused(ctx, tenantID, ev, err)
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound)
 	}
 	return row, nil
 }
 
 // notExpired compares with the database clock, as the api_tokens policies do.
 func notExpired(s *sql.Selector) { s.Where(sql.ExprP(s.C(entapitoken.FieldExpiresAt) + " > now()")) }
-
-func event(p authz.Principal, action, objectID string) audit.Event {
-	actor := auditevent.ActorTypeUser
-	if p.Kind == authz.Token {
-		actor = auditevent.ActorTypeToken
-	}
-	return audit.Event{ActorType: actor, ActorID: p.ID, Action: action, ObjectType: "api_token", ObjectID: objectID}
-}
-
-// refused records a denied or failed attempt in its own transaction
-// (ADR-0027) and returns err. Infrastructure errors aren't attempts.
-func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, err error) error {
-	switch {
-	case errors.Is(err, authz.ErrDenied):
-		ev.Outcome = auditevent.OutcomeDenied
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrNotFound):
-		ev.Outcome = auditevent.OutcomeFailure
-	default:
-		return err
-	}
-	if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		_, err := audit.Record(ctx, tx, tenantID, ev)
-		return err
-	}); rerr != nil {
-		return errors.Join(err, rerr)
-	}
-	return err
-}
