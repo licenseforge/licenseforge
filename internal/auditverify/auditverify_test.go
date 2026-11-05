@@ -662,13 +662,18 @@ func TestFullRunGetsALongerLimit(t *testing.T) {
 // from their new heads), and records progress meanwhile.
 func TestTimedOutFullRunResumes(t *testing.T) {
 	d, j, _ := setup(t)
-	x := chain(t, d, 1)
+	chain(t, d, 1)
+	chain(t, d, 1)
 	j.FullTimeout = 300 * time.Millisecond
 	stuck := true
+	var x string // the second chain the run reaches gets stuck, so one is done before it
 	froms := map[string]audit.Head{}
 	j.verify = func(ctx context.Context, run audit.Runner, c string, from audit.Head) (audit.Head, audit.Head, error) {
 		if _, seen := froms[c]; !seen { // where the chain's verification starts (a second call checks the old head)
 			froms[c] = from
+			if stuck && x == "" && len(froms) == 2 {
+				x = c
+			}
 		}
 		if c == x && stuck {
 			<-ctx.Done()
