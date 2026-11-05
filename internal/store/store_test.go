@@ -382,7 +382,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,
 			"retention_read":                 `SELECT licenseforge_retention true`,
-			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
+			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND (o.seq = audit_export_cursors.seq)))) (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
 		},
 		"audit_anchors": { // ADR-0036: insert-only, by the retention login
 			"retention_read":   `SELECT licenseforge_retention true`,
@@ -398,6 +398,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		"products": { // ADR-0015: archive is one-way, at the database clock
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
+		"customers": { // ADR-0015: as for products
+			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
@@ -405,7 +408,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
 		"api_tokens": {
-			"use_moves_forward (restrictive)":    `UPDATE licenseforge_app true (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND ((NOT (api_tokens.last_used_at IS DISTINCT FROM o.last_used_at)) OR ((api_tokens.last_used_at >= (clock_timestamp() - '00:05:00'::interval)) AND (api_tokens.last_used_at >= COALESCE(o.last_used_at, '-infinity'::timestamp with time zone)))))))`,
+			"use_moves_forward (restrictive)":    `UPDATE licenseforge_app (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND (NOT (o.last_used_at IS DISTINCT FROM api_tokens.last_used_at))))) (EXISTS ( SELECT 1 FROM api_tokens o WHERE (((o.id)::text = (api_tokens.id)::text) AND ((NOT (api_tokens.last_used_at IS DISTINCT FROM o.last_used_at)) OR ((api_tokens.last_used_at >= (clock_timestamp() - '00:05:00'::interval)) AND (api_tokens.last_used_at >= COALESCE(o.last_used_at, '-infinity'::timestamp with time zone)))))))`,
 			"expiry_from_now (restrictive)":      `INSERT licenseforge_app ((expires_at > clock_timestamp()) AND (expires_at <= (clock_timestamp() + '1 year'::interval)) AND ((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))))`,
 			"platform_no_unrevoke (restrictive)": `UPDATE licenseforge_platform (revoked_at IS NULL) true`,
 			"creator_is_member (restrictive)":    `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (api_tokens.tenant_id)::text) AND ((m.user_id)::text = (api_tokens.created_by)::text) AND m.scope_all AND (((m.role)::text = 'owner'::text) OR (((m.role)::text = 'admin'::text) AND ((api_tokens.role)::text <> 'owner'::text))))))`,
@@ -746,28 +749,38 @@ func TestAuditExportPrivileges(t *testing.T) {
 	}
 }
 
-// Products are archived, never deleted (ADR-0015): the exact privileges on
-// products, table and column ACLs, of every grantee except the table owner
-// (PUBLIC included), with their grant options, are pinned. The app and
-// platform pools insert and read; they may update only name, archived_at and
-// updated_at; nobody else has anything, and nobody may pass a privilege on.
-func TestProductPrivileges(t *testing.T) {
+// Products and customers are archived, never deleted (ADR-0015): the exact
+// privileges on them, table and column ACLs, of every grantee except the
+// table owner (PUBLIC included), with their grant options, are pinned. The
+// app and platform pools insert and read; they may update only the listed
+// columns; nobody else has anything, and nobody may pass a privilege on.
+func TestArchivablePrivileges(t *testing.T) {
 	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = owner.Close() }()
+	for table, cols := range map[string][]string{
+		"products":  {"name", "updated_at", "archived_at"},
+		"customers": {"name", "email", "external_refs", "updated_at", "archived_at"},
+	} {
+		privilegesEqual(t, owner, table, cols)
+	}
+}
+
+func privilegesEqual(t *testing.T, owner *sql.DB, table string, cols []string) {
+	t.Helper()
 	rows, err := owner.Query(`
 		WITH acl AS (
 			SELECT a.grantee, a.privilege_type, a.is_grantable, '' AS col
-			FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = 'public.products'::regclass
+			FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = $1::regclass
 			UNION ALL
 			SELECT a.grantee, a.privilege_type, a.is_grantable, att.attname
 			FROM pg_attribute att, aclexplode(att.attacl) a
-			WHERE att.attrelid = 'public.products'::regclass AND att.attacl IS NOT NULL)
+			WHERE att.attrelid = $1::regclass AND att.attacl IS NOT NULL)
 		SELECT COALESCE(r.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable, acl.col
 		FROM acl LEFT JOIN pg_roles r ON r.oid = acl.grantee
-		WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = 'public.products'::regclass)`)
+		WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = $1::regclass)`, "public."+table)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,14 +800,14 @@ func TestProductPrivileges(t *testing.T) {
 	var want []string
 	for _, role := range []string{AppRole, PlatformRole} {
 		want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
-		for _, col := range []string{"name", "updated_at", "archived_at"} {
+		for _, col := range cols {
 			want = append(want, role+" UPDATE "+col+" grantable=false")
 		}
 	}
 	slices.Sort(got)
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
-		t.Errorf("privileges on products:\n got %q\nwant %q", got, want)
+		t.Errorf("privileges on %s:\n got %q\nwant %q", table, got, want)
 	}
 }
 
