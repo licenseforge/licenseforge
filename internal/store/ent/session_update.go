@@ -97,6 +97,12 @@ func (_u *SessionUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.LastSeenAt(); ok {
 		_spec.SetField(session.FieldLastSeenAt, field.TypeTime, value)
 	}
+	if _u.mutation.AcrCleared() {
+		_spec.ClearField(session.FieldAcr, field.TypeString)
+	}
+	if _u.mutation.AuthTimeCleared() {
+		_spec.ClearField(session.FieldAuthTime, field.TypeTime)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{session.Label}
@@ -215,6 +221,12 @@ func (_u *SessionUpdateOne) sqlSave(ctx context.Context) (_node *Session, err er
 	}
 	if value, ok := _u.mutation.LastSeenAt(); ok {
 		_spec.SetField(session.FieldLastSeenAt, field.TypeTime, value)
+	}
+	if _u.mutation.AcrCleared() {
+		_spec.ClearField(session.FieldAcr, field.TypeString)
+	}
+	if _u.mutation.AuthTimeCleared() {
+		_spec.ClearField(session.FieldAuthTime, field.TypeTime)
 	}
 	_node = &Session{config: _u.config}
 	_spec.Assign = _node.assignValues

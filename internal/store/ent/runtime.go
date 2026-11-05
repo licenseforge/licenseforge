@@ -1523,6 +1523,22 @@ func init() {
 	sessionDescLastSeenAt := sessionFields[5].Descriptor()
 	// session.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
 	session.DefaultLastSeenAt = sessionDescLastSeenAt.Default.(func() time.Time)
+	// sessionDescAmr is the schema descriptor for amr field.
+	sessionDescAmr := sessionFields[7].Descriptor()
+	// session.DefaultAmr holds the default value on creation for the amr field.
+	session.DefaultAmr = sessionDescAmr.Default.(string)
+	// session.AmrValidator is a validator for the "amr" field. It is called by the builders before save.
+	session.AmrValidator = sessionDescAmr.Validators[0].(func(string) error)
+	// sessionDescAcr is the schema descriptor for acr field.
+	sessionDescAcr := sessionFields[8].Descriptor()
+	// session.AcrValidator is a validator for the "acr" field. It is called by the builders before save.
+	session.AcrValidator = sessionDescAcr.Validators[0].(func(string) error)
+	// sessionDescAcrs is the schema descriptor for acrs field.
+	sessionDescAcrs := sessionFields[9].Descriptor()
+	// session.DefaultAcrs holds the default value on creation for the acrs field.
+	session.DefaultAcrs = sessionDescAcrs.Default.(string)
+	// session.AcrsValidator is a validator for the "acrs" field. It is called by the builders before save.
+	session.AcrsValidator = sessionDescAcrs.Validators[0].(func(string) error)
 	// sessionDescID is the schema descriptor for id field.
 	sessionDescID := sessionFields[0].Descriptor()
 	// session.DefaultID holds the default value on creation for the id field.

@@ -350,6 +350,26 @@ func AuditRetentionDaysNotNil() predicate.Tenant {
 	return predicate.Tenant(sql.FieldNotNull(FieldAuditRetentionDays))
 }
 
+// MfaPolicyEQ applies the EQ predicate on the "mfa_policy" field.
+func MfaPolicyEQ(v MfaPolicy) predicate.Tenant {
+	return predicate.Tenant(sql.FieldEQ(FieldMfaPolicy, v))
+}
+
+// MfaPolicyNEQ applies the NEQ predicate on the "mfa_policy" field.
+func MfaPolicyNEQ(v MfaPolicy) predicate.Tenant {
+	return predicate.Tenant(sql.FieldNEQ(FieldMfaPolicy, v))
+}
+
+// MfaPolicyIn applies the In predicate on the "mfa_policy" field.
+func MfaPolicyIn(vs ...MfaPolicy) predicate.Tenant {
+	return predicate.Tenant(sql.FieldIn(FieldMfaPolicy, vs...))
+}
+
+// MfaPolicyNotIn applies the NotIn predicate on the "mfa_policy" field.
+func MfaPolicyNotIn(vs ...MfaPolicy) predicate.Tenant {
+	return predicate.Tenant(sql.FieldNotIn(FieldMfaPolicy, vs...))
+}
+
 // HasProducts applies the HasEdge predicate on the "products" edge.
 func HasProducts() predicate.Tenant {
 	return predicate.Tenant(func(s *sql.Selector) {

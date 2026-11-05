@@ -99,6 +99,20 @@ func (_u *TenantUpdate) ClearAuditRetentionDays() *TenantUpdate {
 	return _u
 }
 
+// SetMfaPolicy sets the "mfa_policy" field.
+func (_u *TenantUpdate) SetMfaPolicy(v tenant.MfaPolicy) *TenantUpdate {
+	_u.mutation.SetMfaPolicy(v)
+	return _u
+}
+
+// SetNillableMfaPolicy sets the "mfa_policy" field if the given value is not nil.
+func (_u *TenantUpdate) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantUpdate {
+	if v != nil {
+		_u.SetMfaPolicy(*v)
+	}
+	return _u
+}
+
 // AddProductIDs adds the "products" edge to the Product entity by IDs.
 func (_u *TenantUpdate) AddProductIDs(ids ...string) *TenantUpdate {
 	_u.mutation.AddProductIDs(ids...)
@@ -512,6 +526,11 @@ func (_u *TenantUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Tenant.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MfaPolicy(); ok {
+		if err := tenant.MfaPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -544,6 +563,9 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.AuditRetentionDaysCleared() {
 		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MfaPolicy(); ok {
+		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1076,6 +1098,20 @@ func (_u *TenantUpdateOne) ClearAuditRetentionDays() *TenantUpdateOne {
 	return _u
 }
 
+// SetMfaPolicy sets the "mfa_policy" field.
+func (_u *TenantUpdateOne) SetMfaPolicy(v tenant.MfaPolicy) *TenantUpdateOne {
+	_u.mutation.SetMfaPolicy(v)
+	return _u
+}
+
+// SetNillableMfaPolicy sets the "mfa_policy" field if the given value is not nil.
+func (_u *TenantUpdateOne) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantUpdateOne {
+	if v != nil {
+		_u.SetMfaPolicy(*v)
+	}
+	return _u
+}
+
 // AddProductIDs adds the "products" edge to the Product entity by IDs.
 func (_u *TenantUpdateOne) AddProductIDs(ids ...string) *TenantUpdateOne {
 	_u.mutation.AddProductIDs(ids...)
@@ -1502,6 +1538,11 @@ func (_u *TenantUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Tenant.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MfaPolicy(); ok {
+		if err := tenant.MfaPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1551,6 +1592,9 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 	}
 	if _u.mutation.AuditRetentionDaysCleared() {
 		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MfaPolicy(); ok {
+		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{

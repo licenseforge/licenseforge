@@ -4,6 +4,32 @@
  */
 
 export interface paths {
+    "/tenants/{tenant}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+         * @description Owners only (tenant:write), from a dashboard session. Raising the MFA
+         *     policy needs a session that already meets the new level (409
+         *     mfa_policy_unmet), so an owner can't lock themselves out. Raising it
+         *     doesn't revoke API tokens; the answer reports how many are active.
+         */
+        patch: operations["updateTenant"];
+        trace?: never;
+    };
     "/tenants/{tenant}/api-tokens": {
         parameters: {
             query?: never;
@@ -915,6 +941,26 @@ export interface components {
             /** @description Absent on the last page. */
             next_cursor?: string;
         };
+        /**
+         * @description The assurance a session needs in this tenant (ADR-0038): none, MFA,
+         *     or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+         *     the identity provider asserts it in the ID token (amr/acr).
+         * @enum {string}
+         */
+        MfaPolicy: "none" | "mfa" | "phishing_resistant";
+        /** @description Absent fields stay; none is nullable (null answers 422). */
+        TenantPatch: {
+            mfa_policy?: components["schemas"]["MfaPolicy"];
+        };
+        TenantUpdated: {
+            /** @example tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            slug: string;
+            name: string;
+            mfa_policy: components["schemas"]["MfaPolicy"];
+            /** @description Active API tokens, all created before this change and not revoked by it; review them in the token list. */
+            active_api_tokens: number;
+        };
         /** @description Absent fields stay; none is nullable (null answers 422). */
         MemberPatch: {
             role?: components["schemas"]["MemberRole"];
@@ -993,6 +1039,40 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    updateTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["TenantPatch"];
+            };
+        };
+        responses: {
+            /** @description The tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUpdated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
     listApiTokens: {
         parameters: {
             query?: {

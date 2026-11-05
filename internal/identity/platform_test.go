@@ -163,10 +163,10 @@ func TestRecordLogin(t *testing.T) {
 	s, d := open(t)
 	ctx := context.Background()
 	head := platformHead(t, d)
-	if err := s.RecordLogin(ctx, "usr_x", auditevent.OutcomeDenied, "user_disabled", Source{IP: "::ffff:10.1.2.3", UserAgent: "ua"}); err != nil {
+	if err := s.RecordLogin(ctx, "usr_x", auditevent.OutcomeDenied, "user_disabled", Source{IP: "::ffff:10.1.2.3", UserAgent: "ua"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordLogin(ctx, "", auditevent.OutcomeFailure, "invalid_claims", Source{}); err != nil {
+	if err := s.RecordLogin(ctx, "", auditevent.OutcomeFailure, "invalid_claims", Source{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	es := platformChain(t, d, head)

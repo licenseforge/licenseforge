@@ -31,6 +31,10 @@
 //	LICENSEFORGE_AUDIT_VERIFY_INTERVAL  incremental audit chain verification, default 15m; 0 = off (ADR-0036)
 //	LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL  full verification from the anchor, default 168h
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
+//	LICENSEFORGE_OIDC_MFA_AMR                amr values that count as MFA (comma list; default mfa,otp,swk; ADR-0038)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR amr values that count as phishing-resistant MFA (default hwk,sc,pop)
+//	LICENSEFORGE_OIDC_MFA_ACR                acr/acrs values that count as MFA (default none)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR acr/acrs values that count as phishing-resistant (default none; e.g. phr,phrh on Okta)
 //
 // The serving process refuses to start if the owner or the retention login is
 // in its environment: serving pods must never hold them (ADR-0009, ADR-0036).
@@ -70,6 +74,7 @@ import (
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
 )
@@ -257,6 +262,11 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Fail at start on a malformed policy, not at the first login.
+	assurance, err := identity.AssurancePolicyFromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
 	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -268,6 +278,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
 			// Read only here, at start: a later change needs a restart.
 			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
+			Assurance:      &assurance,
 		}, ids, log)
 		cancel()
 		if err != nil {
@@ -281,7 +292,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// API tokens need only the tenant pool (hashes, no keyring); license keys
 	// and stored idempotent responses (which can hold one) are encrypted, and
 	// the activation API decrypts license keys and signs leases.
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Products: catalog.Products{DB: db}, Customers: customers.Service{DB: db},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},

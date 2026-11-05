@@ -232,7 +232,7 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("callback: %d", code)
 	}
 	first := f.session(t)
-	u, err := f.ids.Session(ctx, first)
+	u, _, err := f.ids.Session(ctx, first)
 	if err != nil || u.Subject != sub || u.Issuer != f.idp.srv.URL || !u.EmailVerified || u.Name == nil || *u.Name != "Ana" {
 		t.Fatalf("session user = %+v, %v", u, err)
 	}
@@ -245,17 +245,17 @@ func TestLogin(t *testing.T) {
 	if code := f.finish(t, q, q.Get("state"), map[string]any{"sub": sub, "email_verified": "false"}); code != http.StatusSeeOther {
 		t.Fatalf("second login: %d", code)
 	}
-	if _, err := f.ids.Session(ctx, first); err == nil {
+	if _, _, err := f.ids.Session(ctx, first); err == nil {
 		t.Error("old session survived a new login")
 	}
-	if u, err = f.ids.Session(ctx, f.session(t)); err != nil || u.EmailVerified {
+	if u, _, err = f.ids.Session(ctx, f.session(t)); err != nil || u.EmailVerified {
 		t.Errorf(`email_verified "false": %+v, %v`, u, err)
 	}
 	q = f.start(t)
 	if code := f.finish(t, q, q.Get("state"), map[string]any{"sub": sub, "email_verified": "true"}); code != http.StatusSeeOther {
 		t.Fatalf("third login: %d", code)
 	}
-	if u, err = f.ids.Session(ctx, f.session(t)); err != nil || !u.EmailVerified {
+	if u, _, err = f.ids.Session(ctx, f.session(t)); err != nil || !u.EmailVerified {
 		t.Errorf(`email_verified "true": %+v, %v`, u, err)
 	}
 }
