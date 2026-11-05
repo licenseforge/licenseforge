@@ -61,7 +61,7 @@ func (s *server) mfaRefused(ctx context.Context, t identity.TenantRef, userID st
 	}
 	err := s.Tenants.DB.WithTenant(ctx, t.ID, func(tx *ent.Tx) error {
 		// The chain's lock first, so two replicas can't both find no entry.
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, t.ID); err != nil {
+		if err := audit.Lock(ctx, tx, t.ID); err != nil {
 			return err
 		}
 		done, err := tx.AuditEvent.Query().Where(auditevent.TenantID(t.ID), auditevent.Action("session.mfa_required"),
