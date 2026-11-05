@@ -7,7 +7,7 @@ What LicenseForge stores, where, and how it is protected. It covers the GDPR rec
 ## Protection that applies everywhere
 
 - **Tenant isolation**: every tenant table has forced row-level security. The tenant login sees only rows of the tenant set for the transaction (ADR-0009), and composite `*_same_tenant` keys stop cross-tenant references.
-- **Logins**: four database logins with separate grants ([Secure Configuration Guide](secure-configuration-guide.md#database-logins)). The login path (`licenseforge_login`) can't read licensing tables.
+- **Logins**: five database logins with separate grants ([Secure Configuration Guide](secure-configuration-guide.md#database-logins)). The login path (`licenseforge_login`) can't read licensing tables.
 - **At rest**: secrets are encrypted in the application (AES-256-GCM, keyring `LICENSEFORGE_MASTER_KEYS`, ADR-0025) or stored only as hashes. Disk and backup encryption are the operator's.
 - **Logs**: the server logs JSON to stdout. ent marks secret columns `Sensitive`, so they never appear in printed rows. Keyring errors never contain key material.
 
@@ -52,7 +52,7 @@ What LicenseForge stores, where, and how it is protected. It covers the GDPR rec
 
 | Where | Data | Protection |
 |---|---|---|
-| Kubernetes Secrets | Database URLs (four logins), `LICENSEFORGE_MASTER_KEYS`, OIDC client secret | Operator's secret manager ([Secure Configuration Guide](secure-configuration-guide.md#secrets-and-the-keyring)) |
+| Kubernetes Secrets | Database URLs (five logins), `LICENSEFORGE_MASTER_KEYS`, OIDC client secret | Operator's secret manager ([Secure Configuration Guide](secure-configuration-guide.md#secrets-and-the-keyring)) |
 | Browser cookie `__Host-lf_session` | Session secret | `HttpOnly; Secure; SameSite=Lax`, `__Host-` prefix, 12 h |
 | Browser cookie `__Host-lf_login` | OIDC state, nonce, PKCE verifier | Same flags, 10 minutes, single use |
 | License files (`lf1`) | Customer **ID** only by default, product, entitlements, expiry | Signed with Ed25519 (no personal data unless the vendor adds it) |
