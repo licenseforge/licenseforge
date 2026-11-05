@@ -84,13 +84,28 @@ func TestFeatures(t *testing.T) {
 	if err != nil || u.Name != "Named users" || u.Description != nil || *u.Unit != "users" || u.Key != "max_users" {
 		t.Fatalf("update = %+v, %v", u, err)
 	}
+	f.event(t, "feature.update", auditevent.OutcomeSuccess, seats.ID, `"changed":["name","description"]`)
 	// Archive once; archived features stay listed; the key is never reused.
 	a, err := fs.Archive(as(f.a, authz.Admin, db.ID), sso.ID)
 	if err != nil || a.ArchivedAt == nil {
 		t.Fatalf("archive = %+v, %v", a, err)
 	}
+	f.event(t, "feature.archive", auditevent.OutcomeSuccess, sso.ID, "")
 	if _, err := fs.Archive(admin, sso.ID); !errors.Is(err, ErrState) {
 		t.Errorf("archive twice: %v", err)
+	}
+	f.event(t, "feature.archive", auditevent.OutcomeFailure, sso.ID, "")
+	for _, op := range []func() error{
+		func() error { _, err := fs.Update(admin, ids.Feature(), FeaturePatch{Name: ptr("x")}); return err },
+		func() error { _, err := fs.Archive(admin, ids.Feature()); return err },
+	} {
+		if err := op(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("missing: %v", err)
+		}
+		e := f.lastEvent(t, f.a)
+		if e.Outcome != auditevent.OutcomeFailure || e.ObjectID != nil || !strings.HasPrefix(e.Action, "feature.") {
+			t.Errorf("missing-feature audit = %+v", e)
+		}
 	}
 	if _, err := fs.Archive(as(f.a, authz.Manager), sso.ID); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("manager archives (rights before state): %v", err)
@@ -98,6 +113,36 @@ func TestFeatures(t *testing.T) {
 	var inv *InvalidError
 	if _, err := fs.Create(admin, FeatureInput{ProductID: db.ID, Key: "sso", Name: "Again", Type: feature.TypeBoolean}); !errors.Is(err, ErrConflict) || !errors.As(err, &inv) || inv.Field != "/key" {
 		t.Errorf("reused key: %v", err)
+	}
+	f.event(t, "feature.create", auditevent.OutcomeFailure, "", "")
+	if _, err := fs.Create(admin, FeatureInput{ProductID: db.ID, Key: "BAD", Name: "Bad", Type: feature.TypeBoolean}); field(err) != "/key" {
+		t.Errorf("bad key: %v", err)
+	}
+	f.event(t, "feature.create", auditevent.OutcomeFailure, "", "")
+	// No audit entry carries a name, description or unit (text a vendor
+	// may consider confidential); only keys, types and which fields changed.
+	if err := f.db.WithTenant(context.Background(), f.a, func(tx *ent.Tx) error {
+		es, err := tx.AuditEvent.Query().All(context.Background())
+		for _, e := range es {
+			for _, v := range []string{"Single sign-on", "Named users", "users", "Again"} {
+				if strings.Contains(e.Details, `"`+v+`"`) {
+					t.Errorf("%s details carry %q: %s", e.Action, v, e.Details)
+				}
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// event checks the newest audit entry: action, outcome, object (or none) and
+// a fragment of its details.
+func (f fixture) event(t *testing.T, action string, outcome auditevent.Outcome, object, details string) {
+	t.Helper()
+	e := f.lastEvent(t, f.a)
+	if e.Action != action || e.Outcome != outcome || (object == "") != (e.ObjectID == nil) || (object != "" && *e.ObjectID != object) || !strings.Contains(e.Details, details) {
+		t.Errorf("audit = %s %s %v %s, want %s %s %s %s", e.Action, e.Outcome, e.ObjectID, e.Details, action, outcome, object, details)
 	}
 }
 

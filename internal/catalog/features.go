@@ -120,21 +120,21 @@ func activeProduct(ctx context.Context, tx *ent.Tx, id string) error {
 		return errNoProduct
 	}
 	lock := func() (*ent.Product, error) { return tx.Product.Query().Where(product.ID(id)).ForShare().Only(ctx) }
+	visible := authz.Require(ctx, authz.CatalogRead, id) == nil
 	p, err := lock()
-	if ent.IsNotFound(err) {
+	if ent.IsNotFound(err) || !visible {
 		// Locked after waiting for a concurrent archive, the row is rechecked
 		// as its newer version, which archive_once filters (its subquery reads
 		// this statement's snapshot): a second statement sees it archived.
+		// Out-of-scope products take the same two statements as missing
+		// ones, so timing doesn't tell them apart.
 		p, err = lock()
 	}
-	if ent.IsNotFound(err) {
+	if ent.IsNotFound(err) || err == nil && !visible {
 		return errNoProduct
 	}
 	if err != nil {
 		return err
-	}
-	if authz.Require(ctx, authz.CatalogRead, id) != nil {
-		return errNoProduct
 	}
 	if err := authz.Require(ctx, authz.CatalogWrite, id); err != nil {
 		return err
@@ -224,13 +224,17 @@ func (s Features) Update(ctx context.Context, id string, patch FeaturePatch) (*e
 // added to a license by override (internal/licenses); its key is kept.
 func (s Features) Archive(ctx context.Context, id string) (*ent.Feature, error) {
 	return s.change(ctx, "feature.archive", id, func(tx *ent.Tx, f *ent.Feature) (*ent.Feature, map[string]any, error) {
-		if f.ArchivedAt != nil {
-			return nil, nil, ErrState
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, f.ID); err != nil {
+		// Atomic and counted: only an unarchived feature is archived, once.
+		res, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NULL`, f.ID)
+		if err != nil {
 			return nil, nil, err
 		}
-		f, err := tx.Feature.Get(ctx, f.ID)
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, nil, err
+		} else if n != 1 {
+			return nil, nil, ErrState
+		}
+		f, err = tx.Feature.Get(ctx, f.ID)
 		return f, nil, err
 	})
 }
