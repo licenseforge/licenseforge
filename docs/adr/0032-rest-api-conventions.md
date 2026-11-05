@@ -49,7 +49,7 @@ Either credential yields an `authz.Principal` (role, product scope, tenant), che
 - Lists silently filter to the caller's product scope. Filters are named equality parameters (`?product_id=`, `?customer_id=`, `?status=`) plus `created_after` / `created_before` (both exclusive); a filter naming a hidden or missing object returns an empty list either way. Unknown parameters answer 400.
 
 ### Writes
-- `POST` creates and answers **201** with the object. `PATCH` takes `application/merge-patch+json` (RFC 7396): absent = unchanged, `null` = clear (nullable fields only, else 422), and answers 200 with the full object; generated code tells absent from `null` with `nullable.Nullable[T]`. `DELETE` answers 204.
+- `POST` creates and answers **201** with the object. `PATCH` takes `application/merge-patch+json` (RFC 7396): absent = unchanged, `null` = clear (nullable fields only, else 422), objects merge key by key (a `null` member removes that key), and answers 200 with the full object; handlers tell absent from `null` from the request body itself. `DELETE` answers 204.
 - Unknown body fields answer 400 `invalid_request` (decoded strictly), so a misspelled PATCH field is never silently dropped.
 - State changes that are not edits are explicit sub-resources: `POST …/licenses/{id}/suspend`, `/revoke`, `/reinstate`; they answer 200 with the object and are audited operations, not field edits.
 - **`Idempotency-Key`** (modelled on the IETF httpapi idempotency-key draft): accepted on every non-idempotent POST, honoured at least on license and activation creation. A key is scoped to (tenant, credential: token ID or user ID), stored in a tenant table under RLS with a hash of the request (method, path, body) and the response, kept 24 hours, at most 255 printable ASCII characters. The request hash covers the resolved tenant ID, the operation and the body (not the raw path, so switching slug and ID isn't a different request). The key row is written in the operation's own transaction, so a concurrent request with the same key waits on it and a crashed request leaves no key. 2xx and 4xx outcomes are stored; 5xx is not, so it can be retried. Same key and same request: steps 1–5 are rerun for the original operation and its referenced objects; if they now refuse, that refusal is the answer, otherwise the stored status and body are replayed. Same key, different request: 422 `idempotency_key_reused`. Still in flight past the wait: 409 `idempotency_in_progress`.
@@ -63,7 +63,7 @@ Either credential yields an `authz.Principal` (role, product scope, tenant), che
 - A test checks that every route the server serves is in the spec, so nothing reachable is undocumented.
 
 ## Consequences
-- New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version), its small runtime package and `github.com/oapi-codegen/nullable` (merge-patch fields).
+- New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version), and its small runtime package.
 - One outer handler gives every endpoint the same authentication, tenant resolution and problem errors; object scope (steps 4–5) still lives in each handler, behind one scoped lookup and one error mapper, and is checked by a test per endpoint.
 - Idempotency needs a tenant table and a cleanup of keys older than 24 hours.
 - Accepting slug or ID costs one lookup branch; it removes the slug-rename breakage for integrations.

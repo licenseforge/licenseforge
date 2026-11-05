@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Signing keys: `signing.Local` `Create`, `Promote` and `Discard` now require `key:write` (owners, ADR-0019) on the whole tenant, in the tenant they act on; other roles, `sdk` and admin tokens, product-scoped principals, another tenant's principal and calls without a principal get `authz.ErrDenied` and change nothing.
 
 ### Added
+- Catalog API slice 1 (ADR-0015, ADR-0019, ADR-0032): products (`internal/catalog`: list, get, create, rename by merge patch; product-scoped, a hidden product answers like a missing one; creating needs `catalog:write` on every product; a taken slug is 409) and customers (`internal/customers`: list, get, create, merge patch with a nullable email, archive once; tenant-wide, managers and up write; audit details without names, emails or refs). `apitokens.Revoke` re-checks the caller's membership first in its transaction.
 - Dashboard members and invitations screen at `/t/{slug}/settings/members` (ADR-0020, ADR-0035).
   - Members: role changes use a JSON Merge Patch. A confirmation previews the API tokens and pending invitations the change would revoke (mirroring the server's rules, from the token and invitation lists), with a toggle for each, and the result shows the IDs actually revoked.
   - Removal works the same way (the IDs come from the `X-Revoked-*` headers).

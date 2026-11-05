@@ -259,6 +259,11 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 	}
 	var row *ent.APIToken
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// The caller still holds its grant, first: the lock order of a member
+		// change (memberships, then tokens; members.lockHeld).
+		if err := store.RecheckPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
 		var err error
 		row, err = tx.APIToken.Query().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).WithProducts().Only(ctx)
 		if ent.IsNotFound(err) {
