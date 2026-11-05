@@ -217,7 +217,7 @@ func TestMFARefusalLookupUsesIndex(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var line string
 			if err := rows.Scan(&line); err != nil {
@@ -243,7 +243,7 @@ func waitingAdvisory(t *testing.T, f *fixture, tenantID string) (n int) {
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			err = rows.Scan(&n)
 		}
