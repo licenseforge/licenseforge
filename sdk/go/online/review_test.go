@@ -675,24 +675,41 @@ func TestRunSimulatedDay(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		skew     func(elapsed time.Duration) time.Duration
-		min, max int // requests a day
-		gaps     int // wakes where Current may fail
+		min, max int                                        // requests a day
+		gaps     int                                        // wakes where Current may fail
+		lease    func(c *licensefile.Claims, now time.Time) // nil: the hour-long lease
+		first    time.Duration                              // the first wait, when set
 	}{
-		{"0", func(time.Duration) time.Duration { return 0 }, 45, 52, 0},
-		{"+45m", func(time.Duration) time.Duration { return 45 * time.Minute }, 90, 115, 0},
-		{"+3h", func(time.Duration) time.Duration { return 3 * time.Hour }, 45, 52, 100}, // every lease lapses at once
-		{"slow", func(time.Duration) time.Duration { return -2 * time.Hour }, 45, 52, 0},
-		{"drifting to +45m", func(e time.Duration) time.Duration { return e * 45 / (24 * 60) }, 48, 115, 0},
+		{"0", func(time.Duration) time.Duration { return 0 }, 45, 52, 0, nil, 0},
+		{"+45m", func(time.Duration) time.Duration { return 45 * time.Minute }, 90, 115, 0, nil, 0},
+		{"+3h", func(time.Duration) time.Duration { return 3 * time.Hour }, 45, 52, 100, nil, 0}, // every lease lapses at once
+		{"slow", func(time.Duration) time.Duration { return -2 * time.Hour }, 45, 52, 0, nil, 0},
+		{"drifting to +45m", func(e time.Duration) time.Duration { return e * 45 / (24 * 60) }, 48, 115, 0, nil, 0},
 		{"jumping to +45m", func(e time.Duration) time.Duration { // the jump lapses the lease held then
 			if e > 12*time.Hour {
 				return 45 * time.Minute
 			}
 			return 0
-		}, 70, 90, 1},
+		}, 70, 90, 1, nil, 0},
+		// A week-long lease with max_offline 1d (refresh_after at 12h): the
+		// first point Current fails at is iat+max_offline, 11h ahead by a
+		// 13h-fast clock; the margin stops at 2 minutes.
+		{name: "week lease, +13h", skew: func(time.Duration) time.Duration { return 13 * time.Hour }, min: 3, max: 4,
+			lease: func(c *licensefile.Claims, now time.Time) {
+				e, r, o := now.Add(7*24*time.Hour), now.Add(12*time.Hour), 24*time.Hour
+				c.Expires, c.RefreshAfter, c.MaxOffline = &e, &r, &o
+			}, first: 11*time.Hour - failMargin},
+		// Grace counts: Current fails only at exp+grace, 45m ahead by a
+		// 45m-fast clock, so refresh_after (30m) stands.
+		{name: "grace, +45m", skew: func(time.Duration) time.Duration { return 45 * time.Minute }, min: 45, max: 52,
+			lease: func(c *licensefile.Claims, _ time.Time) { c.Grace = 30 * time.Minute }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			n, gaps := simulateDay(t, tc.skew)
+			n, gaps, sleeps := simulateDay(t, tc.skew, tc.lease)
 			t.Logf("%d requests, %d gaps", n, gaps)
+			if tc.first != 0 && (len(sleeps) == 0 || sleeps[0] != tc.first) {
+				t.Errorf("first wait %v, want %v", sleeps[:min(len(sleeps), 1)], tc.first)
+			}
 			if n < tc.min || n > tc.max {
 				t.Errorf("%d requests, want %d..%d", n, tc.min, tc.max)
 			}
@@ -703,7 +720,7 @@ func TestRunSimulatedDay(t *testing.T) {
 	}
 }
 
-func simulateDay(t *testing.T, skew func(time.Duration) time.Duration) (requests, gaps int) {
+func simulateDay(t *testing.T, skew func(time.Duration) time.Duration, lease func(*licensefile.Claims, time.Time)) (requests, gaps int, sleeps []time.Duration) {
 	f := newFake(t)
 	var mu sync.Mutex
 	sim := f.iat // server time
@@ -713,6 +730,9 @@ func simulateDay(t *testing.T, skew func(time.Duration) time.Duration) (requests
 		mu.Unlock()
 		e, r := now.Add(time.Hour), now.Add(30*time.Minute)
 		c.IssuedAt, c.Expires, c.RefreshAfter = now, &e, &r
+		if lease != nil {
+			lease(c, now)
+		}
 	}
 	c, _ := f.client(t, f.iat, nil)
 	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim.Add(skew(sim.Sub(f.iat))) }
@@ -723,6 +743,7 @@ func simulateDay(t *testing.T, skew func(time.Duration) time.Duration) (requests
 		sim = sim.Add(d)
 		over := sim.Sub(f.iat) > 24*time.Hour
 		mu.Unlock()
+		sleeps = append(sleeps, d)
 		if over {
 			cancel()
 		} else if _, _, err := c.Current(); err != nil {
@@ -736,7 +757,7 @@ func simulateDay(t *testing.T, skew func(time.Duration) time.Duration) (requests
 	_ = c.Run(ctx, nil)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.reqs), gaps
+	return len(f.reqs), gaps, sleeps
 }
 
 // A refresh_after past exp or iat+max_offline doesn't sleep through them:
