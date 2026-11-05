@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { allCustomers, allProducts } from "@/api/catalog";
+import { getCustomer, getProduct } from "@/api/catalog";
 import type { LicenseStatus } from "@/api/licenses";
 import { formatCount, recentLicenses, summaryQuery } from "@/api/overview";
 import { tenantsQuery } from "@/api/tenants";
@@ -33,12 +33,17 @@ export function Overview() {
   const caller = tenants.find((tn) => tn.slug === slug);
   const summary = useQuery(summaryQuery(slug));
   const recent = useQuery({ queryKey: ["overview-recent", slug], queryFn: () => recentLicenses(slug) });
-  const products = useQuery({ queryKey: ["products-all", slug], queryFn: () => allProducts(slug) });
-  // Customer names only for callers who see customers (tenant-wide).
-  const names = useQuery({ queryKey: ["customers-all", slug], queryFn: () => allCustomers(slug), enabled: caller?.scope.all ?? false });
-  const productName = (id: string) => products.data?.items.find((p) => p.id === id)?.name ?? id;
-  const customerName = (id: string) => names.data?.items.find((c) => c.id === id)?.name ?? id;
   const customers = summary.data?.customers; // absent for callers who don't see every product
+  // Names for the recent rows only: each distinct product and customer by ID
+  // (at most five of each), customers only when the server says the caller
+  // sees them.
+  const distinct = (pick: (l: { product_id: string; customer_id: string }) => string) => [...new Set((recent.data ?? []).map(pick))];
+  const productIds = distinct((l) => l.product_id);
+  const customerIds = customers !== undefined ? distinct((l) => l.customer_id) : [];
+  const products = useQueries({ queries: productIds.map((id) => ({ queryKey: ["product", slug, id], queryFn: () => getProduct(slug, id) })) });
+  const customerRows = useQueries({ queries: customerIds.map((id) => ({ queryKey: ["customer", slug, id], queryFn: () => getCustomer(slug, id) })) });
+  const productName = (id: string) => products[productIds.indexOf(id)]?.data?.name ?? id;
+  const customerName = (id: string) => customerRows[customerIds.indexOf(id)]?.data?.name ?? id;
 
   return (
     <>

@@ -81,7 +81,6 @@ export function TenantLayout() {
   );
 }
 
-
 export function NoTenants() {
   return <p className="text-muted-foreground">{t("tenant.none")}</p>;
 }
