@@ -14,6 +14,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
+	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/predicate"
@@ -174,6 +175,21 @@ func (_u *TenantUpdate) AddAPITokens(v ...*APIToken) *TenantUpdate {
 	return _u.AddAPITokenIDs(ids...)
 }
 
+// AddIdempotencyKeyIDs adds the "idempotency_keys" edge to the IdempotencyKey entity by IDs.
+func (_u *TenantUpdate) AddIdempotencyKeyIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddIdempotencyKeyIDs(ids...)
+	return _u
+}
+
+// AddIdempotencyKeys adds the "idempotency_keys" edges to the IdempotencyKey entity.
+func (_u *TenantUpdate) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddIdempotencyKeyIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -324,6 +340,27 @@ func (_u *TenantUpdate) RemoveAPITokens(v ...*APIToken) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPITokenIDs(ids...)
+}
+
+// ClearIdempotencyKeys clears all "idempotency_keys" edges to the IdempotencyKey entity.
+func (_u *TenantUpdate) ClearIdempotencyKeys() *TenantUpdate {
+	_u.mutation.ClearIdempotencyKeys()
+	return _u
+}
+
+// RemoveIdempotencyKeyIDs removes the "idempotency_keys" edge to IdempotencyKey entities by IDs.
+func (_u *TenantUpdate) RemoveIdempotencyKeyIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveIdempotencyKeyIDs(ids...)
+	return _u
+}
+
+// RemoveIdempotencyKeys removes "idempotency_keys" edges to IdempotencyKey entities.
+func (_u *TenantUpdate) RemoveIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveIdempotencyKeyIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -713,6 +750,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.IdempotencyKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedIdempotencyKeysIDs(); len(nodes) > 0 && !_u.mutation.IdempotencyKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.IdempotencyKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -872,6 +954,21 @@ func (_u *TenantUpdateOne) AddAPITokens(v ...*APIToken) *TenantUpdateOne {
 	return _u.AddAPITokenIDs(ids...)
 }
 
+// AddIdempotencyKeyIDs adds the "idempotency_keys" edge to the IdempotencyKey entity by IDs.
+func (_u *TenantUpdateOne) AddIdempotencyKeyIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddIdempotencyKeyIDs(ids...)
+	return _u
+}
+
+// AddIdempotencyKeys adds the "idempotency_keys" edges to the IdempotencyKey entity.
+func (_u *TenantUpdateOne) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddIdempotencyKeyIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -1022,6 +1119,27 @@ func (_u *TenantUpdateOne) RemoveAPITokens(v ...*APIToken) *TenantUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPITokenIDs(ids...)
+}
+
+// ClearIdempotencyKeys clears all "idempotency_keys" edges to the IdempotencyKey entity.
+func (_u *TenantUpdateOne) ClearIdempotencyKeys() *TenantUpdateOne {
+	_u.mutation.ClearIdempotencyKeys()
+	return _u
+}
+
+// RemoveIdempotencyKeyIDs removes the "idempotency_keys" edge to IdempotencyKey entities by IDs.
+func (_u *TenantUpdateOne) RemoveIdempotencyKeyIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveIdempotencyKeyIDs(ids...)
+	return _u
+}
+
+// RemoveIdempotencyKeys removes "idempotency_keys" edges to IdempotencyKey entities.
+func (_u *TenantUpdateOne) RemoveIdempotencyKeys(v ...*IdempotencyKey) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveIdempotencyKeyIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -1434,6 +1552,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apitoken.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.IdempotencyKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedIdempotencyKeysIDs(); len(nodes) > 0 && !_u.mutation.IdempotencyKeysCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.IdempotencyKeysIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.IdempotencyKeysTable,
+			Columns: []string{tenant.IdempotencyKeysColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

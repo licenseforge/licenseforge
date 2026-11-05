@@ -36,6 +36,8 @@ const (
 	EdgeMemberships = "memberships"
 	// EdgeAPITokens holds the string denoting the api_tokens edge name in mutations.
 	EdgeAPITokens = "api_tokens"
+	// EdgeIdempotencyKeys holds the string denoting the idempotency_keys edge name in mutations.
+	EdgeIdempotencyKeys = "idempotency_keys"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -87,6 +89,13 @@ const (
 	APITokensInverseTable = "api_tokens"
 	// APITokensColumn is the table column denoting the api_tokens relation/edge.
 	APITokensColumn = "tenant_id"
+	// IdempotencyKeysTable is the table that holds the idempotency_keys relation/edge.
+	IdempotencyKeysTable = "idempotency_keys"
+	// IdempotencyKeysInverseTable is the table name for the IdempotencyKey entity.
+	// It exists in this package in order to avoid circular dependency with the "idempotencykey" package.
+	IdempotencyKeysInverseTable = "idempotency_keys"
+	// IdempotencyKeysColumn is the table column denoting the idempotency_keys relation/edge.
+	IdempotencyKeysColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -250,6 +259,20 @@ func ByAPITokens(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newAPITokensStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByIdempotencyKeysCount orders the results by idempotency_keys count.
+func ByIdempotencyKeysCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newIdempotencyKeysStep(), opts...)
+	}
+}
+
+// ByIdempotencyKeys orders the results by idempotency_keys terms.
+func ByIdempotencyKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newIdempotencyKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -297,5 +320,12 @@ func newAPITokensStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(APITokensInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, APITokensTable, APITokensColumn),
+	)
+}
+func newIdempotencyKeysStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(IdempotencyKeysInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, IdempotencyKeysTable, IdempotencyKeysColumn),
 	)
 }

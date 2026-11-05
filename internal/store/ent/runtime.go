@@ -11,6 +11,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/invitationproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
@@ -547,6 +548,72 @@ func init() {
 	// feature.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	feature.IDValidator = func() func(string) error {
 		validators := featureDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	idempotencykeyFields := schema.IdempotencyKey{}.Fields()
+	_ = idempotencykeyFields
+	// idempotencykeyDescTenantID is the schema descriptor for tenant_id field.
+	idempotencykeyDescTenantID := idempotencykeyFields[1].Descriptor()
+	// idempotencykey.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	idempotencykey.TenantIDValidator = func() func(string) error {
+		validators := idempotencykeyDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// idempotencykeyDescCredential is the schema descriptor for credential field.
+	idempotencykeyDescCredential := idempotencykeyFields[2].Descriptor()
+	// idempotencykey.CredentialValidator is a validator for the "credential" field. It is called by the builders before save.
+	idempotencykey.CredentialValidator = idempotencykeyDescCredential.Validators[0].(func(string) error)
+	// idempotencykeyDescKey is the schema descriptor for key field.
+	idempotencykeyDescKey := idempotencykeyFields[3].Descriptor()
+	// idempotencykey.KeyValidator is a validator for the "key" field. It is called by the builders before save.
+	idempotencykey.KeyValidator = func() func(string) error {
+		validators := idempotencykeyDescKey.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(key string) error {
+			for _, fn := range fns {
+				if err := fn(key); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// idempotencykeyDescRequestHash is the schema descriptor for request_hash field.
+	idempotencykeyDescRequestHash := idempotencykeyFields[4].Descriptor()
+	// idempotencykey.RequestHashValidator is a validator for the "request_hash" field. It is called by the builders before save.
+	idempotencykey.RequestHashValidator = idempotencykeyDescRequestHash.Validators[0].(func([]byte) error)
+	// idempotencykeyDescID is the schema descriptor for id field.
+	idempotencykeyDescID := idempotencykeyFields[0].Descriptor()
+	// idempotencykey.DefaultID holds the default value on creation for the id field.
+	idempotencykey.DefaultID = idempotencykeyDescID.Default.(func() string)
+	// idempotencykey.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	idempotencykey.IDValidator = func() func(string) error {
+		validators := idempotencykeyDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

@@ -33,5 +33,6 @@ func (Tenant) Annotations() []schema.Annotation {
 
 func (Tenant) Edges() []ent.Edge {
 	return []ent.Edge{edge.To("products", Product.Type), edge.To("customers", Customer.Type), edge.To("signing_keys", SigningKey.Type),
-		edge.To("audit_events", AuditEvent.Type), edge.To("invitations", Invitation.Type), edge.To("memberships", Membership.Type), edge.To("api_tokens", APIToken.Type)}
+		edge.To("audit_events", AuditEvent.Type), edge.To("invitations", Invitation.Type), edge.To("memberships", Membership.Type), edge.To("api_tokens", APIToken.Type),
+		edge.To("idempotency_keys", IdempotencyKey.Type)}
 }

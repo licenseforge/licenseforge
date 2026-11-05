@@ -456,6 +456,29 @@ func HasAPITokensWith(preds ...predicate.APIToken) predicate.Tenant {
 	})
 }
 
+// HasIdempotencyKeys applies the HasEdge predicate on the "idempotency_keys" edge.
+func HasIdempotencyKeys() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, IdempotencyKeysTable, IdempotencyKeysColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasIdempotencyKeysWith applies the HasEdge predicate on the "idempotency_keys" edge with a given conditions (other predicates).
+func HasIdempotencyKeysWith(preds ...predicate.IdempotencyKey) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newIdempotencyKeysStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Tenant) predicate.Tenant {
 	return predicate.Tenant(sql.AndPredicates(predicates...))

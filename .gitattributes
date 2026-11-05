@@ -3,3 +3,4 @@
 internal/store/ent/** linguist-generated=true
 internal/api/gen/** linguist-generated=true
 web/package-lock.json linguist-generated=true
+web/src/api/schema.ts linguist-generated=true
