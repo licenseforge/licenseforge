@@ -92,6 +92,16 @@ func Record(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.Aud
 	return r, err
 }
 
+// Lock takes tenantID's chain lock in tx, held until tx ends; Record takes
+// it again without waiting (advisory locks are re-entrant). Lock order: a
+// transaction that records an entry and also locks signing-key rows takes
+// this lock first (signing.Local), because activation records while holding
+// it and then share-locks the active key to sign (internal/activations).
+func Lock(ctx context.Context, tx *ent.Tx, tenantID string) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenantID)
+	return err
+}
+
 func write(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.AuditEvent, error) {
 	details := []byte("{}")
 	if len(e.Details) > 0 {
@@ -108,7 +118,7 @@ func write(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.Audi
 		e.SourceIP = ip.Unmap().String()
 	}
 	e.UserAgent = cleanText(e.UserAgent, maxUserAgent)
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenantID); err != nil {
+	if err := Lock(ctx, tx, tenantID); err != nil {
 		return nil, err
 	}
 	// A separate statement, so the clock is read after the lock is held.
