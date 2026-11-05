@@ -4,6 +4,7 @@ import { requireSession } from "@/api/session";
 import { tenantsQuery } from "@/api/tenants";
 import { AppShell } from "@/app-shell";
 import { ErrorPage, LoginPage, NoTenants, NotFound, Overview, TenantLayout } from "@/pages";
+import { CustomersPage, ProductsPage } from "@/catalog-pages";
 import { InvitePage } from "@/invite-page";
 import { inviteWaiting } from "@/invite";
 import { MembersPage } from "@/members-page";
@@ -43,11 +44,13 @@ const tenantRoute = createRoute({ getParentRoute: () => appRoute, path: "t/$slug
 const overviewRoute = createRoute({ getParentRoute: () => tenantRoute, path: "/", component: Overview });
 const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/api-tokens", component: TokensPage });
 const membersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/members", component: MembersPage });
+const productsRoute = createRoute({ getParentRoute: () => tenantRoute, path: "products", component: ProductsPage });
+const customersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "customers", component: CustomersPage });
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
-  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, tokensRoute, membersRoute])]),
+  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, customersRoute, tokensRoute, membersRoute])]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient) {
