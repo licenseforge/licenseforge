@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,9 +27,12 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -65,7 +70,12 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{db: d, tokens: apitokens.Service{DB: d}, mem: map[string]string{}}
+	kr, err := secrets.ParseKeyring("k1=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {

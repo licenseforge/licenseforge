@@ -182,6 +182,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List licenses in the caller's product scope, newest first.
+         * @description Filters are equality on product, customer and status, and a creation-time range. A filter naming a hidden or missing object gives an empty list.
+         */
+        get: operations["listLicenses"];
+        put?: never;
+        /**
+         * Issue a license from a plan. The license key is in this response only.
+         * @description Needs license:issue on the product. The plan's terms and features are
+         *     copied into the license, with per-license overrides. A missing or
+         *     hidden product, plan or customer answers 422 on its field.
+         *     With Idempotency-Key, a retry within 24 hours gets the first answer
+         *     (the key again included, for the same credential).
+         */
+        post: operations["issueLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        /** Get a license (never its key). */
+        get: operations["getLicense"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend an active license.
+         * @description Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+         */
+        post: operations["suspendLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/reinstate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a suspended license active again. A revoked license stays revoked.
+         * @description Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+         */
+        post: operations["reinstateLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an active or suspended license. Final.
+         * @description Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+         */
+        post: operations["revokeLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/tenants": {
         parameters: {
             query?: never;
@@ -250,6 +374,82 @@ export interface components {
             last_used_at: string | null;
             /** Format: date-time */
             revoked_at: string | null;
+        };
+        /** @enum {string} */
+        LicenseStatus: "active" | "suspended" | "revoked";
+        License: {
+            /** @example lic_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            product_id: string;
+            plan_id: string;
+            /** @description The plan's slug when issued. */
+            plan_slug: string;
+            customer_id: string;
+            /** @enum {string} */
+            type: "dev" | "trial" | "paid" | "community";
+            status: components["schemas"]["LicenseStatus"];
+            /** @description The key's last 6 characters */
+            key_hint: string;
+            /** @enum {string} */
+            expiry_basis: "from_issue" | "from_first_activation";
+            /**
+             * Format: date-time
+             * @description Null for a perpetual license
+             */
+            expires_at: string | null;
+            max_activations: number | null;
+            entitlements: {
+                features: string[];
+                limits: {
+                    [key: string]: number;
+                };
+            };
+            external_refs: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            issued_at: string;
+            /** Format: date-time */
+            suspended_at: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        LicensePage: {
+            items: components["schemas"]["License"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        LicenseIssue: {
+            product_id: string;
+            plan_id: string;
+            customer_id: string;
+            /**
+             * @default paid
+             * @enum {string}
+             */
+            type?: "dev" | "trial" | "paid" | "community";
+            /** @description Per-license feature changes by feature key (an enterprise deal). */
+            overrides?: {
+                [key: string]: {
+                    /** @description Drop the feature. */
+                    remove?: boolean;
+                    /**
+                     * Format: int64
+                     * @description For a limit feature (required for one)
+                     */
+                    limit?: number;
+                };
+            };
+            /** @description Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-]. */
+            external_refs?: {
+                [key: string]: string;
+            };
+        };
+        LicenseIssued: components["schemas"]["License"] & {
+            /** @description The license key. Shown once (and on an idempotent replay to the same credential) */
+            key: string;
         };
         /** @enum {string} */
         MemberRole: "owner" | "admin" | "manager" | "support" | "viewer";
@@ -380,6 +580,7 @@ export interface components {
         };
     };
     parameters: {
+        LicenseId: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
         Limit: number;
@@ -713,6 +914,194 @@ export interface operations {
             403: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    listLicenses: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                product_id?: string;
+                customer_id?: string;
+                status?: components["schemas"]["LicenseStatus"];
+                created_after?: string;
+                created_before?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LicensePage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    issueLicense: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1-255 printable ASCII characters; scoped to the tenant and the credential. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LicenseIssue"];
+            };
+        };
+        responses: {
+            /** @description Issued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LicenseIssued"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    suspendLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    reinstateLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    revokeLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listMyTenants: {

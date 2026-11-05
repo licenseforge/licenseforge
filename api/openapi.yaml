@@ -270,6 +270,137 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listLicenses
+      summary: List licenses in the caller's product scope, newest first.
+      description: Filters are equality on product, customer and status, and a creation-time range. A filter naming a hidden or missing object gives an empty list.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - { name: product_id, in: query, schema: { type: string } }
+        - { name: customer_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/LicenseStatus" } }
+        - { name: created_after, in: query, schema: { type: string, format: date-time } }
+        - { name: created_before, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicensePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: issueLicense
+      summary: Issue a license from a plan. The license key is in this response only.
+      description: |
+        Needs license:issue on the product. The plan's terms and features are
+        copied into the license, with per-license overrides. A missing or
+        hidden product, plan or customer answers 422 on its field.
+        With Idempotency-Key, a retry within 24 hours gets the first answer
+        (the key again included, for the same credential).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: 1-255 printable ASCII characters; scoped to the tenant and the credential.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LicenseIssue" }
+      responses:
+        "201":
+          description: Issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LicenseIssued" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    get:
+      operationId: getLicense
+      summary: Get a license (never its key).
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: suspendLicense
+      summary: Suspend an active license.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/reinstate:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: reinstateLicense
+      summary: Make a suspended license active again. A revoked license stays revoked.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: revokeLicense
+      summary: Revoke an active or suspended license. Final.
+      description: Needs license:write on the license's product. A status that doesn't allow it answers 409 invalid_state.
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /me/tenants:
     get:
       operationId: listMyTenants
@@ -305,6 +436,11 @@ components:
       name: X-CSRF-Token
       description: Required with the session on unsafe methods; from GET /auth/session.
   parameters:
+    LicenseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
@@ -368,6 +504,68 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time, nullable: true }
         revoked_at: { type: string, format: date-time, nullable: true }
+    LicenseStatus:
+      type: string
+      enum: [active, suspended, revoked]
+    License:
+      type: object
+      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
+      properties:
+        id: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        product_id: { type: string }
+        plan_id: { type: string }
+        plan_slug: { type: string, description: The plan's slug when issued. }
+        customer_id: { type: string }
+        type: { type: string, enum: [dev, trial, paid, community] }
+        status: { $ref: "#/components/schemas/LicenseStatus" }
+        key_hint: { type: string, description: The key's last 6 characters, to tell keys apart. Never the key. }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
+        expires_at: { type: string, format: date-time, nullable: true, description: Null for a perpetual license, or until first activation. }
+        max_activations: { type: integer, nullable: true }
+        entitlements:
+          type: object
+          required: [features, limits]
+          properties:
+            features: { type: array, items: { type: string } }
+            limits: { type: object, additionalProperties: { type: integer, format: int64 } }
+        external_refs: { type: object, additionalProperties: { type: string } }
+        issued_at: { type: string, format: date-time }
+        suspended_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    LicensePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/License" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    LicenseIssue:
+      type: object
+      required: [product_id, plan_id, customer_id]
+      properties:
+        product_id: { type: string }
+        plan_id: { type: string }
+        customer_id: { type: string }
+        type: { type: string, enum: [dev, trial, paid, community], default: paid }
+        overrides:
+          type: object
+          description: Per-license feature changes by feature key (an enterprise deal).
+          additionalProperties:
+            type: object
+            properties:
+              remove: { type: boolean, description: Drop the feature. }
+              limit: { type: integer, format: int64, description: For a limit feature (required for one), -1 = unlimited. }
+        external_refs:
+          type: object
+          description: Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-].
+          additionalProperties: { type: string, maxLength: 255 }
+    LicenseIssued:
+      allOf:
+        - $ref: "#/components/schemas/License"
+        - type: object
+          required: [key]
+          properties:
+            key: { type: string, description: The license key. Shown once (and on an idempotent replay to the same credential), stored only encrypted. }
     MemberRole:
       type: string
       enum: [owner, admin, manager, support, viewer]

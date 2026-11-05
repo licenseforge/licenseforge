@@ -42,8 +42,10 @@ import (
 
 	"licenseforge.io/licenseforge/internal/api"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
@@ -141,7 +143,8 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if _, err := secrets.ParseKeyring(keys); err != nil { // fail at start, not on first use
+	keyring, err := secrets.ParseKeyring(keys)
+	if err != nil { // fail at start, not on first use
 		return fmt.Errorf("LICENSEFORGE_MASTER_KEYS: %w", err)
 	}
 	// A database outage at start is a crash loop (Kubernetes retries), not "not ready".
@@ -188,8 +191,10 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	} else {
 		log.Warn("LICENSEFORGE_OIDC_ISSUER is not set: dashboard login is off")
 	}
-	// API tokens need only the tenant pool (hashes, no keyring).
+	// API tokens need only the tenant pool (hashes, no keyring); license keys
+	// and stored idempotent responses (which can hold one) are encrypted.
 	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Sessions: sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {
 		log.Warn("built without the dashboard (make web build TAGS=webui): serving a placeholder page")

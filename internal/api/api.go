@@ -27,8 +27,10 @@ import (
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
@@ -48,8 +50,11 @@ const unissuedTenant = "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 // Config is what the API needs from main.
 type Config struct {
-	Tokens  apitokens.Service
-	Members members.Service
+	Tokens   apitokens.Service
+	Members  members.Service
+	Licenses licenses.Service
+	// Idempotency keeps Idempotency-Key outcomes (license issue).
+	Idempotency idempotency.Store
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
 	Identity    identity.Service
@@ -248,6 +253,7 @@ var queryParams = map[string][]string{
 	"ListApiTokens":   {"limit", "cursor"},
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
+	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -417,28 +423,47 @@ func (s *server) badRequest(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // fail is the one error mapper for handler errors.
-func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
+func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) { s.write(w, r, mapErr(err)) }
+
+// mapErr maps a handler's error to its problem.
+func mapErr(err error) *problem {
 	var p *problem
-	var invalidField *members.InvalidError
+	var invalidMember *members.InvalidError
+	var invalidLicense *licenses.InvalidError
 	var invalidInvitation *invitations.InvalidError
 	switch {
 	case errors.As(err, &p):
 	case errors.Is(err, authz.ErrDenied):
 		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
-	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound), errors.Is(err, invitations.ErrNotFound):
+	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound), errors.Is(err, licenses.ErrNotFound), errors.Is(err, invitations.ErrNotFound):
 		p = errNotFound
+	case errors.As(err, &invalidMember):
+		p = invalid(fieldError{invalidMember.Field, invalidMember.Message})
+	case errors.As(err, &invalidLicense):
+		p = invalid(fieldError{invalidLicense.Field, invalidLicense.Message})
+	case errors.Is(err, licenses.ErrInvalid):
+		p = invalid()
 	case errors.As(err, &invalidInvitation):
 		p = invalid(fieldError{invalidInvitation.Field, invalidInvitation.Message})
 	case errors.Is(err, store.ErrInvitation): // one answer for every reason (no oracle)
 		p = invalid(fieldError{"/token", "invalid, expired, revoked or used, or not for this account"})
-	case errors.As(err, &invalidField):
-		p = invalid(fieldError{invalidField.Field, invalidField.Message})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
+	case errors.Is(err, licenses.ErrState):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The license's status doesn't allow this."}
+	case errors.Is(err, idempotency.ErrInvalidKey):
+		p = &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Idempotency-Key must be 1-255 printable ASCII characters."}
+	case errors.Is(err, idempotency.ErrKeyReused):
+		p = &problem{status: http.StatusUnprocessableEntity, code: "idempotency_key_reused", detail: "This Idempotency-Key was used with a different request."}
+	case errors.Is(err, idempotency.ErrInProgress):
+		p = &problem{status: http.StatusConflict, code: "idempotency_in_progress", detail: "A request with this Idempotency-Key is still in progress; retry later."}
 	default:
 		p = internal(err)
 	}
-	s.write(w, r, p)
+	if p.err == nil {
+		p = &problem{status: p.status, code: p.code, detail: p.detail, fields: p.fields, err: err}
+	}
+	return p
 }
 
 func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
@@ -454,7 +479,12 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.status)
-	_ = json.NewEncoder(w).Encode(struct {
+	_, _ = w.Write(p.body(ri.id))
+}
+
+// body is p's problem+json document.
+func (p *problem) body(requestID string) []byte {
+	b, _ := json.Marshal(struct {
 		Type      string       `json:"type"`
 		Title     string       `json:"title"`
 		Status    int          `json:"status"`
@@ -462,5 +492,6 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 		Code      string       `json:"code"`
 		RequestID string       `json:"request_id"`
 		Errors    []fieldError `json:"errors,omitempty"`
-	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, ri.id, p.fields})
+	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, requestID, p.fields})
+	return append(b, '\n')
 }
