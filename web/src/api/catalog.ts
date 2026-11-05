@@ -1,5 +1,6 @@
 import { infiniteQueryOptions } from "@tanstack/react-query";
 import { api, unwrap } from "./client";
+import { everyPage } from "./members";
 import type { components } from "./schema";
 import type { Membership } from "./tokens";
 
@@ -37,6 +38,16 @@ export const customersQuery = (tenant: string) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (p) => p.next_cursor,
   });
+
+/** Every product and customer the caller can see, for pickers and names (bounded paging). */
+export const allProducts = (tenant: string) =>
+  everyPage(async (cursor) =>
+    unwrap(await api.GET("/tenants/{tenant}/products", { params: { path: { tenant }, query: { cursor, limit: 200 } } })),
+  );
+export const allCustomers = (tenant: string) =>
+  everyPage(async (cursor) =>
+    unwrap(await api.GET("/tenants/{tenant}/customers", { params: { path: { tenant }, query: { cursor, limit: 200 } } })),
+  );
 
 export async function createCustomer(tenant: string, body: CustomerCreate): Promise<Customer> {
   return unwrap(await api.POST("/tenants/{tenant}/customers", { params: { path: { tenant } }, body }));
