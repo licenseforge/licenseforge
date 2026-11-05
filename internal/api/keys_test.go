@@ -93,8 +93,11 @@ func TestSigningKeyEndpoints(t *testing.T) {
 	if e := f.lastEvent(t, f.a.ID); e.Action != "signing_key.discard" || e.Outcome != auditevent.OutcomeDenied || *e.ActorID != f.viewerA {
 		t.Errorf("denied discard entry %+v", e)
 	}
-	if r := f.do(t, "GET", p, "", viewer); !strings.Contains(r.raw, `"kid":"`+kid+`","alg":"ed25519"`) && r.body["items"].([]any)[0].(map[string]any)["status"] != "pending" {
-		t.Errorf("refusals changed the key: %s", r.raw)
+	if err := f.db.WithTenant(ctx, f.a.ID, func(tx *ent.Tx) (err error) {
+		stored, err = tx.SigningKey.Get(ctx, kid)
+		return
+	}); err != nil || stored.Status != signingkey.StatusPending {
+		t.Errorf("refusals changed the key: %v %v", stored, err)
 	}
 	// Product-scoped principals read no keys; non-members get 404.
 	f.do(t, "GET", p, "", f.session(t, f.scoped, true)).problem(t, 403, "forbidden")

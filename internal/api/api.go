@@ -37,6 +37,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
@@ -61,6 +62,8 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Customers customers.Service
+	// SigningKeys: list, create, promote, discard (ADR-0026).
+	SigningKeys signing.Local
 	// Audit reads the tenant's audit log (audit:read).
 	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
@@ -279,6 +282,7 @@ var queryParams = map[string][]string{
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
+	"ListSigningKeys": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -460,7 +464,11 @@ func mapErr(err error) *problem {
 	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound):
+	case errors.Is(err, signing.ErrPendingExists):
+		p = &problem{status: http.StatusConflict, code: "pending_key_exists", detail: "The tenant already has a pending key; promote or discard it first."}
+	case errors.Is(err, signing.ErrNotPending):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The key isn't the tenant's pending key."}
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound), errors.Is(err, signing.ErrNotFound):
 		p = errNotFound
 	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
 		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}
