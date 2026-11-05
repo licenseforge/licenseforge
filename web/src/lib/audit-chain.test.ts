@@ -29,34 +29,66 @@ describe("auditHash", () => {
   });
 });
 
+/** Entries of loaded page 1 (raw details as sent). */
+const p1 = (xs: { event: typeof first | typeof second; rawDetails: string | null }[]) => xs.map((x) => ({ ...x, page: 1 }));
+
 describe("verifyChain (newest first)", () => {
-  const chain = [{ event: second, rawDetails: "{}" }, { event: first, rawDetails: D1 }];
+  const chain = p1([{ event: second, rawDetails: "{}" }, { event: first, rawDetails: D1 }]);
   it("accepts an intact chain from seq 1", async () => {
     expect(await verifyChain(chain)).toEqual({ ok: true, checked: 2, fromSeq: 1, toSeq: 2 });
   });
   it("finds a changed field", async () => {
-    expect(await verifyChain([chain[0]!, { event: { ...first, action: "license.revoke" }, rawDetails: D1 }])).toEqual({ ok: false, seq: 1, reason: "hash" });
+    expect(await verifyChain([chain[0]!, { ...chain[1]!, event: { ...first, action: "license.revoke" } }])).toEqual({ ok: false, seq: 1, reason: "hash" });
   });
   it("finds changed details", async () => {
-    expect(await verifyChain([chain[0]!, { event: first, rawDetails: D1.replace("1", "2") }])).toEqual({ ok: false, seq: 1, reason: "hash" });
+    expect(await verifyChain([chain[0]!, { ...chain[1]!, rawDetails: D1.replace("1", "2") }])).toEqual({ ok: false, seq: 1, reason: "hash" });
   });
   it("finds a broken link", async () => {
     // a self-consistent entry 2 that doesn't point at entry 1
     const forged = { ...second, prev_hash: ZERO };
     forged.hash = await auditHash(forged, "{}");
-    expect(await verifyChain([{ event: forged, rawDetails: "{}" }, chain[1]!])).toEqual({ ok: false, seq: 2, reason: "link" });
+    expect(await verifyChain(p1([{ event: forged, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({ ok: false, seq: 2, reason: "link" });
+  });
+  it("finds a broken link deeper in: three entries, broken between 2 and 3", async () => {
+    const third = { ...second, id: "aud_ffffffffffffffffffffffffff", seq: 3, prev_hash: "ab".repeat(32) }; // not entry 2's hash
+    third.hash = await auditHash(third, "{}");
+    expect(await verifyChain(p1([{ event: third, rawDetails: "{}" }, { event: second, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({
+      ok: false,
+      seq: 3,
+      reason: "link",
+    });
   });
   it("finds a missing entry", async () => {
     const third = { ...second, id: "aud_ffffffffffffffffffffffffff", seq: 3, prev_hash: H2 };
     third.hash = await auditHash(third, "{}");
-    expect(await verifyChain([{ event: third, rawDetails: "{}" }, chain[1]!])).toEqual({ ok: false, seq: 3, reason: "gap" });
+    expect(await verifyChain(p1([{ event: third, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({ ok: false, seq: 3, reason: "gap" });
   });
   it("seq 1 must start from zeros", async () => {
     const bad = { ...first, prev_hash: "1".repeat(64) };
     bad.hash = await auditHash(bad, D1);
-    expect(await verifyChain([{ event: bad, rawDetails: D1 }])).toEqual({ ok: false, seq: 1, reason: "start" });
+    expect(await verifyChain(p1([{ event: bad, rawDetails: D1 }]))).toEqual({ ok: false, seq: 1, reason: "start" });
+  });
+  it("refuses hashes that aren't 64 lowercase hex digits", async () => {
+    for (const bad of [{ hash: H1.toUpperCase() }, { hash: H1.slice(2) }, { prev_hash: "0".repeat(63) + "g" }]) {
+      expect(await verifyChain(p1([{ event: { ...first, ...bad }, rawDetails: D1 }]))).toEqual({ ok: false, seq: 1, reason: "hash" });
+    }
+  });
+  it("reports a page whose raw details couldn't be read", async () => {
+    const entries = [chain[0]!, { ...chain[1]!, rawDetails: null, page: 2 }];
+    expect(await verifyChain(entries)).toEqual({ ok: false, page: 2, reason: "page" });
   });
   it("can't judge the link below the oldest loaded entry", async () => {
     expect(await verifyChain([chain[0]!])).toEqual({ ok: true, checked: 1, fromSeq: 2, toSeq: 2 });
+  });
+});
+
+describe("raw details and JSON.parse agree", () => {
+  it("a duplicate details key: the last one wins in both", () => {
+    const body = `{"items":[{"details":{"a":1},"id":"x","details":{"b":2}}]}`;
+    expect(detailsSpans(body)).toEqual(['{"b":2}']);
+    expect((JSON.parse(body) as { items: { details: unknown }[] }).items[0]!.details).toEqual({ b: 2 });
+  });
+  it("numbers of any length are read", () => {
+    expect(detailsSpans(`{"items":[{"details":{"n":${"9".repeat(80)}}}]}`)).toEqual([`{"n":${"9".repeat(80)}}`]);
   });
 });

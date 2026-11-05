@@ -11,6 +11,8 @@ type AuditEvent = components["schemas"]["AuditEvent"];
  * small scanner rather than JSON.parse: re-serializing would change the
  * bytes the hash covers (key order, spacing, escapes).
  */
+const SCALAR = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
+
 export function detailsSpans(body: string): string[] {
   let i = 0;
   const ws = () => {
@@ -54,7 +56,8 @@ export function detailsSpans(body: string): string[] {
         else fail();
       }
     }
-    const m = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(body.slice(i, i + 64));
+    SCALAR.lastIndex = i; // sticky: matches at i only, any length
+    const m = SCALAR.exec(body);
     if (!m) fail();
     i += m![0].length;
   };
@@ -127,21 +130,30 @@ export async function auditHash(e: AuditEvent, rawDetails: string): Promise<stri
 
 export type ChainResult =
   | { ok: true; checked: number; fromSeq: number; toSeq: number }
-  | { ok: false; seq: number; reason: "hash" | "link" | "gap" | "start" };
+  | { ok: false; seq: number; reason: "hash" | "link" | "gap" | "start" }
+  | { ok: false; page: number; reason: "page" };
+
+const HEX64 = /^[0-9a-f]{64}$/;
 
 /**
- * Checks loaded entries, newest first: each hash recomputes, each entry's
- * prev_hash is the next older one's hash, seqs have no holes, and seq 1
- * starts from zeros. It can't see entries before the oldest loaded one.
+ * Checks loaded entries, newest first: hash and prev_hash are 64 lowercase
+ * hex digits, each hash recomputes, each entry's prev_hash is the next
+ * older one's hash, seqs have no holes, and seq 1 starts from zeros. An
+ * entry of a page whose raw details couldn't be read (rawDetails null) is
+ * reported by page. The chain is unkeyed and the same server sends data and
+ * hashes, so this shows the loaded entries are consistent with each other;
+ * it can't detect a rewrite of the whole chain or removed newest entries.
  */
-export async function verifyChain(entries: { event: AuditEvent; rawDetails: string }[]): Promise<ChainResult> {
+export async function verifyChain(entries: { event: AuditEvent; rawDetails: string | null; page: number }[]): Promise<ChainResult> {
   for (let i = 0; i < entries.length; i++) {
-    const { event: e, rawDetails } = entries[i]!;
-    if ((await auditHash(e, rawDetails)) !== e.hash.toLowerCase()) return { ok: false, seq: e.seq, reason: "hash" };
+    const { event: e, rawDetails, page } = entries[i]!;
+    if (rawDetails === null) return { ok: false, page, reason: "page" };
+    if (!HEX64.test(e.hash) || !HEX64.test(e.prev_hash)) return { ok: false, seq: e.seq, reason: "hash" };
+    if ((await auditHash(e, rawDetails)) !== e.hash) return { ok: false, seq: e.seq, reason: "hash" };
     const older = entries[i + 1]?.event;
     if (older) {
       if (older.seq !== e.seq - 1) return { ok: false, seq: e.seq, reason: "gap" };
-      if (e.prev_hash.toLowerCase() !== older.hash.toLowerCase()) return { ok: false, seq: e.seq, reason: "link" };
+      if (e.prev_hash !== older.hash) return { ok: false, seq: e.seq, reason: "link" };
     } else if (e.seq === 1 && !/^0{64}$/.test(e.prev_hash)) {
       return { ok: false, seq: e.seq, reason: "start" };
     }

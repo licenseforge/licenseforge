@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { actorText, type AuditEvent, auditQuery, detailsText, objectText } from "@/api/audit";
 import { errorText, Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,9 @@ const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2 align-top";
 
 function chainText(r: ChainResult) {
-  return r.ok
-    ? t("audit.verified", { count: String(r.checked), from: String(r.fromSeq), to: String(r.toSeq) })
-    : t(`audit.broken.${r.reason}`, { seq: String(r.seq) });
+  if (r.ok) return t("audit.verified", { count: String(r.checked), from: String(r.fromSeq), to: String(r.toSeq) });
+  if (r.reason === "page") return t("audit.broken.page", { page: String(r.page) });
+  return t(`audit.broken.${r.reason}`, { seq: String(r.seq) });
 }
 
 export function AuditPage() {
@@ -24,10 +24,15 @@ export function AuditPage() {
   const [open, setOpen] = useState<AuditEvent | null>(null);
   const pages = list.data?.pages ?? [];
   const rows = pages.flatMap((p) => p.items);
-  // Over what is loaded, newest first: each page's entries with their raw details.
+  // Over what is loaded, newest first: each page's entries with their raw details (null: page unreadable).
   const verify = useMutation({
-    mutationFn: () => verifyChain(pages.flatMap((p) => p.items.map((event, i) => ({ event, rawDetails: p.rawDetails[i]! })))),
+    mutationFn: () =>
+      verifyChain(pages.flatMap((p, n) => p.items.map((event, i) => ({ event, rawDetails: p.rawDetails?.[i] ?? null, page: n + 1 })))),
   });
+  // A result is about the entries it checked: drop it when the loaded entries change (Load more, refetch).
+  const { reset } = verify;
+  useEffect(() => reset(), [list.data, reset]);
+  const head = rows[0]; // the newest entry: its hash is what to compare with a SIEM export
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -41,8 +46,13 @@ export function AuditPage() {
           </Button>
         )}
       </div>
+      {head && (
+        <p className="mt-3 text-sm">
+          {t("audit.head", { seq: String(head.seq) })} <code className="break-all font-mono text-xs">{head.hash}</code>
+        </p>
+      )}
       {verify.data && (
-        <p role={verify.data.ok ? "status" : "alert"} className={`mt-3 text-sm ${verify.data.ok ? "" : "font-medium"}`}>
+        <p role={verify.data.ok ? "status" : "alert"} className={`mt-2 text-sm ${verify.data.ok ? "" : "font-medium"}`}>
           {chainText(verify.data)}
         </p>
       )}

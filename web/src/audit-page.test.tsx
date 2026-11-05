@@ -3,7 +3,7 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { D1, first, second } from "./lib/audit-chain.fixture";
+import { D1, first, H2, second } from "./lib/audit-chain.fixture";
 import { createAppRouter } from "./router";
 
 beforeAll(() => {
@@ -36,6 +36,10 @@ async function open(role: string, all: boolean, body: string | { status: number;
       if (p === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (p === "/api/v1/me/tenants") return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: all, product_ids: all ? [] : ["prd_1"] }] });
       if (p.endsWith("/audit-events")) {
+        if (typeof body === "object" && "pages" in body) {
+          const pages = (body as unknown as { pages: { first: string; second: string } }).pages;
+          return new Response(new URL(req.url).searchParams.get("cursor") ? pages.second : pages.first, { headers: { "Content-Type": "application/json" } });
+        }
         const r = typeof body === "string" ? { status: 200, body } : body;
         return new Response(r.body, { status: r.status, headers: { "Content-Type": r.status === 200 ? "application/json" : "application/problem+json" } });
       }
@@ -86,7 +90,8 @@ it("verifies the loaded chain, and finds an entry changed after it was written",
   let r = await open("owner", true);
   await vi.waitFor(() => expect(r.button("Verify loaded entries")).toBeDefined());
   await act(async () => r.button("Verify loaded entries")!.click());
-  await vi.waitFor(() => expect(r.el.textContent).toContain("Chain intact for the 2 loaded entries (#1 to #2)"));
+  await vi.waitFor(() => expect(r.el.textContent).toContain("The 2 loaded entries (#1–#2) are consistent with each other"));
+  expect(r.el.textContent).toContain(`Head (entry #2): ${H2}`); // to compare with a SIEM export
   act(() => root?.unmount());
   root = undefined;
   // The same body, with one entry's action rewritten (its hash unchanged).
@@ -94,6 +99,26 @@ it("verifies the loaded chain, and finds an entry changed after it was written",
   await vi.waitFor(() => expect(r.button("Verify loaded entries")).toBeDefined());
   await act(async () => r.button("Verify loaded entries")!.click());
   await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Entry #1 doesn't match its hash"));
+});
+
+it("a page it can't read exactly is still listed, and verify says which page", async () => {
+  // Two "items" arrays: JSON.parse keeps the last, the scanner sees both, so they don't line up.
+  const body = `{"items":[${itemText(first, D1)}],"items":[${itemText(second, "{}")},${itemText(first, D1)}]}`;
+  const r = await open("owner", true, body);
+  await vi.waitFor(() => expect(r.el.querySelectorAll("tbody tr")).toHaveLength(2));
+  await act(async () => r.button("Verify loaded entries")!.click());
+  await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Can't verify page 1"));
+});
+
+it("drops a verify result when more entries load", async () => {
+  const twoPages = { first: `{"items":[${itemText(second, "{}")}],"next_cursor":"c2"}`, second: `{"items":[${itemText(first, D1)}]}` };
+  const r = await open("owner", true, { pages: twoPages } as never);
+  await vi.waitFor(() => expect(r.button("Verify loaded entries")).toBeDefined());
+  await act(async () => r.button("Verify loaded entries")!.click());
+  await vi.waitFor(() => expect(r.el.textContent).toContain("are consistent with each other"));
+  await act(async () => r.button("Load more")!.click());
+  await vi.waitFor(() => expect(r.el.querySelectorAll("tbody tr")).toHaveLength(2));
+  await vi.waitFor(() => expect(r.el.textContent).not.toContain("are consistent with each other"));
 });
 
 it("offers the audit log only to owners and admins with every product", async () => {

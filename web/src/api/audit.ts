@@ -7,8 +7,12 @@ import type { Membership } from "./tokens";
 export type AuditEvent = components["schemas"]["AuditEvent"];
 type AuditEventPage = components["schemas"]["AuditEventPage"];
 
-/** One loaded page: the entries, and each entry's details exactly as sent (for the chain check). */
-export type AuditPage = { items: AuditEvent[]; rawDetails: string[]; next_cursor?: string };
+/**
+ * One loaded page: the entries, and each entry's details exactly as sent
+ * (for the chain check), or null if they couldn't be cut out of the body;
+ * the entries are shown either way.
+ */
+export type AuditPage = { items: AuditEvent[]; rawDetails: string[] | null; next_cursor?: string };
 
 /** Reads one page as text: the parsed entries, plus their details cut raw from the body. */
 export async function auditPage(tenant: string, cursor?: string): Promise<AuditPage> {
@@ -16,8 +20,13 @@ export async function auditPage(tenant: string, cursor?: string): Promise<AuditP
     await api.GET("/tenants/{tenant}/audit-events", { params: { path: { tenant }, query: { cursor } }, parseAs: "text" }),
   );
   const page = JSON.parse(body) as AuditEventPage;
-  const rawDetails = detailsSpans(body);
-  if (rawDetails.length !== page.items.length) throw new Error("audit page: details and items don't line up");
+  let rawDetails: string[] | null = null;
+  try {
+    const spans = detailsSpans(body);
+    if (spans.length === page.items.length) rawDetails = spans; // else they don't line up: unverifiable, still listed
+  } catch {
+    // unreadable for the check: still listed, verification says so
+  }
   return { items: page.items, rawDetails, next_cursor: page.next_cursor };
 }
 
