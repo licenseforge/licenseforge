@@ -81,15 +81,6 @@ export function TenantLayout() {
   );
 }
 
-export function Overview() {
-  const { slug } = useParams({ from: "/app/t/$slug/" });
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">{t("overview.title")}</h1>
-      <p className="mt-2 text-muted-foreground">{t("overview.body", { tenant: slug })}</p>
-    </>
-  );
-}
 
 export function NoTenants() {
   return <p className="text-muted-foreground">{t("tenant.none")}</p>;

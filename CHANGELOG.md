@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - Signing keys: `signing.Local` `Create`, `Promote` and `Discard` now require `key:write` (owners, ADR-0019) on the whole tenant, in the tenant they act on; other roles, `sdk` and admin tokens, product-scoped principals, another tenant's principal and calls without a principal get `authz.ErrDenied` and change nothing.
 
 ### Added
+- Dashboard overview at `/t/{slug}` (ADR-0020).
+  - Licenses by status and active customers. The API has no totals (ADR-0032), so the counts page through the lists, stop at 2,000 and show `2,000+` beyond. The customers count is only for callers who see every product.
+  - The newest licenses, with product and customer names.
+  - Activations, failures and recent audit activity wait for their APIs.
 - Dashboard licenses screen at `/t/{slug}/licenses` (ADR-0020).
   - The list filters by product, customer and status, and shows key hints, never keys.
   - The details show the entitlement snapshot and dates. Suspend and revoke ask for confirmation, and revoke says it is final; reinstate doesn't ask.
