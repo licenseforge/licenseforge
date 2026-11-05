@@ -48,6 +48,11 @@ func NewOTLP(c OTLPConfig) (*OTLP, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
 		return nil, errors.New("otlp: endpoint: want https://host[:port]/path, without userinfo, query or fragment")
 	}
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return nil, errors.New("otlp: endpoint: port must be 1 to 65535")
+		}
+	}
 	ip := net.ParseIP(u.Hostname())
 	loopback := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
 	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
@@ -144,9 +149,12 @@ func (o *OTLP) Send(ctx context.Context, batch []Entry) error {
 		return fmt.Errorf("otlp: %s://%s: %w", o.url.Scheme, o.url.Host, errors.Unwrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
-	rb, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	rb, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
 	if err != nil {
 		return fmt.Errorf("otlp: response: %w", err)
+	}
+	if len(rb) > 1<<20 { // a truncated body is never proof of delivery
+		return errors.New("otlp: response larger than 1 MiB")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("otlp: collector answered %s", resp.Status)

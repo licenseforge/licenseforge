@@ -163,6 +163,7 @@ func TestOTLPDeliveryRule(t *testing.T) {
 		{400, "", false, ""},
 		{429, "", false, ""},
 		{503, "", false, ""},
+		{200, strings.Repeat(" ", 1<<20) + "<html>", false, "text/html"}, // judged on the whole body, not its first MiB
 	} {
 		c.set(tc.status, tc.reply, tc.ctype)
 		if err := o.Send(context.Background(), []Entry{entry(1, `{}`)}); (err == nil) != tc.ok {
@@ -199,6 +200,8 @@ func TestOTLPRefuses(t *testing.T) {
 		"query in the endpoint":    {Endpoint: "https://otel.example/v1/logs?api_key=secret"},
 		"fragment in the endpoint": {Endpoint: "https://otel.example/v1/logs#secret"},
 		"missing CA file":          {Endpoint: "https://otel.example/v1/logs", CAFile: p.dir + "/nope"},
+		"port 0":                   {Endpoint: "https://otel.example:0/v1/logs"},
+		"port too large":           {Endpoint: "https://otel.example:99999/v1/logs"},
 	} {
 		if _, err := NewOTLP(cfg); err == nil {
 			t.Errorf("NewOTLP accepted %s", name)
@@ -259,6 +262,14 @@ func TestOTLPHeadersAndRedaction(t *testing.T) {
 	}
 	if got := c.headers[0].Get("X-Api-Key"); got != "ab+c/d==" {
 		t.Errorf("x-api-key = %q", got)
+	}
+	// A transport error names only scheme and host: no path, no header value.
+	o2, err := NewOTLP(OTLPConfig{Endpoint: "http://127.0.0.1:1/v1/hunter2", Headers: "x-api-key=hunter3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o2.Send(context.Background(), []Entry{entry(1, `{}`)}); err == nil || strings.Contains(err.Error(), "hunter") {
+		t.Errorf("transport error: %v", err)
 	}
 	for _, ep := range []string{"https://otel.example/v1/logs?api_key=hunter2", "http://otel.example/hunter2"} {
 		if _, err := NewOTLP(OTLPConfig{Endpoint: ep}); err == nil || strings.Contains(err.Error(), "hunter2") {
