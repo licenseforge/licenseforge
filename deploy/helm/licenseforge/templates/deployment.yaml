@@ -3,6 +3,8 @@
 {{- if le (int .Values.terminationGracePeriodSeconds) (add (int .Values.drainSeconds) 15) }}{{ fail "terminationGracePeriodSeconds must exceed drainSeconds + 15" }}{{ end }}
 {{- /* dig: values reused from a release older than oidc.* have no oidc key. */}}
 {{- $oidc := .Values.oidc | default dict }}
+{{- $sys := include "licenseforge.syslog" . | fromYaml }}
+{{- if and $sys.host (not (regexMatch "^[0-9]+$" (toString $sys.port))) }}{{ fail "audit.export.syslog.port must be a port number" }}{{ end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -56,6 +58,29 @@ spec:
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
               value: {{ printf ":%s" (include "licenseforge.metricsPort" .) | quote }}
+            {{- with $sys.host }}
+            # SIEM export (ADR-0036): RFC 5424 over TLS, verification always on.
+            - name: LICENSEFORGE_AUDIT_SYSLOG_ADDR
+              value: {{ include "licenseforge.hostPort" (list . $sys.port) | quote }}
+            {{- with $sys.serverName }}
+            - name: LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $sys.sdID }}
+            - name: LICENSEFORGE_AUDIT_SYSLOG_SD_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $sys.caSecret }}
+            - name: LICENSEFORGE_AUDIT_SYSLOG_CA_FILE
+              value: /etc/licenseforge/syslog/ca/ca.crt
+            {{- end }}
+            {{- if $sys.clientSecret }}
+            - name: LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE
+              value: /etc/licenseforge/syslog/client/tls.crt
+            - name: LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE
+              value: /etc/licenseforge/syslog/client/tls.key
+            {{- end }}
+            {{- end }}
             {{- if $oidc.enabled }}
             - name: LICENSEFORGE_OIDC_ISSUER
               value: {{ $oidc.issuer | quote }}
@@ -84,6 +109,24 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 2
           resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- if and $sys.host (or $sys.caSecret $sys.clientSecret) }}
+          volumeMounts:
+            {{- if $sys.caSecret }}
+            - {name: syslog-ca, mountPath: /etc/licenseforge/syslog/ca, readOnly: true}
+            {{- end }}
+            {{- if $sys.clientSecret }}
+            - {name: syslog-client, mountPath: /etc/licenseforge/syslog/client, readOnly: true}
+            {{- end }}
+      volumes:
+        {{- with $sys.caSecret }}
+        - name: syslog-ca
+          secret: {secretName: {{ . | quote }}, items: [{key: ca.crt, path: ca.crt}]}
+        {{- end }}
+        {{- with $sys.clientSecret }}
+        - name: syslog-client
+          secret: {secretName: {{ . | quote }}, items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}], defaultMode: 0440}  # group: the pod's fsGroup
+        {{- end }}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

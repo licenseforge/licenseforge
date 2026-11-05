@@ -53,3 +53,13 @@ capabilities:
 {{- define "licenseforge.metricsPort" -}}
 {{- dig "port" 9090 (.Values.metrics | default dict) | int -}}
 {{- end -}}
+
+{{/* audit.export.syslog, nil-safe (values reused from older releases). */}}
+{{- define "licenseforge.syslog" -}}
+{{- toYaml (dig "export" "syslog" dict (.Values.audit | default dict)) -}}
+{{- end -}}
+
+{{/* host:port, an IPv6 host in brackets. */}}
+{{- define "licenseforge.hostPort" -}}
+{{- $h := index . 0 -}}{{- if contains ":" $h -}}[{{ $h }}]{{- else -}}{{ $h }}{{- end -}}:{{ index . 1 | int }}
+{{- end -}}
