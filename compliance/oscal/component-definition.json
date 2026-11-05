@@ -771,7 +771,7 @@
               {
                 "uuid": "e636681c-72eb-46a6-bede-515df58abf3c",
                 "control-id": "ia-2.6",
-                "description": "A tenant can require phishing-resistant MFA (ADR-0038): sessions whose IdP asserts amr hwk, sc or pop, or a configured acr (e.g. Okta phr/phrh, an Entra authentication context requiring phishing-resistant MFA), are recorded as phishing_resistant: a separate authenticator device bound to the origin or the channel (WebAuthn, PIV/CAC).",
+                "description": "A tenant can require phishing-resistant MFA (ADR-0038): sessions whose IdP asserts amr hwk, sc or pop, or a configured acr (e.g. Okta phr/phrh, an Entra authentication context requiring phishing-resistant MFA), are recorded as phishing_resistant. Whether that authenticator is a separate device depends on the IdP's authenticator policy (e.g. hardware security keys or PIV/CAC only, versus synced passkeys).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -795,7 +795,7 @@
               {
                 "uuid": "be29326b-aa2f-5724-bd6b-14a06044504a",
                 "control-id": "ia-2.8",
-                "description": "The login flow is single-use: state, nonce and the PKCE verifier sit in a short-lived __Host- cookie that is cleared on the first callback, the nonce is bound to the ID token, and the PKCE S256 challenge is bound to the code exchange.",
+                "description": "The login flow is single-use: state, nonce and the PKCE verifier sit in a short-lived __Host- cookie that is cleared on the first callback, the nonce is bound to the ID token, and the PKCE S256 challenge is bound to the code exchange. Replay resistance of the authenticator itself is inherited from the IdP; the per-tenant phishing-resistant policy strengthens it once enforcement lands (ADR-0038).",
                 "props": [
                   {
                     "name": "implementation-status",

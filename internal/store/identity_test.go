@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -749,6 +750,46 @@ func TestRefusedKeepsOutages(t *testing.T) {
 		err := refused(&pgconn.PgError{Code: c.code, Message: c.msg})
 		if errors.Is(err, ErrInvitation) != c.refusal {
 			t.Errorf("%s %q: ErrInvitation=%v, want %v", c.code, c.msg, !c.refusal, c.refusal)
+		}
+	}
+}
+
+// The column grants on sessions and tenants are pinned exactly (ADR-0038):
+// a column added to a grant by mistake fails here.
+func TestSessionAndTenantGrantsPinned(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	cols := func(role, table, priv string) string {
+		rows, err := owner.Query(`SELECT column_name FROM information_schema.column_privileges
+			WHERE grantee = $1 AND table_name = $2 AND privilege_type = $3 ORDER BY column_name`, role, table, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, c)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tc := range []struct{ role, table, priv, want string }{
+		{AppRole, "tenants", "UPDATE", "mfa_policy,updated_at"},
+		{IdentityRole, "tenants", "UPDATE", ""},
+		{PlatformRole, "tenants", "UPDATE", "created_at,id,mfa_policy,name,slug,updated_at"},
+		{IdentityRole, "sessions", "UPDATE", "last_seen_at"},
+		{AppRole, "sessions", "UPDATE", ""},
+		{PlatformRole, "sessions", "UPDATE", ""},
+		{IdentityRole, "sessions", "INSERT", "acr,acrs,amr,assurance,auth_time,created_at,expires_at,id,last_seen_at,token_hash,user_id"},
+	} {
+		if got := cols(tc.role, tc.table, tc.priv); got != tc.want {
+			t.Errorf("%s %s on %s: %q, want %q", tc.role, tc.priv, tc.table, got, tc.want)
 		}
 	}
 }

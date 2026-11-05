@@ -32,11 +32,17 @@ func DefaultAssurancePolicy() AssurancePolicy {
 }
 
 // never are amr values that never count as a factor of MFA (ADR-0038), even
-// if configured.
+// if configured, in any case.
 var never = []string{"pwd", "sms", "tel"}
 
+func isNever(v string) bool {
+	return slices.ContainsFunc(never, func(n string) bool { return strings.EqualFold(n, v) })
+}
+
 // The environment variables of an AssurancePolicy (comma-separated values;
-// unset or empty keeps the default set).
+// unset or empty keeps the default set; "none" in an AMR variable disables
+// amr counting for that level, e.g. on Entra, where only configured acrs
+// values count).
 const (
 	EnvMFAAMR               = "LICENSEFORGE_OIDC_MFA_AMR"
 	EnvPhishingResistantAMR = "LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR"
@@ -66,13 +72,20 @@ func AssurancePolicyFromEnv(getenv func(string) string) (AssurancePolicy, error)
 		if raw == "" {
 			continue
 		}
+		if v.isAM && raw == "none" {
+			*v.set = []string{}
+			continue
+		}
 		var vals []string
 		for _, x := range strings.Split(raw, ",") {
 			x = strings.TrimSpace(x)
 			if !v.re.MatchString(x) {
 				return AssurancePolicy{}, fmt.Errorf("%s: malformed value %q", v.env, x)
 			}
-			if v.isAM && slices.Contains(never, x) {
+			if v.isAM && x == "none" {
+				return AssurancePolicy{}, fmt.Errorf("%s: none stands alone (it disables amr counting)", v.env)
+			}
+			if v.isAM && isNever(x) {
 				return AssurancePolicy{}, fmt.Errorf("%s: %q never counts as MFA (ADR-0038)", v.env, x)
 			}
 			vals = append(vals, x)
@@ -110,7 +123,7 @@ func (p AssurancePolicy) Assess(c Claims) SessionAuth {
 	acrs := append([]string{a.ACR}, a.ACRs...)
 	hit := func(amrSet, acrSet []string) bool {
 		for _, v := range a.AMR {
-			if slices.Contains(amrSet, v) && !slices.Contains(never, v) {
+			if slices.Contains(amrSet, v) && !isNever(v) {
 				return true
 			}
 		}
