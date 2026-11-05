@@ -812,6 +812,11 @@ func TestInvitationEndpoints(t *testing.T) {
 	f.do(t, "POST", accept, body, bearer(f.token(t, f.a.ID, f.ownerA, authz.Admin).Token)).problem(t, 401, "unauthenticated")
 	f.do(t, "POST", accept, body, f.session(t, invitee, false)).problem(t, 403, "csrf_failed")
 	unknown := f.do(t, "POST", accept, `{"token":"nope"}`, f.session(t, invitee, true)).problem(t, 422, "validation_failed")
+	for _, tok := range []string{"", strings.Repeat("a", 65), strings.Repeat("a", 1<<16)} {
+		if got := f.do(t, "POST", accept, `{"token":"`+tok+`"}`, f.session(t, invitee, true)).problem(t, 422, "validation_failed"); !reflect.DeepEqual(got, unknown) {
+			t.Errorf("token of %d bytes: %v", len(tok), got)
+		}
+	}
 	wrongUser := f.do(t, "POST", accept, body, f.session(t, f.user(t, "y"+email), true)).problem(t, 422, "validation_failed")
 	if !reflect.DeepEqual(unknown, wrongUser) {
 		t.Errorf("wrong user %v, unknown token %v", wrongUser, unknown)
@@ -831,4 +836,38 @@ func TestInvitationEndpoints(t *testing.T) {
 	}
 	// Other paths outside a tenant stay 404 for sessions.
 	f.do(t, "POST", Prefix+"/invitations/nope", body, f.session(t, invitee, true)).problem(t, 404, "not_found")
+}
+
+// Member changes report the pending invitations they revoked, and
+// revoke_invitations=false keeps them.
+func TestMemberChangesRevokeInvitations(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	admin := f.session(t, f.adminA, true)
+	inv := func() string {
+		r := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/invitations", `{"email":"`+strings.ToLower(ids.New("i")[2:14])+`@example.com","role":"viewer","all_products":true}`, admin)
+		if r.code != 201 {
+			t.Fatalf("invite: %d %s", r.code, r.raw)
+		}
+		return r.body["id"].(string)
+	}
+	m := membersPath(f.a.Slug) + "/" + f.mem[f.adminA]
+	gone := inv()
+	if r := f.do(t, "PATCH", m, `{"product_ids":["`+f.prodA+`"]}`, owner); r.code != 200 || !reflect.DeepEqual(r.body["revoked_invitation_ids"], []any{gone}) {
+		t.Fatalf("narrowing: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", m, `{"all_products":true}`, owner); r.code != 200 {
+		t.Fatalf("widen: %d %s", r.code, r.raw)
+	}
+	kept := inv()
+	if r := f.do(t, "PATCH", m+"?revoke_invitations=false", `{"role":"manager"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_invitation_ids"]) != "[]" {
+		t.Fatalf("opt-out: %d %s", r.code, r.raw)
+	}
+	// A later change that doesn't newly exclude it keeps it.
+	if r := f.do(t, "PATCH", m, `{"role":"support"}`, owner); r.code != 200 || fmt.Sprint(r.body["revoked_invitation_ids"]) != "[]" {
+		t.Fatalf("later demotion: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "DELETE", m, "", owner); r.code != 204 || r.h.Get("X-Revoked-Invitation-Ids") != kept {
+		t.Errorf("delete: %d %v", r.code, r.h)
+	}
 }

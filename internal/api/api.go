@@ -244,8 +244,8 @@ var queryParams = map[string][]string{
 	"ListApiTokens":   {"limit", "cursor"},
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
-	"RemoveMember":    {"revoke_tokens"},
-	"UpdateMember":    {"revoke_tokens"},
+	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
+	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
 
 // strictInput refuses unknown query parameters and decodes the body again

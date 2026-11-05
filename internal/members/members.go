@@ -20,6 +20,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	entapitoken "licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
@@ -90,15 +91,15 @@ type Change struct {
 // change it at all (authz.ErrDenied), then the values must be valid
 // (InvalidError), within the caller's role, and leave an owner.
 //
-// capTokens (the default, ADR-0035) also revokes, in the same transaction
-// and with removal's rules, the member's active tokens this change newly
-// excludes: allowed by the old grant, not by the new one (a role above the
-// new one, or products outside the new scope). A token an earlier change
-// kept (revoke_tokens=false) stays. It returns the member and the revoked
-// token IDs.
-func (s Service) Update(ctx context.Context, memberID string, c Change, capTokens bool) (*ent.Membership, []string, error) {
+// With opts (both true by default, ADR-0035) it also revokes, in the same
+// transaction and with removal's rules, what this change newly excludes:
+// the member's active tokens the new grant doesn't allow (a role above the
+// new one, or products outside the new scope), and their pending
+// invitations the new grant couldn't have made. Something an earlier change
+// kept stays. It returns the member and what it revoked.
+func (s Service) Update(ctx context.Context, memberID string, c Change, opts Revoke) (*ent.Membership, Revoked, error) {
 	var out *ent.Membership
-	var revoked []string
+	var revoked Revoked
 	err := s.change(ctx, "member.update", memberID, func(tx *ent.Tx, m *ent.Membership, from authz.Grant, owners int) (map[string]any, error) {
 		if len(c.Null) > 0 {
 			return nil, &InvalidError{"/" + c.Null[0], "can't be null"}
@@ -120,8 +121,10 @@ func (s Service) Update(ctx context.Context, memberID string, c Change, capToken
 			return nil, ErrLastOwner
 		}
 		var err error
-		revoked, _, err = revokeTokens(ctx, tx, m, "member.update", capTokens, func(g authz.Grant) bool { return !exceeds(g, to) || exceeds(g, from) })
-		if err != nil {
+		if revoked.Tokens, _, err = revokeTokens(ctx, tx, m, "member.update", opts.Tokens, func(g authz.Grant) bool { return !exceeds(g, to) || exceeds(g, from) }); err != nil {
+			return nil, err
+		}
+		if revoked.Invitations, _, err = revokeInvitations(ctx, tx, m, "member.update", opts.Invitations, func(g authz.Grant) bool { return canInvite(to, g) || !canInvite(from, g) }); err != nil {
 			return nil, err
 		}
 		// Product rows first: they reference (membership, scope_all = false).
@@ -142,13 +145,21 @@ func (s Service) Update(ctx context.Context, memberID string, c Change, capToken
 		}
 		out, err = withEdges(tx.Membership.Query()).Where(membership.ID(m.ID)).Only(ctx)
 		return map[string]any{"from_role": string(from.Role), "from_scope_all": from.Scope.All, "from_products": len(from.Scope.Products),
-			"role": string(to.Role), "scope_all": to.Scope.All, "products": len(to.Scope.Products), "tokens_revoked": len(revoked)}, err
+			"role": string(to.Role), "scope_all": to.Scope.All, "products": len(to.Scope.Products),
+			"tokens_revoked": len(revoked.Tokens), "invitations_revoked": len(revoked.Invitations)}, err
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, Revoked{}, err
 	}
 	return out, revoked, nil
 }
+
+// Revoke says what a member change revokes along with it (ADR-0035): the
+// member's API tokens and their pending invitations. Both default to true.
+type Revoke struct{ Tokens, Invitations bool }
+
+// Revoked lists what a member change revoked.
+type Revoked struct{ Tokens, Invitations []string }
 
 // exceeds reports whether a token's grant g goes beyond grant to: a role with
 // a permission to lacks (never sdk, which is always assignable, as in
@@ -163,21 +174,32 @@ func exceeds(g, to authz.Grant) bool {
 	return g.Scope.All || slices.ContainsFunc(g.Scope.Products, func(p string) bool { return !slices.Contains(to.Scope.Products, p) })
 }
 
-// Remove removes a member. revoke (the default ADR-0029 asks for) also
-// revokes every active API token the member created, each audited, in the
-// same transaction; if the caller may not revoke one of them, nothing
-// changes. Access through the member's sessions ends at once: every API
-// request re-reads the membership. It returns the revoked token IDs.
-// Leaving a tenant (removing oneself) needs member:write too.
-func (s Service) Remove(ctx context.Context, memberID string, revoke bool) ([]string, error) {
-	var revoked []string
+// canInvite reports whether a member with grant inviter could have made an
+// invitation with grant g (authz.CanAssign's rules for a user principal:
+// member:write on every product, and a role within the inviter's).
+func canInvite(inviter, g authz.Grant) bool {
+	return inviter.Role.Can(authz.MemberWrite) && inviter.Scope.All && g.Role.Within(inviter.Role)
+}
+
+// Remove removes a member. With opts (both true by default, ADR-0029,
+// ADR-0035) it also revokes every active API token the member created and
+// every pending invitation they sent, each audited, in the same
+// transaction; if the caller may not revoke one of them, nothing changes.
+// Access through the member's sessions ends at once: every API request
+// re-reads the membership. It returns what it revoked. Leaving a tenant
+// (removing oneself) needs member:write too.
+func (s Service) Remove(ctx context.Context, memberID string, opts Revoke) (Revoked, error) {
+	var revoked Revoked
 	err := s.change(ctx, "member.remove", memberID, func(tx *ent.Tx, m *ent.Membership, from authz.Grant, owners int) (map[string]any, error) {
 		if from.Role == authz.Owner && owners == 1 {
 			return nil, ErrLastOwner
 		}
-		var kept int
+		var keptTokens, keptInvitations int
 		var err error
-		if revoked, kept, err = revokeTokens(ctx, tx, m, "member.remove", revoke, nil); err != nil {
+		if revoked.Tokens, keptTokens, err = revokeTokens(ctx, tx, m, "member.remove", opts.Tokens, nil); err != nil {
+			return nil, err
+		}
+		if revoked.Invitations, keptInvitations, err = revokeInvitations(ctx, tx, m, "member.remove", opts.Invitations, nil); err != nil {
 			return nil, err
 		}
 		if _, err := tx.MembershipProduct.Delete().Where(membershipproduct.MembershipID(m.ID)).Exec(ctx); err != nil {
@@ -186,10 +208,12 @@ func (s Service) Remove(ctx context.Context, memberID string, revoke bool) ([]st
 		if err := tx.Membership.DeleteOne(m).Exec(ctx); err != nil {
 			return nil, err
 		}
-		return map[string]any{"role": string(from.Role), "user_id": m.UserID, "revoke_tokens": revoke, "tokens_revoked": len(revoked), "tokens_kept": kept}, nil
+		return map[string]any{"role": string(from.Role), "user_id": m.UserID,
+			"revoke_tokens": opts.Tokens, "tokens_revoked": len(revoked.Tokens), "tokens_kept": keptTokens,
+			"revoke_invitations": opts.Invitations, "invitations_revoked": len(revoked.Invitations), "invitations_kept": keptInvitations}, nil
 	})
 	if err != nil {
-		return nil, err
+		return Revoked{}, err
 	}
 	return revoked, nil
 }
@@ -222,14 +246,54 @@ func revokeTokens(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason str
 			WHERE id = $1 AND revoked_at IS NULL`, t.ID); err != nil {
 			return nil, 0, err
 		}
-		ev := audit.By(p, "api_token.revoke", "api_token", t.ID)
-		ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": reason, "member_id": m.ID}
-		if _, err := audit.Record(ctx, tx, m.TenantID, ev); err != nil {
+		if err := recordRevocation(ctx, tx, m, p, "api_token", t.ID, reason); err != nil {
 			return nil, 0, err
 		}
 		revoked = append(revoked, t.ID)
 	}
 	return revoked, kept, nil
+}
+
+// revokeInvitations is revokeTokens for the pending (open, unexpired)
+// invitations m's user sent.
+func revokeInvitations(ctx context.Context, tx *ent.Tx, m *ent.Membership, reason string, revoke bool, keep func(authz.Grant) bool) (revoked []string, kept int, err error) {
+	p, _ := authz.FromContext(ctx)
+	invs, err := tx.Invitation.Query().Where(invitation.InvitedBy(m.UserID), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil(),
+		func(s *entsql.Selector) { s.Where(entsql.ExprP(s.C(invitation.FieldExpiresAt) + " > now()")) }).
+		Order(ent.Asc(invitation.FieldID)).WithProducts().ForUpdate().All(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, inv := range invs {
+		g := authz.Grant{Role: authz.Role(inv.Role), Scope: authz.Scope{All: inv.ScopeAll}}
+		for _, ip := range inv.Edges.Products {
+			g.Scope.Products = append(g.Scope.Products, ip.ProductID)
+		}
+		if !revoke || (keep != nil && keep(g)) {
+			kept++
+			continue
+		}
+		if err := authz.CanAssign(ctx, authz.User, &g, nil); err != nil {
+			return nil, 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+			WHERE id = $1 AND revoked_at IS NULL AND accepted_at IS NULL`, inv.ID); err != nil {
+			return nil, 0, err
+		}
+		if err := recordRevocation(ctx, tx, m, p, "invitation", inv.ID, reason); err != nil {
+			return nil, 0, err
+		}
+		revoked = append(revoked, inv.ID)
+	}
+	return revoked, kept, nil
+}
+
+// recordRevocation audits one revocation made by a member change.
+func recordRevocation(ctx context.Context, tx *ent.Tx, m *ent.Membership, p authz.Principal, objectType, id, reason string) error {
+	ev := audit.By(p, objectType+".revoke", objectType, id)
+	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": reason, "member_id": m.ID}
+	_, err := audit.Record(ctx, tx, m.TenantID, ev)
+	return err
 }
 
 // notExpired compares with the database clock, as the api_tokens policies do.
