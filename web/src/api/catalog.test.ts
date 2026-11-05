@@ -6,6 +6,7 @@ import {
   canWriteCustomers,
   createCustomer,
   customerPatch,
+  formatRefs,
   parseRefs,
   renameProduct,
   updateCustomer,
@@ -42,6 +43,18 @@ describe("customerPatch (JSON Merge Patch)", () => {
   });
 });
 
+describe("customerPatch: external_refs merge key by key", () => {
+  const before = { ...customer, external_refs: { stripe: "cus_1", crm: "42" } };
+  it("sends a new or changed key with its value, a removed key as null, and leaves the rest out", () => {
+    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: { stripe: "cus_2", erp: "9" } })).toEqual({
+      external_refs: { stripe: "cus_2", erp: "9", crm: null },
+    });
+  });
+  it("omits external_refs when no key changed", () => {
+    expect(customerPatch(before, { name: "Acme", email: "a@acme.example", refs: { crm: "42", stripe: "cus_1" } })).toEqual({});
+  });
+});
+
 describe("catalog calls", () => {
   it("edits a customer with merge-patch, null included", async () => {
     setCsrfToken("csrf-1");
@@ -75,6 +88,9 @@ describe("catalog calls", () => {
 });
 
 describe("parseRefs", () => {
+  it("reads back what formatRefs writes", () => {
+    expect(parseRefs(formatRefs({ stripe: "cus_1", crm: "a=b" }))).toEqual({ stripe: "cus_1", crm: "a=b" });
+  });
   it("reads key=value lines, skipping blanks", () => {
     expect(parseRefs("stripe=cus_1\n\n crm = 42 \n")).toEqual({ stripe: "cus_1", crm: "42" });
   });

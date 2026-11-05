@@ -12,6 +12,7 @@ import {
   type Customer,
   customerPatch,
   customersQuery,
+  formatRefs,
   parseRefs,
   type Product,
   productsQuery,
@@ -229,8 +230,8 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
     mutationFn: async (f: FormData) => {
       const name = String(f.get("name") ?? "");
       const email = String(f.get("email") ?? "");
-      if (customer) return updateCustomer(tenant, customer.id, customerPatch(customer, { name, email }));
       const external_refs = parseRefs(String(f.get("refs") ?? ""));
+      if (customer) return updateCustomer(tenant, customer.id, customerPatch(customer, { name, email, refs: external_refs }));
       return createCustomer(tenant, { name: name.trim(), ...(email.trim() ? { email: email.trim() } : {}), ...(Object.keys(external_refs).length ? { external_refs } : {}) });
     },
     onSuccess: async () => {
@@ -247,7 +248,7 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
       onSubmit={(f) => {
         setRefsError(null);
         try {
-          if (!customer) parseRefs(String(f.get("refs") ?? ""));
+          parseRefs(String(f.get("refs") ?? ""));
         } catch (e) {
           setRefsError(t("customers.refsInvalid", { line: (e as Error).message }));
           return;
@@ -260,13 +261,20 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
       <Field label={t("tokens.col.name")} name="name" required maxLength={200} defaultValue={customer?.name} error={fields.name} />
       <Field label={t("invitations.col.email")} name="email" type="email" maxLength={320} defaultValue={customer?.email ?? ""} error={fields.email} />
       {customer && customer.email && <p className="text-xs text-muted-foreground">{t("customers.emailClear")}</p>}
-      {!customer && (
-        <label className="flex flex-col gap-1 text-sm">
-          {t("customers.col.refs")}
-          <textarea name="refs" rows={3} placeholder="stripe=cus_123" className={`${input} h-auto py-1 font-mono`} aria-invalid={!!(refsError || fields.external_refs)} aria-describedby="refs-error" />
-          {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
-        </label>
-      )}
+      <label className="flex flex-col gap-1 text-sm">
+        {t("customers.col.refs")}
+        <textarea
+          name="refs"
+          rows={3}
+          placeholder="stripe=cus_123"
+          defaultValue={customer ? formatRefs(customer.external_refs) : ""}
+          className={`${input} h-auto py-1 font-mono`}
+          aria-invalid={!!(refsError || fields.external_refs)}
+          aria-describedby="refs-help refs-error"
+        />
+        <span id="refs-help" className="text-xs text-muted-foreground">{t("customers.refsHelp")}</span>
+        {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
+      </label>
     </FormDialog>
   );
 }

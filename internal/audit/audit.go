@@ -28,6 +28,7 @@ import (
 
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
@@ -213,11 +214,19 @@ type Runner func(ctx context.Context, snapshot bool, fn func(*ent.Tx) error) err
 // pageSize is Verify's keyset page (ADR-0036); a var so tests can page small.
 var pageSize = 1000
 
-// readAnchor returns the chain's effective anchor (ADR-0036): the seq and
-// hash of the last pruned entry, zero while nothing was pruned.
-// ponytail: no audit_anchors table yet (it comes with retention), so always
-// zero; a var so tests can simulate a prune moving it.
-var readAnchor = func(context.Context, *ent.Tx, string) (Head, error) { return Head{}, nil }
+// readAnchor returns the chain's effective anchor (ADR-0036): its highest
+// audit_anchors row, the seq and hash of the last pruned entry; zero while
+// nothing was pruned. A var so tests can simulate a prune moving it.
+var readAnchor = func(ctx context.Context, tx *ent.Tx, tenantID string) (Head, error) {
+	a, err := tx.AuditAnchor.Query().Where(auditanchor.TenantID(tenantID)).Order(ent.Desc(auditanchor.FieldSeq)).First(ctx)
+	if ent.IsNotFound(err) {
+		return Head{}, nil
+	}
+	if err != nil {
+		return Head{}, err
+	}
+	return Head{Seq: a.Seq, Hash: a.Hash}, nil
+}
 
 // Verify checks tenantID's chain (ADR-0027, ADR-0036) and returns its head
 // (zero for an empty chain). From the anchor (from is zero, or older than the

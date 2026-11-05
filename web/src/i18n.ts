@@ -127,6 +127,7 @@ const en = {
   "customers.edit": "Edit",
   "customers.editTitle": "Edit {name}",
   "customers.emailClear": "Empty the email to remove it.",
+  "customers.refsHelp": "One key=value per line. Removing a line removes that reference.",
   "customers.refsInvalid": "Use one key=value per line: \"{line}\"",
   "customers.archive": "Archive",
   "customers.archiveTitle": "Archive {name}?",

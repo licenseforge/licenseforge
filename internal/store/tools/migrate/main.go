@@ -111,6 +111,7 @@ func ensureGroupRoles(ctx context.Context, u string) error {
 		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_app') THEN CREATE ROLE licenseforge_app NOLOGIN; END IF;
 		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_platform') THEN CREATE ROLE licenseforge_platform NOLOGIN; END IF;
 		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_identity') THEN CREATE ROLE licenseforge_identity NOLOGIN; END IF;
+		IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'licenseforge_retention') THEN CREATE ROLE licenseforge_retention NOLOGIN; END IF;
 	END $$`)
 	return err
 }
