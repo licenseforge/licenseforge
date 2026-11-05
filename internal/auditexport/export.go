@@ -137,7 +137,8 @@ func (x *Exporter) Once(ctx context.Context) (int, error) {
 	}
 	batch, err := x.read(ctx, c)
 	if err == nil && len(batch) > 0 {
-		sendCtx, cancel := context.WithTimeout(ctx, x.Lease/2)
+		// Half the lease from the claim, so a slow read can't eat into it.
+		sendCtx, cancel := context.WithDeadline(ctx, c.claimedAt.Add(x.Lease/2))
 		err = x.Sink.Send(sendCtx, batch)
 		cancel()
 	}
@@ -161,6 +162,7 @@ func (x *Exporter) check() error {
 type cursor struct {
 	id, tenantID string
 	seq          int64
+	claimedAt    time.Time // local time before the claim: the lease can only start later
 }
 
 // ensureCursors adds a cursor at the chain's start for every chain that has
@@ -199,6 +201,7 @@ func (x *Exporter) ensureCursors(ctx context.Context) error {
 // ponytail: random order scans every cursor of the sink; order by lag if
 // there are ever many thousands of chains.
 func (x *Exporter) claim(ctx context.Context) (c cursor, ok bool, err error) {
+	c.claimedAt = time.Now()
 	err = x.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT c.id, c.tenant_id, c.seq FROM audit_export_cursors c
 			WHERE c.sink_id = $1 AND (c.claimed_until IS NULL OR c.claimed_until < clock_timestamp())
@@ -244,7 +247,10 @@ func (x *Exporter) read(ctx context.Context, c cursor) ([]Entry, error) {
 }
 
 // advance moves the cursor to seq and frees it, only if this replica still
-// holds the lease and the cursor is where it was claimed.
+// holds the lease and the cursor is where it was claimed. The database's
+// forward_to_entry policy only checks updates that move seq, so every update
+// here pins seq (and the lease) in its WHERE clause: an unpinned one could
+// race another replica's advance.
 func (x *Exporter) advance(ctx context.Context, c cursor, seq int64) error {
 	return x.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE audit_export_cursors SET seq = $4, claimed_by = NULL, claimed_until = NULL
