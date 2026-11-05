@@ -75,6 +75,19 @@ URL, or without a port.
   in-cluster database). On OpenShift set `networkPolicy.dns.ports: [5353]`.
   The migration policy is a hook resource: `helm uninstall` leaves it behind
   (it selects only migration pods); delete it with the release's namespace.
+- **Audit export** (ADR-0036): set `audit.export.syslog.host` to send every
+  audit entry to your SIEM as RFC 5424 syslog over TLS (RFC 5425, port 6514 by
+  default, TLS 1.2+, certificate verification always on). `caSecret` names a
+  Secret with `ca.crt` (otherwise system roots); `clientSecret` a
+  `kubernetes.io/tls` Secret for mTLS. Delivery is at-least-once: deduplicate
+  on the entry `id`, and alert when a chain's `seq` doesn't follow on or
+  `prev_hash` isn't the previous `hash`. The collector must answer the
+  sender's TLS `close_notify` with its own (RFC 5425 §5.3): a batch counts as
+  delivered only then. A collector that closes without it gets every batch resent
+  indefinitely; that shows as `licenseforge_audit_export_failures_total` and
+  growing `licenseforge_audit_export_lag_seconds`. Certificates are re-read
+  for every batch, so renewed Secrets apply without a restart. Messages over
+  8 KB (RFC 5425's minimum) are sent but logged, as a collector may truncate them. Narrow the egress with `audit.export.syslog.to`.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;

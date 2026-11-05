@@ -395,7 +395,7 @@
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
                 "control-id": "au-5",
-                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back.",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -408,22 +408,39 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
                     "rel": "reference",
                     "text": "TestRolledBackActionLeavesNoEntry"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/verify_test.go",
+                    "rel": "reference",
+                    "text": "TestWriteFailuresAreCounted"
                   }
                 ],
-                "remarks": "No alert or metric for audit failures yet (Roadmap v0.1: alert on audit failure; Prometheus /metrics)."
+                "remarks": "No alert rules yet: the chart's PrometheusRule and the periodic verify job come later (ADR-0036)."
               },
               {
                 "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",
                 "control-id": "au-6",
-                "description": "Export to a SIEM via syslog (RFC 5424 over TLS) and OpenTelemetry logs. A dashboard audit viewer.",
+                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "partial"
                   }
                 ],
-                "remarks": "Not implemented (Roadmap v0.1: SIEM export via syslog (TLS) and OTel; v0.2: audit log viewer)."
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/auditexport/syslog_test.go",
+                    "rel": "reference",
+                    "text": "TestSyslogExport"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/auditexport/export_test.go",
+                    "rel": "reference",
+                    "text": "TestAtLeastOnceAfterACrash"
+                  }
+                ],
+                "remarks": "Not yet: OTLP export, the SIEM correlation rule in the docs, and the dashboard audit viewer (v0.2)."
               },
               {
                 "uuid": "73f6ddcd-57bc-5f54-b68b-66d9640e06f2",

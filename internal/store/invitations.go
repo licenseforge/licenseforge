@@ -43,7 +43,7 @@ func (d *DB) AcceptInvitation(ctx context.Context, token, userID string, record 
 		return nil, errors.New("store: AcceptInvitation needs the token and an audit record func")
 	}
 	var m *ent.Membership
-	err := inTx(ctx, d.identity, func(tx *ent.Tx) error {
+	err := inTx(ctx, d.identity, nil, func(tx *ent.Tx) error {
 		// FOR UPDATE applies identity's UPDATE policy: only open, unexpired
 		// invitations match.
 		inv, err := tx.Invitation.Query().Where(invitation.TokenHash(InvitationTokenHash(token))).ForUpdate().Only(ctx)

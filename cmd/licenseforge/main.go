@@ -20,6 +20,12 @@
 //	LICENSEFORGE_SESSION_MAX_AGE        dashboard session lifetime, default 12h (1h to 24h, at least the idle timeout)
 //	LICENSEFORGE_LOGIN_BANNER           system use notification shown before login (AC-8), plain text up to 4 KB
 //	LICENSEFORGE_API_HOST               API-only host (api.example.com): tokens only there, sessions only elsewhere; unset = both
+//	LICENSEFORGE_AUDIT_SYSLOG_ADDR      SIEM collector host:port (RFC 5424 over TLS, ADR-0036); unset = no export
+//	LICENSEFORGE_AUDIT_SYSLOG_CA_FILE   PEM roots for the collector's certificate; unset = system roots
+//	LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE client certificate (mTLS), PEM, with _KEY_FILE; unset = none
+//	LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE
+//	LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME  name the collector's certificate must carry; default the address's host
+//	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
 // The serving process refuses to start if the owner login is in its
@@ -43,6 +49,7 @@ import (
 	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/auditexport"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -159,6 +166,25 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	}
 	defer func() { _ = db.Close() }()
 	metrics.SetPools(db.Stats)
+	if addr := os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_ADDR"); addr != "" {
+		sink, err := auditexport.NewSyslog(auditexport.SyslogConfig{Addr: addr,
+			CAFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE"),
+			KeyFile: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE"), ServerName: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME"),
+			SDID: os.Getenv("LICENSEFORGE_AUDIT_SYSLOG_SD_ID")})
+		if err != nil {
+			return fmt.Errorf("LICENSEFORGE_AUDIT_SYSLOG_*: %w", err)
+		}
+		// Registered before serving: from now on retention keeps what this sink hasn't exported.
+		if err := auditexport.Register(ctx, db, "syslog"); err != nil {
+			return err
+		}
+		x := auditexport.New(db, "syslog", sink, log)
+		go func() { // stops with ctx (shutdown); entries left are sent by the next pod
+			if err := x.Run(ctx); err != nil {
+				log.Error("audit export stopped", "sink", "syslog", "err", err)
+			}
+		}()
+	}
 
 	var draining atomic.Bool
 	ready := func(ctx context.Context) error {

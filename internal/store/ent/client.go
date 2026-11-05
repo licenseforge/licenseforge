@@ -19,6 +19,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
@@ -52,6 +54,10 @@ type Client struct {
 	Activation *ActivationClient
 	// AuditEvent is the client for interacting with the AuditEvent builders.
 	AuditEvent *AuditEventClient
+	// AuditExportCursor is the client for interacting with the AuditExportCursor builders.
+	AuditExportCursor *AuditExportCursorClient
+	// AuditExportSink is the client for interacting with the AuditExportSink builders.
+	AuditExportSink *AuditExportSinkClient
 	// Customer is the client for interacting with the Customer builders.
 	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
@@ -99,6 +105,8 @@ func (c *Client) init() {
 	c.APITokenProduct = NewAPITokenProductClient(c.config)
 	c.Activation = NewActivationClient(c.config)
 	c.AuditEvent = NewAuditEventClient(c.config)
+	c.AuditExportCursor = NewAuditExportCursorClient(c.config)
+	c.AuditExportSink = NewAuditExportSinkClient(c.config)
 	c.Customer = NewCustomerClient(c.config)
 	c.Feature = NewFeatureClient(c.config)
 	c.IdempotencyKey = NewIdempotencyKeyClient(c.config)
@@ -211,6 +219,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		APITokenProduct:   NewAPITokenProductClient(cfg),
 		Activation:        NewActivationClient(cfg),
 		AuditEvent:        NewAuditEventClient(cfg),
+		AuditExportCursor: NewAuditExportCursorClient(cfg),
+		AuditExportSink:   NewAuditExportSinkClient(cfg),
 		Customer:          NewCustomerClient(cfg),
 		Feature:           NewFeatureClient(cfg),
 		IdempotencyKey:    NewIdempotencyKeyClient(cfg),
@@ -250,6 +260,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		APITokenProduct:   NewAPITokenProductClient(cfg),
 		Activation:        NewActivationClient(cfg),
 		AuditEvent:        NewAuditEventClient(cfg),
+		AuditExportCursor: NewAuditExportCursorClient(cfg),
+		AuditExportSink:   NewAuditExportSinkClient(cfg),
 		Customer:          NewCustomerClient(cfg),
 		Feature:           NewFeatureClient(cfg),
 		IdempotencyKey:    NewIdempotencyKeyClient(cfg),
@@ -295,10 +307,11 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.Customer,
-		c.Feature, c.IdempotencyKey, c.Invitation, c.InvitationProduct, c.License,
-		c.Membership, c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin,
-		c.Product, c.Session, c.SigningKey, c.Tenant, c.User,
+		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.AuditExportCursor,
+		c.AuditExportSink, c.Customer, c.Feature, c.IdempotencyKey, c.Invitation,
+		c.InvitationProduct, c.License, c.Membership, c.MembershipProduct, c.Plan,
+		c.PlanFeature, c.PlatformAdmin, c.Product, c.Session, c.SigningKey, c.Tenant,
+		c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -308,10 +321,11 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.Customer,
-		c.Feature, c.IdempotencyKey, c.Invitation, c.InvitationProduct, c.License,
-		c.Membership, c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin,
-		c.Product, c.Session, c.SigningKey, c.Tenant, c.User,
+		c.APIToken, c.APITokenProduct, c.Activation, c.AuditEvent, c.AuditExportCursor,
+		c.AuditExportSink, c.Customer, c.Feature, c.IdempotencyKey, c.Invitation,
+		c.InvitationProduct, c.License, c.Membership, c.MembershipProduct, c.Plan,
+		c.PlanFeature, c.PlatformAdmin, c.Product, c.Session, c.SigningKey, c.Tenant,
+		c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -328,6 +342,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Activation.mutate(ctx, m)
 	case *AuditEventMutation:
 		return c.AuditEvent.mutate(ctx, m)
+	case *AuditExportCursorMutation:
+		return c.AuditExportCursor.mutate(ctx, m)
+	case *AuditExportSinkMutation:
+		return c.AuditExportSink.mutate(ctx, m)
 	case *CustomerMutation:
 		return c.Customer.mutate(ctx, m)
 	case *FeatureMutation:
@@ -990,6 +1008,320 @@ func (c *AuditEventClient) mutate(ctx context.Context, m *AuditEventMutation) (V
 		return (&AuditEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown AuditEvent mutation op: %q", m.Op())
+	}
+}
+
+// AuditExportCursorClient is a client for the AuditExportCursor schema.
+type AuditExportCursorClient struct {
+	config
+}
+
+// NewAuditExportCursorClient returns a client for the AuditExportCursor from the given config.
+func NewAuditExportCursorClient(c config) *AuditExportCursorClient {
+	return &AuditExportCursorClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `auditexportcursor.Hooks(f(g(h())))`.
+func (c *AuditExportCursorClient) Use(hooks ...Hook) {
+	c.hooks.AuditExportCursor = append(c.hooks.AuditExportCursor, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `auditexportcursor.Intercept(f(g(h())))`.
+func (c *AuditExportCursorClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AuditExportCursor = append(c.inters.AuditExportCursor, interceptors...)
+}
+
+// Create returns a builder for creating a AuditExportCursor entity.
+func (c *AuditExportCursorClient) Create() *AuditExportCursorCreate {
+	mutation := newAuditExportCursorMutation(c.config, OpCreate)
+	return &AuditExportCursorCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AuditExportCursor entities.
+func (c *AuditExportCursorClient) CreateBulk(builders ...*AuditExportCursorCreate) *AuditExportCursorCreateBulk {
+	return &AuditExportCursorCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AuditExportCursorClient) MapCreateBulk(slice any, setFunc func(*AuditExportCursorCreate, int)) *AuditExportCursorCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AuditExportCursorCreateBulk{err: fmt.Errorf("calling to AuditExportCursorClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AuditExportCursorCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AuditExportCursorCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AuditExportCursor.
+func (c *AuditExportCursorClient) Update() *AuditExportCursorUpdate {
+	mutation := newAuditExportCursorMutation(c.config, OpUpdate)
+	return &AuditExportCursorUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AuditExportCursorClient) UpdateOne(_m *AuditExportCursor) *AuditExportCursorUpdateOne {
+	mutation := newAuditExportCursorMutation(c.config, OpUpdateOne, withAuditExportCursor(_m))
+	return &AuditExportCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AuditExportCursorClient) UpdateOneID(id string) *AuditExportCursorUpdateOne {
+	mutation := newAuditExportCursorMutation(c.config, OpUpdateOne, withAuditExportCursorID(id))
+	return &AuditExportCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AuditExportCursor.
+func (c *AuditExportCursorClient) Delete() *AuditExportCursorDelete {
+	mutation := newAuditExportCursorMutation(c.config, OpDelete)
+	return &AuditExportCursorDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AuditExportCursorClient) DeleteOne(_m *AuditExportCursor) *AuditExportCursorDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AuditExportCursorClient) DeleteOneID(id string) *AuditExportCursorDeleteOne {
+	builder := c.Delete().Where(auditexportcursor.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AuditExportCursorDeleteOne{builder}
+}
+
+// Query returns a query builder for AuditExportCursor.
+func (c *AuditExportCursorClient) Query() *AuditExportCursorQuery {
+	return &AuditExportCursorQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAuditExportCursor},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AuditExportCursor entity by its id.
+func (c *AuditExportCursorClient) Get(ctx context.Context, id string) (*AuditExportCursor, error) {
+	return c.Query().Where(auditexportcursor.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AuditExportCursorClient) GetX(ctx context.Context, id string) *AuditExportCursor {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a AuditExportCursor.
+func (c *AuditExportCursorClient) QueryTenant(_m *AuditExportCursor) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(auditexportcursor.Table, auditexportcursor.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, auditexportcursor.TenantTable, auditexportcursor.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QuerySink queries the sink edge of a AuditExportCursor.
+func (c *AuditExportCursorClient) QuerySink(_m *AuditExportCursor) *AuditExportSinkQuery {
+	query := (&AuditExportSinkClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(auditexportcursor.Table, auditexportcursor.FieldID, id),
+			sqlgraph.To(auditexportsink.Table, auditexportsink.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, auditexportcursor.SinkTable, auditexportcursor.SinkColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *AuditExportCursorClient) Hooks() []Hook {
+	return c.hooks.AuditExportCursor
+}
+
+// Interceptors returns the client interceptors.
+func (c *AuditExportCursorClient) Interceptors() []Interceptor {
+	return c.inters.AuditExportCursor
+}
+
+func (c *AuditExportCursorClient) mutate(ctx context.Context, m *AuditExportCursorMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AuditExportCursorCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AuditExportCursorUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AuditExportCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AuditExportCursorDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown AuditExportCursor mutation op: %q", m.Op())
+	}
+}
+
+// AuditExportSinkClient is a client for the AuditExportSink schema.
+type AuditExportSinkClient struct {
+	config
+}
+
+// NewAuditExportSinkClient returns a client for the AuditExportSink from the given config.
+func NewAuditExportSinkClient(c config) *AuditExportSinkClient {
+	return &AuditExportSinkClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `auditexportsink.Hooks(f(g(h())))`.
+func (c *AuditExportSinkClient) Use(hooks ...Hook) {
+	c.hooks.AuditExportSink = append(c.hooks.AuditExportSink, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `auditexportsink.Intercept(f(g(h())))`.
+func (c *AuditExportSinkClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AuditExportSink = append(c.inters.AuditExportSink, interceptors...)
+}
+
+// Create returns a builder for creating a AuditExportSink entity.
+func (c *AuditExportSinkClient) Create() *AuditExportSinkCreate {
+	mutation := newAuditExportSinkMutation(c.config, OpCreate)
+	return &AuditExportSinkCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AuditExportSink entities.
+func (c *AuditExportSinkClient) CreateBulk(builders ...*AuditExportSinkCreate) *AuditExportSinkCreateBulk {
+	return &AuditExportSinkCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AuditExportSinkClient) MapCreateBulk(slice any, setFunc func(*AuditExportSinkCreate, int)) *AuditExportSinkCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AuditExportSinkCreateBulk{err: fmt.Errorf("calling to AuditExportSinkClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AuditExportSinkCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AuditExportSinkCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AuditExportSink.
+func (c *AuditExportSinkClient) Update() *AuditExportSinkUpdate {
+	mutation := newAuditExportSinkMutation(c.config, OpUpdate)
+	return &AuditExportSinkUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AuditExportSinkClient) UpdateOne(_m *AuditExportSink) *AuditExportSinkUpdateOne {
+	mutation := newAuditExportSinkMutation(c.config, OpUpdateOne, withAuditExportSink(_m))
+	return &AuditExportSinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AuditExportSinkClient) UpdateOneID(id string) *AuditExportSinkUpdateOne {
+	mutation := newAuditExportSinkMutation(c.config, OpUpdateOne, withAuditExportSinkID(id))
+	return &AuditExportSinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AuditExportSink.
+func (c *AuditExportSinkClient) Delete() *AuditExportSinkDelete {
+	mutation := newAuditExportSinkMutation(c.config, OpDelete)
+	return &AuditExportSinkDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AuditExportSinkClient) DeleteOne(_m *AuditExportSink) *AuditExportSinkDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AuditExportSinkClient) DeleteOneID(id string) *AuditExportSinkDeleteOne {
+	builder := c.Delete().Where(auditexportsink.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AuditExportSinkDeleteOne{builder}
+}
+
+// Query returns a query builder for AuditExportSink.
+func (c *AuditExportSinkClient) Query() *AuditExportSinkQuery {
+	return &AuditExportSinkQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAuditExportSink},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AuditExportSink entity by its id.
+func (c *AuditExportSinkClient) Get(ctx context.Context, id string) (*AuditExportSink, error) {
+	return c.Query().Where(auditexportsink.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AuditExportSinkClient) GetX(ctx context.Context, id string) *AuditExportSink {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryCursors queries the cursors edge of a AuditExportSink.
+func (c *AuditExportSinkClient) QueryCursors(_m *AuditExportSink) *AuditExportCursorQuery {
+	query := (&AuditExportCursorClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(auditexportsink.Table, auditexportsink.FieldID, id),
+			sqlgraph.To(auditexportcursor.Table, auditexportcursor.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, auditexportsink.CursorsTable, auditexportsink.CursorsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *AuditExportSinkClient) Hooks() []Hook {
+	return c.hooks.AuditExportSink
+}
+
+// Interceptors returns the client interceptors.
+func (c *AuditExportSinkClient) Interceptors() []Interceptor {
+	return c.inters.AuditExportSink
+}
+
+func (c *AuditExportSinkClient) mutate(ctx context.Context, m *AuditExportSinkMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AuditExportSinkCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AuditExportSinkUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AuditExportSinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AuditExportSinkDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown AuditExportSink mutation op: %q", m.Op())
 	}
 }
 
@@ -3571,6 +3903,22 @@ func (c *TenantClient) QueryIdempotencyKeys(_m *Tenant) *IdempotencyKeyQuery {
 	return query
 }
 
+// QueryAuditExportCursors queries the audit_export_cursors edge of a Tenant.
+func (c *TenantClient) QueryAuditExportCursors(_m *Tenant) *AuditExportCursorQuery {
+	query := (&AuditExportCursorClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(auditexportcursor.Table, auditexportcursor.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.AuditExportCursorsTable, tenant.AuditExportCursorsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *TenantClient) Hooks() []Hook {
 	return c.hooks.Tenant
@@ -3828,16 +4176,16 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIToken, APITokenProduct, Activation, AuditEvent, Customer, Feature,
-		IdempotencyKey, Invitation, InvitationProduct, License, Membership,
-		MembershipProduct, Plan, PlanFeature, PlatformAdmin, Product, Session,
-		SigningKey, Tenant, User []ent.Hook
+		APIToken, APITokenProduct, Activation, AuditEvent, AuditExportCursor,
+		AuditExportSink, Customer, Feature, IdempotencyKey, Invitation,
+		InvitationProduct, License, Membership, MembershipProduct, Plan, PlanFeature,
+		PlatformAdmin, Product, Session, SigningKey, Tenant, User []ent.Hook
 	}
 	inters struct {
-		APIToken, APITokenProduct, Activation, AuditEvent, Customer, Feature,
-		IdempotencyKey, Invitation, InvitationProduct, License, Membership,
-		MembershipProduct, Plan, PlanFeature, PlatformAdmin, Product, Session,
-		SigningKey, Tenant, User []ent.Interceptor
+		APIToken, APITokenProduct, Activation, AuditEvent, AuditExportCursor,
+		AuditExportSink, Customer, Feature, IdempotencyKey, Invitation,
+		InvitationProduct, License, Membership, MembershipProduct, Plan, PlanFeature,
+		PlatformAdmin, Product, Session, SigningKey, Tenant, User []ent.Interceptor
 	}
 )
 

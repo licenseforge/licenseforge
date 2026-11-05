@@ -23,7 +23,7 @@ var ErrNotPlatformAdmin = errors.New("store: not an enabled platform admin")
 
 // withAdminLock runs fn on the platform pool holding the admin-set lock.
 func (d *DB) withAdminLock(ctx context.Context, fn func(*ent.Tx) error) error {
-	return inTx(ctx, d.platform, func(tx *ent.Tx) error {
+	return inTx(ctx, d.platform, nil, func(tx *ent.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, platformAdminLock); err != nil {
 			return err
 		}

@@ -38,6 +38,8 @@ const (
 	EdgeAPITokens = "api_tokens"
 	// EdgeIdempotencyKeys holds the string denoting the idempotency_keys edge name in mutations.
 	EdgeIdempotencyKeys = "idempotency_keys"
+	// EdgeAuditExportCursors holds the string denoting the audit_export_cursors edge name in mutations.
+	EdgeAuditExportCursors = "audit_export_cursors"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -96,6 +98,13 @@ const (
 	IdempotencyKeysInverseTable = "idempotency_keys"
 	// IdempotencyKeysColumn is the table column denoting the idempotency_keys relation/edge.
 	IdempotencyKeysColumn = "tenant_id"
+	// AuditExportCursorsTable is the table that holds the audit_export_cursors relation/edge.
+	AuditExportCursorsTable = "audit_export_cursors"
+	// AuditExportCursorsInverseTable is the table name for the AuditExportCursor entity.
+	// It exists in this package in order to avoid circular dependency with the "auditexportcursor" package.
+	AuditExportCursorsInverseTable = "audit_export_cursors"
+	// AuditExportCursorsColumn is the table column denoting the audit_export_cursors relation/edge.
+	AuditExportCursorsColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -273,6 +282,20 @@ func ByIdempotencyKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newIdempotencyKeysStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByAuditExportCursorsCount orders the results by audit_export_cursors count.
+func ByAuditExportCursorsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAuditExportCursorsStep(), opts...)
+	}
+}
+
+// ByAuditExportCursors orders the results by audit_export_cursors terms.
+func ByAuditExportCursors(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAuditExportCursorsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -327,5 +350,12 @@ func newIdempotencyKeysStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(IdempotencyKeysInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, IdempotencyKeysTable, IdempotencyKeysColumn),
+	)
+}
+func newAuditExportCursorsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AuditExportCursorsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, AuditExportCursorsTable, AuditExportCursorsColumn),
 	)
 }

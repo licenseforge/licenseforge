@@ -44,10 +44,10 @@ func (f *fixture) entries(t *testing.T, after int64) []*ent.AuditEvent {
 	t.Helper()
 	ctx := context.Background()
 	var out []*ent.AuditEvent
+	if _, err := audit.Verify(ctx, f.db.ReadPlatform, audit.PlatformTenant, audit.Head{}); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
-		if _, err := audit.Verify(ctx, tx, audit.PlatformTenant); err != nil {
-			return err
-		}
 		var err error
 		out, err = tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.SeqGT(after)).
 			Order(ent.Asc(auditevent.FieldSeq)).All(ctx)

@@ -122,6 +122,7 @@ func TestCrossTableReferencesAreSameTenant(t *testing.T) {
 		  AND f.conname NOT LIKE '%\_same\_tenant'
 		  AND f.confrelid <> 'tenants'::regclass
 		  AND f.confrelid <> 'users'::regclass -- users belong to no tenant (ADR-0029)
+		  AND f.confrelid <> 'audit_export_sinks'::regclass -- install-wide sinks (ADR-0036)
 		  AND NOT EXISTS (
 		      SELECT 1 FROM pg_constraint s
 		      WHERE s.contype = 'f' AND s.conrelid = f.conrelid AND s.confrelid = f.confrelid
