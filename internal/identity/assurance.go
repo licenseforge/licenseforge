@@ -19,6 +19,21 @@ import (
 type AssurancePolicy struct {
 	MFAAMR, PhishingResistantAMR []string
 	MFAACR, PhishingResistantACR []string
+	// StepUp*ACR are the acr_values a step-up login to that level asks for
+	// (default none: max_age=0 only). Asking is not getting: the session's
+	// level still comes from the returned claims.
+	StepUpMFAACR, StepUpPhishingResistantACR []string
+}
+
+// StepUpACR is the acr_values a step-up to level asks for, if any.
+func (p AssurancePolicy) StepUpACR(level authz.Assurance) []string {
+	switch level {
+	case authz.AssuranceMFA:
+		return p.StepUpMFAACR
+	case authz.AssurancePhishingResistant:
+		return p.StepUpPhishingResistantACR
+	}
+	return nil
 }
 
 // DefaultAssurancePolicy is ADR-0038's default (RFC 8176 values): hwk, sc
@@ -48,6 +63,9 @@ const (
 	EnvPhishingResistantAMR = "LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR"
 	EnvMFAACR               = "LICENSEFORGE_OIDC_MFA_ACR"
 	EnvPhishingResistantACR = "LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR"
+
+	EnvStepUpMFAACR               = "LICENSEFORGE_OIDC_STEP_UP_MFA_ACR"
+	EnvStepUpPhishingResistantACR = "LICENSEFORGE_OIDC_STEP_UP_PHISHING_RESISTANT_ACR"
 )
 
 var (
@@ -67,6 +85,7 @@ func AssurancePolicyFromEnv(getenv func(string) string) (AssurancePolicy, error)
 	}{
 		{EnvMFAAMR, &p.MFAAMR, amrRE, true}, {EnvPhishingResistantAMR, &p.PhishingResistantAMR, amrRE, true},
 		{EnvMFAACR, &p.MFAACR, acrRE, false}, {EnvPhishingResistantACR, &p.PhishingResistantACR, acrRE, false},
+		{EnvStepUpMFAACR, &p.StepUpMFAACR, acrRE, false}, {EnvStepUpPhishingResistantACR, &p.StepUpPhishingResistantACR, acrRE, false},
 	} {
 		raw := strings.TrimSpace(getenv(v.env))
 		if raw == "" {
