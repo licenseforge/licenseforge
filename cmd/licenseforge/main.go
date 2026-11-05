@@ -128,8 +128,8 @@ func prune(ctx context.Context, log *slog.Logger) error {
 	}
 	platformDays := 0
 	if v := os.Getenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS"); v != "" {
-		if platformDays, err = strconv.Atoi(v); err != nil || platformDays < retention.MinDays {
-			return fmt.Errorf("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS: want whole days, at least %d; got %q", retention.MinDays, v)
+		if platformDays, err = strconv.Atoi(v); err != nil || platformDays < retention.MinDays || platformDays > retention.MaxDays {
+			return fmt.Errorf("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS: want whole days, %d to %d; got %q", retention.MinDays, retention.MaxDays, v)
 		}
 	}
 	r, err := store.OpenRetention(ctx, dsn)

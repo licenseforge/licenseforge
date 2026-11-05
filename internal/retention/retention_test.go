@@ -270,8 +270,10 @@ func TestPruneCountCheck(t *testing.T) {
 func TestPrunePlatformChain(t *testing.T) {
 	f := setup(t)
 	f.chain(t, audit.PlatformTenant, append(ages(3, 800*24*time.Hour), ages(2, old)...)...)
-	if _, err := Prune(context.Background(), f.r, 100); !errors.Is(err, ErrInvalid) {
-		t.Errorf("platform retention below 365: %v", err)
+	for _, bad := range []int{100, 36501} {
+		if _, err := Prune(context.Background(), f.r, bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("platform retention %d: %v", bad, err)
+		}
 	}
 	if cuts, err := Prune(context.Background(), f.r, 0); err != nil || len(cutsOf(cuts, audit.PlatformTenant)) != 0 {
 		t.Errorf("platform retention unset: %v %v", cutsOf(cuts, audit.PlatformTenant), err)
@@ -299,8 +301,10 @@ func TestSetTenantRetention(t *testing.T) {
 	if err := SetTenantRetention(as(authz.Admin), f.d, days(400)); !errors.Is(err, authz.ErrDenied) || get().Valid {
 		t.Errorf("admin: %v, %v", err, get())
 	}
-	if err := SetTenantRetention(as(authz.Owner), f.d, days(100)); !errors.Is(err, ErrInvalid) || get().Valid {
-		t.Errorf("100 days: %v, %v", err, get())
+	for _, bad := range []int{100, 36501} {
+		if err := SetTenantRetention(as(authz.Owner), f.d, days(bad)); !errors.Is(err, ErrInvalid) || get().Valid {
+			t.Errorf("%d days: %v, %v", bad, err, get())
+		}
 	}
 	if err := SetTenantRetention(as(authz.Owner), f.d, days(400)); err != nil || get().Int64 != 400 {
 		t.Errorf("owner, 400 days: %v, %v", err, get())
@@ -309,11 +313,11 @@ func TestSetTenantRetention(t *testing.T) {
 		t.Errorf("owner, keep everything: %v, %v", err, get())
 	}
 	var outcomes string
-	if err := f.owner.QueryRow(`SELECT string_agg(outcome || ':' || (details::jsonb->>'days'), ',' ORDER BY seq) FROM audit_events
+	if err := f.owner.QueryRow(`SELECT string_agg(outcome || ':' || COALESCE(details::jsonb->>'days', 'null'), ',' ORDER BY seq) FROM audit_events
 		WHERE tenant_id = $1 AND action = 'tenant.audit_retention.update'`, tn).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
-	if outcomes != "denied:400,success:400" && outcomes != "denied:400,success:400,success:" {
+	if outcomes != "denied:400,failure:100,failure:36501,success:400,success:null" {
 		t.Errorf("audited %q", outcomes)
 	}
 	// The database refuses short periods and other columns too.
@@ -323,8 +327,65 @@ func TestSetTenantRetention(t *testing.T) {
 		t.Error("tenant pool stored 30 days")
 	}
 	if err := f.d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+		return tx.Tenant.UpdateOneID(tn).SetAuditRetentionDays(36501).Exec(context.Background())
+	}); err == nil {
+		t.Error("tenant pool stored 36,501 days")
+	}
+	if err := f.d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
 		return tx.Tenant.UpdateOneID(tn).SetName("renamed").Exec(context.Background())
 	}); err == nil {
 		t.Error("tenant pool renamed itself")
 	}
+}
+
+// A clock step: entry 3 is young between old ones. seq order defines the
+// prefix, so the cut stops at 2 and keeps the later old entries.
+func TestPruneAfterAClockStep(t *testing.T) {
+	f := setup(t)
+	tn := f.tenant(t, days(365))
+	f.chain(t, tn, old, old, young, old, old)
+	cuts, err := Prune(context.Background(), f.r, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(cutsOf(cuts, tn)); got != "[2:2]" {
+		t.Errorf("cuts %s, want one through 2", got)
+	}
+	if first, _, _ := f.seqs(t, tn); first != 3 {
+		t.Errorf("chain starts at %d", first)
+	}
+	f.verify(t, tn)
+}
+
+// Two prune runs at once on one chain: the chain's lock serializes them, so
+// there is exactly one cut and the chain verifies.
+func TestConcurrentPrunes(t *testing.T) {
+	f := setup(t)
+	tn := f.tenant(t, days(365))
+	f.chain(t, tn, append(ages(5, old), young)...)
+	type result struct {
+		cut Cut
+		err error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			c, err := pruneBatch(context.Background(), f.r, tn, 365)
+			results <- result{c, err}
+		}()
+	}
+	cuts := 0
+	for range 2 {
+		r := <-results
+		if r.err != nil {
+			t.Errorf("pruneBatch: %v", r.err)
+		}
+		if r.cut.Deleted > 0 {
+			cuts++
+		}
+	}
+	if cuts != 1 {
+		t.Errorf("%d cuts, want exactly 1", cuts)
+	}
+	f.verify(t, tn)
 }

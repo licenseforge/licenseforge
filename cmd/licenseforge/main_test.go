@@ -334,7 +334,7 @@ func TestPrune(t *testing.T) {
 		t.Errorf("prune with the platform login = %v", err)
 	}
 	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.RetentionURL)
-	for _, bad := range []string{"30", "1y", "-400"} {
+	for _, bad := range []string{"30", "1y", "-400", "36501"} {
 		t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", bad)
 		if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS") {
 			t.Errorf("platform days %q: %v", bad, err)

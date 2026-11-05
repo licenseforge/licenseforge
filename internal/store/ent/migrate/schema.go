@@ -1236,7 +1236,7 @@ func init() {
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
-		"tenants_audit_retention": "audit_retention_days IS NULL OR audit_retention_days >= 365",
+		"tenants_audit_retention": "audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)",
 		"tenants_id_format":       "id ~ '^tnt_[a-z2-7]{26}$'",
 		"tenants_name_not_blank":  "btrim(name) <> ''",
 		"tenants_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",

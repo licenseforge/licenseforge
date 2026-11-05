@@ -23,12 +23,17 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-// MinDays is the shortest retention period (ADR-0036; the database refuses
-// shorter ones too).
-const MinDays = 365
+// MinDays and MaxDays bound a retention period (ADR-0036; the database
+// refuses others too): at least the 365-day floor, at most 100 years.
+const (
+	MinDays = 365
+	MaxDays = 36500
+)
 
-// ErrInvalid means a retention period below MinDays.
-var ErrInvalid = fmt.Errorf("retention: the retention period must be at least %d days", MinDays)
+// ErrInvalid means a retention period outside MinDays..MaxDays.
+var ErrInvalid = fmt.Errorf("retention: the retention period must be %d to %d days", MinDays, MaxDays)
+
+func validDays(d int) bool { return d >= MinDays && d <= MaxDays }
 
 // batch is the most entries one prune transaction removes from a chain, so
 // the chain's lock is held briefly (every login appends to the platform chain).
@@ -49,8 +54,9 @@ func SetTenantRetention(ctx context.Context, db *store.DB, days *int) error {
 		ev.Outcome = auditevent.OutcomeDenied
 		return errors.Join(err, db.WithTenant(ctx, tn, func(tx *ent.Tx) error { _, err := audit.Record(ctx, tx, tn, ev); return err }))
 	}
-	if days != nil && *days < MinDays {
-		return ErrInvalid
+	if days != nil && !validDays(*days) {
+		ev.Outcome = auditevent.OutcomeFailure
+		return errors.Join(ErrInvalid, db.WithTenant(ctx, tn, func(tx *ent.Tx) error { _, err := audit.Record(ctx, tx, tn, ev); return err }))
 	}
 	ev.Outcome = auditevent.OutcomeSuccess
 	return db.WithTenant(ctx, tn, func(tx *ent.Tx) error {
@@ -88,7 +94,7 @@ type Cut struct {
 // everything). It returns the cuts made, in order. A chain that fails is
 // reported and the others are still pruned.
 func Prune(ctx context.Context, r *store.Retention, platformDays int) ([]Cut, error) {
-	if platformDays != 0 && platformDays < MinDays {
+	if platformDays != 0 && !validDays(platformDays) {
 		return nil, ErrInvalid
 	}
 	type chain struct {
