@@ -27,6 +27,7 @@ import (
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/catalog"
 	"licenseforge.io/licenseforge/internal/customers"
@@ -59,6 +60,8 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Customers customers.Service
+	// Audit reads the tenant's audit log (audit:read).
+	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
 	// Invitations: list, create, revoke, and accept (a user route).
@@ -270,6 +273,7 @@ var queryParams = map[string][]string{
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor"},
 	"ListCustomers":   {"limit", "cursor"},
+	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }

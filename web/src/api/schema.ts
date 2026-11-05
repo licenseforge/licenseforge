@@ -306,6 +306,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+         * @description Needs audit:read on every product (owners and admins). Pages run
+         *     by `seq`, the chain's order: newest first by default; with
+         *     `after_seq`, oldest first from the entry after it (self-export:
+         *     pass the last `seq` you hold). Each entry carries `prev_hash` and
+         *     `hash` so the chain can be checked: `hash` is SHA-256 over the
+         *     entry's fields as stored, `details` byte for byte as sent here.
+         *     Reading is audited as `audit_event.read`, at most once per reader
+         *     per 15 minutes.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/tenants": {
         parameters: {
             query?: never;
@@ -566,6 +596,45 @@ export interface components {
             expires_at: string;
             /** Format: date-time */
             refresh_after: string;
+        };
+        /** @description One audit entry, the fields the SIEM export carries (ADR-0036). */
+        AuditEvent: {
+            /** @example aud_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            tenant_id: string;
+            /**
+             * Format: int64
+             * @description 1, 2, … in the tenant's chain; retention removes a prefix.
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description Database clock
+             */
+            occurred_at: string;
+            /** @enum {string} */
+            actor_type: "user" | "token" | "platform" | "system";
+            actor_id: string | null;
+            /** @example license.issue */
+            action: string;
+            object_type: string | null;
+            object_id: string | null;
+            /** @enum {string} */
+            outcome: "success" | "failure" | "denied";
+            source_ip: string | null;
+            user_agent: string | null;
+            details: {
+                [key: string]: unknown;
+            };
+            /** @description Hex; the previous entry's hash (zeros for seq 1). */
+            prev_hash: string;
+            /** @description Hex. */
+            hash: string;
+        };
+        AuditEventPage: {
+            items: components["schemas"]["AuditEvent"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
         };
         Problem: {
             /** @example about:blank */
@@ -1413,6 +1482,39 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Oldest first, from the entry after this seq (0: from the start). Not with cursor. */
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listMyTenants: {
