@@ -42,6 +42,10 @@ const lockKey = 0x4C46_4155_5652
 // run over more chains writes several entries, numbered batch of batches.
 var HeadsPerEntry = 200 // a var so tests can batch small
 
+// aliveTimeout bounds the leader's check of its lock connection, so a hung
+// connection can't hold a run; a var so tests can shorten it.
+var aliveTimeout = 10 * time.Second
+
 // Defaults (ADR-0036: incremental often, full weekly).
 const (
 	DefaultInterval     = 15 * time.Minute
@@ -62,7 +66,8 @@ type Job struct {
 	broken   map[string]bool       // chains whose last verification failed: re-verified from the anchor
 	fullPass map[string]bool       // chains done in the full pass in progress; nil: none in progress
 	lastFull time.Time
-	lock     *store.SessionLock // held while this replica leads
+	lock     *store.SessionLock          // held while this replica leads
+	ping     func(context.Context) error // the lock's liveness check; nil: lock.Alive (tests replace it)
 	now      func() time.Time
 	verify   func(ctx context.Context, run audit.Runner, tenantID string, from audit.Head) (head, anchor audit.Head, err error)
 }
@@ -122,8 +127,12 @@ func (j *Job) Run(ctx context.Context) error {
 // connection dropped) is released and taken again if it's free.
 func (j *Job) lead(ctx context.Context) (bool, error) {
 	if j.lock != nil {
-		pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := j.lock.Alive(pingCtx)
+		ping := j.ping
+		if ping == nil {
+			ping = j.lock.Alive
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, aliveTimeout)
+		err := ping(pingCtx)
 		cancel()
 		if err == nil {
 			return true, nil
@@ -163,6 +172,9 @@ func (j *Job) Once(parent context.Context) (Result, error) {
 	ctx, cancel := context.WithTimeout(parent, limit)
 	defer cancel()
 	ok, err := j.lead(ctx)
+	if err != nil {
+		metrics.AuditVerifyErrors.Inc()
+	}
 	if err != nil || !ok {
 		return Result{}, err
 	}
@@ -176,6 +188,7 @@ func (j *Job) Once(parent context.Context) (Result, error) {
 		chains, err = tx.Tenant.Query().IDs(ctx)
 		return err
 	}); err != nil {
+		metrics.AuditVerifyErrors.Inc()
 		return r, err
 	}
 	chains = append(chains, audit.PlatformTenant) // its tenants row is hidden from every serving login
@@ -229,8 +242,10 @@ func (j *Job) Once(parent context.Context) (Result, error) {
 	if err := j.checkpoint(cpCtx, r, listed); err != nil {
 		errs = append(errs, err)
 	}
+	metrics.AuditVerifyErrors.Add(float64(len(errs)))
 	if full && len(errs) == 0 { // every chain was done in this pass
 		j.lastFull, j.fullPass = j.now(), nil
+		metrics.AuditVerifyLastFull.Set(float64(j.lastFull.Unix()))
 	}
 	return r, errors.Join(errs...)
 }

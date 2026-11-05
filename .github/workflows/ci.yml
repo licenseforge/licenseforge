@@ -89,11 +89,13 @@ jobs:
           # chart's ServiceMonitor (else nothing scrapes what they watch), unless turned off.
           crd="--api-versions monitoring.coreos.com/v1/PrometheusRule --set metrics.serviceMonitor.enabled=true"
           rules=$(helm template t . $s $crd --show-only templates/prometheusrule.yaml)
-          for alert in LicenseForgeAuditWriteFailures LicenseForgeAuditExportLag LicenseForgeAuditVerifyFailed LicenseForgeAuditVerifyStalled LicenseForgeRateLimitTableFull; do
+          for alert in LicenseForgeAuditWriteFailures LicenseForgeAuditExportLag LicenseForgeAuditVerifyFailed LicenseForgeAuditVerifyStalled LicenseForgeAuditVerifyErrors LicenseForgeAuditFullVerifyOverdue LicenseForgeRateLimitTableFull; do
             grep -qF "alert: $alert" <<<"$rules" || { echo "missing alert $alert"; exit 1; }
           done
           grep -qF '(max_over_time(licenseforge_audit_verify_last_success_timestamp_seconds{namespace="default"}[45m]))) > 1800 or absent(licenseforge_audit_verify_last_success_timestamp_seconds' <<<"$rules" || { echo "stall alert: want max_over_time over 2x interval + 15m, threshold 2x the interval"; exit 1; }
-          if helm template t . $s $crd --set auditVerify.intervalMinutes=0 | grep -qF LicenseForgeAuditVerifyStalled; then echo "stall alert with verification off"; exit 1; fi
+          grep -qF 'expr: sum by (namespace) (increase(licenseforge_audit_verify_errors_total{namespace="default"}[1h])) > 0' <<<"$rules" || { echo "verify errors alert expression"; exit 1; }
+          grep -qF '(max_over_time(licenseforge_audit_verify_last_full_timestamp_seconds{namespace="default"}[336h]))) > 1209600 or absent(licenseforge_audit_verify_last_full_timestamp_seconds' <<<"$rules" || { echo "full-pass overdue alert: want max_over_time over 2x the full interval, threshold 2x, plus absent"; exit 1; }
+          if helm template t . $s $crd --set auditVerify.intervalMinutes=0 | grep -qE 'LicenseForgeAuditVerify(Stalled|Errors)|LicenseForgeAuditFullVerifyOverdue'; then echo "verification alerts with verification off"; exit 1; fi
           if helm template t . $s | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule without the CRD"; exit 1; fi
           if helm template t . $s --api-versions monitoring.coreos.com/v1/PrometheusRule | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule without the ServiceMonitor"; exit 1; fi
           if helm template t . $s $crd --set metrics.alerts.enabled=false | grep -q 'kind: PrometheusRule'; then echo "PrometheusRule while off"; exit 1; fi

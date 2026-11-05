@@ -1,6 +1,7 @@
 {{- $alerts := dig "alerts" dict (.Values.metrics | default dict) }}
 {{- $sm := dig "serviceMonitor" dict (.Values.metrics | default dict) }}
 {{- $verify := int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict)) }}
+{{- $full := int (dig "fullIntervalHours" 168 (.Values.auditVerify | default dict)) }}
 {{- if and (dig "enabled" true $alerts) $sm.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
 {{- $ns := printf "namespace=%q" .Release.Namespace }}
 # Audit failure alerts (ADR-0036, AU-5): on by default when the Prometheus
@@ -49,6 +50,22 @@ spec:
           labels: {severity: critical}
           annotations:
             summary: "No audit chain verification has completed for over {{ mul 2 $verify }} minutes: the verifier is stuck, failing or not running."
+        - alert: LicenseForgeAuditVerifyErrors
+          # Chains that can't be read, runs cut off by their limit, checkpoints
+          # not written: while they persist the full pass can't complete.
+          expr: sum by (namespace) (increase(licenseforge_audit_verify_errors_total{ {{- $ns -}} }[1h])) > 0
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "Audit verification keeps failing (not a broken chain): check the server log for the chain and the error."
+        - alert: LicenseForgeAuditFullVerifyOverdue
+          # No full pass (every chain from its anchor) completed in two full
+          # intervals, across leader handovers, or the metric is missing.
+          expr: (time() - max by (namespace) (max_over_time(licenseforge_audit_verify_last_full_timestamp_seconds{ {{- $ns -}} }[{{ mul 2 $full }}h]))) > {{ mul 2 $full 3600 }} or absent(licenseforge_audit_verify_last_full_timestamp_seconds{ {{- $ns -}} })
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "No full audit verification pass has completed for over {{ mul 2 $full }} hours."
         {{- end }}
         - alert: LicenseForgeRateLimitTableFull
           # Past its address bound the per-address limit lets new addresses through (fail open).
