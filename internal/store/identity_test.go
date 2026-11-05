@@ -604,6 +604,7 @@ func TestIdentityGrants(t *testing.T) {
 		{AppRole, "tenants", "slug", "UPDATE", false},
 		{AppRole, "tenants", "id", "UPDATE", false},
 		{IdentityRole, "tenants", "mfa_policy", "UPDATE", false},
+		{IdentityRole, "tenants", "mfa_policy", "SELECT", true}, // the session check compares it
 		{IdentityRole, "sessions", "assurance", "INSERT", true},
 		{IdentityRole, "sessions", "amr", "INSERT", true},
 		{IdentityRole, "sessions", "assurance", "UPDATE", false},

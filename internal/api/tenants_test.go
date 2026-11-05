@@ -26,7 +26,10 @@ func TestUpdateTenantMFAPolicy(t *testing.T) {
 	if r := patch(`{}`, ownerMFA); r.code != 200 || r.body["mfa_policy"] != "mfa" {
 		t.Errorf("empty patch: %d %s", r.code, r.raw)
 	}
-	if r := patch(`{"mfa_policy":"none"}`, ownerNone); r.code != 200 || r.body["mfa_policy"] != "none" {
+	// A password session can't reach the tenant once it requires MFA (403
+	// mfa_required); lowering takes a session that meets the current policy.
+	patch(`{"mfa_policy":"none"}`, ownerNone).problem(t, http.StatusForbidden, "mfa_required")
+	if r := patch(`{"mfa_policy":"none"}`, ownerMFA); r.code != 200 || r.body["mfa_policy"] != "none" {
 		t.Errorf("lower: %d %s", r.code, r.raw)
 	}
 

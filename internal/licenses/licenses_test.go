@@ -987,3 +987,50 @@ func TestIssueWaitsForArchive(t *testing.T) {
 		t.Fatal("issue didn't finish")
 	}
 }
+
+// An override of a feature racing that feature's archive: the issue waits
+// for the archive and then refuses the feature as archived (it looks again
+// after archive_once filters the row it waited for), not as unknown.
+func TestOverrideWaitsForFeatureArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	done := make(chan error, 1)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = clock_timestamp() WHERE product_id = $1 AND key = 'export'`, f.a.prodP); err != nil {
+			return err
+		}
+		go func() {
+			req := f.req(f.a)
+			req.Overrides = map[string]Override{"export": {}}
+			_, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), req)
+			done <- err
+		}()
+		for i := 0; ; i++ {
+			var n int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			if i == 100 {
+				return errors.New("the issue never waited")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+	select {
+	case err := <-done:
+		var inv *InvalidError
+		if !errors.As(err, &inv) || inv.Field != "/overrides/export" || !strings.Contains(inv.Message, "archived") {
+			t.Errorf("override after a concurrent archive: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("issue didn't finish")
+	}
+}

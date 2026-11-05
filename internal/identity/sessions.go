@@ -120,14 +120,20 @@ func (s Service) NewSession(ctx context.Context, userID string, auth SessionAuth
 	return cookie, nil
 }
 
-// Session returns the user of a live session and the assurance its login
-// proved (ADR-0038), and records the activity (at most once a minute).
-func (s Service) Session(ctx context.Context, cookie string) (*ent.User, authz.Assurance, error) {
+// SessionInfo is what a live session says beyond its user.
+type SessionInfo struct {
+	ID        string          // ses_…
+	Assurance authz.Assurance // what its login proved (ADR-0038)
+}
+
+// Session returns the user of a live session and its ID and assurance, and
+// records the activity (at most once a minute).
+func (s Service) Session(ctx context.Context, cookie string) (*ent.User, SessionInfo, error) {
 	if len(cookie) != cookieLen {
-		return nil, "", ErrNoSession
+		return nil, SessionInfo{}, ErrNoSession
 	}
 	var u *ent.User
-	var level authz.Assurance
+	var info SessionInfo
 	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
 		var id, userID string
 		rows, err := tx.QueryContext(ctx, `SELECT s.id, s.user_id, s.assurance FROM sessions s JOIN users u ON u.id = s.user_id
@@ -141,7 +147,8 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, authz.A
 			_ = rows.Close()
 			return errors.Join(sql.ErrNoRows, rows.Err())
 		}
-		err = rows.Scan(&id, &userID, &level)
+		err = rows.Scan(&id, &userID, &info.Assurance)
+		info.ID = id
 		if cerr := rows.Close(); err == nil {
 			err = cerr
 		}
@@ -160,12 +167,12 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, authz.A
 		return err
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, "", ErrNoSession
+		return nil, SessionInfo{}, ErrNoSession
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, SessionInfo{}, err
 	}
-	return u, level, nil
+	return u, info, nil
 }
 
 // EndSession ends the session (logout). Ending an unknown session is not an

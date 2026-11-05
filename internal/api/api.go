@@ -37,6 +37,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
@@ -60,7 +61,10 @@ type Config struct {
 	Licenses licenses.Service
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
+	Features  catalog.Features
 	Customers customers.Service
+	// SigningKeys: list, create, promote, discard (ADR-0026).
+	SigningKeys signing.Local
 	// Audit reads the tenant's audit log (audit:read).
 	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
@@ -84,6 +88,7 @@ type server struct {
 	Config
 	mux     *http.ServeMux
 	limiter *keyLimiter
+	mfaSeen mfaAudited
 }
 
 // New returns the API handler; mount it at Prefix + "/".
@@ -199,7 +204,7 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 }
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
-	u, level, code, err := s.Sessions.Check(w, r)
+	u, sess, code, err := s.Sessions.Check(w, r)
 	switch code {
 	case 0:
 	case http.StatusUnauthorized:
@@ -214,15 +219,15 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		if userRoutes[r.URL.EscapedPath()] {
 			// A principal with no tenant: authz denies every permission to
 			// it; only user routes, which act for the user, accept it.
-			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: level}, nil
+			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: sess.Assurance}, nil
 		}
 		return authz.Principal{}, errNotFound
 	}
 	ctx := r.Context()
-	tenantID, err := s.Identity.TenantID(ctx, ref)
+	t, err := s.Identity.Tenant(ctx, ref)
 	var g authz.Grant
 	if err == nil {
-		g, err = s.Identity.Grant(ctx, u.ID, tenantID)
+		g, err = s.Identity.Grant(ctx, u.ID, t.ID)
 	}
 	if errors.Is(err, identity.ErrNotMember) {
 		return authz.Principal{}, errNotFound
@@ -230,7 +235,14 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
-	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope, Assurance: level}, nil
+	// ADR-0038: after the membership check, so a non-member never learns
+	// the policy (404 above); checked on every request, so a raised policy
+	// applies to live sessions at once.
+	if !sess.Assurance.Meets(t.MFAPolicy) {
+		s.mfaRefused(ctx, t, u.ID, sess)
+		return authz.Principal{}, mfaRequired(t, sess.Assurance)
+	}
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: t.ID, Role: g.Role, Scope: g.Scope, Assurance: sess.Assurance}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -276,9 +288,11 @@ var queryParams = map[string][]string{
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor", "archived"},
+	"ListFeatures":    {"limit", "cursor", "product_id"},
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
+	"ListSigningKeys": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -418,6 +432,7 @@ type problem struct {
 	status       int
 	code, detail string
 	fields       []fieldError
+	extra        map[string]string // RFC 9457 extension members
 	err          error
 }
 
@@ -460,7 +475,11 @@ func mapErr(err error) *problem {
 	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound):
+	case errors.Is(err, signing.ErrPendingExists):
+		p = &problem{status: http.StatusConflict, code: "pending_key_exists", detail: "The tenant already has a pending key; promote or discard it first."}
+	case errors.Is(err, signing.ErrNotPending):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The key isn't the tenant's pending key."}
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound), errors.Is(err, signing.ErrNotFound):
 		p = errNotFound
 	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
 		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}
@@ -540,5 +559,15 @@ func (p *problem) body(requestID string) []byte {
 		RequestID string       `json:"request_id"`
 		Errors    []fieldError `json:"errors,omitempty"`
 	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, requestID, p.fields})
+	if len(p.extra) > 0 { // extension members, after the standard ones
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		for k, v := range p.extra {
+			if _, taken := m[k]; !taken {
+				m[k] = v
+			}
+		}
+		b, _ = json.Marshal(m)
+	}
 	return append(b, '\n')
 }

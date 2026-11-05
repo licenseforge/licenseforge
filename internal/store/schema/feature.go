@@ -13,7 +13,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-var keyRE = regexp.MustCompile(keyPattern)
+// KeyRE matches a feature key (snake_case).
+var KeyRE = regexp.MustCompile(keyPattern)
 
 // Feature is a capability of a product that licenses switch on (boolean) or
 // limit (ADR-0015). Its key is what apps check (HasFeature, Limit), so it is
@@ -26,7 +27,7 @@ func (Feature) Fields() []ent.Field {
 	return []ent.Field{
 		prefixedID(ids.Feature),
 		field.String("product_id").Immutable().NotEmpty().SchemaType(idType),
-		field.String("key").Immutable().NotEmpty().MaxLen(63).Match(keyRE).SchemaType(slugType),
+		field.String("key").Immutable().NotEmpty().MaxLen(63).Match(KeyRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
 		field.String("description").Optional().Nillable().MaxLen(2000).Validate(notBlank).SchemaType(map[string]string{"postgres": "varchar(2000)"}),
 		field.Enum("type").Values(featureTypes...).Immutable(),
