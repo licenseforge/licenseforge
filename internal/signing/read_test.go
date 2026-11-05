@@ -2,11 +2,16 @@ package signing
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"testing"
 	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
+	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
 // List and Get need key:read on the whole tenant, in the tenant they read:
@@ -105,5 +110,35 @@ func TestPromoteAndDiscardReturnTheKey(t *testing.T) {
 	k, err = l.DiscardKey(as(tn), tn, third.ID)
 	if err != nil || k.ID != third.ID || k.Status != "retired" || k.RetiredAt == nil || k.PrivateKeyCiphertext != nil {
 		t.Errorf("DiscardKey = %+v, %v", k, err)
+	}
+}
+
+// Keys created at the same instant page by kid: none is skipped.
+func TestListTieBreak(t *testing.T) {
+	l, _, _ := setup(t)
+	tn := newTenant(t, l)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if err := l.DB.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+		for range 2 {
+			pub, _, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.SigningKey.Create().SetID(ids.SigningKey()).SetTenantID(tn).SetAlg(signingkey.AlgEd25519).SetPublicKey(pub).
+				SetStatus(signingkey.StatusRetired).SetRetiredAt(at).SetCreatedAt(at).SetUpdatedAt(at).Save(context.Background()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := l.List(as(tn), tn, 1, time.Time{}, "")
+	if err != nil || len(first) != 1 {
+		t.Fatalf("page 1: %v %v", first, err)
+	}
+	second, err := l.List(as(tn), tn, 5, first[0].CreatedAt, first[0].ID)
+	if err != nil || len(second) != 1 || second[0].ID == first[0].ID {
+		t.Errorf("page 2: %v %v", second, err)
 	}
 }
