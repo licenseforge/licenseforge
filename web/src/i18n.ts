@@ -211,7 +211,7 @@ const en = {
   "audit.broken.hash": "Entry #{seq} doesn't match its hash: it may have been changed.",
   "audit.broken.page": "Can't verify page {page}: its entries couldn't be read exactly as sent.",
   "audit.head": "Head (entry #{seq}):",
-  "audit.broken.link": "Entry #{seq} doesn't link to the entry before it: the chain was altered.",
+  "audit.broken.link": "Entry #{seq} doesn't link to the entry before it: the chain may have been altered.",
   "audit.broken.gap": "Entries are missing just before #{seq}.",
   "audit.broken.start": "Entry #1 doesn't start the chain.",
   "problem.unauthenticated": "Your session has ended. Sign in again.",

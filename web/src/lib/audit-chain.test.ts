@@ -69,7 +69,7 @@ describe("verifyChain (newest first)", () => {
     expect(await verifyChain(p1([{ event: bad, rawDetails: D1 }]))).toEqual({ ok: false, seq: 1, reason: "start" });
   });
   it("refuses hashes that aren't 64 lowercase hex digits", async () => {
-    for (const bad of [{ hash: H1.toUpperCase() }, { hash: H1.slice(2) }, { prev_hash: "0".repeat(63) + "g" }]) {
+    for (const bad of [{ hash: H1.toUpperCase() }, { hash: H1.slice(2) }, { prev_hash: "0".repeat(63) + "g" }, { prev_hash: "0".repeat(64) + "f" }, { hash: H1 + "f" }]) {
       expect(await verifyChain(p1([{ event: { ...first, ...bad }, rawDetails: D1 }]))).toEqual({ ok: false, seq: 1, reason: "hash" });
     }
   });
