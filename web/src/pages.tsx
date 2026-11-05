@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { canReadAudit } from "@/api/audit";
 import { authConfigQuery, loginHref } from "@/api/session";
+import { tenantsQuery } from "@/api/tenants";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
 
@@ -53,6 +55,8 @@ export function LoginPage() {
 
 export function TenantLayout() {
   const { slug } = useParams({ from: "/app/t/$slug" });
+  const { data: tenants } = useQuery(tenantsQuery);
+  const caller = tenants?.find((tn) => tn.slug === slug);
   const link = "rounded-md px-2 py-1 text-sm hover:bg-accent [&.active]:font-semibold [&.active]:underline";
   return (
     <>
@@ -75,6 +79,11 @@ export function TenantLayout() {
         <Link to="/t/$slug/settings/api-tokens" params={{ slug }} className={link}>
           {t("nav.tokens")}
         </Link>
+        {canReadAudit(caller) && (
+          <Link to="/t/$slug/settings/audit" params={{ slug }} className={link}>
+            {t("nav.audit")}
+          </Link>
+        )}
       </nav>
       <Outlet />
     </>
