@@ -17,24 +17,84 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ActivationBinding.
+const (
+	Cluster ActivationBinding = "cluster"
+	Machine ActivationBinding = "machine"
+)
+
+// Valid indicates whether the value is a known member of the ActivationBinding enum.
+func (e ActivationBinding) Valid() bool {
+	switch e {
+	case Cluster:
+		return true
+	case Machine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivationFpSource.
+const (
+	ActivationFpSourceEnv        ActivationFpSource = "env"
+	ActivationFpSourceKubernetes ActivationFpSource = "kubernetes"
+	ActivationFpSourceMachineId  ActivationFpSource = "machine-id"
+	ActivationFpSourceOverride   ActivationFpSource = "override"
+)
+
+// Valid indicates whether the value is a known member of the ActivationFpSource enum.
+func (e ActivationFpSource) Valid() bool {
+	switch e {
+	case ActivationFpSourceEnv:
+		return true
+	case ActivationFpSourceKubernetes:
+		return true
+	case ActivationFpSourceMachineId:
+		return true
+	case ActivationFpSourceOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivationMode.
+const (
+	Offline ActivationMode = "offline"
+	Online  ActivationMode = "online"
+)
+
+// Valid indicates whether the value is a known member of the ActivationMode enum.
+func (e ActivationMode) Valid() bool {
+	switch e {
+	case Offline:
+		return true
+	case Online:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ActivationRequestFpSource.
 const (
-	Env        ActivationRequestFpSource = "env"
-	Kubernetes ActivationRequestFpSource = "kubernetes"
-	MachineId  ActivationRequestFpSource = "machine-id"
-	Override   ActivationRequestFpSource = "override"
+	ActivationRequestFpSourceEnv        ActivationRequestFpSource = "env"
+	ActivationRequestFpSourceKubernetes ActivationRequestFpSource = "kubernetes"
+	ActivationRequestFpSourceMachineId  ActivationRequestFpSource = "machine-id"
+	ActivationRequestFpSourceOverride   ActivationRequestFpSource = "override"
 )
 
 // Valid indicates whether the value is a known member of the ActivationRequestFpSource enum.
 func (e ActivationRequestFpSource) Valid() bool {
 	switch e {
-	case Env:
+	case ActivationRequestFpSourceEnv:
 		return true
-	case Kubernetes:
+	case ActivationRequestFpSourceKubernetes:
 		return true
-	case MachineId:
+	case ActivationRequestFpSourceMachineId:
 		return true
-	case Override:
+	case ActivationRequestFpSourceOverride:
 		return true
 	default:
 		return false
@@ -285,6 +345,48 @@ type AcceptedInvitation struct {
 	TenantId string `json:"tenant_id"`
 }
 
+// Activation defines model for Activation.
+type Activation struct {
+	AppVersion *string           `json:"app_version"`
+	Binding    ActivationBinding `json:"binding"`
+	CreatedAt  time.Time         `json:"created_at"`
+
+	// DeactivatedAt Null while it holds a seat.
+	DeactivatedAt *time.Time `json:"deactivated_at"`
+
+	// Fingerprint The lease's bind.fp (a hash, never the raw machine ID).
+	Fingerprint string             `json:"fingerprint"`
+	FirstSeenAt time.Time          `json:"first_seen_at"`
+	FpSource    ActivationFpSource `json:"fp_source"`
+
+	// Hostname As the SDK last reported it.
+	Hostname *string `json:"hostname"`
+
+	// Id Example: act_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id         string         `json:"id"`
+	LastSeenAt time.Time      `json:"last_seen_at"`
+	LicenseId  string         `json:"license_id"`
+	Mode       ActivationMode `json:"mode"`
+	SdkVersion *string        `json:"sdk_version"`
+}
+
+// ActivationBinding defines model for Activation.Binding.
+type ActivationBinding string
+
+// ActivationFpSource defines model for Activation.FpSource.
+type ActivationFpSource string
+
+// ActivationMode defines model for Activation.Mode.
+type ActivationMode string
+
+// ActivationPage defines model for ActivationPage.
+type ActivationPage struct {
+	Items []Activation `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
 // ActivationRequest defines model for ActivationRequest.
 type ActivationRequest struct {
 	// AppVersion Printable ASCII.
@@ -507,9 +609,11 @@ type Lease struct {
 
 // License defines model for License.
 type License struct {
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Entitlements struct {
+	// ActiveActivations Seats taken now (activations not deactivated).
+	ActiveActivations int       `json:"active_activations"`
+	CreatedAt         time.Time `json:"created_at"`
+	CustomerId        string    `json:"customer_id"`
+	Entitlements      struct {
 		Features []string         `json:"features"`
 		Limits   map[string]int64 `json:"limits"`
 	} `json:"entitlements"`
@@ -568,9 +672,11 @@ type LicenseIssueType string
 
 // LicenseIssued defines model for LicenseIssued.
 type LicenseIssued struct {
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Entitlements struct {
+	// ActiveActivations Seats taken now (activations not deactivated).
+	ActiveActivations int       `json:"active_activations"`
+	CreatedAt         time.Time `json:"created_at"`
+	CustomerId        string    `json:"customer_id"`
+	Entitlements      struct {
 		Features []string         `json:"features"`
 		Limits   map[string]int64 `json:"limits"`
 	} `json:"entitlements"`
@@ -754,6 +860,9 @@ type ProductPatch struct {
 // Role defines model for Role.
 type Role string
 
+// ActivationId Example: act_01jcz5b2y3c4d5e6f7g8h9j0k1
+type ActivationId = string
+
 // ActivationTenant Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
 type ActivationTenant = string
 
@@ -834,6 +943,14 @@ type ListLicensesParams struct {
 type IssueLicenseParams struct {
 	// IdempotencyKey 1-255 printable ASCII characters; scoped to the tenant and the credential.
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// ListActivationsParams defines parameters for ListActivations.
+type ListActivationsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
 // ListMembersParams defines parameters for ListMembers.
@@ -968,6 +1085,12 @@ type ServerInterface interface {
 	// GetLicense Get a license (never its key).
 	// (GET /tenants/{tenant}/licenses/{id})
 	GetLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// ListActivations List a license's activations (machines or clusters), deactivated ones included, newest first.
+	// (GET /tenants/{tenant}/licenses/{id}/activations)
+	ListActivations(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, params ListActivationsParams)
+	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
+	DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -1765,6 +1888,114 @@ func (siw *ServerInterfaceWrapper) GetLicense(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListActivations operation middleware
+func (siw *ServerInterfaceWrapper) ListActivations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListActivationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListActivations(w, r, tenant, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeactivateActivation operation middleware
+func (siw *ServerInterfaceWrapper) DeactivateActivation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "activation_id" -------------
+	var activationId ActivationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "activation_id", r.PathValue("activation_id"), &activationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "activation_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeactivateActivation(w, r, tenant, id, activationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReinstateLicense operation middleware
 func (siw *ServerInterfaceWrapper) ReinstateLicense(w http.ResponseWriter, r *http.Request) {
 
@@ -2388,6 +2619,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", wrapper.DeactivateActivation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
@@ -5055,6 +5288,236 @@ func (response GetLicense404ApplicationProblemPlusJSONResponse) VisitGetLicenseR
 	return err
 }
 
+type ListActivationsRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+	Params ListActivationsParams
+}
+
+type ListActivationsResponseObject interface {
+	VisitListActivationsResponse(w http.ResponseWriter) error
+}
+
+type ListActivations200JSONResponse ActivationPage
+
+func (response ListActivations200JSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListActivations400ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations401ResponseHeaders
+}
+
+func (response ListActivations401ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations403ResponseHeaders
+}
+
+func (response ListActivations403ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations404ResponseHeaders
+}
+
+func (response ListActivations404ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivationRequestObject struct {
+	Tenant       Tenant       `json:"tenant"`
+	Id           LicenseId    `json:"id"`
+	ActivationId ActivationId `json:"activation_id"`
+}
+
+type DeactivateActivationResponseObject interface {
+	VisitDeactivateActivationResponse(w http.ResponseWriter) error
+}
+
+type DeactivateActivation200JSONResponse Activation
+
+func (response DeactivateActivation200JSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DeactivateActivation400ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation401ResponseHeaders
+}
+
+func (response DeactivateActivation401ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation403ResponseHeaders
+}
+
+func (response DeactivateActivation403ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation404ResponseHeaders
+}
+
+func (response DeactivateActivation404ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReinstateLicenseRequestObject struct {
 	Tenant Tenant    `json:"tenant"`
 	Id     LicenseId `json:"id"`
@@ -6690,6 +7153,12 @@ type StrictServerInterface interface {
 	// GetLicense Get a license (never its key).
 	// (GET /tenants/{tenant}/licenses/{id})
 	GetLicense(ctx context.Context, request GetLicenseRequestObject) (GetLicenseResponseObject, error)
+	// ListActivations List a license's activations (machines or clusters), deactivated ones included, newest first.
+	// (GET /tenants/{tenant}/licenses/{id}/activations)
+	ListActivations(ctx context.Context, request ListActivationsRequestObject) (ListActivationsResponseObject, error)
+	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
+	DeactivateActivation(ctx context.Context, request DeactivateActivationRequestObject) (DeactivateActivationResponseObject, error)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(ctx context.Context, request ReinstateLicenseRequestObject) (ReinstateLicenseResponseObject, error)
@@ -7322,6 +7791,62 @@ func (sh *strictHandler) GetLicense(w http.ResponseWriter, r *http.Request, tena
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetLicenseResponseObject); ok {
 		if err := validResponse.VisitGetLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListActivations operation middleware
+func (sh *strictHandler) ListActivations(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, params ListActivationsParams) {
+	var request ListActivationsRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListActivations(ctx, request.(ListActivationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListActivations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListActivationsResponseObject); ok {
+		if err := validResponse.VisitListActivationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeactivateActivation operation middleware
+func (sh *strictHandler) DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId) {
+	var request DeactivateActivationRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+	request.ActivationId = activationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeactivateActivation(ctx, request.(DeactivateActivationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeactivateActivation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeactivateActivationResponseObject); ok {
+		if err := validResponse.VisitDeactivateActivationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

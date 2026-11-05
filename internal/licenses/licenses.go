@@ -25,6 +25,7 @@ import (
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
@@ -438,35 +439,43 @@ var (
 	revoke = transition{"license.revoke", []license.Status{license.StatusActive, license.StatusSuspended}, `status = 'revoked', revoked_at = clock_timestamp(), suspended_at = NULL`}
 )
 
+// Changed is a license after a status change, with its seats taken
+// (activations not deactivated), counted in the change's transaction so a
+// committed change always has its answer.
+type Changed struct {
+	*ent.License
+	ActiveActivations int
+}
+
 // Suspend suspends an active license. p needs license:write on its product.
-func (s Service) Suspend(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Suspend(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, suspend)
 }
 
 // Reinstate makes a suspended license active again. A revoked license can't
 // be reinstated.
-func (s Service) Reinstate(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Reinstate(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, reinstate)
 }
 
 // Revoke revokes an active or suspended license, finally.
-func (s Service) Revoke(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Revoke(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, revoke)
 }
 
-func (s Service) change(ctx context.Context, p authz.Principal, licenseID string, t transition) (*ent.License, error) {
+func (s Service) change(ctx context.Context, p authz.Principal, licenseID string, t transition) (Changed, error) {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
-		return nil, err
+		return Changed{}, err
 	}
 	ev := event(p, t.action, "")
 	// Order of checks (ADR-0032): ID format, lookup under the product scope
 	// (missing and hidden alike: ErrNotFound), then license:write.
 	if !ids.Valid("lic", licenseID) { // hostile input: not stored in the entry
-		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
+		return Changed{}, s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
-	var row *ent.License
+	var row Changed
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		// Authorize on an unlocked read (product_id is immutable), so callers
 		// who may not change the license can't hold its lock.
@@ -513,7 +522,10 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(fmt.Errorf("%w: license changed concurrently", ErrState), err)
 		}
-		if row, err = tx.License.Get(ctx, l.ID); err != nil {
+		if row.License, err = tx.License.Get(ctx, l.ID); err != nil {
+			return err
+		}
+		if row.ActiveActivations, err = tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.DeactivatedAtIsNil()).Count(ctx); err != nil {
 			return err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
@@ -526,7 +538,7 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		if errors.Is(err, ErrState) {
 			ev.Details = map[string]any{"reason": err.Error()}
 		}
-		return nil, s.refused(ctx, tenantID, ev, err)
+		return Changed{}, s.refused(ctx, tenantID, ev, err)
 	}
 	return row, nil
 }
