@@ -136,3 +136,59 @@ it("hides Edit, Archive and New customer without customer:write", async () => {
   const manager = await customersPage("manager");
   expect(manager).toEqual(expect.arrayContaining(["Edit", "Archive", "New customer"]));
 });
+
+async function productsPage(role: string, scopeAll = true) {
+  const posts: string[] = [];
+  const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  const db = { id: "prd_1", slug: "db", name: "DB", archived_at: null, created_at: "2026-11-01T00:00:00Z" };
+  const old = { id: "prd_2", slug: "old", name: "Old", archived_at: "2026-11-02T00:00:00Z", created_at: "2026-10-01T00:00:00Z" };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      const path = new URL(req.url).pathname;
+      if (req.method === "POST") {
+        posts.push(path);
+        return json({ ...db, archived_at: "2026-11-05T00:00:00Z" });
+      }
+      if (path === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
+      if (path === "/api/v1/me/tenants") return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: scopeAll, product_ids: scopeAll ? [] : ["prd_1"] }] });
+      if (path.endsWith("/products")) return json({ items: [db, old] });
+      return json({ items: [] });
+    }),
+  );
+  const qc = new QueryClient();
+  const router = createAppRouter(qc, createMemoryHistory({ initialEntries: ["/t/acme/products"] }));
+  const el = document.createElement("div");
+  document.body.append(el);
+  const root = createRoot(el);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={qc}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  );
+  await vi.waitFor(() => expect(el.querySelector("header select option")?.textContent).toBe("Acme"));
+  await vi.waitFor(() => expect(el.textContent).toContain("Old"));
+  const rowButtons = (name: string) =>
+    [...el.querySelectorAll("tbody tr")].find((r) => r.querySelector("td")?.textContent === name)!.querySelectorAll("button");
+  return { el, root, posts, rowButtons };
+}
+
+it("archiving a product asks first, is one-way, and needs catalog:write", async () => {
+  const { el, root, posts, rowButtons } = await productsPage("admin");
+  expect(el.textContent).toContain("Archived");
+  expect([...rowButtons("Old")].map((b) => b.textContent)).not.toContain("Archive"); // already archived: one-way
+  const archive = [...rowButtons("DB")].find((b) => b.textContent === "Archive")!;
+  await act(async () => archive.click());
+  expect(el.querySelector("dialog")?.textContent).toContain("This is one-way");
+  expect(posts).toHaveLength(0);
+  const confirm = [...el.querySelectorAll<HTMLButtonElement>("dialog button")].find((b) => b.textContent === "Archive")!;
+  await act(async () => confirm.click());
+  await vi.waitFor(() => expect(posts).toEqual(["/api/v1/tenants/acme/products/prd_1/archive"]));
+  act(() => root.unmount());
+
+  const manager = await productsPage("manager");
+  expect([...manager.rowButtons("DB")].map((b) => b.textContent)).not.toContain("Archive");
+  act(() => manager.root.unmount());
+});
