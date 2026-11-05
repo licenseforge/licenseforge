@@ -91,6 +91,13 @@ URL, or without a port.
   growing `licenseforge_audit_export_lag_seconds`. Certificates are re-read
   for every batch, so renewed Secrets apply without a restart. Messages over
   8 KB (RFC 5425's minimum) are sent but logged, as a collector may truncate them. Narrow the egress with `audit.export.syslog.to`.
+- **Audit retention** (ADR-0036): set `auditRetention.enabled` and
+  `auditRetention.secret` (a Secret with `retention-database-url`, the
+  `licenseforge_pruner` login) to run `licenseforge audit prune` on
+  `auditRetention.schedule` (`concurrencyPolicy: Forbid`). Tenant owners set
+  their own retention (365 to 36,500 days); `auditRetention.platformDays` sets
+  the platform chain's (empty keeps everything). Nothing a registered SIEM
+  sink hasn't received is pruned.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;

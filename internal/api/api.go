@@ -274,6 +274,7 @@ var queryParams = map[string][]string{
 	"ListProducts":    {"limit", "cursor"},
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
+	"ListActivations": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -455,7 +456,7 @@ func mapErr(err error) *problem {
 	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound):
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound):
 		p = errNotFound
 	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
 		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}

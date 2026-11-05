@@ -22,6 +22,8 @@ const (
 	FieldSlug = "slug"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldAuditRetentionDays holds the string denoting the audit_retention_days field in the database.
+	FieldAuditRetentionDays = "audit_retention_days"
 	// EdgeProducts holds the string denoting the products edge name in mutations.
 	EdgeProducts = "products"
 	// EdgeCustomers holds the string denoting the customers edge name in mutations.
@@ -123,6 +125,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldSlug,
 	FieldName,
+	FieldAuditRetentionDays,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -178,6 +181,11 @@ func BySlug(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByAuditRetentionDays orders the results by the audit_retention_days field.
+func ByAuditRetentionDays(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAuditRetentionDays, opts...).ToFunc()
 }
 
 // ByProductsCount orders the results by products count.

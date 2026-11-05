@@ -371,7 +371,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	// this list, so it gets reviewed.
 	extra := map[string]map[string]string{ // ADR-0029: identity role and the invitation rules
 		"tenants": {
-			"identity_read": `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
+			"tenant_settings": `UPDATE licenseforge_app ((id)::text = app_tenant_id()) ((id)::text = app_tenant_id())`, // ADR-0036: audit retention
+			"retention_read":  `SELECT licenseforge_retention true`,
+			"identity_read":   `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 		},
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,

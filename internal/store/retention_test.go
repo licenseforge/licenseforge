@@ -319,11 +319,35 @@ func TestRetentionPrivileges(t *testing.T) {
 			t.Errorf("%s %s on %s = %v, want %v", c.role, c.priv, c.table, got, c.want)
 		}
 	}
+	// On tenants: the two columns it needs, read-only.
+	for col, want := range map[string]bool{"id": true, "audit_retention_days": true, "name": false, "slug": false} {
+		var got bool
+		if err := owner.QueryRow(`SELECT has_column_privilege($1, 'tenants', $2, 'SELECT')`, RetentionRole, col).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("retention SELECT tenants.%s = %v, want %v", col, got, want)
+		}
+	}
+	var tw bool
+	if err := owner.QueryRow(`SELECT has_any_column_privilege($1, 'tenants', 'INSERT,UPDATE') OR has_table_privilege($1, 'tenants', 'DELETE,TRUNCATE')`, RetentionRole).Scan(&tw); err != nil || tw {
+		t.Errorf("retention login may write tenants (%v)", err)
+	}
+	// The tenant pool may change only its retention setting (and updated_at).
+	for col, want := range map[string]bool{"audit_retention_days": true, "updated_at": true, "name": false, "slug": false, "id": false} {
+		var got bool
+		if err := owner.QueryRow(`SELECT has_column_privilege($1, 'tenants', $2, 'UPDATE')`, AppRole, col).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("tenant pool UPDATE tenants.%s = %v, want %v", col, got, want)
+		}
+	}
 	// Nothing else: the retention login touches only the audit tables.
 	var others []string
 	rows, err := owner.Query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname = 'public' AND c.relkind = 'r'
-		  AND c.relname NOT IN ('audit_events', 'audit_anchors', 'audit_export_cursors', 'audit_export_sinks')
+		  AND c.relname NOT IN ('audit_events', 'audit_anchors', 'audit_export_cursors', 'audit_export_sinks', 'tenants')
 		  AND (has_table_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
 		    OR has_any_column_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,REFERENCES'))`, RetentionRole)
 	if err != nil {

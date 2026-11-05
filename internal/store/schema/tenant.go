@@ -20,14 +20,18 @@ func (Tenant) Fields() []ent.Field {
 		prefixedID(ids.Tenant),
 		field.String("slug").Unique().NotEmpty().MaxLen(63).Match(SlugRE).SchemaType(slugType),
 		field.String("name").NotEmpty().MaxLen(200).Validate(notBlank).SchemaType(nameType),
+		// Audit retention in days (ADR-0036); nil keeps everything. 365 (the
+		// database's floor) to 36,500; set by owners only (retention.SetTenantRetention).
+		field.Int("audit_retention_days").Optional().Nillable(),
 	}
 }
 
 func (Tenant) Annotations() []schema.Annotation {
 	return []schema.Annotation{entsql.Annotation{Checks: map[string]string{
-		"tenants_id_format":      `id ~ '^tnt_` + idChars + `$'`,
-		"tenants_slug_format":    `slug ~ '` + slugPattern + `'`,
-		"tenants_name_not_blank": `btrim(name) <> ''`,
+		"tenants_id_format":       `id ~ '^tnt_` + idChars + `$'`,
+		"tenants_slug_format":     `slug ~ '` + slugPattern + `'`,
+		"tenants_name_not_blank":  `btrim(name) <> ''`,
+		"tenants_audit_retention": `audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)`,
 	}}}
 }
 
