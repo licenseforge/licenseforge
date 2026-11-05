@@ -111,7 +111,7 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 	}
 	body, _ := ctx.Value(bodyKey{}).([]byte)
 	ri, _ := ctx.Value(reqKey{}).(reqInfo)
-	out, _, err := s.Idempotency.Do(ctx, idempotency.Request{TenantID: p.TenantID, Credential: p.ID, Key: *req.Params.IdempotencyKey,
+	out, replayed, err := s.Idempotency.Do(ctx, idempotency.Request{TenantID: p.TenantID, Credential: p.ID, Key: *req.Params.IdempotencyKey,
 		Operation: "IssueLicense", Body: body},
 		func(ctx context.Context, tx *ent.Tx) error { return s.Licenses.RecheckIssue(ctx, tx, p, ir.ProductID) },
 		func(ctx context.Context, tx *ent.Tx) (idempotency.Outcome, error) {
@@ -129,6 +129,17 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 		})
 	if err != nil {
 		return nil, err
+	}
+	if replayed && out.Status == http.StatusCreated { // the key is shown again: audited, or not shown (ADR-0025)
+		var lic struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(out.Body, &lic); err != nil {
+			return nil, err
+		}
+		if err := s.Licenses.RecordKeyReveal(ctx, p, lic.ID); err != nil {
+			return nil, err
+		}
 	}
 	if out.Status >= 400 { // a replayed problem names this request, like X-Request-Id
 		var m map[string]any

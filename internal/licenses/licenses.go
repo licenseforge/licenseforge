@@ -144,7 +144,9 @@ func (s Service) IssueTx(ctx context.Context, tx *ent.Tx, p authz.Principal, req
 		}
 		ev.Outcome = o
 		if _, rerr := audit.Record(ctx, tx, tenantID, ev); rerr != nil {
-			return Issued{}, errors.Join(err, rerr)
+			// Not the refusal (a 4xx would be stored without its entry): an
+			// outage, so Do rolls back and stores nothing.
+			return Issued{}, fmt.Errorf("licenses: recording a refused issue: %w", rerr)
 		}
 		return Issued{}, visible
 	}
@@ -153,14 +155,42 @@ func (s Service) IssueTx(ctx context.Context, tx *ent.Tx, p authz.Principal, req
 
 // RecheckIssue repeats Issue's product and permission checks in tx, for a
 // replayed idempotent issue (idempotency.Store.Do's recheck): p must still
-// see productID and hold license:issue on it.
+// see productID and hold license:issue on it. Only the product is checked
+// again: plans and customers have no visibility beyond the tenant, and
+// licenses are never deleted. A refusal is recorded in a transaction of its
+// own (Do rolls back tx). The replayed body is the issue-time snapshot;
+// clients GET the license for its current status.
 func (s Service) RecheckIssue(ctx context.Context, tx *ent.Tx, p authz.Principal, productID string) error {
-	err := checkProduct(authz.WithPrincipal(ctx, p), tx, productID)
-	var h hidden
-	if errors.As(err, &h) {
-		return h.visible
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
 	}
-	return err
+	if err := checkProduct(ctx, tx, productID); err != nil {
+		ev := event(p, "license.issue", "")
+		ev.Details = map[string]any{"replay": true}
+		if ids.Valid("prd", productID) {
+			ev.Details["product_id"] = productID
+		}
+		return s.refused(ctx, tenantID, ev, err)
+	}
+	return nil
+}
+
+// RecordKeyReveal records that p was shown licenseID's key again (a replayed
+// idempotent issue), as every key reveal is (ADR-0025): no key material.
+func (s Service) RecordKeyReveal(ctx context.Context, p authz.Principal, licenseID string) error {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+	ev := event(p, "license.key_reveal", licenseID)
+	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, map[string]any{"reason": "idempotent_replay"}
+	return s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		_, err := audit.Record(ctx, tx, tenantID, ev)
+		return err
+	})
 }
 
 // checkProduct: the product exists, p sees it and may issue for it. One

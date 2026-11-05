@@ -8,6 +8,7 @@ import (
 
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
@@ -192,6 +193,10 @@ func TestIssueLicenseIdempotency(t *testing.T) {
 	if again.code != 201 || again.body["id"] != first.body["id"] || again.body["key"] != first.body["key"] {
 		t.Fatalf("replay: %d %s", again.code, again.raw)
 	}
+	if e := f.lastEvent(t, f.a.ID); e.Action != "license.key_reveal" || *e.ObjectID != first.body["id"] || *e.ActorID != f.ownerA ||
+		strings.Contains(e.Details, first.body["key"].(string)) {
+		t.Errorf("replay audit = %+v", e)
+	}
 	if r := f.do(t, "GET", p, "", owner); len(r.body["items"].([]any)) != 1 {
 		t.Errorf("issued twice: %s", r.raw)
 	}
@@ -224,6 +229,9 @@ func TestIssueLicenseIdempotency(t *testing.T) {
 	if r := f.do(t, "POST", p, body, admin, k3).problem(t, 403, "forbidden"); r["key"] != nil {
 		t.Errorf("replay leaked: %v", r)
 	}
+	if e := f.lastEvent(t, f.a.ID); e.Action != "license.issue" || e.Outcome != "denied" || *e.ActorID != f.adminA || !strings.Contains(e.Details, `"replay":true`) {
+		t.Errorf("refused replay audit = %+v", e)
+	}
 	// Malformed keys.
 	for _, k := range []string{strings.Repeat("k", 256), "é", ""} {
 		r := f.do(t, "POST", p, body, owner, header("Idempotency-Key", k))
@@ -234,4 +242,17 @@ func TestIssueLicenseIdempotency(t *testing.T) {
 			t.Errorf("key %q: %d %s", k, r.code, r.raw)
 		}
 	}
+}
+
+func (f *fixture) lastEvent(t *testing.T, tenant string) *ent.AuditEvent {
+	t.Helper()
+	var e *ent.AuditEvent
+	if err := f.db.WithTenant(context.Background(), tenant, func(tx *ent.Tx) error {
+		var err error
+		e, err = tx.AuditEvent.Query().Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return e
 }
