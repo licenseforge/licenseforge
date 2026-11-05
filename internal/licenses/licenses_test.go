@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/plan"
 	"licenseforge.io/licenseforge/internal/store/ent/planfeature"
+	storeids "licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/schema"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -330,7 +332,8 @@ func TestOverrides(t *testing.T) {
 	for range 5 {
 		req := f.req(f.a)
 		req.Overrides = map[string]Override{"zz_nope": {}, "aa_nope": {}, "mm_nope": {}}
-		if _, err := f.s.Issue(ctx, p, req); err == nil || !strings.Contains(err.Error(), `"aa_nope"`) {
+		var inv *InvalidError
+		if _, err := f.s.Issue(ctx, p, req); !errors.As(err, &inv) || inv.Field != "/overrides/aa_nope" {
 			t.Fatalf("err = %v", err)
 		}
 	}
@@ -682,5 +685,176 @@ func TestTransitionDoesNotBlockKeyShare(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Refusals name the request field (ADR-0032), and come after the product
+// and permission checks.
+func TestIssueFieldErrors(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	for name, c := range map[string]struct {
+		change func(*IssueRequest)
+		field  string
+	}{
+		"malformed product":         {func(r *IssueRequest) { r.ProductID = "x" }, "/product_id"},
+		"another tenant's":          {func(r *IssueRequest) { r.ProductID = f.b.prodP }, "/product_id"},
+		"malformed plan":            {func(r *IssueRequest) { r.PlanID = "x" }, "/plan_id"},
+		"another product's plan":    {func(r *IssueRequest) { r.PlanID = f.a.planQ.ID }, "/plan_id"},
+		"malformed customer":        {func(r *IssueRequest) { r.CustomerID = "x" }, "/customer_id"},
+		"another tenant's customer": {func(r *IssueRequest) { r.CustomerID = f.b.customer }, "/customer_id"},
+		"type":                      {func(r *IssueRequest) { r.Type = "gold" }, "/type"},
+		"external refs":             {func(r *IssueRequest) { r.ExternalRefs = map[string]string{"A": "1"} }, "/external_refs"},
+		"override, escaped key":     {func(r *IssueRequest) { r.Overrides = map[string]Override{"a/b~c": {}} }, "/overrides/a~1b~0c"},
+	} {
+		req := f.req(f.a)
+		c.change(&req)
+		var inv *InvalidError
+		if _, err := f.s.Issue(ctx, mgr, req); !errors.As(err, &inv) || inv.Field != c.field {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A viewer sending invalid values is refused for its role first.
+	req := f.req(f.a)
+	req.PlanID, req.Type = "x", "gold"
+	if _, err := f.s.Issue(ctx, as(f.a.id, authz.Viewer, all), req); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("viewer, invalid values: %v", err)
+	}
+}
+
+// IssueTx records its refusal in the caller's transaction (it commits with
+// it), and RecheckIssue repeats the product and permission checks.
+func TestIssueTxAndRecheck(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	lic, ev := f.count(t, f.a.id)
+	req := f.req(f.a)
+	req.Type = "gold"
+	var refused error
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		_, refused = f.s.IssueTx(ctx, tx, mgr, req)
+		return nil // commit, as idempotency.Store.Do does for a 4xx
+	})
+	if !errors.Is(refused, ErrInvalid) {
+		t.Fatalf("refused = %v", refused)
+	}
+	if lic2, ev2 := f.count(t, f.a.id); lic2 != lic || ev2 != ev+1 || f.lastEvent(t, f.a.id).Outcome != auditevent.OutcomeFailure {
+		t.Errorf("licenses %d→%d, events %d→%d", lic, lic2, ev, ev2)
+	}
+	var got Issued
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		var err error
+		got, err = f.s.IssueTx(ctx, tx, mgr, f.req(f.a))
+		return err
+	})
+	if got.Key == "" || f.get(t, f.a.id, got.License.ID) == nil {
+		t.Fatalf("issued %+v", got)
+	}
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		for name, c := range map[string]struct {
+			p    authz.Principal
+			want error
+		}{
+			"manager":               {mgr, nil},
+			"viewer":                {as(f.a.id, authz.Viewer, all), authz.ErrDenied},
+			"outside product scope": {as(f.a.id, authz.Manager, authz.Scope{Products: []string{f.a.prodQ}}), ErrInvalid},
+		} {
+			if err := f.s.RecheckIssue(ctx, tx, c.p, f.a.prodP); !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+				t.Errorf("recheck %s: %v", name, err)
+			}
+		}
+		return nil
+	})
+}
+
+func TestListAndGet(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	var made []*ent.License
+	for range 3 {
+		got, err := f.s.Issue(ctx, mgr, f.req(f.a))
+		if err != nil {
+			t.Fatal(err)
+		}
+		made = append(made, got.License)
+	}
+	if _, err := f.s.Suspend(ctx, mgr, made[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Issue(ctx, as(f.b.id, authz.Manager, all), f.req(f.b)); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(ls []*ent.License) (out []string) {
+		for _, l := range ls {
+			out = append(out, l.ID)
+		}
+		return out
+	}
+	p1, err := f.s.List(ctx, mgr, Filter{}, 2, time.Time{}, "")
+	if err != nil || !slices.Equal(ids(p1), []string{made[2].ID, made[1].ID}) {
+		t.Fatalf("page 1 = %v, %v", ids(p1), err)
+	}
+	p2, err := f.s.List(ctx, mgr, Filter{}, 2, p1[1].CreatedAt, p1[1].ID)
+	if err != nil || !slices.Equal(ids(p2), []string{made[0].ID}) {
+		t.Fatalf("page 2 = %v, %v", ids(p2), err)
+	}
+	now := time.Now()
+	for name, c := range map[string]struct {
+		p    authz.Principal
+		f    Filter
+		want []string
+	}{
+		"suspended":              {mgr, Filter{Status: license.StatusSuspended}, []string{made[0].ID}},
+		"product":                {mgr, Filter{ProductID: f.a.prodP}, []string{made[2].ID, made[1].ID, made[0].ID}},
+		"other product":          {mgr, Filter{ProductID: f.a.prodQ}, nil},
+		"customer":               {mgr, Filter{CustomerID: f.a.customer}, []string{made[2].ID, made[1].ID, made[0].ID}},
+		"another customer":       {mgr, Filter{CustomerID: f.b.customer}, nil},
+		"created after":          {mgr, Filter{CreatedAfter: &made[1].CreatedAt}, []string{made[2].ID}},
+		"created before":         {mgr, Filter{CreatedBefore: &made[1].CreatedAt}, []string{made[0].ID}},
+		"future":                 {mgr, Filter{CreatedAfter: &now}, nil},
+		"scoped elsewhere":       {as(f.a.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodQ}}), Filter{}, nil},
+		"scoped, filter outside": {as(f.a.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodQ}}), Filter{ProductID: f.a.prodP}, nil},
+	} {
+		got, err := f.s.List(ctx, c.p, c.f, 10, time.Time{}, "")
+		if err != nil || !slices.Equal(ids(got), c.want) {
+			t.Errorf("%s: %v, %v", name, ids(got), err)
+		}
+	}
+	if l, err := f.s.Get(ctx, as(f.a.id, authz.Viewer, all), made[0].ID); err != nil || l.ID != made[0].ID {
+		t.Errorf("get: %v, %v", l, err)
+	}
+	for name, c := range map[string]struct {
+		p  authz.Principal
+		id string
+	}{
+		"missing":        {mgr, newLicenseID()},
+		"malformed":      {mgr, "x"},
+		"another tenant": {as(f.b.id, authz.Manager, all), made[0].ID},
+		"out of scope":   {as(f.a.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodQ}}), made[0].ID},
+	} {
+		if _, err := f.s.Get(ctx, c.p, c.id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("get %s: %v", name, err)
+		}
+	}
+}
+
+func newLicenseID() string { return storeids.License() }
+
+func TestRecordKeyRevealRefusesMalformedIDs(t *testing.T) {
+	f := setup(t)
+	mgr := as(f.a.id, authz.Manager, all)
+	for _, c := range [][2]string{{"", f.a.prodP}, {"lic_x", f.a.prodP}, {newLicenseID(), ""}, {newLicenseID(), "x"}} {
+		if err := f.s.RecordKeyReveal(context.Background(), mgr, c[0], c[1]); err == nil {
+			t.Errorf("reveal %q/%q recorded", c[0], c[1])
+		}
+	}
+	if err := f.s.RecordKeyReveal(context.Background(), mgr, newLicenseID(), f.a.prodP); err != nil {
+		t.Error(err)
+	}
+	if e := f.lastEvent(t, f.a.id); e.Action != "license.key_reveal" || !strings.Contains(e.Details, f.a.prodP) {
+		t.Errorf("audit = %+v", e)
 	}
 }

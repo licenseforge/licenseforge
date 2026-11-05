@@ -23,13 +23,18 @@ import (
 	"slices"
 	"strings"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
+	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -48,22 +53,31 @@ const unissuedTenant = "tnt_aaaaaaaaaaaaaaaaaaaaaaaaaa"
 type Config struct {
 	Tokens   apitokens.Service
 	Members  members.Service
-	Identity identity.Service
-	Sessions *weblogin.Sessions // nil: dashboard login is off, so sessions answer 401
+	Licenses licenses.Service
+	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
+	Idempotency idempotency.Store
+	// Invitations: list, create, revoke, and accept (a user route).
+	Invitations invitations.Service
+	Identity    identity.Service
+	Sessions    *weblogin.Sessions // nil: dashboard login is off, so sessions answer 401
 	// APIHost, if set, accepts only API tokens; every other host only
 	// sessions. Empty: both everywhere (one hostname).
 	APIHost string
 	Log     *slog.Logger
+	// The activation API (activation.go).
+	Activations    activations.Service
+	ActivationRate int // requests per license key per minute, per replica; 0: DefaultActivationRate
 }
 
 type server struct {
 	Config
-	mux *http.ServeMux
+	mux     *http.ServeMux
+	limiter *keyLimiter
 }
 
 // New returns the API handler; mount it at Prefix + "/".
 func New(c Config) http.Handler {
-	s := &server{Config: c, mux: http.NewServeMux()}
+	s := &server{Config: c, mux: http.NewServeMux(), limiter: newKeyLimiter(c.ActivationRate)}
 	s.routes(s.mux)
 	return s
 }
@@ -101,6 +115,10 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			s.write(w, r, p)
 		}
 	}()
+	if strings.HasPrefix(r.URL.Path, activationPrefix) { // decoded, as ServeMux matches it
+		s.activation(w, r)
+		return
+	}
 	p, prob := s.authenticate(w, r)
 	if prob != nil {
 		s.write(w, r, prob)
@@ -181,6 +199,11 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	}
 	ref, ok := tenantRef(r)
 	if !ok {
+		if userRoutes[r.URL.EscapedPath()] {
+			// A principal with no tenant: authz denies every permission to
+			// it; only user routes, which act for the user, accept it.
+			return authz.Principal{Kind: authz.User, ID: u.ID}, nil
+		}
 		return authz.Principal{}, errNotFound
 	}
 	ctx := r.Context()
@@ -197,6 +220,11 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	}
 	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope}, nil
 }
+
+// userRoutes are session-only paths outside a tenant, acting for the
+// signed-in user (tokens belong to tenants: 401 there, as on any
+// non-tenant path).
+var userRoutes = map[string]bool{Prefix + "/invitations/accept": true, Prefix + "/me/tenants": true}
 
 // tenantRef is the {tenant} segment of /api/v1/tenants/{tenant}/…, split
 // from the escaped path as ServeMux does.
@@ -231,10 +259,12 @@ func clean(s string) string {
 // queryParams are each operation's query parameters; others answer 400.
 // TestRoutesMatchSpec keeps it equal to the spec.
 var queryParams = map[string][]string{
-	"ListApiTokens": {"limit", "cursor"},
-	"ListMembers":   {"limit", "cursor"},
-	"RemoveMember":  {"revoke_tokens"},
-	"UpdateMember":  {"revoke_tokens"},
+	"ListApiTokens":   {"limit", "cursor"},
+	"ListMembers":     {"limit", "cursor"},
+	"ListInvitations": {"limit", "cursor"},
+	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
+	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
+	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
 
 // strictInput refuses unknown query parameters and decodes the body again
@@ -402,23 +432,49 @@ func (s *server) badRequest(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // fail is the one error mapper for handler errors.
-func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
+func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) { s.write(w, r, mapErr(err)) }
+
+// mapErr maps a handler's error to its problem.
+func mapErr(err error) *problem {
 	var p *problem
-	var invalidField *members.InvalidError
+	var invalidMember *members.InvalidError
+	var invalidLicense *licenses.InvalidError
+	var invalidInvitation *invitations.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case activationProblem(err) != nil:
+		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):
 		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
-	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound):
+	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound), errors.Is(err, licenses.ErrNotFound), errors.Is(err, invitations.ErrNotFound):
 		p = errNotFound
-	case errors.As(err, &invalidField):
-		p = invalid(fieldError{invalidField.Field, invalidField.Message})
+	case errors.As(err, &invalidMember):
+		p = invalid(fieldError{invalidMember.Field, invalidMember.Message})
+	case errors.As(err, &invalidLicense):
+		p = invalid(fieldError{invalidLicense.Field, invalidLicense.Message})
+	case errors.Is(err, licenses.ErrInvalid):
+		p = invalid()
+	case errors.As(err, &invalidInvitation):
+		p = invalid(fieldError{invalidInvitation.Field, invalidInvitation.Message})
+	case errors.Is(err, store.ErrInvitation): // one answer for every reason (no oracle)
+		p = invalid(fieldError{"/token", "invalid, expired, revoked or used, or not for this account"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
+	case errors.Is(err, licenses.ErrState):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The license's status doesn't allow this."}
+	case errors.Is(err, idempotency.ErrInvalidKey):
+		p = &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Idempotency-Key must be 1-255 printable ASCII characters."}
+	case errors.Is(err, idempotency.ErrKeyReused):
+		p = &problem{status: http.StatusUnprocessableEntity, code: "idempotency_key_reused", detail: "This Idempotency-Key was used with a different request."}
+	case errors.Is(err, idempotency.ErrInProgress):
+		p = &problem{status: http.StatusConflict, code: "idempotency_in_progress", detail: "A request with this Idempotency-Key is still in progress; retry later."}
 	default:
 		p = internal(err)
 	}
-	s.write(w, r, p)
+	if p.err == nil {
+		p = &problem{status: p.status, code: p.code, detail: p.detail, fields: p.fields, err: err}
+	}
+	return p
 }
 
 func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
@@ -430,11 +486,20 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 	s.Log.Log(r.Context(), level, "api refusal", "request_id", ri.id, "client_request_id", ri.client,
 		"method", r.Method, "path", r.URL.Path, "status", p.status, "code", p.code, "err", p.err)
 	if p.status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="licenseforge"`)
+		scheme := "Bearer"
+		if strings.HasPrefix(r.URL.Path, activationPrefix) {
+			scheme = "License"
+		}
+		w.Header().Set("WWW-Authenticate", scheme+` realm="licenseforge"`)
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.status)
-	_ = json.NewEncoder(w).Encode(struct {
+	_, _ = w.Write(p.body(ri.id))
+}
+
+// body is p's problem+json document.
+func (p *problem) body(requestID string) []byte {
+	b, _ := json.Marshal(struct {
 		Type      string       `json:"type"`
 		Title     string       `json:"title"`
 		Status    int          `json:"status"`
@@ -442,5 +507,6 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 		Code      string       `json:"code"`
 		RequestID string       `json:"request_id"`
 		Errors    []fieldError `json:"errors,omitempty"`
-	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, ri.id, p.fields})
+	}{"about:blank", http.StatusText(p.status), p.status, p.detail, p.code, requestID, p.fields})
+	return append(b, '\n')
 }

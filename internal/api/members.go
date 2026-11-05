@@ -61,28 +61,36 @@ func (s *server) UpdateMember(ctx context.Context, req apigen.UpdateMemberReques
 			c.Scope.Products = *b.ProductIds
 		}
 	}
-	m, revoked, err := s.Members.Update(ctx, req.Id, c, req.Params.RevokeTokens == nil || *req.Params.RevokeTokens)
+	m, revoked, err := s.Members.Update(ctx, req.Id, c, members.Revoke{Tokens: orTrue(req.Params.RevokeTokens), Invitations: orTrue(req.Params.RevokeInvitations)})
 	if err != nil {
 		return nil, err
 	}
 	v := memberView(m)
 	return apigen.UpdateMember200JSONResponse{Id: v.Id, UserId: v.UserId, Email: v.Email, Name: v.Name, Role: v.Role,
-		AllProducts: v.AllProducts, ProductIds: v.ProductIds, CreatedAt: v.CreatedAt, RevokedTokenIds: append([]string{}, revoked...)}, nil
+		AllProducts: v.AllProducts, ProductIds: v.ProductIds, CreatedAt: v.CreatedAt, RevokedTokenIds: append([]string{}, revoked.Tokens...),
+		RevokedInvitationIds: append([]string{}, revoked.Invitations...)}, nil
 }
 
 func (s *server) RemoveMember(ctx context.Context, req apigen.RemoveMemberRequestObject) (apigen.RemoveMemberResponseObject, error) {
-	revoke := req.Params.RevokeTokens == nil || *req.Params.RevokeTokens
-	revoked, err := s.Members.Remove(ctx, req.Id, revoke)
+	revoked, err := s.Members.Remove(ctx, req.Id, members.Revoke{Tokens: orTrue(req.Params.RevokeTokens), Invitations: orTrue(req.Params.RevokeInvitations)})
 	if err != nil {
 		return nil, err
 	}
 	var res apigen.RemoveMember204Response
-	if len(revoked) > 0 { // DELETE answers 204 (ADR-0032): the IDs go in a header
-		ids := strings.Join(revoked, ",")
+	// DELETE answers 204 (ADR-0032): the IDs go in headers.
+	if len(revoked.Tokens) > 0 {
+		ids := strings.Join(revoked.Tokens, ",")
 		res.Headers.XRevokedTokenIds = &ids
+	}
+	if len(revoked.Invitations) > 0 {
+		ids := strings.Join(revoked.Invitations, ",")
+		res.Headers.XRevokedInvitationIds = &ids
 	}
 	return res, nil
 }
+
+// orTrue is an optional boolean parameter that defaults to true.
+func orTrue(b *bool) bool { return b == nil || *b }
 
 func memberView(m *ent.Membership) apigen.Member {
 	v := apigen.Member{Id: m.ID, UserId: m.UserID, Role: apigen.MemberRole(m.Role), AllProducts: m.ScopeAll,
