@@ -15,6 +15,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
@@ -48,6 +50,8 @@ const (
 	TypeAPITokenProduct   = "APITokenProduct"
 	TypeActivation        = "Activation"
 	TypeAuditEvent        = "AuditEvent"
+	TypeAuditExportCursor = "AuditExportCursor"
+	TypeAuditExportSink   = "AuditExportSink"
 	TypeCustomer          = "Customer"
 	TypeFeature           = "Feature"
 	TypeIdempotencyKey    = "IdempotencyKey"
@@ -4185,6 +4189,1156 @@ func (m *AuditEventMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown AuditEvent edge %s", name)
+}
+
+// AuditExportCursorMutation represents an operation that mutates the AuditExportCursor nodes in the graph.
+type AuditExportCursorMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *string
+	seq           *int64
+	addseq        *int64
+	claimed_by    *string
+	claimed_until *time.Time
+	clearedFields map[string]struct{}
+	tenant        *string
+	clearedtenant bool
+	sink          *string
+	clearedsink   bool
+	done          bool
+	oldValue      func(context.Context) (*AuditExportCursor, error)
+	predicates    []predicate.AuditExportCursor
+}
+
+var _ ent.Mutation = (*AuditExportCursorMutation)(nil)
+
+// auditexportcursorOption allows management of the mutation configuration using functional options.
+type auditexportcursorOption func(*AuditExportCursorMutation)
+
+// newAuditExportCursorMutation creates new mutation for the AuditExportCursor entity.
+func newAuditExportCursorMutation(c config, op Op, opts ...auditexportcursorOption) *AuditExportCursorMutation {
+	m := &AuditExportCursorMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeAuditExportCursor,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withAuditExportCursorID sets the ID field of the mutation.
+func withAuditExportCursorID(id string) auditexportcursorOption {
+	return func(m *AuditExportCursorMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *AuditExportCursor
+		)
+		m.oldValue = func(ctx context.Context) (*AuditExportCursor, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().AuditExportCursor.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withAuditExportCursor sets the old AuditExportCursor of the mutation.
+func withAuditExportCursor(node *AuditExportCursor) auditexportcursorOption {
+	return func(m *AuditExportCursorMutation) {
+		m.oldValue = func(context.Context) (*AuditExportCursor, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m AuditExportCursorMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m AuditExportCursorMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of AuditExportCursor entities.
+func (m *AuditExportCursorMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *AuditExportCursorMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *AuditExportCursorMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().AuditExportCursor.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetTenantID sets the "tenant_id" field.
+func (m *AuditExportCursorMutation) SetTenantID(s string) {
+	m.tenant = &s
+}
+
+// TenantID returns the value of the "tenant_id" field in the mutation.
+func (m *AuditExportCursorMutation) TenantID() (r string, exists bool) {
+	v := m.tenant
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTenantID returns the old "tenant_id" field's value of the AuditExportCursor entity.
+// If the AuditExportCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportCursorMutation) OldTenantID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTenantID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTenantID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTenantID: %w", err)
+	}
+	return oldValue.TenantID, nil
+}
+
+// ResetTenantID resets all changes to the "tenant_id" field.
+func (m *AuditExportCursorMutation) ResetTenantID() {
+	m.tenant = nil
+}
+
+// SetSinkID sets the "sink_id" field.
+func (m *AuditExportCursorMutation) SetSinkID(s string) {
+	m.sink = &s
+}
+
+// SinkID returns the value of the "sink_id" field in the mutation.
+func (m *AuditExportCursorMutation) SinkID() (r string, exists bool) {
+	v := m.sink
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSinkID returns the old "sink_id" field's value of the AuditExportCursor entity.
+// If the AuditExportCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportCursorMutation) OldSinkID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSinkID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSinkID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSinkID: %w", err)
+	}
+	return oldValue.SinkID, nil
+}
+
+// ResetSinkID resets all changes to the "sink_id" field.
+func (m *AuditExportCursorMutation) ResetSinkID() {
+	m.sink = nil
+}
+
+// SetSeq sets the "seq" field.
+func (m *AuditExportCursorMutation) SetSeq(i int64) {
+	m.seq = &i
+	m.addseq = nil
+}
+
+// Seq returns the value of the "seq" field in the mutation.
+func (m *AuditExportCursorMutation) Seq() (r int64, exists bool) {
+	v := m.seq
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSeq returns the old "seq" field's value of the AuditExportCursor entity.
+// If the AuditExportCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportCursorMutation) OldSeq(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSeq is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSeq requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSeq: %w", err)
+	}
+	return oldValue.Seq, nil
+}
+
+// AddSeq adds i to the "seq" field.
+func (m *AuditExportCursorMutation) AddSeq(i int64) {
+	if m.addseq != nil {
+		*m.addseq += i
+	} else {
+		m.addseq = &i
+	}
+}
+
+// AddedSeq returns the value that was added to the "seq" field in this mutation.
+func (m *AuditExportCursorMutation) AddedSeq() (r int64, exists bool) {
+	v := m.addseq
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSeq resets all changes to the "seq" field.
+func (m *AuditExportCursorMutation) ResetSeq() {
+	m.seq = nil
+	m.addseq = nil
+}
+
+// SetClaimedBy sets the "claimed_by" field.
+func (m *AuditExportCursorMutation) SetClaimedBy(s string) {
+	m.claimed_by = &s
+}
+
+// ClaimedBy returns the value of the "claimed_by" field in the mutation.
+func (m *AuditExportCursorMutation) ClaimedBy() (r string, exists bool) {
+	v := m.claimed_by
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaimedBy returns the old "claimed_by" field's value of the AuditExportCursor entity.
+// If the AuditExportCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportCursorMutation) OldClaimedBy(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaimedBy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaimedBy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaimedBy: %w", err)
+	}
+	return oldValue.ClaimedBy, nil
+}
+
+// ClearClaimedBy clears the value of the "claimed_by" field.
+func (m *AuditExportCursorMutation) ClearClaimedBy() {
+	m.claimed_by = nil
+	m.clearedFields[auditexportcursor.FieldClaimedBy] = struct{}{}
+}
+
+// ClaimedByCleared returns if the "claimed_by" field was cleared in this mutation.
+func (m *AuditExportCursorMutation) ClaimedByCleared() bool {
+	_, ok := m.clearedFields[auditexportcursor.FieldClaimedBy]
+	return ok
+}
+
+// ResetClaimedBy resets all changes to the "claimed_by" field.
+func (m *AuditExportCursorMutation) ResetClaimedBy() {
+	m.claimed_by = nil
+	delete(m.clearedFields, auditexportcursor.FieldClaimedBy)
+}
+
+// SetClaimedUntil sets the "claimed_until" field.
+func (m *AuditExportCursorMutation) SetClaimedUntil(t time.Time) {
+	m.claimed_until = &t
+}
+
+// ClaimedUntil returns the value of the "claimed_until" field in the mutation.
+func (m *AuditExportCursorMutation) ClaimedUntil() (r time.Time, exists bool) {
+	v := m.claimed_until
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaimedUntil returns the old "claimed_until" field's value of the AuditExportCursor entity.
+// If the AuditExportCursor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportCursorMutation) OldClaimedUntil(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaimedUntil is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaimedUntil requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaimedUntil: %w", err)
+	}
+	return oldValue.ClaimedUntil, nil
+}
+
+// ClearClaimedUntil clears the value of the "claimed_until" field.
+func (m *AuditExportCursorMutation) ClearClaimedUntil() {
+	m.claimed_until = nil
+	m.clearedFields[auditexportcursor.FieldClaimedUntil] = struct{}{}
+}
+
+// ClaimedUntilCleared returns if the "claimed_until" field was cleared in this mutation.
+func (m *AuditExportCursorMutation) ClaimedUntilCleared() bool {
+	_, ok := m.clearedFields[auditexportcursor.FieldClaimedUntil]
+	return ok
+}
+
+// ResetClaimedUntil resets all changes to the "claimed_until" field.
+func (m *AuditExportCursorMutation) ResetClaimedUntil() {
+	m.claimed_until = nil
+	delete(m.clearedFields, auditexportcursor.FieldClaimedUntil)
+}
+
+// ClearTenant clears the "tenant" edge to the Tenant entity.
+func (m *AuditExportCursorMutation) ClearTenant() {
+	m.clearedtenant = true
+	m.clearedFields[auditexportcursor.FieldTenantID] = struct{}{}
+}
+
+// TenantCleared reports if the "tenant" edge to the Tenant entity was cleared.
+func (m *AuditExportCursorMutation) TenantCleared() bool {
+	return m.clearedtenant
+}
+
+// TenantIDs returns the "tenant" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// TenantID instead. It exists only for internal usage by the builders.
+func (m *AuditExportCursorMutation) TenantIDs() (ids []string) {
+	if id := m.tenant; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetTenant resets all changes to the "tenant" edge.
+func (m *AuditExportCursorMutation) ResetTenant() {
+	m.tenant = nil
+	m.clearedtenant = false
+}
+
+// ClearSink clears the "sink" edge to the AuditExportSink entity.
+func (m *AuditExportCursorMutation) ClearSink() {
+	m.clearedsink = true
+	m.clearedFields[auditexportcursor.FieldSinkID] = struct{}{}
+}
+
+// SinkCleared reports if the "sink" edge to the AuditExportSink entity was cleared.
+func (m *AuditExportCursorMutation) SinkCleared() bool {
+	return m.clearedsink
+}
+
+// SinkIDs returns the "sink" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// SinkID instead. It exists only for internal usage by the builders.
+func (m *AuditExportCursorMutation) SinkIDs() (ids []string) {
+	if id := m.sink; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetSink resets all changes to the "sink" edge.
+func (m *AuditExportCursorMutation) ResetSink() {
+	m.sink = nil
+	m.clearedsink = false
+}
+
+// Where appends a list predicates to the AuditExportCursorMutation builder.
+func (m *AuditExportCursorMutation) Where(ps ...predicate.AuditExportCursor) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the AuditExportCursorMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *AuditExportCursorMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.AuditExportCursor, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *AuditExportCursorMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *AuditExportCursorMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (AuditExportCursor).
+func (m *AuditExportCursorMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *AuditExportCursorMutation) Fields() []string {
+	fields := make([]string, 0, 5)
+	if m.tenant != nil {
+		fields = append(fields, auditexportcursor.FieldTenantID)
+	}
+	if m.sink != nil {
+		fields = append(fields, auditexportcursor.FieldSinkID)
+	}
+	if m.seq != nil {
+		fields = append(fields, auditexportcursor.FieldSeq)
+	}
+	if m.claimed_by != nil {
+		fields = append(fields, auditexportcursor.FieldClaimedBy)
+	}
+	if m.claimed_until != nil {
+		fields = append(fields, auditexportcursor.FieldClaimedUntil)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *AuditExportCursorMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case auditexportcursor.FieldTenantID:
+		return m.TenantID()
+	case auditexportcursor.FieldSinkID:
+		return m.SinkID()
+	case auditexportcursor.FieldSeq:
+		return m.Seq()
+	case auditexportcursor.FieldClaimedBy:
+		return m.ClaimedBy()
+	case auditexportcursor.FieldClaimedUntil:
+		return m.ClaimedUntil()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *AuditExportCursorMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case auditexportcursor.FieldTenantID:
+		return m.OldTenantID(ctx)
+	case auditexportcursor.FieldSinkID:
+		return m.OldSinkID(ctx)
+	case auditexportcursor.FieldSeq:
+		return m.OldSeq(ctx)
+	case auditexportcursor.FieldClaimedBy:
+		return m.OldClaimedBy(ctx)
+	case auditexportcursor.FieldClaimedUntil:
+		return m.OldClaimedUntil(ctx)
+	}
+	return nil, fmt.Errorf("unknown AuditExportCursor field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditExportCursorMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case auditexportcursor.FieldTenantID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTenantID(v)
+		return nil
+	case auditexportcursor.FieldSinkID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSinkID(v)
+		return nil
+	case auditexportcursor.FieldSeq:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSeq(v)
+		return nil
+	case auditexportcursor.FieldClaimedBy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaimedBy(v)
+		return nil
+	case auditexportcursor.FieldClaimedUntil:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaimedUntil(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *AuditExportCursorMutation) AddedFields() []string {
+	var fields []string
+	if m.addseq != nil {
+		fields = append(fields, auditexportcursor.FieldSeq)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *AuditExportCursorMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case auditexportcursor.FieldSeq:
+		return m.AddedSeq()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditExportCursorMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case auditexportcursor.FieldSeq:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSeq(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *AuditExportCursorMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(auditexportcursor.FieldClaimedBy) {
+		fields = append(fields, auditexportcursor.FieldClaimedBy)
+	}
+	if m.FieldCleared(auditexportcursor.FieldClaimedUntil) {
+		fields = append(fields, auditexportcursor.FieldClaimedUntil)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *AuditExportCursorMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *AuditExportCursorMutation) ClearField(name string) error {
+	switch name {
+	case auditexportcursor.FieldClaimedBy:
+		m.ClearClaimedBy()
+		return nil
+	case auditexportcursor.FieldClaimedUntil:
+		m.ClearClaimedUntil()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *AuditExportCursorMutation) ResetField(name string) error {
+	switch name {
+	case auditexportcursor.FieldTenantID:
+		m.ResetTenantID()
+		return nil
+	case auditexportcursor.FieldSinkID:
+		m.ResetSinkID()
+		return nil
+	case auditexportcursor.FieldSeq:
+		m.ResetSeq()
+		return nil
+	case auditexportcursor.FieldClaimedBy:
+		m.ResetClaimedBy()
+		return nil
+	case auditexportcursor.FieldClaimedUntil:
+		m.ResetClaimedUntil()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *AuditExportCursorMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.tenant != nil {
+		edges = append(edges, auditexportcursor.EdgeTenant)
+	}
+	if m.sink != nil {
+		edges = append(edges, auditexportcursor.EdgeSink)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *AuditExportCursorMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case auditexportcursor.EdgeTenant:
+		if id := m.tenant; id != nil {
+			return []ent.Value{*id}
+		}
+	case auditexportcursor.EdgeSink:
+		if id := m.sink; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *AuditExportCursorMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *AuditExportCursorMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *AuditExportCursorMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.clearedtenant {
+		edges = append(edges, auditexportcursor.EdgeTenant)
+	}
+	if m.clearedsink {
+		edges = append(edges, auditexportcursor.EdgeSink)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *AuditExportCursorMutation) EdgeCleared(name string) bool {
+	switch name {
+	case auditexportcursor.EdgeTenant:
+		return m.clearedtenant
+	case auditexportcursor.EdgeSink:
+		return m.clearedsink
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *AuditExportCursorMutation) ClearEdge(name string) error {
+	switch name {
+	case auditexportcursor.EdgeTenant:
+		m.ClearTenant()
+		return nil
+	case auditexportcursor.EdgeSink:
+		m.ClearSink()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *AuditExportCursorMutation) ResetEdge(name string) error {
+	switch name {
+	case auditexportcursor.EdgeTenant:
+		m.ResetTenant()
+		return nil
+	case auditexportcursor.EdgeSink:
+		m.ResetSink()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportCursor edge %s", name)
+}
+
+// AuditExportSinkMutation represents an operation that mutates the AuditExportSink nodes in the graph.
+type AuditExportSinkMutation struct {
+	config
+	op             Op
+	typ            string
+	id             *string
+	created_at     *time.Time
+	clearedFields  map[string]struct{}
+	cursors        map[string]struct{}
+	removedcursors map[string]struct{}
+	clearedcursors bool
+	done           bool
+	oldValue       func(context.Context) (*AuditExportSink, error)
+	predicates     []predicate.AuditExportSink
+}
+
+var _ ent.Mutation = (*AuditExportSinkMutation)(nil)
+
+// auditexportsinkOption allows management of the mutation configuration using functional options.
+type auditexportsinkOption func(*AuditExportSinkMutation)
+
+// newAuditExportSinkMutation creates new mutation for the AuditExportSink entity.
+func newAuditExportSinkMutation(c config, op Op, opts ...auditexportsinkOption) *AuditExportSinkMutation {
+	m := &AuditExportSinkMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeAuditExportSink,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withAuditExportSinkID sets the ID field of the mutation.
+func withAuditExportSinkID(id string) auditexportsinkOption {
+	return func(m *AuditExportSinkMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *AuditExportSink
+		)
+		m.oldValue = func(ctx context.Context) (*AuditExportSink, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().AuditExportSink.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withAuditExportSink sets the old AuditExportSink of the mutation.
+func withAuditExportSink(node *AuditExportSink) auditexportsinkOption {
+	return func(m *AuditExportSinkMutation) {
+		m.oldValue = func(context.Context) (*AuditExportSink, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m AuditExportSinkMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m AuditExportSinkMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of AuditExportSink entities.
+func (m *AuditExportSinkMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *AuditExportSinkMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *AuditExportSinkMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().AuditExportSink.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *AuditExportSinkMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *AuditExportSinkMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the AuditExportSink entity.
+// If the AuditExportSink object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditExportSinkMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *AuditExportSinkMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// AddCursorIDs adds the "cursors" edge to the AuditExportCursor entity by ids.
+func (m *AuditExportSinkMutation) AddCursorIDs(ids ...string) {
+	if m.cursors == nil {
+		m.cursors = make(map[string]struct{})
+	}
+	for i := range ids {
+		m.cursors[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCursors clears the "cursors" edge to the AuditExportCursor entity.
+func (m *AuditExportSinkMutation) ClearCursors() {
+	m.clearedcursors = true
+}
+
+// CursorsCleared reports if the "cursors" edge to the AuditExportCursor entity was cleared.
+func (m *AuditExportSinkMutation) CursorsCleared() bool {
+	return m.clearedcursors
+}
+
+// RemoveCursorIDs removes the "cursors" edge to the AuditExportCursor entity by IDs.
+func (m *AuditExportSinkMutation) RemoveCursorIDs(ids ...string) {
+	if m.removedcursors == nil {
+		m.removedcursors = make(map[string]struct{})
+	}
+	for i := range ids {
+		delete(m.cursors, ids[i])
+		m.removedcursors[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCursors returns the removed IDs of the "cursors" edge to the AuditExportCursor entity.
+func (m *AuditExportSinkMutation) RemovedCursorsIDs() (ids []string) {
+	for id := range m.removedcursors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// CursorsIDs returns the "cursors" edge IDs in the mutation.
+func (m *AuditExportSinkMutation) CursorsIDs() (ids []string) {
+	for id := range m.cursors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCursors resets all changes to the "cursors" edge.
+func (m *AuditExportSinkMutation) ResetCursors() {
+	m.cursors = nil
+	m.clearedcursors = false
+	m.removedcursors = nil
+}
+
+// Where appends a list predicates to the AuditExportSinkMutation builder.
+func (m *AuditExportSinkMutation) Where(ps ...predicate.AuditExportSink) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the AuditExportSinkMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *AuditExportSinkMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.AuditExportSink, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *AuditExportSinkMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *AuditExportSinkMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (AuditExportSink).
+func (m *AuditExportSinkMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *AuditExportSinkMutation) Fields() []string {
+	fields := make([]string, 0, 1)
+	if m.created_at != nil {
+		fields = append(fields, auditexportsink.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *AuditExportSinkMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case auditexportsink.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *AuditExportSinkMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case auditexportsink.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown AuditExportSink field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditExportSinkMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case auditexportsink.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportSink field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *AuditExportSinkMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *AuditExportSinkMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditExportSinkMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown AuditExportSink numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *AuditExportSinkMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *AuditExportSinkMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *AuditExportSinkMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown AuditExportSink nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *AuditExportSinkMutation) ResetField(name string) error {
+	switch name {
+	case auditexportsink.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportSink field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *AuditExportSinkMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.cursors != nil {
+		edges = append(edges, auditexportsink.EdgeCursors)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *AuditExportSinkMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case auditexportsink.EdgeCursors:
+		ids := make([]ent.Value, 0, len(m.cursors))
+		for id := range m.cursors {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *AuditExportSinkMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.removedcursors != nil {
+		edges = append(edges, auditexportsink.EdgeCursors)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *AuditExportSinkMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case auditexportsink.EdgeCursors:
+		ids := make([]ent.Value, 0, len(m.removedcursors))
+		for id := range m.removedcursors {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *AuditExportSinkMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedcursors {
+		edges = append(edges, auditexportsink.EdgeCursors)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *AuditExportSinkMutation) EdgeCleared(name string) bool {
+	switch name {
+	case auditexportsink.EdgeCursors:
+		return m.clearedcursors
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *AuditExportSinkMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown AuditExportSink unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *AuditExportSinkMutation) ResetEdge(name string) error {
+	switch name {
+	case auditexportsink.EdgeCursors:
+		m.ResetCursors()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditExportSink edge %s", name)
 }
 
 // CustomerMutation represents an operation that mutates the Customer nodes in the graph.
@@ -18297,41 +19451,44 @@ func (m *SigningKeyMutation) ResetEdge(name string) error {
 // TenantMutation represents an operation that mutates the Tenant nodes in the graph.
 type TenantMutation struct {
 	config
-	op                      Op
-	typ                     string
-	id                      *string
-	created_at              *time.Time
-	updated_at              *time.Time
-	slug                    *string
-	name                    *string
-	clearedFields           map[string]struct{}
-	products                map[string]struct{}
-	removedproducts         map[string]struct{}
-	clearedproducts         bool
-	customers               map[string]struct{}
-	removedcustomers        map[string]struct{}
-	clearedcustomers        bool
-	signing_keys            map[string]struct{}
-	removedsigning_keys     map[string]struct{}
-	clearedsigning_keys     bool
-	audit_events            map[string]struct{}
-	removedaudit_events     map[string]struct{}
-	clearedaudit_events     bool
-	invitations             map[string]struct{}
-	removedinvitations      map[string]struct{}
-	clearedinvitations      bool
-	memberships             map[string]struct{}
-	removedmemberships      map[string]struct{}
-	clearedmemberships      bool
-	api_tokens              map[string]struct{}
-	removedapi_tokens       map[string]struct{}
-	clearedapi_tokens       bool
-	idempotency_keys        map[string]struct{}
-	removedidempotency_keys map[string]struct{}
-	clearedidempotency_keys bool
-	done                    bool
-	oldValue                func(context.Context) (*Tenant, error)
-	predicates              []predicate.Tenant
+	op                          Op
+	typ                         string
+	id                          *string
+	created_at                  *time.Time
+	updated_at                  *time.Time
+	slug                        *string
+	name                        *string
+	clearedFields               map[string]struct{}
+	products                    map[string]struct{}
+	removedproducts             map[string]struct{}
+	clearedproducts             bool
+	customers                   map[string]struct{}
+	removedcustomers            map[string]struct{}
+	clearedcustomers            bool
+	signing_keys                map[string]struct{}
+	removedsigning_keys         map[string]struct{}
+	clearedsigning_keys         bool
+	audit_events                map[string]struct{}
+	removedaudit_events         map[string]struct{}
+	clearedaudit_events         bool
+	invitations                 map[string]struct{}
+	removedinvitations          map[string]struct{}
+	clearedinvitations          bool
+	memberships                 map[string]struct{}
+	removedmemberships          map[string]struct{}
+	clearedmemberships          bool
+	api_tokens                  map[string]struct{}
+	removedapi_tokens           map[string]struct{}
+	clearedapi_tokens           bool
+	idempotency_keys            map[string]struct{}
+	removedidempotency_keys     map[string]struct{}
+	clearedidempotency_keys     bool
+	audit_export_cursors        map[string]struct{}
+	removedaudit_export_cursors map[string]struct{}
+	clearedaudit_export_cursors bool
+	done                        bool
+	oldValue                    func(context.Context) (*Tenant, error)
+	predicates                  []predicate.Tenant
 }
 
 var _ ent.Mutation = (*TenantMutation)(nil)
@@ -19014,6 +20171,60 @@ func (m *TenantMutation) ResetIdempotencyKeys() {
 	m.removedidempotency_keys = nil
 }
 
+// AddAuditExportCursorIDs adds the "audit_export_cursors" edge to the AuditExportCursor entity by ids.
+func (m *TenantMutation) AddAuditExportCursorIDs(ids ...string) {
+	if m.audit_export_cursors == nil {
+		m.audit_export_cursors = make(map[string]struct{})
+	}
+	for i := range ids {
+		m.audit_export_cursors[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAuditExportCursors clears the "audit_export_cursors" edge to the AuditExportCursor entity.
+func (m *TenantMutation) ClearAuditExportCursors() {
+	m.clearedaudit_export_cursors = true
+}
+
+// AuditExportCursorsCleared reports if the "audit_export_cursors" edge to the AuditExportCursor entity was cleared.
+func (m *TenantMutation) AuditExportCursorsCleared() bool {
+	return m.clearedaudit_export_cursors
+}
+
+// RemoveAuditExportCursorIDs removes the "audit_export_cursors" edge to the AuditExportCursor entity by IDs.
+func (m *TenantMutation) RemoveAuditExportCursorIDs(ids ...string) {
+	if m.removedaudit_export_cursors == nil {
+		m.removedaudit_export_cursors = make(map[string]struct{})
+	}
+	for i := range ids {
+		delete(m.audit_export_cursors, ids[i])
+		m.removedaudit_export_cursors[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAuditExportCursors returns the removed IDs of the "audit_export_cursors" edge to the AuditExportCursor entity.
+func (m *TenantMutation) RemovedAuditExportCursorsIDs() (ids []string) {
+	for id := range m.removedaudit_export_cursors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AuditExportCursorsIDs returns the "audit_export_cursors" edge IDs in the mutation.
+func (m *TenantMutation) AuditExportCursorsIDs() (ids []string) {
+	for id := range m.audit_export_cursors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAuditExportCursors resets all changes to the "audit_export_cursors" edge.
+func (m *TenantMutation) ResetAuditExportCursors() {
+	m.audit_export_cursors = nil
+	m.clearedaudit_export_cursors = false
+	m.removedaudit_export_cursors = nil
+}
+
 // Where appends a list predicates to the TenantMutation builder.
 func (m *TenantMutation) Where(ps ...predicate.Tenant) {
 	m.predicates = append(m.predicates, ps...)
@@ -19198,7 +20409,7 @@ func (m *TenantMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *TenantMutation) AddedEdges() []string {
-	edges := make([]string, 0, 8)
+	edges := make([]string, 0, 9)
 	if m.products != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19222,6 +20433,9 @@ func (m *TenantMutation) AddedEdges() []string {
 	}
 	if m.idempotency_keys != nil {
 		edges = append(edges, tenant.EdgeIdempotencyKeys)
+	}
+	if m.audit_export_cursors != nil {
+		edges = append(edges, tenant.EdgeAuditExportCursors)
 	}
 	return edges
 }
@@ -19278,13 +20492,19 @@ func (m *TenantMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeAuditExportCursors:
+		ids := make([]ent.Value, 0, len(m.audit_export_cursors))
+		for id := range m.audit_export_cursors {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *TenantMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 8)
+	edges := make([]string, 0, 9)
 	if m.removedproducts != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19308,6 +20528,9 @@ func (m *TenantMutation) RemovedEdges() []string {
 	}
 	if m.removedidempotency_keys != nil {
 		edges = append(edges, tenant.EdgeIdempotencyKeys)
+	}
+	if m.removedaudit_export_cursors != nil {
+		edges = append(edges, tenant.EdgeAuditExportCursors)
 	}
 	return edges
 }
@@ -19364,13 +20587,19 @@ func (m *TenantMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeAuditExportCursors:
+		ids := make([]ent.Value, 0, len(m.removedaudit_export_cursors))
+		for id := range m.removedaudit_export_cursors {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *TenantMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 8)
+	edges := make([]string, 0, 9)
 	if m.clearedproducts {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -19395,6 +20624,9 @@ func (m *TenantMutation) ClearedEdges() []string {
 	if m.clearedidempotency_keys {
 		edges = append(edges, tenant.EdgeIdempotencyKeys)
 	}
+	if m.clearedaudit_export_cursors {
+		edges = append(edges, tenant.EdgeAuditExportCursors)
+	}
 	return edges
 }
 
@@ -19418,6 +20650,8 @@ func (m *TenantMutation) EdgeCleared(name string) bool {
 		return m.clearedapi_tokens
 	case tenant.EdgeIdempotencyKeys:
 		return m.clearedidempotency_keys
+	case tenant.EdgeAuditExportCursors:
+		return m.clearedaudit_export_cursors
 	}
 	return false
 }
@@ -19457,6 +20691,9 @@ func (m *TenantMutation) ResetEdge(name string) error {
 		return nil
 	case tenant.EdgeIdempotencyKeys:
 		m.ResetIdempotencyKeys()
+		return nil
+	case tenant.EdgeAuditExportCursors:
+		m.ResetAuditExportCursors()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant edge %s", name)

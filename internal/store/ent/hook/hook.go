@@ -57,6 +57,30 @@ func (f AuditEventFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, 
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AuditEventMutation", m)
 }
 
+// The AuditExportCursorFunc type is an adapter to allow the use of ordinary
+// function as AuditExportCursor mutator.
+type AuditExportCursorFunc func(context.Context, *ent.AuditExportCursorMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AuditExportCursorFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AuditExportCursorMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AuditExportCursorMutation", m)
+}
+
+// The AuditExportSinkFunc type is an adapter to allow the use of ordinary
+// function as AuditExportSink mutator.
+type AuditExportSinkFunc func(context.Context, *ent.AuditExportSinkMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AuditExportSinkFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AuditExportSinkMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AuditExportSinkMutation", m)
+}
+
 // The CustomerFunc type is an adapter to allow the use of ordinary
 // function as Customer mutator.
 type CustomerFunc func(context.Context, *ent.CustomerMutation) (ent.Value, error)

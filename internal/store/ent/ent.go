@@ -16,6 +16,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
@@ -96,6 +98,8 @@ func checkColumn(t, c string) error {
 			apitokenproduct.Table:   apitokenproduct.ValidColumn,
 			activation.Table:        activation.ValidColumn,
 			auditevent.Table:        auditevent.ValidColumn,
+			auditexportcursor.Table: auditexportcursor.ValidColumn,
+			auditexportsink.Table:   auditexportsink.ValidColumn,
 			customer.Table:          customer.ValidColumn,
 			feature.Table:           feature.ValidColumn,
 			idempotencykey.Table:    idempotencykey.ValidColumn,

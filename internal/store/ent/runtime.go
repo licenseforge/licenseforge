@@ -9,6 +9,8 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
@@ -333,6 +335,98 @@ func init() {
 	// auditevent.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	auditevent.IDValidator = func() func(string) error {
 		validators := auditeventDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	auditexportcursorFields := schema.AuditExportCursor{}.Fields()
+	_ = auditexportcursorFields
+	// auditexportcursorDescTenantID is the schema descriptor for tenant_id field.
+	auditexportcursorDescTenantID := auditexportcursorFields[1].Descriptor()
+	// auditexportcursor.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	auditexportcursor.TenantIDValidator = func() func(string) error {
+		validators := auditexportcursorDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// auditexportcursorDescSinkID is the schema descriptor for sink_id field.
+	auditexportcursorDescSinkID := auditexportcursorFields[2].Descriptor()
+	// auditexportcursor.SinkIDValidator is a validator for the "sink_id" field. It is called by the builders before save.
+	auditexportcursor.SinkIDValidator = func() func(string) error {
+		validators := auditexportcursorDescSinkID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(sink string) error {
+			for _, fn := range fns {
+				if err := fn(sink); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// auditexportcursorDescSeq is the schema descriptor for seq field.
+	auditexportcursorDescSeq := auditexportcursorFields[3].Descriptor()
+	// auditexportcursor.DefaultSeq holds the default value on creation for the seq field.
+	auditexportcursor.DefaultSeq = auditexportcursorDescSeq.Default.(int64)
+	// auditexportcursor.SeqValidator is a validator for the "seq" field. It is called by the builders before save.
+	auditexportcursor.SeqValidator = auditexportcursorDescSeq.Validators[0].(func(int64) error)
+	// auditexportcursorDescClaimedBy is the schema descriptor for claimed_by field.
+	auditexportcursorDescClaimedBy := auditexportcursorFields[4].Descriptor()
+	// auditexportcursor.ClaimedByValidator is a validator for the "claimed_by" field. It is called by the builders before save.
+	auditexportcursor.ClaimedByValidator = auditexportcursorDescClaimedBy.Validators[0].(func(string) error)
+	// auditexportcursorDescID is the schema descriptor for id field.
+	auditexportcursorDescID := auditexportcursorFields[0].Descriptor()
+	// auditexportcursor.DefaultID holds the default value on creation for the id field.
+	auditexportcursor.DefaultID = auditexportcursorDescID.Default.(func() string)
+	// auditexportcursor.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	auditexportcursor.IDValidator = func() func(string) error {
+		validators := auditexportcursorDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	auditexportsinkFields := schema.AuditExportSink{}.Fields()
+	_ = auditexportsinkFields
+	// auditexportsinkDescCreatedAt is the schema descriptor for created_at field.
+	auditexportsinkDescCreatedAt := auditexportsinkFields[1].Descriptor()
+	// auditexportsink.DefaultCreatedAt holds the default value on creation for the created_at field.
+	auditexportsink.DefaultCreatedAt = auditexportsinkDescCreatedAt.Default.(func() time.Time)
+	// auditexportsinkDescID is the schema descriptor for id field.
+	auditexportsinkDescID := auditexportsinkFields[0].Descriptor()
+	// auditexportsink.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	auditexportsink.IDValidator = func() func(string) error {
+		validators := auditexportsinkDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

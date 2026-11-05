@@ -18,6 +18,12 @@ type Activation func(*sql.Selector)
 // AuditEvent is the predicate function for auditevent builders.
 type AuditEvent func(*sql.Selector)
 
+// AuditExportCursor is the predicate function for auditexportcursor builders.
+type AuditExportCursor func(*sql.Selector)
+
+// AuditExportSink is the predicate function for auditexportsink builders.
+type AuditExportSink func(*sql.Selector)
+
 // Customer is the predicate function for customer builders.
 type Customer func(*sql.Selector)
 

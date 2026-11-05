@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/idempotencykey"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
@@ -200,6 +201,21 @@ func (_c *TenantCreate) AddIdempotencyKeys(v ...*IdempotencyKey) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddIdempotencyKeyIDs(ids...)
+}
+
+// AddAuditExportCursorIDs adds the "audit_export_cursors" edge to the AuditExportCursor entity by IDs.
+func (_c *TenantCreate) AddAuditExportCursorIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddAuditExportCursorIDs(ids...)
+	return _c
+}
+
+// AddAuditExportCursors adds the "audit_export_cursors" edges to the AuditExportCursor entity.
+func (_c *TenantCreate) AddAuditExportCursors(v ...*AuditExportCursor) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAuditExportCursorIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -452,6 +468,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(idempotencykey.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AuditExportCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditExportCursorsTable,
+			Columns: []string{tenant.AuditExportCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

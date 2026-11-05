@@ -22,6 +22,10 @@ type Tx struct {
 	Activation *ActivationClient
 	// AuditEvent is the client for interacting with the AuditEvent builders.
 	AuditEvent *AuditEventClient
+	// AuditExportCursor is the client for interacting with the AuditExportCursor builders.
+	AuditExportCursor *AuditExportCursorClient
+	// AuditExportSink is the client for interacting with the AuditExportSink builders.
+	AuditExportSink *AuditExportSinkClient
 	// Customer is the client for interacting with the Customer builders.
 	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
@@ -189,6 +193,8 @@ func (tx *Tx) init() {
 	tx.APITokenProduct = NewAPITokenProductClient(tx.config)
 	tx.Activation = NewActivationClient(tx.config)
 	tx.AuditEvent = NewAuditEventClient(tx.config)
+	tx.AuditExportCursor = NewAuditExportCursorClient(tx.config)
+	tx.AuditExportSink = NewAuditExportSinkClient(tx.config)
 	tx.Customer = NewCustomerClient(tx.config)
 	tx.Feature = NewFeatureClient(tx.config)
 	tx.IdempotencyKey = NewIdempotencyKeyClient(tx.config)

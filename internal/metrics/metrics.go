@@ -70,6 +70,15 @@ var (
 		Name: "licenseforge_audit_verify_failures_total", Help: "Audit chain verifications that found a broken chain.",
 	})
 
+	// AuditExportFailures counts failed export rounds per sink (ADR-0036).
+	AuditExportFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "licenseforge_audit_export_failures_total", Help: "Audit export rounds that failed, by sink.",
+	}, []string{"sink"})
+	// AuditExportLag is the age of the oldest audit entry a sink hasn't received.
+	AuditExportLag = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "licenseforge_audit_export_lag_seconds", Help: "Age of the oldest audit entry not yet delivered to the sink.",
+	}, []string{"sink"})
+
 	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_http_requests_total", Help: "HTTP requests by route pattern and status class.",
 	}, []string{"route", "code"})
@@ -82,7 +91,7 @@ var (
 func init() {
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
-	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, requests, duration, poolCollector{},
+	Registry.MustRegister(UnknownLicenseKeys, AuditWriteFailures, AuditVerifyFailures, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

@@ -192,6 +192,53 @@ var (
 			},
 		},
 	}
+	// AuditExportCursorsColumns holds the columns for the "audit_export_cursors" table.
+	AuditExportCursorsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64, Default: 0},
+		{Name: "claimed_by", Type: field.TypeString, Nullable: true, Size: 100, SchemaType: map[string]string{"postgres": "varchar(100)"}},
+		{Name: "claimed_until", Type: field.TypeTime, Nullable: true},
+		{Name: "sink_id", Type: field.TypeString, Size: 32, SchemaType: map[string]string{"postgres": "varchar(32)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// AuditExportCursorsTable holds the schema information for the "audit_export_cursors" table.
+	AuditExportCursorsTable = &schema.Table{
+		Name:       "audit_export_cursors",
+		Columns:    AuditExportCursorsColumns,
+		PrimaryKey: []*schema.Column{AuditExportCursorsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "audit_export_cursors_audit_export_sinks_cursors",
+				Columns:    []*schema.Column{AuditExportCursorsColumns[4]},
+				RefColumns: []*schema.Column{AuditExportSinksColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "audit_export_cursors_tenants_audit_export_cursors",
+				Columns:    []*schema.Column{AuditExportCursorsColumns[5]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "auditexportcursor_tenant_id_sink_id",
+				Unique:  true,
+				Columns: []*schema.Column{AuditExportCursorsColumns[5], AuditExportCursorsColumns[4]},
+			},
+		},
+	}
+	// AuditExportSinksColumns holds the columns for the "audit_export_sinks" table.
+	AuditExportSinksColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 32, SchemaType: map[string]string{"postgres": "varchar(32)"}},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// AuditExportSinksTable holds the schema information for the "audit_export_sinks" table.
+	AuditExportSinksTable = &schema.Table{
+		Name:       "audit_export_sinks",
+		Columns:    AuditExportSinksColumns,
+		PrimaryKey: []*schema.Column{AuditExportSinksColumns[0]},
+	}
 	// CustomersColumns holds the columns for the "customers" table.
 	CustomersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -906,6 +953,8 @@ var (
 		APITokenProductsTable,
 		ActivationsTable,
 		AuditEventsTable,
+		AuditExportCursorsTable,
+		AuditExportSinksTable,
 		CustomersTable,
 		FeaturesTable,
 		IdempotencyKeysTable,
@@ -968,6 +1017,18 @@ func init() {
 		"audit_events_object_type":   "object_type IS NULL OR object_type ~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'",
 		"audit_events_outcome_valid": "(outcome)::text = ANY (ARRAY['success'::text, 'failure'::text, 'denied'::text])",
 		"audit_events_seq_positive":  "seq > 0",
+	}
+	AuditExportCursorsTable.ForeignKeys[0].RefTable = AuditExportSinksTable
+	AuditExportCursorsTable.ForeignKeys[1].RefTable = TenantsTable
+	AuditExportCursorsTable.Annotation = &entsql.Annotation{}
+	AuditExportCursorsTable.Annotation.Checks = map[string]string{
+		"audit_export_cursors_claim":     "(claimed_by IS NULL) = (claimed_until IS NULL)",
+		"audit_export_cursors_id_format": "(id)::text ~ '^aec_[a-z2-7]{26}$'::text",
+		"audit_export_cursors_seq":       "seq >= 0",
+	}
+	AuditExportSinksTable.Annotation = &entsql.Annotation{}
+	AuditExportSinksTable.Annotation.Checks = map[string]string{
+		"audit_export_sinks_id_format": "(id)::text ~ '^[a-z][a-z0-9-]{0,31}$'::text",
 	}
 	CustomersTable.ForeignKeys[0].RefTable = TenantsTable
 	CustomersTable.Annotation = &entsql.Annotation{}
