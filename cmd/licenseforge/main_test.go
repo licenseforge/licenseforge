@@ -118,7 +118,8 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
 	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "SESSION_IDLE_TIMEOUT", "SESSION_MAX_AGE", "LOGIN_BANNER",
 		"AUDIT_OTLP_ENDPOINT", "AUDIT_OTLP_CA_FILE", "AUDIT_OTLP_CERT_FILE", "AUDIT_OTLP_KEY_FILE", "AUDIT_OTLP_HEADERS",
-		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID"} {
+		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID",
+		"TRUSTED_PROXIES", "RATE_LIMIT_ACTIVATION", "RATE_LIMIT_MANAGEMENT", "RATE_LIMIT_LOGIN"} {
 		t.Setenv("LICENSEFORGE_"+k, "")
 	}
 }
@@ -260,6 +261,9 @@ func TestServeRefuses(t *testing.T) {
 		"max age over a day":     {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
 		"max age below idle":     {env.TenantURL, env.PlatformURL, testKeys, "", "below the idle timeout"},
 		"bad banner":             {env.TenantURL, env.PlatformURL, testKeys, "", "login banner"},
+		"bad trusted proxy":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_TRUSTED_PROXIES"},
+		"negative rate limit":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_LOGIN"},
+		"bad rate limit":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_MANAGEMENT"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -290,6 +294,12 @@ func TestServeRefuses(t *testing.T) {
 		case "max age below idle":
 			t.Setenv("LICENSEFORGE_SESSION_IDLE_TIMEOUT", "3h")
 			t.Setenv("LICENSEFORGE_SESSION_MAX_AGE", "2h")
+		case "bad trusted proxy":
+			t.Setenv("LICENSEFORGE_TRUSTED_PROXIES", "10.0.0.0/8, proxy.local")
+		case "negative rate limit":
+			t.Setenv("LICENSEFORGE_RATE_LIMIT_LOGIN", "-1")
+		case "bad rate limit":
+			t.Setenv("LICENSEFORGE_RATE_LIMIT_MANAGEMENT", "600/min")
 		case "bad banner":
 			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
 			t.Setenv("LICENSEFORGE_LOGIN_BANNER", strings.Repeat("x", 4097))
@@ -323,6 +333,30 @@ func TestServeFailsWithMetricsListener(t *testing.T) {
 	defer cancel()
 	if err := serve(ctx, listen(t), mln, quiet); err == nil || !strings.Contains(err.Error(), "metrics listener") {
 		t.Errorf("serve = %v, want a metrics listener error", err)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "")
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", "")
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_RETENTION_DATABASE_URL is not set") {
+		t.Errorf("prune without the login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.PlatformURL)
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "unsafe database role") {
+		t.Errorf("prune with the platform login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.RetentionURL)
+	for _, bad := range []string{"30", "1y", "-400", "36501"} {
+		t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", bad)
+		if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS") {
+			t.Errorf("platform days %q: %v", bad, err)
+		}
+	}
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "400")
+	if err := prune(ctx, quiet); err != nil {
+		t.Errorf("prune = %v", err)
 	}
 }
 
@@ -369,5 +403,57 @@ func TestServeStartsAuditExport(t *testing.T) {
 			t.Fatalf("%d of 2 sinks registered, both exporters running: %v", registered, running)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// The public listener limits per client address before anything else
+// (ADR-0032 step 0); health checks and the dashboard aren't limited.
+func TestServeRateLimits(t *testing.T) {
+	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
+	t.Setenv("LICENSEFORGE_RATE_LIMIT_MANAGEMENT", "2")
+	addr, maddr, stop := startServe(t)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	}()
+	client := &http.Client{Timeout: 2 * time.Second}
+	get := func(host, p string) (*http.Response, string) {
+		resp, err := client.Get("http://" + host + p)
+		if err != nil {
+			return nil, ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp, string(b)
+	}
+	for range 50 { // until serve has opened the database
+		if resp, _ := get(addr, "/readyz"); resp != nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var codes []int
+	for range 3 {
+		resp, _ := get(addr, "/api/v1/tenants/acme/api-tokens")
+		if resp == nil {
+			t.Fatal("no response")
+		}
+		codes = append(codes, resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests && (resp.Header.Get("Retry-After") == "" || resp.Header.Get("RateLimit-Policy") != `"address-management";q=2;w=60`) {
+			t.Errorf("429 headers: %v", resp.Header)
+		}
+	}
+	if codes[0] != http.StatusUnauthorized || codes[1] != http.StatusUnauthorized || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("codes %v, want 401 401 429", codes)
+	}
+	for range 5 {
+		if resp, _ := get(addr, "/healthz"); resp == nil || resp.StatusCode != http.StatusOK {
+			t.Fatal("health check limited")
+		}
+	}
+	if _, body := get(maddr, "/metrics"); !strings.Contains(body, `licenseforge_rate_limited_requests_total{surface="management"}`) ||
+		!strings.Contains(body, `licenseforge_rate_limited_requests_total{surface="login"} 0`) {
+		t.Error("metrics: no rate-limit counter by surface")
 	}
 }

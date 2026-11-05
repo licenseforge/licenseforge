@@ -65,6 +65,10 @@ spec:
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
               value: {{ printf ":%s" (include "licenseforge.metricsPort" .) | quote }}
+            {{- with .Values.trustedProxies }}
+            - name: LICENSEFORGE_TRUSTED_PROXIES
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $sys.host }}
             # SIEM export (ADR-0036): RFC 5424 over TLS, verification always on.
             - name: LICENSEFORGE_AUDIT_SYSLOG_ADDR

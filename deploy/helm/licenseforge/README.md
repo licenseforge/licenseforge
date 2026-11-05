@@ -69,6 +69,8 @@ URL, or without a port.
 
 ## Notes
 
+- **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
+
 - **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only
   (plus the OIDC provider when `oidc.enabled`),
   for the server and (as a hook policy, so it applies from the first install)
@@ -100,6 +102,13 @@ URL, or without a port.
   A batch counts as delivered only on a 2xx response with an empty body or an
   OTLP JSON body that rejects no record; anything else is retried, visible as
   export failures and lag.
+- **Audit retention** (ADR-0036): set `auditRetention.enabled` and
+  `auditRetention.secret` (a Secret with `retention-database-url`, the
+  `licenseforge_pruner` login) to run `licenseforge audit prune` on
+  `auditRetention.schedule` (`concurrencyPolicy: Forbid`). Tenant owners set
+  their own retention (365 to 36,500 days); `auditRetention.platformDays` sets
+  the platform chain's (empty keeps everything). Nothing a registered SIEM
+  sink hasn't received is pruned.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;

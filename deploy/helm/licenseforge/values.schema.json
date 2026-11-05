@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "trustedProxies": {"type": "string"},
     "oidc": {
       "type": "object",
       "additionalProperties": false,
@@ -88,6 +89,17 @@
             }
           }
         }
+      }
+    },
+    "auditRetention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "secret": {"type": "string"},
+        "schedule": {"type": "string", "minLength": 9},
+        "platformDays": {"anyOf": [{"type": "string", "maxLength": 0}, {"type": "integer", "minimum": 365, "maximum": 36500}]},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 60}
       }
     },
     "metrics": {

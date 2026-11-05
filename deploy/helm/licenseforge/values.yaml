@@ -34,6 +34,12 @@ terminationGracePeriodSeconds: 30
 
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
+# Your ingress controller's or load balancer's addresses (CIDRs, comma-
+# separated): only their X-Forwarded-For is believed. Leave empty and every
+# client counts as the ingress for the per-address rate limit and in audit
+# entries. List proxies only, never client networks.
+trustedProxies: ""
+
 # Dashboard login through your OIDC provider (ADR-0003). Off: no login.
 oidc:
   enabled: false
@@ -80,6 +86,17 @@ audit:
       clientSecret: ""    # kubernetes.io/tls Secret for mTLS; empty: no client cert
       headersSecret: ""   # Secret with key headers: k=v,k2=v2 (e.g. an API key)
       to: []
+
+# Audit retention (ADR-0036): a CronJob runs `licenseforge audit prune` with
+# the retention login, the only one that deletes audit entries (never given
+# to the serving pods). Tenants set their own retention (owners only, 365 to
+# 36,500 days); platformDays is the platform chain's (empty: keep everything).
+auditRetention:
+  enabled: false
+  secret: ""          # Secret with retention-database-url (the licenseforge_pruner login)
+  schedule: "17 3 * * *"
+  platformDays: ""    # e.g. 730; 365 to 36,500
+  activeDeadlineSeconds: 3600
 
 resources:
   requests: {cpu: 100m, memory: 64Mi}

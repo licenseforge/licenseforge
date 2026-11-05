@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -19,14 +20,20 @@ type Source struct{ IP, UserAgent string }
 // RecordLogin appends a user.login entry to the platform chain, in a
 // transaction of its own. userID is empty when the login failed before a user
 // was known; reason (snake_case, no personal data) says why it failed.
-func (s Service) RecordLogin(ctx context.Context, userID string, outcome auditevent.Outcome, reason string, src Source) error {
+func (s Service) RecordLogin(ctx context.Context, userID string, outcome auditevent.Outcome, reason string, src Source, auth *SessionAuth) error {
 	e := audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID, Action: "user.login",
-		Outcome: outcome, SourceIP: src.IP, UserAgent: src.UserAgent}
+		Outcome: outcome, SourceIP: src.IP, UserAgent: src.UserAgent, Details: map[string]any{}}
 	if userID != "" {
 		e.ObjectType, e.ObjectID = "user", userID
 	}
 	if reason != "" {
-		e.Details = map[string]any{"reason": reason}
+		e.Details["reason"] = reason
+	}
+	if auth != nil { // how the session was authenticated (ADR-0038): IA-2 evidence
+		e.Details["assurance"], e.Details["amr"], e.Details["acr"], e.Details["acrs"] = string(auth.Assurance), auth.AMR, auth.ACR, auth.ACRs
+		if auth.AuthTime != nil {
+			e.Details["auth_time"] = auth.AuthTime.Format(time.RFC3339)
+		}
 	}
 	return s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		_, err := audit.Record(ctx, tx, audit.PlatformTenant, e)

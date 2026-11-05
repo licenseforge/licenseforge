@@ -17,24 +17,84 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ActivationBinding.
+const (
+	Cluster ActivationBinding = "cluster"
+	Machine ActivationBinding = "machine"
+)
+
+// Valid indicates whether the value is a known member of the ActivationBinding enum.
+func (e ActivationBinding) Valid() bool {
+	switch e {
+	case Cluster:
+		return true
+	case Machine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivationFpSource.
+const (
+	ActivationFpSourceEnv        ActivationFpSource = "env"
+	ActivationFpSourceKubernetes ActivationFpSource = "kubernetes"
+	ActivationFpSourceMachineId  ActivationFpSource = "machine-id"
+	ActivationFpSourceOverride   ActivationFpSource = "override"
+)
+
+// Valid indicates whether the value is a known member of the ActivationFpSource enum.
+func (e ActivationFpSource) Valid() bool {
+	switch e {
+	case ActivationFpSourceEnv:
+		return true
+	case ActivationFpSourceKubernetes:
+		return true
+	case ActivationFpSourceMachineId:
+		return true
+	case ActivationFpSourceOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActivationMode.
+const (
+	Offline ActivationMode = "offline"
+	Online  ActivationMode = "online"
+)
+
+// Valid indicates whether the value is a known member of the ActivationMode enum.
+func (e ActivationMode) Valid() bool {
+	switch e {
+	case Offline:
+		return true
+	case Online:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ActivationRequestFpSource.
 const (
-	Env        ActivationRequestFpSource = "env"
-	Kubernetes ActivationRequestFpSource = "kubernetes"
-	MachineId  ActivationRequestFpSource = "machine-id"
-	Override   ActivationRequestFpSource = "override"
+	ActivationRequestFpSourceEnv        ActivationRequestFpSource = "env"
+	ActivationRequestFpSourceKubernetes ActivationRequestFpSource = "kubernetes"
+	ActivationRequestFpSourceMachineId  ActivationRequestFpSource = "machine-id"
+	ActivationRequestFpSourceOverride   ActivationRequestFpSource = "override"
 )
 
 // Valid indicates whether the value is a known member of the ActivationRequestFpSource enum.
 func (e ActivationRequestFpSource) Valid() bool {
 	switch e {
-	case Env:
+	case ActivationRequestFpSourceEnv:
 		return true
-	case Kubernetes:
+	case ActivationRequestFpSourceKubernetes:
 		return true
-	case MachineId:
+	case ActivationRequestFpSourceMachineId:
 		return true
-	case Override:
+	case ActivationRequestFpSourceOverride:
 		return true
 	default:
 		return false
@@ -245,6 +305,27 @@ func (e MemberRole) Valid() bool {
 	}
 }
 
+// Defines values for MfaPolicy.
+const (
+	Mfa               MfaPolicy = "mfa"
+	None              MfaPolicy = "none"
+	PhishingResistant MfaPolicy = "phishing_resistant"
+)
+
+// Valid indicates whether the value is a known member of the MfaPolicy enum.
+func (e MfaPolicy) Valid() bool {
+	switch e {
+	case Mfa:
+		return true
+	case None:
+		return true
+	case PhishingResistant:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleAdmin   Role = "admin"
@@ -283,6 +364,48 @@ type AcceptedInvitation struct {
 
 	// TenantId Usable as {tenant} in paths.
 	TenantId string `json:"tenant_id"`
+}
+
+// Activation defines model for Activation.
+type Activation struct {
+	AppVersion *string           `json:"app_version"`
+	Binding    ActivationBinding `json:"binding"`
+	CreatedAt  time.Time         `json:"created_at"`
+
+	// DeactivatedAt Null while it holds a seat.
+	DeactivatedAt *time.Time `json:"deactivated_at"`
+
+	// Fingerprint The lease's bind.fp (a hash, never the raw machine ID).
+	Fingerprint string             `json:"fingerprint"`
+	FirstSeenAt time.Time          `json:"first_seen_at"`
+	FpSource    ActivationFpSource `json:"fp_source"`
+
+	// Hostname As the SDK last reported it.
+	Hostname *string `json:"hostname"`
+
+	// Id Example: act_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id         string         `json:"id"`
+	LastSeenAt time.Time      `json:"last_seen_at"`
+	LicenseId  string         `json:"license_id"`
+	Mode       ActivationMode `json:"mode"`
+	SdkVersion *string        `json:"sdk_version"`
+}
+
+// ActivationBinding defines model for Activation.Binding.
+type ActivationBinding string
+
+// ActivationFpSource defines model for Activation.FpSource.
+type ActivationFpSource string
+
+// ActivationMode defines model for Activation.Mode.
+type ActivationMode string
+
+// ActivationPage defines model for ActivationPage.
+type ActivationPage struct {
+	Items []Activation `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // ActivationRequest defines model for ActivationRequest.
@@ -507,9 +630,11 @@ type Lease struct {
 
 // License defines model for License.
 type License struct {
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Entitlements struct {
+	// ActiveActivations Seats taken now (activations not deactivated).
+	ActiveActivations int       `json:"active_activations"`
+	CreatedAt         time.Time `json:"created_at"`
+	CustomerId        string    `json:"customer_id"`
+	Entitlements      struct {
 		Features []string         `json:"features"`
 		Limits   map[string]int64 `json:"limits"`
 	} `json:"entitlements"`
@@ -568,9 +693,11 @@ type LicenseIssueType string
 
 // LicenseIssued defines model for LicenseIssued.
 type LicenseIssued struct {
-	CreatedAt    time.Time `json:"created_at"`
-	CustomerId   string    `json:"customer_id"`
-	Entitlements struct {
+	// ActiveActivations Seats taken now (activations not deactivated).
+	ActiveActivations int       `json:"active_activations"`
+	CreatedAt         time.Time `json:"created_at"`
+	CustomerId        string    `json:"customer_id"`
+	Entitlements      struct {
 		Features []string         `json:"features"`
 		Limits   map[string]int64 `json:"limits"`
 	} `json:"entitlements"`
@@ -676,6 +803,11 @@ type MemberUpdated struct {
 	UserId          string     `json:"user_id"`
 }
 
+// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+// the identity provider asserts it in the ID token (amr/acr).
+type MfaPolicy string
+
 // MyTenant defines model for MyTenant.
 type MyTenant struct {
 	AllProducts bool   `json:"all_products"`
@@ -752,6 +884,33 @@ type ProductPatch struct {
 
 // Role defines model for Role.
 type Role string
+
+// TenantPatch Absent fields stay; none is nullable (null answers 422).
+type TenantPatch struct {
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy *MfaPolicy `json:"mfa_policy,omitempty"`
+}
+
+// TenantUpdated defines model for TenantUpdated.
+type TenantUpdated struct {
+	// ActiveApiTokens Active API tokens, all created before this change and not revoked by it; review them in the token list.
+	ActiveApiTokens int `json:"active_api_tokens"`
+
+	// Id Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy MfaPolicy `json:"mfa_policy"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+}
+
+// ActivationId Example: act_01jcz5b2y3c4d5e6f7g8h9j0k1
+type ActivationId = string
 
 // ActivationTenant Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
 type ActivationTenant = string
@@ -835,6 +994,14 @@ type IssueLicenseParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// ListActivationsParams defines parameters for ListActivations.
+type ListActivationsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // ListMembersParams defines parameters for ListMembers.
 type ListMembersParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -881,6 +1048,9 @@ type RefreshLeaseJSONRequestBody = ActivationRequest
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 
+// UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
+type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
 
@@ -922,6 +1092,9 @@ type ServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(w http.ResponseWriter, r *http.Request)
+	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+	// (PATCH /tenants/{tenant})
+	UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams)
@@ -964,6 +1137,12 @@ type ServerInterface interface {
 	// GetLicense Get a license (never its key).
 	// (GET /tenants/{tenant}/licenses/{id})
 	GetLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// ListActivations List a license's activations (machines or clusters), deactivated ones included, newest first.
+	// (GET /tenants/{tenant}/licenses/{id}/activations)
+	ListActivations(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, params ListActivationsParams)
+	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
+	DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -1126,6 +1305,32 @@ func (siw *ServerInterfaceWrapper) ListMyTenants(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyTenants(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTenant operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTenant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTenant(w, r, tenant)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1758,6 +1963,114 @@ func (siw *ServerInterfaceWrapper) GetLicense(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListActivations operation middleware
+func (siw *ServerInterfaceWrapper) ListActivations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListActivationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListActivations(w, r, tenant, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeactivateActivation operation middleware
+func (siw *ServerInterfaceWrapper) DeactivateActivation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "activation_id" -------------
+	var activationId ActivationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "activation_id", r.PathValue("activation_id"), &activationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "activation_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeactivateActivation(w, r, tenant, id, activationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReinstateLicense operation middleware
 func (siw *ServerInterfaceWrapper) ReinstateLicense(w http.ResponseWriter, r *http.Request) {
 
@@ -2317,6 +2630,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}", wrapper.UpdateTenant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.ListApiTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens", wrapper.CreateApiToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/api-tokens/{id}/revoke", wrapper.RevokeApiToken)
@@ -2333,6 +2647,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", wrapper.DeactivateActivation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
@@ -3109,6 +3425,192 @@ func (response ListMyTenants401ApplicationProblemPlusJSONResponse) VisitListMyTe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenantRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Body   *UpdateTenantApplicationMergePatchPlusJSONRequestBody
+}
+
+type UpdateTenantResponseObject interface {
+	VisitUpdateTenantResponse(w http.ResponseWriter) error
+}
+
+type UpdateTenant200JSONResponse TenantUpdated
+
+func (response UpdateTenant200JSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateTenant400ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant401ResponseHeaders
+}
+
+func (response UpdateTenant401ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant403ResponseHeaders
+}
+
+func (response UpdateTenant403ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant404ResponseHeaders
+}
+
+func (response UpdateTenant404ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant409ResponseHeaders
+}
+
+func (response UpdateTenant409ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant413ResponseHeaders
+}
+
+func (response UpdateTenant413ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTenant422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateTenant422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateTenant422ResponseHeaders
+}
+
+func (response UpdateTenant422ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4999,6 +5501,236 @@ func (response GetLicense404ApplicationProblemPlusJSONResponse) VisitGetLicenseR
 	return err
 }
 
+type ListActivationsRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+	Params ListActivationsParams
+}
+
+type ListActivationsResponseObject interface {
+	VisitListActivationsResponse(w http.ResponseWriter) error
+}
+
+type ListActivations200JSONResponse ActivationPage
+
+func (response ListActivations200JSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListActivations400ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations401ResponseHeaders
+}
+
+func (response ListActivations401ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations403ResponseHeaders
+}
+
+func (response ListActivations403ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivations404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListActivations404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListActivations404ResponseHeaders
+}
+
+func (response ListActivations404ApplicationProblemPlusJSONResponse) VisitListActivationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivationRequestObject struct {
+	Tenant       Tenant       `json:"tenant"`
+	Id           LicenseId    `json:"id"`
+	ActivationId ActivationId `json:"activation_id"`
+}
+
+type DeactivateActivationResponseObject interface {
+	VisitDeactivateActivationResponse(w http.ResponseWriter) error
+}
+
+type DeactivateActivation200JSONResponse Activation
+
+func (response DeactivateActivation200JSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DeactivateActivation400ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation401ResponseHeaders
+}
+
+func (response DeactivateActivation401ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation403ResponseHeaders
+}
+
+func (response DeactivateActivation403ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateActivation404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeactivateActivation404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeactivateActivation404ResponseHeaders
+}
+
+func (response DeactivateActivation404ApplicationProblemPlusJSONResponse) VisitDeactivateActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReinstateLicenseRequestObject struct {
 	Tenant Tenant    `json:"tenant"`
 	Id     LicenseId `json:"id"`
@@ -6454,6 +7186,9 @@ type StrictServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(ctx context.Context, request ListMyTenantsRequestObject) (ListMyTenantsResponseObject, error)
+	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+	// (PATCH /tenants/{tenant})
+	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
@@ -6496,6 +7231,12 @@ type StrictServerInterface interface {
 	// GetLicense Get a license (never its key).
 	// (GET /tenants/{tenant}/licenses/{id})
 	GetLicense(ctx context.Context, request GetLicenseRequestObject) (GetLicenseResponseObject, error)
+	// ListActivations List a license's activations (machines or clusters), deactivated ones included, newest first.
+	// (GET /tenants/{tenant}/licenses/{id}/activations)
+	ListActivations(ctx context.Context, request ListActivationsRequestObject) (ListActivationsResponseObject, error)
+	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
+	DeactivateActivation(ctx context.Context, request DeactivateActivationRequestObject) (DeactivateActivationResponseObject, error)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(ctx context.Context, request ReinstateLicenseRequestObject) (ReinstateLicenseResponseObject, error)
@@ -6715,6 +7456,39 @@ func (sh *strictHandler) ListMyTenants(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyTenantsResponseObject); ok {
 		if err := validResponse.VisitListMyTenantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateTenant operation middleware
+func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request UpdateTenantRequestObject
+
+	request.Tenant = tenant
+
+	var body UpdateTenantApplicationMergePatchPlusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateTenant(ctx, request.(UpdateTenantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateTenant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateTenantResponseObject); ok {
+		if err := validResponse.VisitUpdateTenantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -7125,6 +7899,62 @@ func (sh *strictHandler) GetLicense(w http.ResponseWriter, r *http.Request, tena
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetLicenseResponseObject); ok {
 		if err := validResponse.VisitGetLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListActivations operation middleware
+func (sh *strictHandler) ListActivations(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, params ListActivationsParams) {
+	var request ListActivationsRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListActivations(ctx, request.(ListActivationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListActivations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListActivationsResponseObject); ok {
+		if err := validResponse.VisitListActivationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeactivateActivation operation middleware
+func (sh *strictHandler) DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId) {
+	var request DeactivateActivationRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+	request.ActivationId = activationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeactivateActivation(ctx, request.(DeactivateActivationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeactivateActivation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeactivateActivationResponseObject); ok {
+		if err := validResponse.VisitDeactivateActivationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
