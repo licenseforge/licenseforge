@@ -17,6 +17,10 @@ on:
       - web/package.json
       - web/package-lock.json
       - web/.nvmrc
+      - web/.npmrc
+      - web/index.html
+      - web/vite.config.*
+      - web/scripts/**
 permissions: {}
 defaults:
   run:
@@ -38,7 +42,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go.mod, cache: false } # release builds never restore a cache written elsewhere
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: web/.nvmrc } # no cache, as for Go
+        with: { node-version-file: web/.nvmrc, package-manager-cache: false } # no cache, as for Go
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.3.1 }
       - name: Version from the tag (one semver for server, images and chart, ADR-0023)
@@ -78,9 +82,13 @@ jobs:
           done
       - name: Every binary and image embeds the dashboard, not the placeholder
         run: |
-          # The bundle's index.html carries a marker; the placeholder page has its own text.
+          # go:embed stores the bundle's files verbatim in the binary. web/index.html
+          # has <meta name="licenseforge" content="dashboard"> for this check (the
+          # placeholder page has its own text instead), and the bundle carries the
+          # generated third-party notices.
           check() {
             grep -aq 'name="licenseforge" content="dashboard"' "$1" || { echo "$1: no dashboard bundle"; exit 1; }
+            grep -aq 'Third-party software in the LicenseForge dashboard bundle' "$1" || { echo "$1: no third-party notices"; exit 1; }
             if grep -aq 'This binary was built without the dashboard' "$1"; then echo "$1: placeholder page"; exit 1; fi
             echo "$1: dashboard embedded"
           }
@@ -103,6 +111,30 @@ jobs:
           # Built from source through the Go checksum database (its toolchain too, if
           # syft needs a newer Go); the version stamp names it in the SBOM.
           GOTOOLCHAIN=auto go install -ldflags "-X main.version=1.55.0" github.com/anchore/syft/cmd/syft@v1.55.0
+          # The dashboard's npm packages, which syft can't see inside the binary:
+          # production dependencies from the lockfile, merged into every SBOM below
+          # so each artifact keeps one SBOM.
+          DASH=$RUNNER_TEMP/dashboard.spdx.json
+          SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=false syft scan file:web/package-lock.json \
+            --override-default-catalogers javascript-lock-cataloger \
+            --source-name licenseforge-dashboard --source-version "$VERSION" -o "spdx-json=$DASH"
+          # merge FILE: add the dashboard packages, contained in FILE's root (the image
+          # or binary), with their dependency relationships (not the lockfile entry).
+          merge() {
+            jq --slurpfile d "$DASH" '
+              $d[0] as $d
+              | [$d.relationships[] | select(.relationshipType == "DESCRIBES") | .relatedSpdxElement] as $droot
+              | [.relationships[] | select(.relationshipType == "DESCRIBES") | .relatedSpdxElement] as $root
+              | if ($droot | length) != 1 or ($root | length) != 1 then error("SBOM without exactly one root") else . end
+              | [$d.packages[] | select(.SPDXID != $droot[0])] as $pkgs
+              | if ($pkgs | length) == 0 then error("no dashboard packages") else . end
+              | [$pkgs[].SPDXID] as $ids
+              | .packages += $pkgs
+              | .relationships += [$pkgs[] | {spdxElementId: $root[0], relatedSpdxElement: .SPDXID, relationshipType: "CONTAINS"}]
+              | .relationships += [$d.relationships[] | select((.spdxElementId as $e | $ids | index($e)) and (.relatedSpdxElement as $r | $ids | index($r)))]
+            ' "$1" > "$1.merged"
+            mv "$1.merged" "$1"
+          }
           mkdir -p out/sbom
           for suffix in "" -fips; do
             # ponytail: one SBOM per image, from the amd64 manifest. The arm64 one has
@@ -110,11 +142,13 @@ jobs:
             syft scan "oci-archive:out/oci/image$suffix.tar" --platform linux/amd64 \
               --source-name "$IMAGE" --source-version "$VERSION$suffix" \
               -o "spdx-json=out/sbom/image$suffix.spdx.json"
+            merge "out/sbom/image$suffix.spdx.json"
           done
           # Both binaries come from the same module graph; one SBOM covers them.
           syft scan "file:out/bin/licenseforge_${VERSION}_linux_amd64" \
             --source-name licenseforge --source-version "$VERSION" \
             -o "spdx-json=out/bin/licenseforge_${VERSION}.spdx.json"
+          merge "out/bin/licenseforge_${VERSION}.spdx.json"
       - name: Helm chart
         env:
           VERSION: ${{ steps.version.outputs.version }}
