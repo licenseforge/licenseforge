@@ -14,6 +14,9 @@ on:
       - .dockerignore
       - Makefile
       - deploy/helm/**
+      - web/package.json
+      - web/package-lock.json
+      - web/.nvmrc
 permissions: {}
 defaults:
   run:
@@ -34,6 +37,8 @@ jobs:
         with: { persist-credentials: false }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go.mod, cache: false } # release builds never restore a cache written elsewhere
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: web/.nvmrc } # no cache, as for Go
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.3.1 }
       - name: Version from the tag (one semver for server, images and chart, ADR-0023)
@@ -49,9 +54,10 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          make web # the dashboard bundle (npm ci from the lockfile, no install scripts), embedded with TAGS=webui
           mkdir -p out/bin
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch make build VERSION="$VERSION"
+            GOOS=linux GOARCH=$arch make build VERSION="$VERSION" TAGS=webui
             mv bin/licenseforge "out/bin/licenseforge_${VERSION}_linux_${arch}"
           done
           (cd out/bin && sha256sum licenseforge_* > SHA256SUMS && cat SHA256SUMS)
@@ -69,6 +75,26 @@ jobs:
               --build-arg VERSION="$VERSION" --build-arg GOFIPS140=$fips \
               --provenance=false --sbom=false \
               --output "type=oci,dest=out/oci/image$suffix.tar" .
+          done
+      - name: Every binary and image embeds the dashboard, not the placeholder
+        run: |
+          # The bundle's index.html carries a marker; the placeholder page has its own text.
+          check() {
+            grep -aq 'name="licenseforge" content="dashboard"' "$1" || { echo "$1: no dashboard bundle"; exit 1; }
+            if grep -aq 'This binary was built without the dashboard' "$1"; then echo "$1: placeholder page"; exit 1; fi
+            echo "$1: dashboard embedded"
+          }
+          for f in out/bin/licenseforge_*_linux_*; do check "$f"; done
+          for suffix in "" -fips; do
+            for arch in amd64 arm64; do
+              d=$(mktemp -d)
+              skopeo copy -q --override-os linux --override-arch "$arch" "oci-archive:out/oci/image$suffix.tar" "dir:$d/img"
+              mkdir "$d/fs"
+              for layer in $(jq -r '.layers[].digest | sub("^sha256:"; "")' "$d/img/manifest.json"); do
+                tar -xf "$d/img/$layer" -C "$d/fs" licenseforge 2>/dev/null || true # only the layer that has it
+              done
+              check "$d/fs/licenseforge" # image$suffix, $arch
+            done
           done
       - name: SBOMs (SPDX)
         env:
