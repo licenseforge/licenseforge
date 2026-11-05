@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -596,6 +597,18 @@ func TestIdentityGrants(t *testing.T) {
 		{IdentityRole, "tenants", "slug", "SELECT", true},
 		{IdentityRole, "tenants", "created_at", "SELECT", false},
 		{IdentityRole, "audit_events", "id", "UPDATE", false},
+		// ADR-0038: the tenant pool changes only its tenant's MFA policy; a
+		// session's authentication is written once by the login path.
+		{AppRole, "tenants", "mfa_policy", "UPDATE", true},
+		{AppRole, "tenants", "name", "UPDATE", false},
+		{AppRole, "tenants", "slug", "UPDATE", false},
+		{AppRole, "tenants", "id", "UPDATE", false},
+		{IdentityRole, "tenants", "mfa_policy", "UPDATE", false},
+		{IdentityRole, "sessions", "assurance", "INSERT", true},
+		{IdentityRole, "sessions", "amr", "INSERT", true},
+		{IdentityRole, "sessions", "assurance", "UPDATE", false},
+		{IdentityRole, "sessions", "amr", "UPDATE", false},
+		{IdentityRole, "sessions", "auth_time", "UPDATE", false},
 		{AppRole, "api_tokens", "revoked_at", "INSERT", false},
 		{AppRole, "api_tokens", "last_used_at", "INSERT", false},
 		{AppRole, "api_tokens", "role", "UPDATE", false},
@@ -737,5 +750,56 @@ func TestRefusedKeepsOutages(t *testing.T) {
 		if errors.Is(err, ErrInvitation) != c.refusal {
 			t.Errorf("%s %q: ErrInvitation=%v, want %v", c.code, c.msg, !c.refusal, c.refusal)
 		}
+	}
+}
+
+// The column grants on sessions and tenants are pinned exactly (ADR-0038):
+// a column added to a grant by mistake fails here.
+func TestSessionAndTenantGrantsPinned(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	cols := func(role, table, priv string) string {
+		rows, err := owner.Query(`SELECT column_name FROM information_schema.column_privileges
+			WHERE grantee = $1 AND table_name = $2 AND privilege_type = $3 ORDER BY column_name`, role, table, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, c)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tc := range []struct{ role, table, priv, want string }{
+		{AppRole, "tenants", "UPDATE", "audit_retention_days,mfa_policy,updated_at"},
+		{IdentityRole, "tenants", "UPDATE", ""},
+		{PlatformRole, "tenants", "UPDATE", "audit_retention_days,created_at,id,mfa_policy,name,slug,updated_at"},
+		{IdentityRole, "sessions", "UPDATE", "last_seen_at"},
+		{AppRole, "sessions", "UPDATE", ""},
+		{PlatformRole, "sessions", "UPDATE", ""},
+		{IdentityRole, "sessions", "INSERT", "acr,acrs,amr,assurance,auth_time,created_at,expires_at,id,last_seen_at,token_hash,user_id"},
+	} {
+		if got := cols(tc.role, tc.table, tc.priv); got != tc.want {
+			t.Errorf("%s %s on %s: %q, want %q", tc.role, tc.priv, tc.table, got, tc.want)
+		}
+	} // No serving role may pass its rights on (table or column grant options).
+	var grantable int
+	if err := owner.QueryRow(`SELECT count(*) FROM (
+			SELECT grantee, table_name FROM information_schema.column_privileges WHERE is_grantable = 'YES'
+			UNION ALL SELECT grantee, table_name FROM information_schema.table_privileges WHERE is_grantable = 'YES') g
+		JOIN pg_tables t ON t.tablename = g.table_name AND t.schemaname = 'public'
+		WHERE g.table_name IN ('tenants', 'sessions') AND g.grantee <> t.tableowner`).Scan(&grantable); err != nil {
+		t.Fatal(err)
+	}
+	if grantable != 0 {
+		t.Errorf("%d grant options on tenants/sessions held by a role other than the owner", grantable)
 	}
 }

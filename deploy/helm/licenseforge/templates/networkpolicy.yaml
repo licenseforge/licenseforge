@@ -29,6 +29,18 @@ spec:
       to: {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- end }}
+    {{- $otlp := include "licenseforge.otlp" . | fromYaml }}
+    {{- if $otlp.endpoint }}
+    # OTLP collector (audit export, ADR-0036): the endpoint's port (443 if it
+    # names none). Empty `to`: any destination on that port.
+    {{- $hostport := (urlParse $otlp.endpoint).host }}
+    {{- $port := 443 }}
+    {{- if regexMatch ":[0-9]+$" $hostport }}{{ $port = regexFind "[0-9]+$" $hostport | int }}{{ end }}
+    - ports: [{port: {{ $port }}, protocol: TCP}]
+      {{- with $otlp.to }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
     {{- $oidc := .Values.oidc | default dict }}
     {{- if $oidc.enabled }}
     {{- /* A rule without a port would allow every port. */}}

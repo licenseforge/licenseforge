@@ -23,6 +23,8 @@ func (Tenant) Fields() []ent.Field {
 		// Audit retention in days (ADR-0036); nil keeps everything. 365 (the
 		// database's floor) to 36,500; set by owners only (retention.SetTenantRetention).
 		field.Int("audit_retention_days").Optional().Nillable(),
+		// The assurance a session needs to act in the tenant (ADR-0038).
+		field.Enum("mfa_policy").Values(assuranceLevels...).Default("none"),
 	}
 }
 
@@ -32,6 +34,7 @@ func (Tenant) Annotations() []schema.Annotation {
 		"tenants_slug_format":     `slug ~ '` + slugPattern + `'`,
 		"tenants_name_not_blank":  `btrim(name) <> ''`,
 		"tenants_audit_retention": `audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)`,
+		"tenants_mfa_policy":      enumCheck("mfa_policy", assuranceLevels),
 	}}}
 }
 

@@ -4,6 +4,32 @@
  */
 
 export interface paths {
+    "/tenants/{tenant}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+         * @description Owners only (tenant:write), from a dashboard session. Raising the MFA
+         *     policy needs a session that already meets the new level (409
+         *     mfa_policy_unmet), so an owner can't lock themselves out. Raising it
+         *     doesn't revoke API tokens; the answer reports how many are active.
+         */
+        patch: operations["updateTenant"];
+        trace?: never;
+    };
     "/tenants/{tenant}/api-tokens": {
         parameters: {
             query?: never;
@@ -176,6 +202,36 @@ export interface paths {
          *     email doesn't match, all answer the same 422.
          */
         post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Exact counts for the dashboard overview, within the caller's scope.
+         * @description Needs license:read. License counts cover the products the caller
+         *     can see: a product-scoped caller gets the counts of its products.
+         *     `customers` is present only for callers with customer:read on every
+         *     product (customers are tenant-wide), and absent otherwise.
+         *
+         *     Lists carry no totals (ADR-0032); this resource is where counts
+         *     live. More counters (for example activations) may be added as new
+         *     members; clients must ignore members they don't know.
+         */
+        get: operations["getSummary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -776,6 +832,26 @@ export interface components {
             /** Format: date-time */
             revoked_at: string | null;
         };
+        /** @description Each counter is an object, so a counter can gain members and new counters can be added without breaking clients. */
+        Summary: {
+            /** @description Licenses by status, in the caller's product scope. */
+            licenses: {
+                /** Format: int64 */
+                active: number;
+                /** Format: int64 */
+                suspended: number;
+                /** Format: int64 */
+                revoked: number;
+            };
+            /** @description Present only for callers with customer:read on every product. */
+            customers?: {
+                /**
+                 * Format: int64
+                 * @description Customers that aren't archived.
+                 */
+                active: number;
+            };
+        };
         /** @enum {string} */
         LicenseStatus: "active" | "suspended" | "revoked";
         License: {
@@ -995,6 +1071,26 @@ export interface components {
             /** @description Absent on the last page. */
             next_cursor?: string;
         };
+        /**
+         * @description The assurance a session needs in this tenant (ADR-0038): none, MFA,
+         *     or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+         *     the identity provider asserts it in the ID token (amr/acr).
+         * @enum {string}
+         */
+        MfaPolicy: "none" | "mfa" | "phishing_resistant";
+        /** @description Absent fields stay; none is nullable (null answers 422). */
+        TenantPatch: {
+            mfa_policy?: components["schemas"]["MfaPolicy"];
+        };
+        TenantUpdated: {
+            /** @example tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            slug: string;
+            name: string;
+            mfa_policy: components["schemas"]["MfaPolicy"];
+            /** @description Active API tokens, all created before this change and not revoked by it; review them in the token list. */
+            active_api_tokens: number;
+        };
         /** @description Absent fields stay; none is nullable (null answers 422). */
         MemberPatch: {
             role?: components["schemas"]["MemberRole"];
@@ -1073,6 +1169,40 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    updateTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["TenantPatch"];
+            };
+        };
+        responses: {
+            /** @description The tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUpdated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
     listApiTokens: {
         parameters: {
             query?: {
@@ -1394,6 +1524,33 @@ export interface operations {
             403: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    getSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Summary"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listLicenses: {

@@ -84,7 +84,7 @@ func TestBannerGate(t *testing.T) {
 	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
 		t.Fatalf("callback: %d", code)
 	}
-	u, err := f.ids.Session(t.Context(), f.session(t))
+	u, _, err := f.ids.Session(t.Context(), f.session(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestAPISessionsUseConfiguredTimeouts(t *testing.T) {
 		}
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/tenants/acme/api-tokens", nil)
 		req.AddCookie(&http.Cookie{Name: SessionCookie, Value: cookie})
-		_, code, _ := f.h.Sessions().Check(httptest.NewRecorder(), req)
+		_, _, code, _ := f.h.Sessions().Check(httptest.NewRecorder(), req)
 		return code
 	}
 	if code := check("9 minutes"); code != 0 {
