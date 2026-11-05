@@ -119,7 +119,8 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "SESSION_IDLE_TIMEOUT", "SESSION_MAX_AGE", "LOGIN_BANNER",
 		"AUDIT_OTLP_ENDPOINT", "AUDIT_OTLP_CA_FILE", "AUDIT_OTLP_CERT_FILE", "AUDIT_OTLP_KEY_FILE", "AUDIT_OTLP_HEADERS",
 		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID",
-		"TRUSTED_PROXIES", "RATE_LIMIT_ACTIVATION", "RATE_LIMIT_MANAGEMENT", "RATE_LIMIT_LOGIN"} {
+		"TRUSTED_PROXIES", "RATE_LIMIT_ACTIVATION", "RATE_LIMIT_MANAGEMENT", "RATE_LIMIT_LOGIN",
+		"AUDIT_VERIFY_INTERVAL", "AUDIT_VERIFY_FULL_INTERVAL"} {
 		t.Setenv("LICENSEFORGE_"+k, "")
 	}
 }
@@ -264,6 +265,8 @@ func TestServeRefuses(t *testing.T) {
 		"bad trusted proxy":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_TRUSTED_PROXIES"},
 		"negative rate limit":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_LOGIN"},
 		"bad rate limit":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_MANAGEMENT"},
+		"bad verify interval":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_INTERVAL"},
+		"no full verify":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -300,6 +303,10 @@ func TestServeRefuses(t *testing.T) {
 			t.Setenv("LICENSEFORGE_RATE_LIMIT_LOGIN", "-1")
 		case "bad rate limit":
 			t.Setenv("LICENSEFORGE_RATE_LIMIT_MANAGEMENT", "600/min")
+		case "bad verify interval":
+			t.Setenv("LICENSEFORGE_AUDIT_VERIFY_INTERVAL", "-1m")
+		case "no full verify":
+			t.Setenv("LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL", "0")
 		case "bad banner":
 			t.Setenv("LICENSEFORGE_OIDC_ISSUER", "https://idp.example")
 			t.Setenv("LICENSEFORGE_LOGIN_BANNER", strings.Repeat("x", 4097))
@@ -456,4 +463,35 @@ func TestServeRateLimits(t *testing.T) {
 		!strings.Contains(body, `licenseforge_rate_limited_requests_total{surface="login"} 0`) {
 		t.Error("metrics: no rate-limit counter by surface")
 	}
+}
+
+// serve starts the periodic audit verification: its first run writes a
+// checkpoint to the platform chain.
+func TestServeVerifiesAudit(t *testing.T) {
+	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
+	admin, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	count := func() (n int) {
+		if err := admin.QueryRow(`SELECT count(*) FROM audit_events WHERE action = 'audit.checkpoint'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := count()
+	_, _, stop := startServe(t)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	}()
+	for range 100 {
+		if count() > before {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("no audit.checkpoint written after start")
 }

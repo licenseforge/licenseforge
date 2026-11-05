@@ -28,6 +28,8 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_CA_FILE` | no | system roots | PEM roots for the collector's certificate (chart: `audit.export.syslog.caSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME` | no | the address's host | Name the collector's certificate must carry |
+| `LICENSEFORGE_AUDIT_VERIFY_INTERVAL` | no | `15m` | How often one replica verifies every audit chain from the head it last verified and writes an `audit.checkpoint` entry ([below](#audit-verification-and-alerts)). `0` turns it off |
+| `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL` | no | `168h` | How often the verification starts from each chain's anchor instead (a full check) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
 | `LICENSEFORGE_AUDIT_OTLP_ENDPOINT` | no | unset = no OTLP export | OTLP/HTTP logs URL with the JSON encoding, `https://…/v1/logs` (http only on loopback; ADR-0036). TLS 1.2+, verified. A batch is delivered only on a 2xx with an empty body or an OTLP JSON body rejecting no record. No HTTP proxy is used |
 | `LICENSEFORGE_AUDIT_OTLP_CA_FILE`, `_CERT_FILE`, `_KEY_FILE` | no | system roots, no client certificate | As for syslog (chart: `audit.export.otlp.caSecret`, `clientSecret`) |
@@ -38,6 +40,36 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_RATE_LIMIT_LOGIN` | no | `60` | The same for `/auth/login` and `/auth/callback` |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
+
+## Audit verification and alerts
+
+ADR-0036. One replica leads the verification: the first to take a session advisory lock on the platform pool keeps it, with its database connection, for its lifetime, and checks that connection before each run; the others try again every interval and take over only once the leader's session is gone (pod stopped, connection dropped; the lock's connection uses TCP keepalives, so a dead leader is noticed in about 90 seconds). The platform pool's `LICENSEFORGE_PLATFORM_DATABASE_URL` must therefore be a direct connection or go through a session-pooling proxy: a transaction-pooling proxy (PgBouncer `pool_mode = transaction`) would hand the lock's session to other clients. Every `LICENSEFORGE_AUDIT_VERIFY_INTERVAL` (Helm `auditVerify.intervalMinutes`) the leader verifies every tenant chain and the platform chain from the head it verified last, held in its memory only, and from each chain's anchor at start and every `LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL` (`auditVerify.fullIntervalHours`). An incremental run is cut off after one interval. The full pass may take several runs: each may take `FullInterval / 4`, and the chains a run finished stay done, so the next run continues with the rest. Each run appends `audit.checkpoint` entries to the platform chain: `details.heads` lists `{tenant_id, seq, hash, anchor: {seq, hash}}` (the anchor is where the chain starts after retention; seq 0 while nothing was pruned), up to 200 per entry (`batch` of `batches`), and `details.mode` is `incremental` or `full`. Incremental runs list only chains whose head or anchor moved; the full pass lists every chain. A broken chain makes the entry's outcome `failure` and is listed in `details.broken`; its last good head is kept, and every following run verifies it from the anchor and checks that head is still there unchanged (so a removed tail is caught too), counting it in `licenseforge_audit_verify_failures_total` again until it is repaired. Every verified chain sets `licenseforge_audit_verify_last_success_timestamp_seconds`, so a long full pass still shows progress; a completed full pass sets `licenseforge_audit_verify_last_full_timestamp_seconds` (on a new install it starts at the server's start, so the first pass gets the alert's grace; a restart of an install that ran full passes before doesn't reset it), and other errors count in `licenseforge_audit_verify_errors_total`, so a chain that keeps failing (and the full pass it blocks) shows up too.
+
+**Alerts.** With the Prometheus Operator's CRDs present and `metrics.serviceMonitor.enabled` on, the chart installs a `PrometheusRule` (`metrics.alerts.*`; set `metrics.alerts.labels` to match your Prometheus's rule selector). Without the ServiceMonitor nothing would scrape the metrics the rules watch, so they aren't installed and the install notes say so; then write equivalent rules for your monitoring:
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `LicenseForgeAuditWriteFailures` | an audit entry couldn't be written (its action was rolled back) | critical |
+| `LicenseForgeAuditExportLag` | a sink is more than `metrics.alerts.exportLagSeconds` (15 min) behind, for 5 min | warning |
+| `LicenseForgeAuditVerifyFailed` | a chain didn't verify in the last hour | critical |
+| `LicenseForgeAuditVerifyErrors` | verification errors other than broken chains (a chain that can't be read, a run cut off by its limit, a checkpoint not written) for an hour; while they persist the full pass can't complete | warning |
+| `LicenseForgeAuditFullVerifyOverdue` | no full pass (every chain from its anchor) completed in two full intervals, or the metric is missing | warning |
+| `LicenseForgeAuditVerifyStalled` | no chain was verified for two intervals (across a leader handover too), or the metric is missing (a stuck, failing or absent verifier) | critical |
+| `LicenseForgeRateLimitTableFull` | the per-address rate limit let new addresses through untracked | warning |
+
+Route the critical alerts to whoever is responsible for the audit log (AU-5): the security or compliance owner, not only on-call operations.
+
+**SIEM correlation rule** (the SIEM is the verifier of record). Every exported event carries `id`, `tenant_id`, `seq`, `prev_hash` and `hash`. Delivery is at least once, so first deduplicate on `id`. Then, per `tenant_id`, ordered by `seq`:
+
+```text
+for each event e (after dedup on e.id), grouped by e.tenant_id, ordered by e.seq:
+  p = previous event of the same tenant_id
+  if p exists and (e.seq != p.seq + 1 or e.prev_hash != p.hash):
+      alert "audit chain gap or rewrite", tenant_id, p.seq, e.seq
+  # the first event of a chain in the SIEM may start at any seq (retention, a sink added later)
+```
+
+Also compare the heads in `audit.checkpoint` events (`details.heads[].seq` and `.hash`) with the events you hold for those chains: a checkpoint head you never received means events were lost on the way; a head below what you hold means the chain was truncated in the database.
 
 ## Database logins
 
@@ -159,4 +191,4 @@ spec:
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
 - **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
-- **Audit log**: kept in full until the retention job ships (*planned*). Export the chain head regularly to detect truncation once SIEM export exists (*planned*).
+- **Audit log**: kept in full until the retention job ships (*planned*). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.

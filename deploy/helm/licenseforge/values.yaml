@@ -119,6 +119,21 @@ metrics:
     enabled: false
     interval: 30s
     labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus
+  # Alert rules (PrometheusRule) for audit write failures, export lag,
+  # verification failures or a stalled verifier, and a full rate-limit
+  # table (ADR-0036). Rendered only when the Prometheus Operator's CRDs exist
+  # and serviceMonitor.enabled is on (otherwise nothing scrapes the metrics).
+  alerts:
+    enabled: true
+    exportLagSeconds: 900
+    labels: {}   # e.g. {release: kube-prometheus-stack}, to match your Prometheus's ruleSelector
+
+# Periodic audit chain verification (ADR-0036): the leader replica verifies
+# every intervalMinutes (0 = off) and from each chain's anchor every
+# fullIntervalHours. The stall alert fires after two missed runs.
+auditVerify:
+  intervalMinutes: 15
+  fullIntervalHours: 168
 
 podDisruptionBudget:
   enabled: true

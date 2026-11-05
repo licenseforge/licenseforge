@@ -1,4 +1,14 @@
 LicenseForge {{ .Chart.AppVersion }} is installed as {{ include "licenseforge.fullname" . }} in {{ .Release.Namespace }}.
+{{- $alerts := dig "alerts" dict (.Values.metrics | default dict) }}
+{{- $sm := dig "serviceMonitor" dict (.Values.metrics | default dict) }}
+{{- if and (dig "enabled" true $alerts) (not $sm.enabled) }}
+
+NOTE: the audit alert rules (PrometheusRule) are not installed, because
+metrics.serviceMonitor.enabled is off and nothing would scrape the metrics
+they watch. Set metrics.serviceMonitor.enabled=true (with the Prometheus
+Operator), or write equivalent rules for your monitoring (Secure
+Configuration Guide, "Audit verification and alerts").
+{{- end }}
 {{- if not (trim (.Values.trustedProxies | default "")) }}
 
 WARNING: trustedProxies is empty, so X-Forwarded-For is ignored. Behind an

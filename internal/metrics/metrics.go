@@ -71,6 +71,25 @@ var (
 	AuditWriteFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_audit_write_failures_total", Help: "Audit entries that couldn't be written (their action failed too), by chain.",
 	}, []string{"chain"})
+	// AuditVerifyLastSuccess is when the periodic verification
+	// (internal/auditverify) last completed a run, Unix seconds; 0 on
+	// replicas that never led one. Alert when it stops moving.
+	AuditVerifyLastSuccess = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_audit_verify_last_success_timestamp_seconds", Help: "When the periodic audit verification last completed a run (Unix seconds).",
+	})
+	// AuditVerifyErrors counts verification errors that aren't a broken
+	// chain: a chain that couldn't be read, a run cut off by its time limit,
+	// a checkpoint that couldn't be written. Persisting errors keep a full
+	// pass from completing.
+	AuditVerifyErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "licenseforge_audit_verify_errors_total", Help: "Audit verification errors other than broken chains (read failures, timeouts, checkpoint failures).",
+	})
+	// AuditVerifyLastFull is when a full verification pass (every chain from
+	// its anchor) last completed, Unix seconds; 0 on replicas that never
+	// completed one.
+	AuditVerifyLastFull = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_audit_verify_last_full_timestamp_seconds", Help: "When a full audit verification pass last completed (Unix seconds).",
+	})
 	// AuditVerifyFailures counts chains audit.Verify found broken.
 	AuditVerifyFailures = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "licenseforge_audit_verify_failures_total", Help: "Audit chain verifications that found a broken chain.",
@@ -100,7 +119,7 @@ func init() {
 	}
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
-	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
+	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditVerifyErrors, AuditVerifyLastFull, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

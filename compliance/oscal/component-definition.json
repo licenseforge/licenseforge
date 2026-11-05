@@ -395,12 +395,12 @@
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
                 "control-id": "au-5",
-                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036).",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036). The server verifies every chain every 15 minutes, incrementally from its last verified heads and fully weekly, and records the heads in audit.checkpoint entries; the chart's PrometheusRule alerts on write failures, verification failures, a stalled verifier (no chain verified for two intervals), persisting verification errors, an overdue full pass and export lag.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "partial"
+                    "value": "implemented"
                   }
                 ],
                 "links": [
@@ -413,14 +413,23 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/verify_test.go",
                     "rel": "reference",
                     "text": "TestWriteFailuresAreCounted"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/auditverify/auditverify_test.go",
+                    "rel": "reference",
+                    "text": "TestTamperedEntryFiresTheMetric"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/templates/prometheusrule.yaml",
+                    "rel": "reference"
                   }
                 ],
-                "remarks": "No alert rules yet: the chart's PrometheusRule and the periodic verify job come later (ADR-0036)."
+                "remarks": "The alert rules need the Prometheus Operator (else write equivalent rules from the Secure Configuration Guide); routing them to the audit owner is the operator's."
               },
               {
                 "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",
                 "control-id": "au-6",
-                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS) and/or OTLP logs over HTTP (JSON; delivered only on a 2xx rejecting no record), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics. Tenants read and self-export their own chain through the REST API (audit:read, owners and admins; under RLS, the platform chain never visible) with the same fields, so they can check it themselves; reading is itself audited, once per reader per 15 minutes.",
+                "description": "Every audit chain is pushed to a SIEM as RFC 5424 syslog over TLS (RFC 5425, TLS 1.2+, verified, optional mTLS) and/or OTLP logs over HTTP (JSON; delivered only on a 2xx rejecting no record), at least once, with each entry's seq, prev_hash and hash so the SIEM can check continuity (ADR-0036). A batch counts as delivered only after the collector's close_notify. Export lag and failures are metrics. Tenants read and self-export their own chain through the REST API (audit:read, owners and admins; under RLS, the platform chain never visible) with the same fields, so they can check it themselves; reading is itself audited, once per reader per 15 minutes. Periodic audit.checkpoint entries carry each chain's verified head and anchor, so the SIEM can compare them; the Secure Configuration Guide has the SIEM continuity rule.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -450,7 +459,7 @@
                     "text": "TestListRecordsReads"
                   }
                 ],
-                "remarks": "Not yet: the SIEM correlation rule in the docs, and the dashboard audit viewer screen (v0.2)."
+                "remarks": "Not yet: the dashboard audit viewer screen (v0.2)."
               },
               {
                 "uuid": "73f6ddcd-57bc-5f54-b68b-66d9640e06f2",

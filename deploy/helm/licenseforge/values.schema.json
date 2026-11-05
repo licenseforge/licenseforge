@@ -2,6 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "auditVerify": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intervalMinutes": {"type": "integer", "minimum": 0, "maximum": 1440},
+        "fullIntervalHours": {"type": "integer", "minimum": 1, "maximum": 8760}
+      }
+    },
     "trustedProxies": {"type": "string"},
     "oidc": {
       "type": "object",
@@ -122,6 +130,15 @@
           "properties": {
             "enabled": {"type": "boolean"},
             "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+            "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
+        },
+        "alerts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "exportLagSeconds": {"type": "integer", "minimum": 60},
             "labels": {"type": "object", "additionalProperties": {"type": "string"}}
           }
         }

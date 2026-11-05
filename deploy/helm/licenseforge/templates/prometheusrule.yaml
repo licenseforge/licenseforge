@@ -1,0 +1,76 @@
+{{- $alerts := dig "alerts" dict (.Values.metrics | default dict) }}
+{{- $sm := dig "serviceMonitor" dict (.Values.metrics | default dict) }}
+{{- $verify := int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict)) }}
+{{- $full := int (dig "fullIntervalHours" 168 (.Values.auditVerify | default dict)) }}
+{{- if and (dig "enabled" true $alerts) $sm.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+{{- $ns := printf "namespace=%q" .Release.Namespace }}
+# Audit failure alerts (ADR-0036, AU-5): on by default when the Prometheus
+# Operator's CRDs exist and the chart's ServiceMonitor scrapes the server
+# (without it the metrics never arrive and no alert would ever fire).
+# Route them to whoever must act on audit failures
+# (Secure Configuration Guide). Series carry the namespace label the
+# Operator's scrapes add; only this release's namespace is matched.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "licenseforge.fullname" . }}
+  labels:
+    {{- include "licenseforge.labels" . | nindent 4 }}
+    {{- with $alerts.labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  groups:
+    - name: licenseforge-audit
+      rules:
+        - alert: LicenseForgeAuditWriteFailures
+          # Each failure rolled back the action it records (fail closed).
+          expr: sum by (namespace, chain) (increase(licenseforge_audit_write_failures_total{ {{- $ns -}} }[5m])) > 0
+          labels: {severity: critical}
+          annotations:
+            summary: "Audit entries can't be written ({{ "{{" }} $labels.chain {{ "}}" }} chain); the actions they record fail."
+        - alert: LicenseForgeAuditExportLag
+          expr: max by (namespace, sink) (licenseforge_audit_export_lag_seconds{ {{- $ns -}} }) > {{ dig "exportLagSeconds" 900 $alerts }}
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "Audit export to {{ "{{" }} $labels.sink {{ "}}" }} is {{ "{{" }} $value | humanizeDuration {{ "}}" }} behind; entries wait in the database (retention won't prune them)."
+        - alert: LicenseForgeAuditVerifyFailed
+          # The periodic verification runs every 15 minutes and counts each broken chain, every run.
+          expr: sum by (namespace) (increase(licenseforge_audit_verify_failures_total{ {{- $ns -}} }[1h])) > 0
+          labels: {severity: critical}
+          annotations:
+            summary: "An audit hash chain doesn't verify: an entry was changed, removed or reordered. The server log and the latest audit.checkpoint entry name the chain."
+        {{- if gt $verify 0 }}
+        - alert: LicenseForgeAuditVerifyStalled
+          # The leader replica verifies every auditVerify.intervalMinutes; two
+          # missed runs (or no data at all) mean nobody is verifying.
+          # max_over_time keeps the last leader's value across a handover or a
+          # rolling deploy (its series vanish; the new leader's starts at 0).
+          expr: (time() - max by (namespace) (max_over_time(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} }[{{ add (mul 2 $verify) 15 }}m]))) > {{ mul 2 $verify 60 }} or absent(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })
+          for: {{ $verify }}m
+          labels: {severity: critical}
+          annotations:
+            summary: "No audit chain verification has completed for over {{ mul 2 $verify }} minutes: the verifier is stuck, failing or not running."
+        - alert: LicenseForgeAuditVerifyErrors
+          # Chains that can't be read, runs cut off by their limit, checkpoints
+          # not written: while they persist the full pass can't complete.
+          expr: sum by (namespace) (increase(licenseforge_audit_verify_errors_total{ {{- $ns -}} }[1h])) > 0
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "Audit verification keeps failing (not a broken chain): check the server log for the chain and the error."
+        - alert: LicenseForgeAuditFullVerifyOverdue
+          # No full pass (every chain from its anchor) completed in two full
+          # intervals, across leader handovers, or the metric is missing.
+          expr: (time() - max by (namespace) (max_over_time(licenseforge_audit_verify_last_full_timestamp_seconds{ {{- $ns -}} }[{{ mul 2 $full }}h]))) > {{ mul 2 $full 3600 }} or absent(licenseforge_audit_verify_last_full_timestamp_seconds{ {{- $ns -}} })
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "No full audit verification pass has completed for over {{ mul 2 $full }} hours."
+        {{- end }}
+        - alert: LicenseForgeRateLimitTableFull
+          # Past its address bound the per-address limit lets new addresses through (fail open).
+          expr: sum by (namespace, surface) (increase(licenseforge_rate_limit_untracked_requests_total{ {{- $ns -}} }[5m])) > 0
+          labels: {severity: warning}
+          annotations:
+            summary: "The per-address rate limit's table is full on {{ "{{" }} $labels.surface {{ "}}" }}: new addresses pass unlimited."
+{{- end }}

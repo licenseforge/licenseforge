@@ -31,6 +31,8 @@
 //	LICENSEFORGE_AUDIT_OTLP_CA_FILE, _CERT_FILE, _KEY_FILE  as for syslog
 //	LICENSEFORGE_AUDIT_OTLP_HEADERS     request headers, k=v,k2=v2 (values %-encoded), e.g. an API key
 //	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
+//	LICENSEFORGE_AUDIT_VERIFY_INTERVAL  incremental audit chain verification, default 15m; 0 = off (ADR-0036)
+//	LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL  full verification from the anchor, default 168h
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //	LICENSEFORGE_TRUSTED_PROXIES        CIDRs or addresses of proxies whose X-Forwarded-For is believed; unset = none
 //	LICENSEFORGE_RATE_LIMIT_ACTIVATION  requests per client address per minute, per replica, on the activation API; default 1200, 0 = off
@@ -66,6 +68,7 @@ import (
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/auditexport"
+	"licenseforge.io/licenseforge/internal/auditverify"
 	"licenseforge.io/licenseforge/internal/catalog"
 	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
@@ -255,6 +258,23 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		}()
 	}
 
+	// Periodic chain verification (ADR-0036); one replica per interval runs it.
+	verify := auditverify.New(db, log)
+	if verify.Interval, err = envDuration("LICENSEFORGE_AUDIT_VERIFY_INTERVAL", auditverify.DefaultInterval); err != nil {
+		return err
+	}
+	if verify.FullInterval, err = envDuration("LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL", auditverify.DefaultFullInterval); err != nil {
+		return err
+	}
+	if verify.Interval > 0 {
+		if verify.FullInterval == 0 {
+			return errors.New("LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL: must be above 0 while verification is on")
+		}
+		go func() { _ = verify.Run(ctx) }() // stops with ctx; errors are logged
+	} else {
+		log.Warn("LICENSEFORGE_AUDIT_VERIFY_INTERVAL is 0: periodic audit verification is off")
+	}
+
 	var draining atomic.Bool
 	ready := func(ctx context.Context) error {
 		if draining.Load() {
@@ -433,6 +453,19 @@ func sessionTimeouts(s identity.Service) (identity.Service, error) {
 		return s, fmt.Errorf("LICENSEFORGE_SESSION_IDLE_TIMEOUT / LICENSEFORGE_SESSION_MAX_AGE: %w", err)
 	}
 	return s, nil
+}
+
+// envDuration reads a non-negative duration from key, def when unset.
+func envDuration(key string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%s: want a duration like 15m (0 = off), got %q", key, v)
+	}
+	return d, nil
 }
 
 func envOr(key, def string) string {
