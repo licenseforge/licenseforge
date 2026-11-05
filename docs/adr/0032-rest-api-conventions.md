@@ -62,6 +62,8 @@ Either credential yields an `authz.Principal` (role, product scope, tenant), che
 - Handlers implement oapi-codegen's **strict server** interface (`std-http` target, stdlib `net/http`); the generated code is committed, and CI fails if it is stale ([ADR-0023 Repository structure](0023-repository-structure.md)).
 - A test checks that every route the server serves is in the spec, so nothing reachable is undocumented.
 
+- **Summaries**: lists carry no totals; counts the dashboard needs come from a per-tenant `GET /api/v1/tenants/{tenant}/summary` resource, scoped to what the caller can see (a field the caller can't see is absent, not zero), extended by adding fields.
+
 ## Consequences
 - New dependencies: `oapi-codegen` (code generator, run via `go run` at a pinned version), and its small runtime package.
 - One outer handler gives every endpoint the same authentication, tenant resolution and problem errors; object scope (steps 4–5) still lives in each handler, behind one scoped lookup and one error mapper, and is checked by a test per endpoint.
