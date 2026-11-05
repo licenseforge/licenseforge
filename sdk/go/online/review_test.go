@@ -75,14 +75,6 @@ func TestDeactivateLostResponse(t *testing.T) {
 	if _, err := c.Activate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Not activated on the first attempt: an error, the lease stays.
-	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 404, "not_activated"); return true }
-	if err := c.Deactivate(context.Background()); !errors.Is(err, ErrNotActivated) {
-		t.Fatalf("first attempt: %v", err)
-	}
-	if _, _, err := c.Current(); err != nil {
-		t.Errorf("lease dropped: %v", err)
-	}
 	// The first answer is lost (503), the retry finds it done: success.
 	before := len(f.reqs)
 	f.respond = func(_ string, n int, w http.ResponseWriter) bool {
@@ -177,11 +169,11 @@ func TestWarnings(t *testing.T) {
 	if w := c.Warnings(); len(w) != 1 || !errors.Is(w[0], ErrBadLease) {
 		t.Errorf("bad stored lease: %v", w)
 	}
-	// Clock and store failures come with the lease, and Run reports them.
+	// Clock and store failures are warnings: the lease is in use, and Run
+	// reports them.
 	g, _ := clock.New(failClock{}, key, clock.Options{})
 	c, _ = f.client(t, f.iat, func(cfg *Config) { cfg.Clock = g; cfg.Store = failStore{saveErr: errors.New("full")} })
-	l, err := c.Activate(context.Background())
-	if l == nil || err == nil || !strings.Contains(err.Error(), "clock not reset") || !strings.Contains(err.Error(), "full") {
+	if l, err := c.Activate(context.Background()); l == nil || err != nil {
 		t.Fatalf("activate: %v %v", l, err)
 	}
 	if _, _, err := c.Current(); err != nil && !errors.Is(err, clock.ErrUnreadable) {
@@ -195,10 +187,24 @@ func TestWarnings(t *testing.T) {
 		}
 		return false
 	}
-	var reported []error
-	_ = c.Run(ctx, func(err error) { reported = append(reported, err) })
-	if len(reported) == 0 || !strings.Contains(reported[0].Error(), "full") {
+	var reported []string
+	_ = c.Run(ctx, func(err error) { reported = append(reported, err.Error()) })
+	all := strings.Join(reported, "\n")
+	if !strings.Contains(all, "clock not reset") || !strings.Contains(all, "full") {
 		t.Errorf("Run reported %v", reported)
+	}
+	// Warnings from New reach Run's onErr too.
+	bad2 := "lf1.nope"
+	c, _ = f.client(t, f.iat, func(cfg *Config) { cfg.Store = &memStore{saved: &bad2} })
+	c.mu.Lock()
+	c.claims = &licensefile.Claims{} // something to keep fresh, so Run starts
+	c.mu.Unlock()
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	reported = nil
+	_ = c.Run(ctx2, func(err error) { reported = append(reported, err.Error()) })
+	if len(reported) == 0 || !strings.Contains(reported[0], "stored lease not used") {
+		t.Errorf("New warnings not reported: %v", reported)
 	}
 }
 
@@ -246,10 +252,13 @@ func TestClaimsAreCopies(t *testing.T) {
 	}
 	l.Claims.Entitlements.Features[0] = "x"
 	l.Claims.Entitlements.Limits["seats"] = 999
+	exp := *l.Claims.Expires
+	*l.Claims.Expires = exp.Add(1000 * time.Hour)
 	got, _, _ := c.Current()
 	got.Product = "y"
+	*got.Expires = exp.Add(2000 * time.Hour)
 	again, _, _ := c.Current()
-	if !slices.Equal(again.Entitlements.Features, []string{"sso"}) || again.Entitlements.Limits["seats"] != 5 || again.Product != product {
+	if !slices.Equal(again.Entitlements.Features, []string{"sso"}) || again.Entitlements.Limits["seats"] != 5 || again.Product != product || !again.Expires.Equal(exp) {
 		t.Errorf("cache changed: %+v", again)
 	}
 }
@@ -289,3 +298,246 @@ type lockedStore struct {
 
 func (l *lockedStore) Load() (string, error) { l.mu.Lock(); defer l.mu.Unlock(); return l.s, nil }
 func (l *lockedStore) Save(s string) error   { l.mu.Lock(); defer l.mu.Unlock(); l.s = s; return nil }
+
+// Not activated on the first attempt is success too: the seat is free.
+func TestDeactivateNotActivated(t *testing.T) {
+	f := newFake(t)
+	store := &memStore{}
+	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.Store = store })
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 404, "not_activated"); return true }
+	if err := c.Deactivate(context.Background()); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if _, _, err := c.Current(); !errors.Is(err, ErrNoLease) || *store.saved != "" {
+		t.Errorf("lease kept: %v", err)
+	}
+	// Other refusals stay errors, and the lease stays.
+	if _, err := (func() (*Lease, error) { f.respond = nil; return c.Activate(context.Background()) })(); err != nil {
+		t.Fatal(err)
+	}
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 401, "unauthenticated"); return true }
+	if err := c.Deactivate(context.Background()); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("deactivate: %v", err)
+	}
+	if _, _, err := c.Current(); err != nil {
+		t.Errorf("lease dropped: %v", err)
+	}
+}
+
+// A simulated day where Current keeps failing for a reason no refresh fixes
+// (the build is newer than updates_until): Run refreshes on the lease's
+// schedule, not every minute.
+func TestRunBoundedWhenRefreshCantHelp(t *testing.T) {
+	f := newFake(t)
+	var mu sync.Mutex
+	sim := f.iat
+	f.claims = func(c *licensefile.Claims) {
+		mu.Lock()
+		now := sim.Truncate(time.Second)
+		mu.Unlock()
+		u := now.Add(-time.Hour)
+		e, r := now.Add(time.Hour), now.Add(30*time.Minute)
+		c.IssuedAt, c.UpdatesUntil, c.Expires, c.RefreshAfter = now, &u, &e, &r
+	}
+	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.BuildDate = f.iat })
+	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim }
+	ctx, cancel := context.WithCancel(context.Background())
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		sim = sim.Add(d)
+		over := sim.Sub(f.iat) > 24*time.Hour
+		mu.Unlock()
+		if over {
+			cancel()
+		}
+		return ctx.Err()
+	}
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Run(ctx, nil)
+	if n := len(f.reqs); n > 60 { // every 30 minutes: 48 a day
+		t.Errorf("%d requests in a simulated day", n)
+	}
+}
+
+// Without refresh_after, Run waits half the time to exp (at most backoffMax).
+func TestRunWithoutRefreshAfter(t *testing.T) {
+	f := newFake(t)
+	f.claims = func(c *licensefile.Claims) { c.RefreshAfter = nil }
+	c, sleeps := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = c.Run(ctx, nil)
+	if len(*sleeps) != 1 || (*sleeps)[0] != backoffMax { // exp in 1h: half is 30m, capped at 5m
+		t.Errorf("sleeps %v", *sleeps)
+	}
+}
+
+// Jitter is up to a tenth of the wait.
+func TestRunJitter(t *testing.T) {
+	f := newFake(t)
+	c, sleeps := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var asked int64
+	c.rand = func(n int64) int64 { asked = n; return n - 1 }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = c.Run(ctx, nil)
+	if want := int64(30*time.Minute/10) + 1; asked != want || (*sleeps)[0] != 30*time.Minute+time.Duration(want-1) {
+		t.Errorf("rand(%d), sleep %v", asked, *sleeps)
+	}
+}
+
+// The commit lock: a slow store save and a second, newer lease end with the
+// store holding the cached (newest) lease; Forget waits for a save too.
+func TestCommitLock(t *testing.T) {
+	f := newFake(t)
+	var mu sync.Mutex
+	issued := 0
+	f.claims = func(c *licensefile.Claims) {
+		mu.Lock()
+		issued++
+		n := issued
+		mu.Unlock()
+		c.IssuedAt = c.IssuedAt.Add(time.Duration(n) * time.Second)
+	}
+	store := &blockingStore{block: make(chan struct{}), entered: make(chan struct{})}
+	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.Store = store })
+	done := make(chan *Lease)
+	go func() { l, _ := c.Refresh(context.Background()); done <- l }()
+	<-store.entered // the first lease is saving, the commit held
+	newer := make(chan *Lease)
+	go func() { l, _ := c.Refresh(context.Background()); newer <- l }()
+	time.Sleep(50 * time.Millisecond) // the second one gets its lease and waits to commit
+	close(store.block)
+	first, second := <-done, <-newer
+	if first == nil || second == nil || !second.Claims.IssuedAt.After(first.Claims.IssuedAt) {
+		t.Fatalf("leases %v %v", first, second)
+	}
+	c.mu.Lock()
+	cached := c.lease
+	c.mu.Unlock()
+	if store.value() != cached || cached != second.File {
+		t.Errorf("store and cache disagree, or the older lease won")
+	}
+
+	// Forget waits for a save in progress, so the lease doesn't come back.
+	store2 := &blockingStore{block: make(chan struct{}), entered: make(chan struct{})}
+	c2, _ := f.client(t, f.iat.Add(time.Hour), func(cfg *Config) { cfg.Store = store2 })
+	go func() { l, _ := c2.Refresh(context.Background()); done <- l }()
+	<-store2.entered
+	forgot := make(chan error)
+	go func() { forgot <- c2.Forget() }()
+	time.Sleep(50 * time.Millisecond)
+	close(store2.block)
+	<-done
+	if err := <-forgot; err != nil {
+		t.Fatal(err)
+	}
+	if store2.value() != "" {
+		t.Error("Forget overtaken by a save: the lease is back in the store")
+	}
+	if _, _, err := c2.Current(); !errors.Is(err, ErrNoLease) {
+		t.Errorf("Current after Forget: %v", err)
+	}
+}
+
+// blockingStore blocks the first Save until block closes.
+type blockingStore struct {
+	mu      sync.Mutex
+	s       string
+	saves   int
+	block   chan struct{}
+	entered chan struct{}
+}
+
+func (b *blockingStore) Load() (string, error) { return "", nil }
+func (b *blockingStore) Save(s string) error {
+	b.mu.Lock()
+	b.saves++
+	first := b.saves == 1
+	b.mu.Unlock()
+	if first {
+		close(b.entered)
+		<-b.block
+	}
+	b.mu.Lock()
+	b.s = s
+	b.mu.Unlock()
+	return nil
+}
+func (b *blockingStore) value() string { b.mu.Lock(); defer b.mu.Unlock(); return b.s }
+
+// A refresh in flight when Forget runs doesn't bring the lease back.
+func TestForgetSupersedesInFlight(t *testing.T) {
+	f := newFake(t)
+	c, _ := f.client(t, f.iat, nil)
+	inside, release := make(chan struct{}), make(chan struct{})
+	f.respond = func(string, int, http.ResponseWriter) bool {
+		close(inside)
+		<-release
+		return false
+	}
+	got := make(chan error)
+	go func() { _, err := c.Refresh(context.Background()); got <- err }()
+	<-inside
+	if err := c.Forget(); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-got; !errors.Is(err, ErrSuperseded) {
+		t.Errorf("refresh = %v", err)
+	}
+	if _, _, err := c.Current(); !errors.Is(err, ErrNoLease) {
+		t.Errorf("lease came back: %v", err)
+	}
+}
+
+// Run forgets the lease when the server says this machine is no longer
+// licensed (revoked, or the seat moved).
+func TestRunForgetsOnRevocation(t *testing.T) {
+	for _, code := range []string{"license_revoked", "not_activated"} {
+		f := newFake(t)
+		store := &memStore{}
+		c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.Store = store })
+		if _, err := c.Activate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, code); return true }
+		if err := c.Run(context.Background(), nil); err == nil {
+			t.Fatalf("%s: Run returned nil", code)
+		}
+		if _, _, err := c.Current(); !errors.Is(err, ErrNoLease) || *store.saved != "" {
+			t.Errorf("%s: lease kept: %v", code, err)
+		}
+	}
+}
+
+// ClockTolerance reaches the claim checks.
+func TestClockTolerance(t *testing.T) {
+	f := newFake(t)
+	tol := 72 * time.Hour
+	local := f.iat.Add(-48 * time.Hour) // the server is two days ahead; the lease's offset is ignored here
+	for name, cfgTol := range map[string]*time.Duration{"default": nil, "configured": &tol} {
+		c, _ := f.client(t, local, func(cfg *Config) { cfg.ClockTolerance = cfgTol })
+		if _, err := c.Activate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		c.mu.Lock()
+		c.offset = 0 // check against the local clock alone
+		c.mu.Unlock()
+		_, _, err := c.Current()
+		if (name == "default") != errors.Is(err, licensefile.ErrClockSkew) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
