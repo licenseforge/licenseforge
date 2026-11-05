@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"licenseforge.io/licenseforge/internal/audit"
@@ -141,6 +143,10 @@ func TestKeyRefusalsAreAudited(t *testing.T) {
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", pending.ID, denied, map[string]any{}})
 	_ = l.Discard(viewer, tn, "sk_../../x")
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", "", denied, nil}) // malformed IDs aren't stored
+	if err := l.Discard(owner, tn, "sk_../../x"); !errors.Is(err, ErrNotPending) {
+		t.Errorf("malformed kid: %v", err)
+	}
+	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.discard", "", auditevent.OutcomeFailure, nil})
 
 	_, _ = l.Create(owner, tn)
 	n = expectOne(t, l, tn, n, "usr_test", want{"signing_key.create", "", failed, map[string]any{"reason": ErrPendingExists.Error()}})
@@ -227,6 +233,97 @@ func TestAuditHasNoKeyMaterial(t *testing.T) {
 			if strings.Contains(raw, s) {
 				t.Errorf("%s: entry contains key material", e.Action)
 			}
+		}
+	}
+}
+
+var errInjected = errors.New("injected audit failure")
+
+// failAudit makes every audit write fail until the test ends.
+func failAudit(t *testing.T) {
+	t.Helper()
+	orig := recordAudit
+	recordAudit = func(context.Context, *ent.Tx, string, audit.Event) (*ent.AuditEvent, error) { return nil, errInjected }
+	t.Cleanup(func() { recordAudit = orig })
+}
+
+// Fail closed (ADR-0027): if the audit entry can't be written, the operation
+// fails and changes nothing; a refusal whose entry can't be written reports
+// both errors.
+func TestFailedAuditFailsTheOperation(t *testing.T) {
+	l, _, _ := setup(t)
+	first, rotating := newTenant(t, l), newTenant(t, l)
+	if _, err := l.Create(as(first), first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Create(as(rotating), rotating); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := l.Create(as(rotating), rotating)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeFirst, beforeRotating := statuses(t, l, first), statuses(t, l, rotating)
+	failAudit(t)
+
+	_, err = l.Create(as(first), first)
+	if !errors.Is(err, errInjected) {
+		t.Errorf("Create: %v, want the audit error", err)
+	}
+	if err := l.Promote(as(rotating), rotating, pending.ID); !errors.Is(err, errInjected) {
+		t.Errorf("Promote: %v, want the audit error", err)
+	}
+	if err := l.Discard(as(rotating), rotating, pending.ID); !errors.Is(err, errInjected) {
+		t.Errorf("Discard: %v, want the audit error", err)
+	}
+	_, err = l.Create(asRole(rotating, authz.Viewer), rotating)
+	if !errors.Is(err, authz.ErrDenied) || !errors.Is(err, errInjected) {
+		t.Errorf("refused Create: %v, want ErrDenied and the audit error", err)
+	}
+	for tn, before := range map[string]map[string]string{first: beforeFirst, rotating: beforeRotating} {
+		after := statuses(t, l, tn)
+		if len(after) != len(before) {
+			t.Errorf("keys %v, want %v", after, before)
+		}
+		for id, s := range before {
+			if after[id] != s {
+				t.Errorf("%s is %s, want %s", id, after[id], s)
+			}
+		}
+	}
+}
+
+// Discard and Promote of the same pending key at once: exactly one wins and
+// the tenant keeps exactly one active key.
+func TestConcurrentDiscardAndPromote(t *testing.T) {
+	l, _, _ := setup(t)
+	for range 20 {
+		tn := newTenant(t, l)
+		active, err := l.Create(as(tn), tn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending, err := l.Create(as(tn), tn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var promoteErr, discardErr error
+		var wg sync.WaitGroup
+		wg.Go(func() { promoteErr = l.Promote(as(tn), tn, pending.ID) })
+		wg.Go(func() { discardErr = l.Discard(as(tn), tn, pending.ID) })
+		wg.Wait()
+		s := statuses(t, l, tn)
+		switch {
+		case promoteErr == nil && errors.Is(discardErr, ErrNotPending):
+			if s[pending.ID] != "active" || s[active.ID] != "retired" {
+				t.Fatalf("promote won, keys %v", s)
+			}
+		case discardErr == nil && errors.Is(promoteErr, ErrNotPending):
+			if s[pending.ID] != "retired" || s[active.ID] != "active" {
+				t.Fatalf("discard won, keys %v", s)
+			}
+		default:
+			t.Fatalf("promote %v, discard %v, keys %v", promoteErr, discardErr, s)
 		}
 	}
 }

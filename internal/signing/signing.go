@@ -115,7 +115,7 @@ func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err
 		return err
 	}
 	if rerr := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		_, err := audit.Record(ctx, tx, tenantID, ev)
+		_, err := recordAudit(ctx, tx, tenantID, ev)
 		return err
 	}); rerr != nil {
 		return errors.Join(err, rerr)
@@ -128,9 +128,17 @@ func (l Local) refused(ctx context.Context, tenantID string, ev audit.Event, err
 // the algorithm and states, never key material.
 func record(ctx context.Context, tx *ent.Tx, tenantID string, ev audit.Event, details map[string]any) error {
 	ev.Outcome, ev.Details = auditevent.OutcomeSuccess, details
-	_, err := audit.Record(ctx, tx, tenantID, ev)
+	_, err := recordAudit(ctx, tx, tenantID, ev)
 	return err
 }
+
+// recordAudit is audit.Record; tests replace it to check that a failed audit
+// write fails the operation (fail closed, ADR-0027).
+var recordAudit = audit.Record
+
+// errStateChanged means a key wasn't in the state the operation expected when
+// it was written (a concurrent rotation): the write changed nothing.
+var errStateChanged = errors.New("signing: key state changed concurrently")
 
 func binding(tenantID, kid string) secrets.Binding {
 	return secrets.Binding{Purpose: PurposeSigningKey, TenantID: tenantID, RowID: kid}
@@ -162,7 +170,28 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 		return nil, err
 	}
 	var k *ent.SigningKey
-	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+	// A concurrent first Create can win the tenant's only active slot; the
+	// loser retries once and then becomes the pending key (or gets
+	// ErrPendingExists), instead of reporting a pending key that doesn't exist.
+	for attempt := 0; ; attempt++ {
+		err = l.create(ctx, tenantID, kid, pub, ct, ev, attempt == 0, &k)
+		if !errors.Is(err, errLostFirstKey) {
+			break
+		}
+	}
+	if err != nil {
+		ev.ObjectID = "" // the key doesn't exist
+		return nil, l.refused(ctx, tn, ev, err)
+	}
+	return k, nil
+}
+
+// errLostFirstKey means another Create made the tenant's first (active) key
+// at the same time.
+var errLostFirstKey = errors.New("signing: concurrent first key")
+
+func (l Local) create(ctx context.Context, tenantID, kid string, pub ed25519.PublicKey, ct string, ev audit.Event, retry bool, out **ent.SigningKey) error {
+	return l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		hasKeys, err := tx.SigningKey.Query().Exist(ctx)
 		if err != nil {
 			return err
@@ -172,22 +201,22 @@ func (l Local) Create(ctx context.Context, tenantID string) (*ent.SigningKey, er
 		if !hasKeys {
 			c.SetStatus(signingkey.StatusActive).SetActivatedAt(time.Now())
 		}
-		k, err = c.Save(ctx)
+		k, err := c.Save(ctx)
 		// Only the one-active / one-pending index; other violations (unknown
-		// tenant, CHECKs) are returned as they are.
+		// tenant, CHECKs) are returned as they are. Inserting an active key
+		// can only collide with another active key: a concurrent first key.
 		if sqlgraph.IsUniqueConstraintError(err) && strings.Contains(err.Error(), "signingkey_tenant_id_status") {
+			if !hasKeys && retry {
+				return errLostFirstKey
+			}
 			return ErrPendingExists
 		}
 		if err != nil {
 			return err
 		}
+		*out = k
 		return record(ctx, tx, tenantID, ev, map[string]any{"alg": string(k.Alg), "to": string(k.Status)})
 	})
-	if err != nil {
-		ev.ObjectID = "" // the key doesn't exist
-		return nil, l.refused(ctx, tn, ev, err)
-	}
-	return k, nil
 }
 
 // Promote makes the pending key kid active and retires the active one,
@@ -201,6 +230,9 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 	}
 	if err := authorize(ctx, tenantID); err != nil {
 		return l.refused(ctx, tn, ev, err)
+	}
+	if ev.ObjectID == "" { // malformed kid: refused before any query
+		return l.refused(ctx, tn, ev, ErrNotPending)
 	}
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		now := time.Now()
@@ -225,12 +257,17 @@ func (l Local) Promote(ctx context.Context, tenantID, kid string) error {
 		}
 		details := map[string]any{"alg": string(pending.Alg), "from": string(signingkey.StatusPending), "to": string(signingkey.StatusActive)}
 		if active != nil {
-			if err := retire(ctx, tx, active.ID, now); err != nil {
+			if err := retire(ctx, tx, active.ID, signingkey.StatusActive, now); err != nil {
 				return err
 			}
 			details["retired"] = active.ID
 		}
-		if err := tx.SigningKey.UpdateOneID(kid).SetStatus(signingkey.StatusActive).SetActivatedAt(now).Exec(ctx); err != nil {
+		n, err := tx.SigningKey.Update().Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).
+			SetStatus(signingkey.StatusActive).SetActivatedAt(now).Save(ctx)
+		if err == nil && n != 1 {
+			err = errStateChanged
+		}
+		if err != nil {
 			return err
 		}
 		return record(ctx, tx, tenantID, ev, details)
@@ -252,18 +289,23 @@ func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
 	if err := authorize(ctx, tenantID); err != nil {
 		return l.refused(ctx, tn, ev, err)
 	}
+	if ev.ObjectID == "" { // malformed kid: refused before any query
+		return l.refused(ctx, tn, ev, ErrNotPending)
+	}
 	err = l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		k, err := tx.SigningKey.Query().Where(signingkey.ID(kid), signingkey.StatusEQ(signingkey.StatusPending)).ForUpdate().Only(ctx)
-		if ent.IsNotFound(err) {
+		// The write itself requires the key to be pending, so a concurrent
+		// Promote either commits first (nothing is retired: ErrNotPending) or
+		// waits for this transaction.
+		if err := retire(ctx, tx, kid, signingkey.StatusPending, time.Now()); errors.Is(err, errStateChanged) {
 			return ErrNotPending
+		} else if err != nil {
+			return err
 		}
+		alg, err := tx.SigningKey.Query().Where(signingkey.ID(kid)).Select(signingkey.FieldAlg).String(ctx)
 		if err != nil {
 			return err
 		}
-		if err := retire(ctx, tx, kid, time.Now()); err != nil {
-			return err
-		}
-		return record(ctx, tx, tenantID, ev, map[string]any{"alg": string(k.Alg), "from": string(signingkey.StatusPending), "to": string(signingkey.StatusRetired)})
+		return record(ctx, tx, tenantID, ev, map[string]any{"alg": alg, "from": string(signingkey.StatusPending), "to": string(signingkey.StatusRetired)})
 	})
 	if err != nil {
 		return l.refused(ctx, tn, ev, err)
@@ -271,9 +313,15 @@ func (l Local) Discard(ctx context.Context, tenantID, kid string) error {
 	return nil
 }
 
-func retire(ctx context.Context, tx *ent.Tx, kid string, now time.Time) error {
-	return tx.SigningKey.UpdateOneID(kid).SetStatus(signingkey.StatusRetired).SetRetiredAt(now).
-		ClearPrivateKeyCiphertext().Exec(ctx)
+// retire retires kid and erases its private key, only if it is still in
+// state from (errStateChanged otherwise, and nothing changes).
+func retire(ctx context.Context, tx *ent.Tx, kid string, from signingkey.Status, now time.Time) error {
+	n, err := tx.SigningKey.Update().Where(signingkey.ID(kid), signingkey.StatusEQ(from)).
+		SetStatus(signingkey.StatusRetired).SetRetiredAt(now).ClearPrivateKeyCiphertext().Save(ctx)
+	if err == nil && n != 1 {
+		err = errStateChanged
+	}
+	return err
 }
 
 // Active returns the tenant's active kid.

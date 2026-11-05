@@ -372,7 +372,7 @@ func TestConcurrentCreateMakesOneActiveKey(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if active != 1 || pending > 1 {
+	if active != 1 || pending != 1 { // the losers of the first-key race become the pending key
 		t.Fatalf("%d active, %d pending keys", active, pending)
 	}
 }
