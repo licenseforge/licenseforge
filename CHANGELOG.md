@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Dashboard licenses screen at `/t/{slug}/licenses` (ADR-0020).
   - The list filters by product, customer and status, and shows key hints, never keys.
   - The details show the entitlement snapshot and dates. Suspend and revoke ask for confirmation, and revoke says it is final; reinstate doesn't ask.
-  - Issuing a license (product, customer, plan ID, type, external references) sends an `Idempotency-Key` that stays fixed for the dialog, so a retry never issues twice. The key is shown once and kept only in the dialog.
+  - Issuing a license (product, customer, plan ID, type, external references) sends an `Idempotency-Key`, so a retry never issues twice: it is kept after a network error, a 5xx or an idempotency conflict, and replaced after a definitive 4xx (a fixable form error). Archived customers aren't offered, and a caller who can't list customers enters a customer ID. The web lint refuses `console` calls, so secrets can't be logged. The key is shown once and kept only in the dialog.
   - Actions are hidden below manager.
   - Activations aren't shown yet: the API has no management endpoints for them.
 - Dashboard products and customers screens (ADR-0020), at `/t/{slug}/products` and `/t/{slug}/customers`.
