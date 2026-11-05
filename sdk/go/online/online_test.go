@@ -409,15 +409,25 @@ func TestClockReset(t *testing.T) {
 	if err := g.Observe(f.iat.Add(48*time.Hour), f.iat.Add(48*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.Clock = g })
+	local := f.iat.Add(-3 * time.Hour) // the local clock is behind the server
+	c, _ := f.client(t, local, func(cfg *Config) { cfg.Clock = g })
 	if _, err := c.Activate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if now, err := g.Now(f.iat); err != nil || !now.Equal(f.iat) {
+	// The mark is the lease's iat, not the local time.
+	if now, err := g.Now(local); err != nil || !now.Equal(f.iat) {
 		t.Errorf("guard after activate: %v %v", now, err)
 	}
 	if _, st, err := c.Current(); err != nil || st != licensefile.StatusValid {
 		t.Errorf("Current: %v %v", st, err)
+	}
+	// Current goes through the guard: a clock more than the tolerance behind
+	// its mark is a rollback.
+	if err := g.Reset(f.iat.Add(48 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.Current(); !errors.Is(err, clock.ErrRollback) {
+		t.Errorf("Current behind the mark: %v", err)
 	}
 }
 
