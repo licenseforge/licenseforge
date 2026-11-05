@@ -55,11 +55,20 @@ function isProblem(v: unknown): v is Problem {
 
 /** The data of an openapi-fetch result, or an ApiError carrying its problem. */
 export function unwrap<T>(r: { data?: T; error?: unknown; response: Response }): T {
-  if (!r.response.ok || r.data === undefined) {
-    const p = isProblem(r.error) ? r.error : undefined;
-    throw new ApiError(r.response.status, `${r.response.url}: ${p?.code ?? r.response.status}`, p);
-  }
+  if (r.data === undefined) throw failure(check(r));
+  check(r);
   return r.data;
+}
+
+/** The Response of a result without a body (204), or an ApiError carrying its problem. */
+export function check(r: { error?: unknown; response: Response }): Response {
+  if (!r.response.ok) throw failure(r.response, r.error);
+  return r.response;
+}
+
+function failure(res: Response, error?: unknown): ApiError {
+  const p = isProblem(error) ? error : undefined;
+  return new ApiError(res.status, `${res.url}: ${p?.code ?? res.status}`, p);
 }
 
 /**
