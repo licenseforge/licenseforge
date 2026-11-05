@@ -406,6 +406,22 @@ func TestCreateRacesRemoval(t *testing.T) {
 	}
 }
 
+// Revoke re-checks the caller's membership: an owner principal of a user
+// who is an admin now can't revoke an owner token.
+func TestRevokeRechecksPrincipal(t *testing.T) {
+	f := setup(t)
+	ownerTok, err := f.s.Create(f.as(f.a, f.ownerA, authz.Owner), "root", authz.Owner, all, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Revoke(f.as(f.a, f.adminA, authz.Owner), ownerTok.Row.ID); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("stale principal: %v", err)
+	}
+	if _, err := f.s.Revoke(f.as(f.a, f.ownerA, authz.Owner), ownerTok.Row.ID); err != nil {
+		t.Errorf("current principal: %v", err)
+	}
+}
+
 func TestRevokeAuditAndRights(t *testing.T) {
 	f := setup(t)
 	owner, admin := f.as(f.a, f.ownerA, authz.Owner), f.as(f.a, f.adminA, authz.Admin)

@@ -8,6 +8,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
@@ -246,6 +247,54 @@ func init() {
 	// activation.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	activation.IDValidator = func() func(string) error {
 		validators := activationDescID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(id string) error {
+			for _, fn := range fns {
+				if err := fn(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	auditanchorFields := schema.AuditAnchor{}.Fields()
+	_ = auditanchorFields
+	// auditanchorDescTenantID is the schema descriptor for tenant_id field.
+	auditanchorDescTenantID := auditanchorFields[1].Descriptor()
+	// auditanchor.TenantIDValidator is a validator for the "tenant_id" field. It is called by the builders before save.
+	auditanchor.TenantIDValidator = func() func(string) error {
+		validators := auditanchorDescTenantID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(tenant string) error {
+			for _, fn := range fns {
+				if err := fn(tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// auditanchorDescSeq is the schema descriptor for seq field.
+	auditanchorDescSeq := auditanchorFields[2].Descriptor()
+	// auditanchor.SeqValidator is a validator for the "seq" field. It is called by the builders before save.
+	auditanchor.SeqValidator = auditanchorDescSeq.Validators[0].(func(int64) error)
+	// auditanchorDescCutAt is the schema descriptor for cut_at field.
+	auditanchorDescCutAt := auditanchorFields[4].Descriptor()
+	// auditanchor.DefaultCutAt holds the default value on creation for the cut_at field.
+	auditanchor.DefaultCutAt = auditanchorDescCutAt.Default.(func() time.Time)
+	// auditanchorDescID is the schema descriptor for id field.
+	auditanchorDescID := auditanchorFields[0].Descriptor()
+	// auditanchor.DefaultID holds the default value on creation for the id field.
+	auditanchor.DefaultID = auditanchorDescID.Default.(func() string)
+	// auditanchor.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	auditanchor.IDValidator = func() func(string) error {
+		validators := auditanchorDescID.Validators
 		fns := [...]func(string) error{
 			validators[0].(func(string) error),
 			validators[1].(func(string) error),

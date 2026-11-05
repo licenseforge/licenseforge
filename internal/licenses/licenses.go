@@ -25,6 +25,7 @@ import (
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
@@ -93,7 +94,7 @@ type IssueRequest struct {
 	ProductID, PlanID, CustomerID string
 	Type                          license.Type        // "" = paid
 	Overrides                     map[string]Override // by feature key
-	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see validRefs
+	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see ValidRefs
 }
 
 // Issued is a new license. Key is the plaintext license key: returned here
@@ -253,7 +254,7 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		return refused(&InvalidError{"/customer_id", "no such customer"})
 	case license.TypeValidator(req.Type) != nil:
 		return refused(&InvalidError{"/type", "unknown license type"})
-	case !validRefs(req.ExternalRefs):
+	case !ValidRefs(req.ExternalRefs):
 		return refused(&InvalidError{"/external_refs", "at most 20, keys of 1-64 [a-z0-9_.-], values of up to 255 bytes of UTF-8 without control characters"})
 	}
 	id, key := ids.License(), licensekey.New() // New returns the canonical form, which Normalize gives at lookup
@@ -421,35 +422,43 @@ var (
 	revoke = transition{"license.revoke", []license.Status{license.StatusActive, license.StatusSuspended}, `status = 'revoked', revoked_at = clock_timestamp(), suspended_at = NULL`}
 )
 
+// Changed is a license after a status change, with its seats taken
+// (activations not deactivated), counted in the change's transaction so a
+// committed change always has its answer.
+type Changed struct {
+	*ent.License
+	ActiveActivations int
+}
+
 // Suspend suspends an active license. p needs license:write on its product.
-func (s Service) Suspend(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Suspend(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, suspend)
 }
 
 // Reinstate makes a suspended license active again. A revoked license can't
 // be reinstated.
-func (s Service) Reinstate(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Reinstate(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, reinstate)
 }
 
 // Revoke revokes an active or suspended license, finally.
-func (s Service) Revoke(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+func (s Service) Revoke(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, revoke)
 }
 
-func (s Service) change(ctx context.Context, p authz.Principal, licenseID string, t transition) (*ent.License, error) {
+func (s Service) change(ctx context.Context, p authz.Principal, licenseID string, t transition) (Changed, error) {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
 	if err != nil {
-		return nil, err
+		return Changed{}, err
 	}
 	ev := event(p, t.action, "")
 	// Order of checks (ADR-0032): ID format, lookup under the product scope
 	// (missing and hidden alike: ErrNotFound), then license:write.
 	if !ids.Valid("lic", licenseID) { // hostile input: not stored in the entry
-		return nil, s.refused(ctx, tenantID, ev, ErrNotFound)
+		return Changed{}, s.refused(ctx, tenantID, ev, ErrNotFound)
 	}
-	var row *ent.License
+	var row Changed
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		// Authorize on an unlocked read (product_id is immutable), so callers
 		// who may not change the license can't hold its lock.
@@ -496,7 +505,10 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(fmt.Errorf("%w: license changed concurrently", ErrState), err)
 		}
-		if row, err = tx.License.Get(ctx, l.ID); err != nil {
+		if row.License, err = tx.License.Get(ctx, l.ID); err != nil {
+			return err
+		}
+		if row.ActiveActivations, err = tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.DeactivatedAtIsNil()).Count(ctx); err != nil {
 			return err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
@@ -509,7 +521,7 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		if errors.Is(err, ErrState) {
 			ev.Details = map[string]any{"reason": err.Error()}
 		}
-		return nil, s.refused(ctx, tenantID, ev, err)
+		return Changed{}, s.refused(ctx, tenantID, ev, err)
 	}
 	return row, nil
 }
@@ -616,10 +628,10 @@ func DBNow(ctx context.Context, tx *ent.Tx) (time.Time, error) {
 	return now.UTC().Truncate(time.Microsecond), nil
 }
 
-// validRefs: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
+// ValidRefs reports whether external refs (licenses, customers) are valid: at most 20 entries, keys of 1-64 bytes of [a-z0-9_.-], values
 // of up to 255 bytes of valid UTF-8 without control, format or separator
 // characters (incl. NUL, zero-width and bidi controls).
-func validRefs(refs map[string]string) bool {
+func ValidRefs(refs map[string]string) bool {
 	if len(refs) > 20 {
 		return false
 	}

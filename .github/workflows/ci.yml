@@ -105,6 +105,20 @@ jobs:
           if helm template t . $s $o --show-only templates/deployment.yaml | grep -q LICENSEFORGE_OIDC_CLIENT_SECRET; then echo "client secret without a Secret"; exit 1; fi
           if helm template t . $s $o --set oidc.clientSecret.secretName=idp --set oidc.clientSecret.key=null >/dev/null 2>&1; then echo "client secret without a key"; exit 1; fi
           if helm template t . $s $o --set oidc.egress=null >/dev/null 2>&1; then echo "IdP egress without a port"; exit 1; fi
+          # Audit retention CronJob (ADR-0036): off by default; Forbid, the pruner Secret, never in the Deployment.
+          if helm template t . $s | grep -qE 'audit-prune|retention-database-url'; then echo "audit prune while off"; exit 1; fi
+          r="--set auditRetention.enabled=true --set auditRetention.secret=pruner --set auditRetention.platformDays=730"
+          helm lint --strict . $s $r
+          c=$(helm template t . $s $r --show-only templates/audit-prune-cronjob.yaml)
+          for want in 'concurrencyPolicy: Forbid' 'args: [audit, prune]' '{secretKeyRef: {name: "pruner", key: retention-database-url}}' 'value: "730"' 'component: audit-prune'; do
+            grep -qF -- "$want" <<<"$c" || { echo "audit prune CronJob: missing $want"; exit 1; }
+          done
+          helm template t . $s $r --show-only templates/networkpolicy.yaml | grep -qF 'name: t-licenseforge-audit-prune' || { echo "no audit prune NetworkPolicy"; exit 1; }
+          if helm template t . $s $r --show-only templates/deployment.yaml | grep -q retention; then echo "retention login in the Deployment"; exit 1; fi
+          helm template t . $s --set auditRetention=null >/dev/null
+          for bad in auditRetention.platformDays=30 auditRetention.platformDays=36501 auditRetention.typo=1 'auditRetention.secret='; do
+            if helm template t . $s --set auditRetention.enabled=true --set auditRetention.secret=pruner --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
+          done
           # Values of a release from before oidc.* (reused on upgrade) still render.
           helm template t . $s --set oidc=null >/dev/null
           # Same for metrics.*: the server's default port, and the scrape port stays closed.

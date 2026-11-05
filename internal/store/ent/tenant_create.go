@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
@@ -66,6 +67,20 @@ func (_c *TenantCreate) SetSlug(v string) *TenantCreate {
 // SetName sets the "name" field.
 func (_c *TenantCreate) SetName(v string) *TenantCreate {
 	_c.mutation.SetName(v)
+	return _c
+}
+
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_c *TenantCreate) SetAuditRetentionDays(v int) *TenantCreate {
+	_c.mutation.SetAuditRetentionDays(v)
+	return _c
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_c *TenantCreate) SetNillableAuditRetentionDays(v *int) *TenantCreate {
+	if v != nil {
+		_c.SetAuditRetentionDays(*v)
+	}
 	return _c
 }
 
@@ -218,6 +233,21 @@ func (_c *TenantCreate) AddAuditExportCursors(v ...*AuditExportCursor) *TenantCr
 	return _c.AddAuditExportCursorIDs(ids...)
 }
 
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (_c *TenantCreate) AddAuditAnchorIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddAuditAnchorIDs(ids...)
+	return _c
+}
+
+// AddAuditAnchors adds the "audit_anchors" edges to the AuditAnchor entity.
+func (_c *TenantCreate) AddAuditAnchors(v ...*AuditAnchor) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAuditAnchorIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_c *TenantCreate) Mutation() *TenantMutation {
 	return _c.mutation
@@ -346,6 +376,10 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+		_node.AuditRetentionDays = &value
 	}
 	if nodes := _c.mutation.ProductsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -484,6 +518,22 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AuditAnchorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {
