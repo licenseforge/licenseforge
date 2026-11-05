@@ -29,6 +29,10 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME` | no | the address's host | Name the collector's certificate must carry |
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
+| `LICENSEFORGE_TRUSTED_PROXIES` | no | unset = no proxy trusted | Comma-separated CIDRs or addresses of your ingress/load balancer. Only their `X-Forwarded-For` is believed, read from the right: the client is the right-most hop that isn't a trusted proxy. List proxies only, never client networks. Prefixes broader than /8 (IPv4) or /32 (IPv6) are refused at start |
+| `LICENSEFORGE_RATE_LIMIT_ACTIVATION` | no | `1200` | Requests per client address per minute, per replica, on `/api/v1/activation/` (`0` = off). Many installs can share a customer's egress address; each license key is limited separately (60/min) |
+| `LICENSEFORGE_RATE_LIMIT_MANAGEMENT` | no | `600` | The same for the rest of `/api/v1` and `/auth/` except login |
+| `LICENSEFORGE_RATE_LIMIT_LOGIN` | no | `60` | The same for `/auth/login` and `/auth/callback` |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 
@@ -65,7 +69,9 @@ The server speaks plain HTTP on 8080 and has no TLS settings. The chart creates 
 - Terminate TLS at your ingress controller, gateway or service mesh, with TLS 1.2 or newer (1.3 preferred) and a certificate for the public host. For FIPS deployments, the terminating proxy must use a FIPS-validated TLS module. FIPS-only suites in the server are *planned* (Roadmap v0.1).
 - Set HSTS at the ingress. Login cookies use the `__Host-` prefix and `Secure`, so login works only over https (or on localhost).
 - Route only what users need: `/auth/*` and, later, the API and dashboard. `/healthz` and `/readyz` are for the kubelet. They reveal nothing, but needn't be public.
-- Rate-limit and size-limit requests at the ingress: the server has timeouts but no rate limiting.
+- **Set `LICENSEFORGE_TRUSTED_PROXIES` to your ingress's addresses** (e.g. the pod CIDR of the ingress controller). Otherwise every client counts as the proxy for the rate limit and in audit entries. The server logs one warning naming the peer the first time it ignores an `X-Forwarded-For`, and counts every ignored header in `licenseforge_forwarded_headers_ignored_total`; the Helm chart's install notes warn while `trustedProxies` is empty. Health checks and the dashboard's static files aren't limited.
+- IPv6 clients are counted per /64. A client holding a larger block gets one bucket per /64 in it (a /48 is 65,536 buckets), so the per-address limit doesn't bound an attacker with a large IPv6 allocation; the address table's bound (fail open past it) and the ingress do.
+- The server's per-address limit is per replica and fails open for new addresses once 100,000 are tracked in a minute (`licenseforge_rate_limit_untracked_requests_total`); `licenseforge_rate_limited_requests_total` counts 429s by surface. Keep volumetric and connection limits at the ingress. Request bodies are limited to 1 MB; the server cuts requests that take over 30 s to send and responses over 60 s.
 - If the proxy rewrites `Host`, keep the browser-facing origin equal to `LICENSEFORGE_OIDC_REDIRECT_URL`'s.
 
 ## Secrets and the keyring
