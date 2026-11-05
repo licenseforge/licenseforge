@@ -347,7 +347,7 @@ func runBounded(t *testing.T, skew time.Duration) {
 		mu.Lock()
 		now := sim.Truncate(time.Second)
 		mu.Unlock()
-		u := now.Add(-time.Hour)
+		u := f.iat.Add(-time.Hour) // before the build all day
 		e, r := now.Add(time.Hour), now.Add(30*time.Minute)
 		c.IssuedAt, c.UpdatesUntil, c.Expires, c.RefreshAfter = now, &u, &e, &r
 	}
@@ -389,20 +389,25 @@ func TestRunWithoutRefreshAfter(t *testing.T) {
 	}
 }
 
-// Jitter is up to a tenth of the wait.
+// Jitter is up to a tenth of the wait, after refresh_after (ADR-0034: not
+// before), also when refresh_after is half the lifetime.
 func TestRunJitter(t *testing.T) {
-	f := newFake(t)
-	c, sleeps := f.client(t, f.iat, nil)
-	if _, err := c.Activate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	var asked int64
-	c.rand = func(n int64) int64 { asked = n; return n - 1 }
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_ = c.Run(ctx, nil)
-	if want := int64(30*time.Minute/10) + 1; asked != want || (*sleeps)[0] != 30*time.Minute+time.Duration(want-1) {
-		t.Errorf("rand(%d), sleep %v", asked, *sleeps)
+	for _, tc := range []struct {
+		exp, want time.Duration
+	}{{2 * time.Hour, 33 * time.Minute}, {time.Hour, 33 * time.Minute}} {
+		f := newFake(t)
+		f.claims = func(c *licensefile.Claims) { e := c.IssuedAt.Add(tc.exp); c.Expires = &e }
+		c, sleeps := f.client(t, f.iat, nil)
+		if _, err := c.Activate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		c.rand = func(n int64) int64 { return n - 1 }
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = c.Run(ctx, nil)
+		if (*sleeps)[0] != tc.want {
+			t.Errorf("exp %v: sleeps %v, want %v", tc.exp, *sleeps, tc.want)
+		}
 	}
 }
 
@@ -579,9 +584,6 @@ func TestRunKeepsNewerLease(t *testing.T) {
 		}
 		once.Do(func() { // the app re-activates while this refresh is answered
 			f.respond = nil
-			if err := c.Forget(); err != nil { // a commit of another lease: bump the generation
-				t.Error(err)
-			}
 			if _, err := c.Activate(context.Background()); err != nil {
 				t.Error(err)
 			}
@@ -662,5 +664,128 @@ func TestRunHalfOfShortExp(t *testing.T) {
 	_ = c.Run(ctx, nil)
 	if len(*sleeps) != 1 || (*sleeps)[0] != 2*time.Minute {
 		t.Errorf("sleeps %v", *sleeps)
+	}
+}
+
+// A simulated day of an hour-long lease (refresh_after at 30 minutes) with
+// the local clock skew(elapsed) ahead of the server: Run keeps the lease
+// passing Current at every wake when a refresh can (a fast clock lapses it
+// locally before refresh_after), without refreshing more than it must.
+func TestRunSimulatedDay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		skew     func(elapsed time.Duration) time.Duration
+		min, max int // requests a day
+		gaps     int // wakes where Current may fail
+	}{
+		{"0", func(time.Duration) time.Duration { return 0 }, 45, 52, 0},
+		{"+45m", func(time.Duration) time.Duration { return 45 * time.Minute }, 90, 115, 0},
+		{"+3h", func(time.Duration) time.Duration { return 3 * time.Hour }, 45, 52, 100}, // every lease lapses at once
+		{"slow", func(time.Duration) time.Duration { return -2 * time.Hour }, 45, 52, 0},
+		{"drifting to +45m", func(e time.Duration) time.Duration { return e * 45 / (24 * 60) }, 48, 115, 0},
+		{"jumping to +45m", func(e time.Duration) time.Duration { // the jump lapses the lease held then
+			if e > 12*time.Hour {
+				return 45 * time.Minute
+			}
+			return 0
+		}, 70, 90, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, gaps := simulateDay(t, tc.skew)
+			t.Logf("%d requests, %d gaps", n, gaps)
+			if n < tc.min || n > tc.max {
+				t.Errorf("%d requests, want %d..%d", n, tc.min, tc.max)
+			}
+			if gaps > tc.gaps {
+				t.Errorf("Current failed at %d wakes", gaps)
+			}
+		})
+	}
+}
+
+func simulateDay(t *testing.T, skew func(time.Duration) time.Duration) (requests, gaps int) {
+	f := newFake(t)
+	var mu sync.Mutex
+	sim := f.iat // server time
+	f.claims = func(c *licensefile.Claims) {
+		mu.Lock()
+		now := sim.Truncate(time.Second)
+		mu.Unlock()
+		e, r := now.Add(time.Hour), now.Add(30*time.Minute)
+		c.IssuedAt, c.Expires, c.RefreshAfter = now, &e, &r
+	}
+	c, _ := f.client(t, f.iat, nil)
+	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return sim.Add(skew(sim.Sub(f.iat))) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		sim = sim.Add(d)
+		over := sim.Sub(f.iat) > 24*time.Hour
+		mu.Unlock()
+		if over {
+			cancel()
+		} else if _, _, err := c.Current(); err != nil {
+			gaps++
+		}
+		return ctx.Err()
+	}
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Run(ctx, nil)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.reqs), gaps
+}
+
+// A refresh_after past exp or iat+max_offline doesn't sleep through them:
+// Run wakes at half the time left.
+func TestRunWaitCapped(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		exp, maxOffline time.Duration
+	}{{"exp", time.Hour, 4 * time.Hour}, {"max_offline", 4 * time.Hour, time.Hour}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t)
+			f.claims = func(c *licensefile.Claims) {
+				e, r, o := c.IssuedAt.Add(tc.exp), c.IssuedAt.Add(3*time.Hour), tc.maxOffline
+				c.Expires, c.RefreshAfter, c.MaxOffline = &e, &r, &o
+			}
+			c, sleeps := f.client(t, f.iat, nil)
+			if _, err := c.Activate(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_ = c.Run(ctx, nil)
+			if len(*sleeps) != 1 || (*sleeps)[0] != 30*time.Minute {
+				t.Errorf("sleeps %v", *sleeps)
+			}
+		})
+	}
+}
+
+// Only Forget supersedes an in-flight call: a lease another call commits
+// meanwhile doesn't make a refresh fail (the iat comparison keeps the
+// newest).
+func TestRefreshNotSupersededByCommit(t *testing.T) {
+	f := newFake(t)
+	c, _ := f.client(t, f.iat, nil)
+	if _, err := c.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	f.respond = func(op string, _ int, _ http.ResponseWriter) bool {
+		once.Do(func() {
+			f.respond = nil
+			if _, err := c.Activate(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		return false
+	}
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Errorf("Refresh = %v", err)
 	}
 }

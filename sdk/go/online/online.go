@@ -148,6 +148,7 @@ type Client struct {
 	claims   *licensefile.Claims
 	offset   time.Duration // server time minus local time, from the last lease
 	gen      uint64        // bumped by Forget: in-flight calls from before don't commit
+	ver      uint64        // bumped by every commit and Forget: forgetIf keeps a newer lease
 	warnings []error       // non-fatal problems not yet reported (Warnings, Run)
 
 	now   func() time.Time
@@ -279,20 +280,21 @@ func (c *Client) Deactivate(ctx context.Context) error {
 func (c *Client) Forget() error { return c.forget(nil) }
 
 // forgetIf forgets only if no lease was committed or forgotten since
-// generation gen: a refusal of an older call mustn't drop a lease an
+// version ver: a refusal of an older call mustn't drop a lease an
 // Activate committed meanwhile.
-func (c *Client) forgetIf(gen uint64) error { return c.forget(&gen) }
+func (c *Client) forgetIf(ver uint64) error { return c.forget(&ver) }
 
-func (c *Client) forget(ifGen *uint64) error {
+func (c *Client) forget(ifVer *uint64) error {
 	c.commit.Lock()
 	defer c.commit.Unlock()
 	c.mu.Lock()
-	if ifGen != nil && c.gen != *ifGen {
+	if ifVer != nil && c.ver != *ifVer {
 		c.mu.Unlock()
 		return nil
 	}
 	c.lease, c.claims, c.offset = "", nil, 0
 	c.gen++
+	c.ver++
 	c.mu.Unlock()
 	if c.cfg.Store != nil {
 		return c.cfg.Store.Save("")
@@ -301,27 +303,29 @@ func (c *Client) forget(ifGen *uint64) error {
 }
 
 // leaseCall makes the call (up to attempts) and commits its lease. It
-// returns the generation the call started from.
+// returns the version the call started from (for forgetIf). Only a Forget
+// meanwhile supersedes the call: concurrent refreshes don't, and the iat
+// comparison keeps the newest of them.
 func (c *Client) leaseCall(ctx context.Context, op, idemKey string, attempts int) (*Lease, uint64, error) {
 	body, _ := json.Marshal(map[string]string{
 		"fingerprint": c.cfg.Fingerprint.Fingerprint, "fp_source": string(c.cfg.Fingerprint.Source),
 		"hostname": c.cfg.Hostname, "app_version": c.cfg.AppVersion, "sdk_version": SDKVersion,
 	})
 	c.mu.Lock()
-	gen := c.gen
+	gen, ver := c.gen, c.ver
 	c.mu.Unlock()
 	raw, err := c.call(ctx, op, body, idemKey, http.StatusOK, attempts)
 	if err != nil {
-		return nil, gen, err
+		return nil, ver, err
 	}
 	var r leaseResponse
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return nil, gen, fmt.Errorf("%w: %w", ErrBadLease, err)
+		return nil, ver, fmt.Errorf("%w: %w", ErrBadLease, err)
 	}
 	local := c.now()
 	claims, err := c.verifyFresh(r.Lease)
 	if err != nil {
-		return nil, gen, err
+		return nil, ver, err
 	}
 	// One commit at a time, so the comparison, the cache, the clock and the
 	// store all end with the same lease.
@@ -330,15 +334,16 @@ func (c *Client) leaseCall(ctx context.Context, op, idemKey string, attempts int
 	c.mu.Lock()
 	if c.gen != gen { // forgotten (or deactivated) meanwhile: don't bring it back
 		c.mu.Unlock()
-		return nil, gen, ErrSuperseded
+		return nil, ver, ErrSuperseded
 	}
 	if c.claims != nil && claims.IssuedAt.Before(c.claims.IssuedAt) {
 		// An older lease than the one held: a replay, which could otherwise
 		// wind the clock guard back (ADR-0018).
 		c.mu.Unlock()
-		return nil, gen, fmt.Errorf("%w: issued before the current lease", ErrBadLease)
+		return nil, ver, fmt.Errorf("%w: issued before the current lease", ErrBadLease)
 	}
 	c.lease, c.claims, c.offset = r.Lease, claims, claims.IssuedAt.Sub(local)
+	c.ver++
 	c.mu.Unlock()
 	// The lease is in use from here on; the clock and store failing doesn't
 	// change that, so they are warnings (Warnings, Run's onErr).
@@ -352,7 +357,7 @@ func (c *Client) leaseCall(ctx context.Context, op, idemKey string, attempts int
 			c.warn(fmt.Errorf("online: lease not stored: %w", err))
 		}
 	}
-	return &Lease{File: r.Lease, Claims: cloneClaims(claims), ActivationID: r.ActivationID}, gen, nil
+	return &Lease{File: r.Lease, Claims: cloneClaims(claims), ActivationID: r.ActivationID}, ver, nil
 }
 
 // verifyFresh checks a lease: the signature against the trusted keys, the
@@ -427,16 +432,26 @@ func (c *Client) Current() (*licensefile.Claims, licensefile.Status, error) {
 		return nil, "", ErrNoLease
 	}
 	claims = cloneClaims(claims)
+	o, err := c.currentOptions()
+	if err != nil {
+		return claims, "", err
+	}
+	st, err := claims.Check(o)
+	return claims, st, err
+}
+
+// currentOptions are the check options Current uses: with Config.Clock,
+// the time has passed the rollback check.
+func (c *Client) currentOptions() (licensefile.CheckOptions, error) {
 	o := c.checkOptions()
 	if c.cfg.Clock != nil {
 		t, err := c.cfg.Clock.Now(o.Now)
 		if err != nil && !errors.Is(err, clock.ErrNotPersisted) {
-			return claims, "", err
+			return o, err
 		}
 		o.Now = t
 	}
-	st, err := claims.Check(o)
-	return claims, st, err
+	return o, nil
 }
 
 // ServerOffset is server time minus local time from the last lease (whole
@@ -452,12 +467,51 @@ func (c *Client) ServerOffset() time.Duration {
 // lease's iat (ADR-0034), and the app refreshes before each check itself.
 const MinRefreshInterval = time.Minute
 
+// failMargin caps how long before the lease would fail Current Run wakes.
+const failMargin = 2 * time.Minute
+
+// wakeBounds bound how long Run waits with a lease that passes Current (0:
+// no bound). half is half the time left to exp and to iat+max_offline
+// (server time), so a refresh_after past them can't sleep through them.
+// beforeFail is a margin (10% of what is left, at most failMargin) before
+// Current would start failing by its own clock, which runs ahead of server
+// time when the local clock is fast: refresh_after alone would let the
+// lease lapse locally.
+func (c *Client) wakeBounds(cl *licensefile.Claims, now time.Time) (half, beforeFail time.Duration) {
+	bound := func(b *time.Duration, d time.Duration) {
+		if d > 0 && (*b == 0 || d < *b) {
+			*b = d
+		}
+	}
+	var fail *time.Time
+	if cl.MaxOffline != nil {
+		off := cl.IssuedAt.Add(*cl.MaxOffline)
+		bound(&half, off.Sub(now)/2)
+		fail = &off
+	}
+	if cl.Expires != nil {
+		bound(&half, cl.Expires.Sub(now)/2)
+		if e := cl.Expires.Add(cl.Grace); fail == nil || e.Before(*fail) {
+			fail = &e
+		}
+	}
+	if o, err := c.currentOptions(); err == nil && fail != nil {
+		left := fail.Sub(o.Now)
+		bound(&beforeFail, left-min(left/10, failMargin))
+	}
+	return half, beforeFail
+}
+
 // Run refreshes the lease until ctx ends: from refresh_after on (without
 // one, at half the time to exp, at most backoffMax), and on its first pass
 // at once if the cached lease doesn't pass Current (a skewed clock after a
 // restart); never sooner than MinRefreshInterval after a success, always
 // with jitter. Times are scheduled in server time (the local clock plus the
-// offset from the last lease), as refresh_after and exp are. Each pass is
+// offset from the last lease), as refresh_after and exp are; but while the
+// lease passes Current, Run wakes no later than wakeBounds allow: before
+// the lease would fail by Current's clock (a fast local clock), and at half
+// the time left to exp and to iat+max_offline. A lease that fails Current right after a refresh
+// gets the server's schedule alone (refreshing can't fix it). Each pass is
 // one request: failures are retried by the next pass, with exponential
 // backoff and jitter, not sooner than the server's Retry-After. Every
 // failure and warning goes to onErr.
@@ -501,15 +555,25 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 		default:
 			wait = backoffMax
 		}
-		if refreshed && failures == 0 {
-			wait = max(wait, MinRefreshInterval)
+		var half, beforeFail time.Duration
+		if failures == 0 && invalid == nil {
+			half, beforeFail = c.wakeBounds(claims, now)
+		}
+		if half > 0 {
+			wait = min(wait, half)
 		}
 		wait = max(wait, 0)
 		wait += time.Duration(c.rand(int64(wait/10) + 1)) // spread fleets out
+		if beforeFail > 0 && wait > beforeFail {
+			wait = beforeFail - time.Duration(c.rand(int64(beforeFail/10)+1)) // early, still spread
+		}
+		if refreshed && failures == 0 {
+			wait = max(wait, MinRefreshInterval)
+		}
 		if err := c.sleep(ctx, wait); err != nil {
 			return err
 		}
-		_, gen, err := c.leaseCall(ctx, "refresh", "", 1) // one attempt: this loop retries
+		_, ver, err := c.leaseCall(ctx, "refresh", "", 1) // one attempt: this loop retries
 		if err == nil {
 			failures, retry, refreshed = 0, 0, true
 			continue
@@ -521,7 +585,7 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 		var ae *APIError
 		isAPI := errors.As(err, &ae)
 		if isAPI && (ae.Status == http.StatusForbidden && errors.Is(err, ErrRevoked) || ae.Status == http.StatusNotFound && errors.Is(err, ErrNotActivated)) {
-			if ferr := c.forgetIf(gen); ferr != nil {
+			if ferr := c.forgetIf(ver); ferr != nil {
 				report(ferr)
 			}
 			return err
