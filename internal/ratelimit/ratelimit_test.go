@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -68,11 +69,11 @@ func TestClientAddr(t *testing.T) {
 }
 
 func TestParseTrusted(t *testing.T) {
-	got, err := ParseTrusted(" 10.1.2.3/8 ,192.0.2.7, ::ffff:192.0.2.8, 2001:db8::/32,")
+	got, err := ParseTrusted(" 10.1.2.3/8 ,192.0.2.7, ::ffff:192.0.2.8, 2001:db8::/32, ::ffff:172.16.0.0/108,")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"10.0.0.0/8", "192.0.2.7/32", "192.0.2.8/32", "2001:db8::/32"}
+	want := []string{"10.0.0.0/8", "192.0.2.7/32", "192.0.2.8/32", "2001:db8::/32", "172.16.0.0/12"}
 	if len(got) != len(want) {
 		t.Fatalf("%v, want %v", got, want)
 	}
@@ -84,7 +85,8 @@ func TestParseTrusted(t *testing.T) {
 	if p, err := ParseTrusted(""); err != nil || len(p) != 0 {
 		t.Errorf("empty: %v %v", p, err)
 	}
-	for _, bad := range []string{"10.0.0.0/33", "proxy.local", "fe80::1%eth0", "10.0.0.1-10.0.0.9"} {
+	for _, bad := range []string{"10.0.0.0/33", "proxy.local", "fe80::1%eth0", "10.0.0.1-10.0.0.9",
+		"0.0.0.0/0", "::/0", "10.0.0.0/7", "2001:db8::/31", "::ffff:0.0.0.0/96", "::ffff:0.0.0.0/95", "10.0.0.0/8, 0.0.0.0/0"} {
 		if _, err := ParseTrusted(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -106,8 +108,8 @@ func TestSurfaceOf(t *testing.T) {
 		"/":                                     None,
 		"/assets/app.js":                        None,
 		"/apix":                                 None,
-		"/x/../api/v1/activation/a":             Activation,
-		"/api/v1/../healthz":                    None,
+		"/api/v1/../healthz":                    Management, // decoded %2e%2e: ServeMux routes it to /api/v1/
+		"/api/v1/activation/../../x":            Activation,
 	} {
 		if got := SurfaceOf(p); got != want {
 			t.Errorf("%s: %q, want %q", p, got, want)
@@ -266,5 +268,57 @@ func TestMemoryBound(t *testing.T) {
 	}
 	if n := len(l.counts); n != 1 {
 		t.Errorf("new window tracks %d", n)
+	}
+}
+
+// An encoded dot segment reaches the handler of the prefix it is under
+// (ServeMux routes "/api/v1/%2e%2e/healthz" to "/api/v1/"), so it is limited
+// as that surface, not as the path it would clean to.
+func TestEncodedDotSegmentsAreLimited(t *testing.T) {
+	l, _, _ := newTest(Config{Quotas: map[Surface]int{Management: 1}}, start)
+	mux := http.NewServeMux()
+	api := 0
+	mux.HandleFunc("/api/v1/", func(http.ResponseWriter, *http.Request) { api++ })
+	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
+	h := l.Wrap(mux)
+	var codes []int
+	for range 2 {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/%2e%2e/healthz", nil)
+		r.RemoteAddr = "203.0.113.9:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		codes = append(codes, w.Code)
+	}
+	if api != 1 || codes[1] != http.StatusTooManyRequests {
+		t.Errorf("encoded dot segments: codes %v, API handler ran %d times", codes, api)
+	}
+}
+
+// X-Forwarded-For from a peer that isn't trusted is ignored, counted each
+// time and logged once, naming the peer and the setting.
+func TestIgnoredForwardedForIsReported(t *testing.T) {
+	var logs strings.Builder
+	l := New(Config{Trusted: mustTrusted(t, "10.0.0.0/8"), Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	ignored := testutil.ToFloat64(IgnoredForwarded)
+	for _, c := range []struct {
+		remote, xff string
+	}{
+		{"203.0.113.9:1", "198.51.100.1"}, // untrusted: counted, logged
+		{"203.0.113.9:1", "198.51.100.2"}, // counted, not logged again
+		{"10.0.0.1:1", "198.51.100.3"},    // a trusted proxy: not counted
+		{"203.0.113.9:1", ""},             // no header: not counted
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		l.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(httptest.NewRecorder(), r)
+	}
+	if got := testutil.ToFloat64(IgnoredForwarded); got != ignored+2 {
+		t.Errorf("ignored counter %v, want %v", got, ignored+2)
+	}
+	if n := strings.Count(logs.String(), "LICENSEFORGE_TRUSTED_PROXIES"); n != 1 || !strings.Contains(logs.String(), "peer=203.0.113.9") {
+		t.Errorf("want one warning naming the peer, got %q", logs.String())
 	}
 }

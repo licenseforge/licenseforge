@@ -19,9 +19,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +67,9 @@ type Config struct {
 	Quotas map[Surface]int
 	// MaxAddresses bounds memory; 0 means DefaultMaxAddresses.
 	MaxAddresses int
+	// Log gets one warning the first time X-Forwarded-For arrives from a
+	// peer that isn't a trusted proxy; nil: slog.Default().
+	Log *slog.Logger
 }
 
 // Limiter counts requests. Build it with New.
@@ -75,6 +78,8 @@ type Limiter struct {
 	quotas  map[Surface]int
 	max     int
 	now     func() time.Time
+	log     *slog.Logger
+	warned  sync.Once
 
 	mu     sync.Mutex
 	start  time.Time
@@ -91,12 +96,17 @@ func New(c Config) *Limiter {
 	if c.MaxAddresses <= 0 {
 		c.MaxAddresses = DefaultMaxAddresses
 	}
-	return &Limiter{trusted: c.Trusted, quotas: c.Quotas, max: c.MaxAddresses, now: time.Now, counts: map[key]int{}}
+	if c.Log == nil {
+		c.Log = slog.Default()
+	}
+	return &Limiter{trusted: c.Trusted, quotas: c.Quotas, max: c.MaxAddresses, now: time.Now, log: c.Log, counts: map[key]int{}}
 }
 
-// SurfaceOf classifies a request path (cleaned first, like ServeMux does).
+// SurfaceOf classifies a request by its decoded path as is, never cleaned:
+// ServeMux redirects a path with literal dot segments but routes encoded
+// ones ("/api/v1/%2e%2e/healthz" reaches the /api/v1/ handler as
+// "/api/v1/../healthz"), so the prefix it routes by is the one to limit by.
 func SurfaceOf(p string) Surface {
-	p = path.Clean("/" + p)
 	switch {
 	case strings.HasPrefix(p, "/api/v1/activation/"):
 		return Activation
@@ -108,8 +118,16 @@ func SurfaceOf(p string) Surface {
 	return None
 }
 
+// Narrowest prefixes ParseTrusted accepts: anything broader (a /0 above
+// all) would let most of the internet set its own client address.
+const (
+	minBits4 = 8
+	minBits6 = 32
+)
+
 // ParseTrusted parses a comma-separated list of CIDRs or single addresses,
 // e.g. LICENSEFORGE_TRUSTED_PROXIES="10.0.0.0/8, fd00::/8, 192.0.2.7".
+// IPv4-mapped IPv6 forms are read as IPv4 (as client addresses are).
 func ParseTrusted(s string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for part := range strings.SplitSeq(s, ",") {
@@ -120,6 +138,15 @@ func ParseTrusted(s string) ([]netip.Prefix, error) {
 		if p, err := netip.ParsePrefix(part); err == nil {
 			if p.Addr().Zone() != "" {
 				return nil, fmt.Errorf("trusted proxy %q: no zones", part)
+			}
+			if p.Addr().Is4In6() {
+				if p.Bits() < 96 {
+					return nil, fmt.Errorf("trusted proxy %q: an IPv4-mapped prefix must be /96 or longer", part)
+				}
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
+			if p.Addr().Is4() && p.Bits() < minBits4 || p.Addr().Is6() && p.Bits() < minBits6 {
+				return nil, fmt.Errorf("trusted proxy %q: broader than /%d (IPv4) or /%d (IPv6); list your proxies' own ranges", part, minBits4, minBits6)
 			}
 			out = append(out, p.Masked())
 			continue
@@ -234,6 +261,12 @@ var (
 	Untracked = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_rate_limit_untracked_requests_total", Help: "Requests let through untracked because the address table was full, by surface.",
 	}, []string{"surface"})
+	// IgnoredForwarded counts requests whose X-Forwarded-For was ignored
+	// because the peer isn't a trusted proxy (a missing
+	// LICENSEFORGE_TRUSTED_PROXIES, or a client sending the header itself).
+	IgnoredForwarded = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "licenseforge_forwarded_headers_ignored_total", Help: "Requests with X-Forwarded-For from a peer that isn't a trusted proxy (header ignored).",
+	})
 )
 
 func init() {
@@ -241,7 +274,7 @@ func init() {
 		Refused.WithLabelValues(string(s))
 		Untracked.WithLabelValues(string(s))
 	}
-	metrics.Registry.MustRegister(Refused, Untracked)
+	metrics.Registry.MustRegister(Refused, Untracked, IgnoredForwarded)
 }
 
 // Wrap limits next: on a limited surface, a request over quota gets 429
@@ -252,6 +285,13 @@ func (l *Limiter) Wrap(next http.Handler) http.Handler {
 		a, ok := ClientAddr(r, l.trusted)
 		if ok {
 			r = r.WithContext(context.WithValue(r.Context(), addrKey{}, a))
+		}
+		if peer, isAddr := parseAddr(r.RemoteAddr); isAddr && len(r.Header.Values("X-Forwarded-For")) > 0 && !trusted(l.trusted, peer) {
+			IgnoredForwarded.Inc()
+			l.warned.Do(func() {
+				l.log.Warn("X-Forwarded-For from a peer that isn't a trusted proxy is ignored: clients behind a proxy count as the proxy for the rate limit and in audit entries; if this peer is your ingress, add it to LICENSEFORGE_TRUSTED_PROXIES",
+					"peer", peer.String())
+			})
 		}
 		s := SurfaceOf(r.URL.Path)
 		quota := l.quotas[s]

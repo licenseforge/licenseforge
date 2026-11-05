@@ -143,7 +143,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil || drain < 0 {
 		return fmt.Errorf("LICENSEFORGE_DRAIN: want a duration like 5s, got %q", os.Getenv("LICENSEFORGE_DRAIN"))
 	}
-	limiter, err := rateLimiter()
+	limiter, err := rateLimiter(log)
 	if err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ func newMux(ready func(context.Context) error, log *slog.Logger) *http.ServeMux 
 }
 
 // rateLimiter builds the per-client-address limiter from the environment.
-func rateLimiter() (*ratelimit.Limiter, error) {
+func rateLimiter(log *slog.Logger) (*ratelimit.Limiter, error) {
 	trusted, err := ratelimit.ParseTrusted(os.Getenv("LICENSEFORGE_TRUSTED_PROXIES"))
 	if err != nil {
 		return nil, fmt.Errorf("LICENSEFORGE_TRUSTED_PROXIES: %w", err)
@@ -346,7 +346,7 @@ func rateLimiter() (*ratelimit.Limiter, error) {
 		}
 		quotas[q.surface] = n
 	}
-	return ratelimit.New(ratelimit.Config{Trusted: trusted, Quotas: quotas}), nil
+	return ratelimit.New(ratelimit.Config{Trusted: trusted, Quotas: quotas, Log: log}), nil
 }
 
 // sessionTimeouts sets s's timeouts from the environment, within bounds.
