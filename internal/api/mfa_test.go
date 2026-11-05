@@ -2,16 +2,21 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 )
 
@@ -110,6 +115,84 @@ func TestMFARefusalAuditedOnce(t *testing.T) {
 	}
 	if len(f.mfaEvents(t, f.b.ID)) != 0 {
 		t.Error("tenant b's chain written")
+	}
+}
+
+// A refusal already on the chain is found without the chain lock, so a
+// member retrying never queues behind the tenant's audited writes.
+func TestMFARefusalRepeatSkipsChainLock(t *testing.T) {
+	f := setup(t)
+	f.setPolicy(t, f.a.ID, authz.AssuranceMFA)
+	s := f.sessionAt(t, f.viewerA, false, authz.AssuranceNone)
+	f.do(t, "GET", tokensPath(f.a.Slug), "", s).problem(t, http.StatusForbidden, "mfa_required")
+	f.srv.mfaSeen = mfaAudited{} // another replica
+	locked, release, held := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		held <- f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+			if err := audit.Lock(context.Background(), tx, f.a.ID); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.do(t, "GET", tokensPath(f.a.Slug), "", s).problem(t, http.StatusForbidden, "mfa_required")
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Error("the repeated refusal waited for the chain lock")
+	}
+	close(release)
+	<-done
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.mfaEvents(t, f.a.ID)); n != 1 {
+		t.Errorf("%d entries", n)
+	}
+}
+
+// One session refused by two tenants: one entry on each tenant's chain.
+func TestMFARefusalAuditedPerTenant(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var email string
+	if err := f.db.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		u, err := tx.User.Get(ctx, f.viewerA)
+		if err == nil {
+			email = *u.Email
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tok := rand.Text()
+	if err := f.db.WithTenant(ctx, f.b.ID, func(tx *ent.Tx) error {
+		_, err := tx.Invitation.Create().SetTenantID(f.b.ID).SetEmail(email).SetRole(invitation.RoleViewer).SetScopeAll(true).
+			SetInvitedBy(f.ownerB).SetTokenHash(store.InvitationTokenHash(tok)).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.AcceptInvitation(ctx, tok, f.viewerA, func(*ent.Tx, *ent.Membership) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	f.setPolicy(t, f.a.ID, authz.AssuranceMFA)
+	f.setPolicy(t, f.b.ID, authz.AssuranceMFA)
+	s := f.sessionAt(t, f.viewerA, false, authz.AssuranceNone)
+	for range 2 {
+		f.do(t, "GET", tokensPath(f.a.Slug), "", s).problem(t, http.StatusForbidden, "mfa_required")
+		f.do(t, "GET", tokensPath(f.b.Slug), "", s).problem(t, http.StatusForbidden, "mfa_required")
+	}
+	a, b := f.mfaEvents(t, f.a.ID), f.mfaEvents(t, f.b.ID)
+	if len(a) != 1 || len(b) != 1 || *a[0].ObjectID != *b[0].ObjectID {
+		t.Errorf("entries: a %d, b %d", len(a), len(b))
 	}
 }
 

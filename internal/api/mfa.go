@@ -60,16 +60,23 @@ func (s *server) mfaRefused(ctx context.Context, t identity.TenantRef, userID st
 		return
 	}
 	err := s.Tenants.DB.WithTenant(ctx, t.ID, func(tx *ent.Tx) error {
-		// The chain's lock first, so two replicas can't both find no entry.
+		exists := func(ctx context.Context) (bool, error) {
+			return tx.AuditEvent.Query().Where(auditevent.TenantID(t.ID), auditevent.Action("session.mfa_required"),
+				auditevent.ObjectType("session"), auditevent.ObjectID(sess.ID)).Exist(ctx)
+		}
+		// Without the chain lock first (a partial index finds it), so a
+		// repeated refusal never queues behind the tenant's audited writes;
+		// then under the lock again, so two replicas can't both record.
+		if done, err := exists(ctx); err != nil || done {
+			return err
+		}
 		if err := audit.Lock(ctx, tx, t.ID); err != nil {
 			return err
 		}
-		done, err := tx.AuditEvent.Query().Where(auditevent.TenantID(t.ID), auditevent.Action("session.mfa_required"),
-			auditevent.ObjectType("session"), auditevent.ObjectID(sess.ID)).Exist(ctx)
-		if err != nil || done {
+		if done, err := exists(ctx); err != nil || done {
 			return err
 		}
-		_, err = audit.Record(ctx, tx, t.ID, audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID,
+		_, err := audit.Record(ctx, tx, t.ID, audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID,
 			Action: "session.mfa_required", ObjectType: "session", ObjectID: sess.ID, Outcome: auditevent.OutcomeDenied,
 			Details: map[string]any{"required": string(t.MFAPolicy), "session_assurance": string(sess.Assurance)}})
 		return err
