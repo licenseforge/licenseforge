@@ -63,6 +63,24 @@ const PurposeSigningKey secrets.Purpose = "signing_key"
 type Local struct {
 	DB   *store.DB
 	Keys *secrets.Keyring
+	tx   *ent.Tx // WithTx: read keys in this transaction
+}
+
+// WithTx returns l reading keys (Active, Public, Sign) in tx, a tenant
+// transaction of the caller, instead of transactions of its own: signing
+// inside a transaction then needs no second pool connection while that
+// transaction holds its locks. The key's share lock is held until tx ends.
+func (l Local) WithTx(tx *ent.Tx) Local {
+	l.tx = tx
+	return l
+}
+
+// in runs fn in l's transaction (WithTx) or a new tenant transaction.
+func (l Local) in(ctx context.Context, tenantID string, fn func(*ent.Tx) error) error {
+	if l.tx != nil {
+		return fn(l.tx)
+	}
+	return l.DB.WithTenant(ctx, tenantID, fn)
 }
 
 var _ Signer = Local{}
@@ -187,7 +205,7 @@ func retire(ctx context.Context, tx *ent.Tx, kid string, now time.Time) error {
 // Active returns the tenant's active kid.
 func (l Local) Active(ctx context.Context, tenantID string) (string, error) {
 	var kid string
-	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+	err := l.in(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error
 		kid, err = tx.SigningKey.Query().Where(signingkey.StatusEQ(signingkey.StatusActive)).OnlyID(ctx)
 		if ent.IsNotFound(err) {
@@ -207,7 +225,7 @@ func (l Local) Sign(ctx context.Context, tenantID, kid string, msg []byte) ([]by
 		return nil, ErrWrongMessage
 	}
 	var sig []byte
-	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+	err := l.in(ctx, tenantID, func(tx *ent.Tx) error {
 		// ponytail: FOR SHARE writes a row lock per signature on one hot row;
 		// check the row version instead if signing throughput ever matters.
 		k, err := tx.SigningKey.Query().Where(signingkey.ID(kid)).ForShare().Only(ctx)
@@ -249,7 +267,7 @@ func (l Local) Public(ctx context.Context, tenantID, kid string) (PublicKey, err
 
 func (l Local) key(ctx context.Context, tenantID, kid string) (*ent.SigningKey, error) {
 	var k *ent.SigningKey
-	err := l.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+	err := l.in(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error
 		k, err = tx.SigningKey.Get(ctx, kid)
 		return err

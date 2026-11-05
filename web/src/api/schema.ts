@@ -328,10 +328,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/activation/tenants/{tenant}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate this machine or cluster and get a signed lease (SDKs).
+         * @description Activation API (ADR-0004, ADR-0034): authenticated by the license key,
+         *     not by a token or session. Activating an already active fingerprint
+         *     reuses its activation (no new seat). With `Idempotency-Key`, a retry
+         *     gets the first answer back (ADR-0032).
+         */
+        post: operations["activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/activation/tenants/{tenant}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh an active activation's lease (also validate). Never takes a seat.
+         * @description `not_activated` (404) asks the SDK to activate again.
+         */
+        post: operations["refreshLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/activation/tenants/{tenant}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate this machine or cluster, freeing its seat. */
+        post: operations["deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActivationRequest: {
+            /**
+             * @description The lease's bind.fp: `sha256:` + 64 lowercase hex (License File Format, Fingerprints).
+             * @example sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684
+             */
+            fingerprint: string;
+            /**
+             * @description Where the fingerprint came from; kubernetes binds the cluster, the others the machine.
+             * @enum {string}
+             */
+            fp_source: "override" | "env" | "kubernetes" | "machine-id";
+            /** @description Letters, digits, `-`, `.`, `_`. */
+            hostname?: string;
+            /** @description Printable ASCII. */
+            app_version?: string;
+            /** @description Printable ASCII. */
+            sdk_version?: string;
+        };
+        DeactivationRequest: {
+            fingerprint: string;
+        };
+        Lease: {
+            /** @description The signed lf1 lease (License File Format); verify it with the SDK. */
+            lease: string;
+            /** @description The signing key's ID. */
+            kid: string;
+            /** @example act_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            activation_id: string;
+            /**
+             * Format: date-time
+             * @description Server time (ADR-0018).
+             */
+            issued_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            refresh_after: string;
+        };
         Problem: {
             /** @example about:blank */
             type: string;
@@ -578,11 +685,28 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description Too many requests for this license key (ADR-0034); retry after `Retry-After` seconds. */
+        RateLimited: {
+            headers: {
+                "X-Request-Id"?: string;
+                "Retry-After"?: number;
+                "RateLimit-Policy"?: string;
+                RateLimit?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
     };
     parameters: {
         LicenseId: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
+        /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+        ActivationTenant: string;
+        /** @description 1–255 printable ASCII characters; kept 24 hours (ADR-0032). */
+        IdempotencyKey: string;
         Limit: number;
         /** @description Opaque; `next_cursor` of the previous page. */
         Cursor: string;
@@ -1124,6 +1248,108 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
+        };
+    };
+    activate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1–255 printable ASCII characters; kept 24 hours (ADR-0032). */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Activated; the lease. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    refreshLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description The new lease. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
+                tenant: components["parameters"]["ActivationTenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Deactivated. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            429: components["responses"]["RateLimited"];
         };
     };
 }

@@ -146,6 +146,11 @@ var (
 					Where: "deactivated_at IS NULL",
 				},
 			},
+			{
+				Name:    "activation_history",
+				Unique:  false,
+				Columns: []*schema.Column{ActivationsColumns[14], ActivationsColumns[4]},
+			},
 		},
 	}
 	// AuditEventsColumns holds the columns for the "audit_events" table.
@@ -990,7 +995,7 @@ func init() {
 	IdempotencyKeysTable.ForeignKeys[0].RefTable = TenantsTable
 	IdempotencyKeysTable.Annotation = &entsql.Annotation{}
 	IdempotencyKeysTable.Annotation.Checks = map[string]string{
-		"idempotency_keys_credential": "credential ~ '^(tok|usr)_[a-z2-7]{26}$'",
+		"idempotency_keys_credential": "credential ~ '^(tok|usr|lic)_[a-z2-7]{26}$'",
 		"idempotency_keys_hash_len":   "length(request_hash) = 32",
 		"idempotency_keys_id_format":  "id ~ '^idk_[a-z2-7]{26}$'",
 		"idempotency_keys_key":        "key ~ '^[ -~]{1,255}$'",

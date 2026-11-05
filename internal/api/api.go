@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
@@ -53,7 +54,7 @@ type Config struct {
 	Tokens   apitokens.Service
 	Members  members.Service
 	Licenses licenses.Service
-	// Idempotency keeps Idempotency-Key outcomes (license issue).
+	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
@@ -63,16 +64,20 @@ type Config struct {
 	// sessions. Empty: both everywhere (one hostname).
 	APIHost string
 	Log     *slog.Logger
+	// The activation API (activation.go).
+	Activations    activations.Service
+	ActivationRate int // requests per license key per minute, per replica; 0: DefaultActivationRate
 }
 
 type server struct {
 	Config
-	mux *http.ServeMux
+	mux     *http.ServeMux
+	limiter *keyLimiter
 }
 
 // New returns the API handler; mount it at Prefix + "/".
 func New(c Config) http.Handler {
-	s := &server{Config: c, mux: http.NewServeMux()}
+	s := &server{Config: c, mux: http.NewServeMux(), limiter: newKeyLimiter(c.ActivationRate)}
 	s.routes(s.mux)
 	return s
 }
@@ -110,6 +115,10 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			s.write(w, r, p)
 		}
 	}()
+	if strings.HasPrefix(r.URL.Path, activationPrefix) { // decoded, as ServeMux matches it
+		s.activation(w, r)
+		return
+	}
 	p, prob := s.authenticate(w, r)
 	if prob != nil {
 		s.write(w, r, prob)
@@ -433,6 +442,8 @@ func mapErr(err error) *problem {
 	var invalidInvitation *invitations.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case activationProblem(err) != nil:
+		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):
 		p = &problem{status: http.StatusForbidden, code: "forbidden", detail: "Your role or scope doesn't allow this.", err: err}
 	case errors.Is(err, apitokens.ErrNotFound), errors.Is(err, members.ErrNotFound), errors.Is(err, licenses.ErrNotFound), errors.Is(err, invitations.ErrNotFound):
@@ -475,7 +486,11 @@ func (s *server) write(w http.ResponseWriter, r *http.Request, p *problem) {
 	s.Log.Log(r.Context(), level, "api refusal", "request_id", ri.id, "client_request_id", ri.client,
 		"method", r.Method, "path", r.URL.Path, "status", p.status, "code", p.code, "err", p.err)
 	if p.status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="licenseforge"`)
+		scheme := "Bearer"
+		if strings.HasPrefix(r.URL.Path, activationPrefix) {
+			scheme = "License"
+		}
+		w.Header().Set("WWW-Authenticate", scheme+` realm="licenseforge"`)
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.status)

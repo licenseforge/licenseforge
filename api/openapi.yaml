@@ -419,6 +419,88 @@ paths:
               schema: { $ref: "#/components/schemas/MyTenantPage" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
+  /activation/tenants/{tenant}/activate:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: activate
+      summary: Activate this machine or cluster and get a signed lease (SDKs).
+      description: |
+        Activation API (ADR-0004, ADR-0034): authenticated by the license key,
+        not by a token or session. Activating an already active fingerprint
+        reuses its activation (no new seat). With `Idempotency-Key`, a retry
+        gets the first answer back (ADR-0032).
+      security:
+        - licenseKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: Activated; the lease.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lease" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /activation/tenants/{tenant}/refresh:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: refreshLease
+      summary: Refresh an active activation's lease (also validate). Never takes a seat.
+      description: "`not_activated` (404) asks the SDK to activate again."
+      security:
+        - licenseKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivationRequest" }
+      responses:
+        "200":
+          description: The new lease.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lease" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /activation/tenants/{tenant}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/ActivationTenant"
+    post:
+      operationId: deactivate
+      summary: Deactivate this machine or cluster, freeing its seat.
+      security:
+        - licenseKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeactivationRequest" }
+      responses:
+        "204":
+          description: Deactivated.
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 components:
   securitySchemes:
     apiToken:
@@ -435,6 +517,11 @@ components:
       in: header
       name: X-CSRF-Token
       description: Required with the session on unsafe methods; from GET /auth/session.
+    licenseKey:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Activation API only: `Authorization: License LF-XXXXX-…` (the license key as the user typed it)."
   parameters:
     LicenseId:
       name: id
@@ -447,6 +534,17 @@ components:
       required: true
       description: The tenant's slug or ID (`tnt_…`).
       schema: { type: string }
+    ActivationTenant:
+      name: tenant
+      in: path
+      required: true
+      description: The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it).
+      schema: { type: string, example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: 1–255 printable ASCII characters; kept 24 hours (ADR-0032).
+      schema: { type: string, maxLength: 255 }
     Limit:
       name: limit
       in: query
@@ -464,7 +562,44 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Too many requests for this license key (ADR-0034); retry after `Retry-After` seconds.
+      headers:
+        X-Request-Id: { schema: { type: string } }
+        Retry-After: { schema: { type: integer } }
+        RateLimit-Policy: { schema: { type: string, example: '"license-key";q=60;w=60' } }
+        RateLimit: { schema: { type: string, example: '"license-key";r=0;t=17' } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    ActivationRequest:
+      type: object
+      required: [fingerprint, fp_source]
+      properties:
+        fingerprint: { type: string, description: "The lease's bind.fp: `sha256:` + 64 lowercase hex (License File Format, Fingerprints).", example: "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684" }
+        fp_source:
+          type: string
+          enum: [override, env, kubernetes, machine-id]
+          description: Where the fingerprint came from; kubernetes binds the cluster, the others the machine.
+        hostname: { type: string, maxLength: 253, description: "Letters, digits, `-`, `.`, `_`." }
+        app_version: { type: string, maxLength: 64, description: Printable ASCII. }
+        sdk_version: { type: string, maxLength: 64, description: Printable ASCII. }
+    DeactivationRequest:
+      type: object
+      required: [fingerprint]
+      properties:
+        fingerprint: { type: string }
+    Lease:
+      type: object
+      required: [lease, kid, activation_id, issued_at, expires_at, refresh_after]
+      properties:
+        lease: { type: string, description: The signed lf1 lease (License File Format); verify it with the SDK. }
+        kid: { type: string, description: The signing key's ID. }
+        activation_id: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        issued_at: { type: string, format: date-time, description: Server time (ADR-0018). }
+        expires_at: { type: string, format: date-time }
+        refresh_after: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code, request_id]

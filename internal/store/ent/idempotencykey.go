@@ -20,7 +20,7 @@ type IdempotencyKey struct {
 	ID string `json:"id,omitempty"`
 	// TenantID holds the value of the "tenant_id" field.
 	TenantID string `json:"tenant_id,omitempty"`
-	// API token or user ID
+	// API token, user or license ID
 	Credential string `json:"credential,omitempty"`
 	// Key holds the value of the "key" field.
 	Key string `json:"key,omitempty"`
