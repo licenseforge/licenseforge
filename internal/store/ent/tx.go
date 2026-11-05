@@ -26,6 +26,8 @@ type Tx struct {
 	Customer *CustomerClient
 	// Feature is the client for interacting with the Feature builders.
 	Feature *FeatureClient
+	// IdempotencyKey is the client for interacting with the IdempotencyKey builders.
+	IdempotencyKey *IdempotencyKeyClient
 	// Invitation is the client for interacting with the Invitation builders.
 	Invitation *InvitationClient
 	// InvitationProduct is the client for interacting with the InvitationProduct builders.
@@ -189,6 +191,7 @@ func (tx *Tx) init() {
 	tx.AuditEvent = NewAuditEventClient(tx.config)
 	tx.Customer = NewCustomerClient(tx.config)
 	tx.Feature = NewFeatureClient(tx.config)
+	tx.IdempotencyKey = NewIdempotencyKeyClient(tx.config)
 	tx.Invitation = NewInvitationClient(tx.config)
 	tx.InvitationProduct = NewInvitationProductClient(tx.config)
 	tx.License = NewLicenseClient(tx.config)

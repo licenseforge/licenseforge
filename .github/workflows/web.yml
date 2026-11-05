@@ -4,9 +4,9 @@ name: Web
 on:
   push:
     branches: [main]
-    paths: [web/**, .github/workflows/web.yml]
+    paths: [web/**, api/openapi.yaml, .github/workflows/web.yml]
   pull_request:
-    paths: [web/**, .github/workflows/web.yml]
+    paths: [web/**, api/openapi.yaml, .github/workflows/web.yml]
 permissions:
   contents: read
 jobs:
@@ -24,6 +24,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - name: Generated API client is up to date
+        run: npm run gen:api && git diff --exit-code -- src/api/schema.ts
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
