@@ -395,7 +395,7 @@
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
                 "control-id": "au-5",
-                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back.",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -408,9 +408,14 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
                     "rel": "reference",
                     "text": "TestRolledBackActionLeavesNoEntry"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/verify_test.go",
+                    "rel": "reference",
+                    "text": "TestWriteFailuresAreCounted"
                   }
                 ],
-                "remarks": "No alert or metric for audit failures yet (Roadmap v0.1: alert on audit failure; Prometheus /metrics)."
+                "remarks": "No alert rules yet: the chart's PrometheusRule and the periodic verify job come later (ADR-0036)."
               },
               {
                 "uuid": "984eb824-0c57-51f2-a983-4430786eb8e6",

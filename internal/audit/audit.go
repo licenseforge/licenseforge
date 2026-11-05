@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -79,6 +80,18 @@ func cleanText(s string, n int) string {
 // comes from the database clock, so entries written by several server
 // instances agree with seq order (AU-8).
 func Record(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.AuditEvent, error) {
+	r, err := write(ctx, tx, tenantID, e)
+	if err != nil { // the caller's action fails with it (AU-5); alert on this metric
+		chain := "tenant"
+		if tenantID == PlatformTenant {
+			chain = "platform"
+		}
+		metrics.AuditWriteFailures.WithLabelValues(chain).Inc()
+	}
+	return r, err
+}
+
+func write(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.AuditEvent, error) {
 	details := []byte("{}")
 	if len(e.Details) > 0 {
 		var err error
@@ -182,32 +195,138 @@ type Head struct {
 	Hash []byte
 }
 
-// Verify checks tenantID's whole chain in tx: it starts at seq 1 with the zero
-// prev_hash, each prev_hash equals the previous entry's hash and each hash is
-// correct. seq is hashed, so a removed or reordered entry breaks a link. It
-// returns the head (zero for an empty chain).
+// Runner runs fn in a new read-only transaction on a pool that can read the
+// chain, REPEATABLE READ if snapshot: store.DB.ReadPlatform for any chain,
+// or store.DB.ReadTenant for a tenant's own.
+type Runner func(ctx context.Context, snapshot bool, fn func(*ent.Tx) error) error
+
+// pageSize is Verify's keyset page (ADR-0036); a var so tests can page small.
+var pageSize = 1000
+
+// readAnchor returns the chain's effective anchor (ADR-0036): the seq and
+// hash of the last pruned entry, zero while nothing was pruned.
+// ponytail: no audit_anchors table yet (it comes with retention), so always
+// zero; a var so tests can simulate a prune moving it.
+var readAnchor = func(context.Context, *ent.Tx, string) (Head, error) { return Head{}, nil }
+
+// Verify checks tenantID's chain (ADR-0027, ADR-0036) and returns its head
+// (zero for an empty chain). From the anchor (from is zero, or older than the
+// anchor) it checks the whole surviving chain: the first entry links to the
+// anchor (seq 1 and 32 zero bytes without one) and nothing at or below the
+// anchor remains. From a head the caller verified earlier, it checks that
+// entry is unchanged and only the entries after it: an incremental check
+// costs O(new entries). Keep that head yourself, never in a table a serving
+// login can write. Every entry must be the previous seq + 1, link to the
+// previous hash and hash correctly; seq is hashed, so a removed or reordered
+// entry breaks a link.
 //
-// ponytail: loads the chain into memory; page by seq when chains get large.
-// Retention (later) will start from an exported anchor instead of seq 1.
-func Verify(ctx context.Context, tx *ent.Tx, tenantID string) (Head, error) {
-	events, err := tx.AuditEvent.Query().Where(auditevent.TenantID(tenantID)).
-		Order(ent.Asc(auditevent.FieldSeq)).All(ctx)
-	if err != nil {
-		return Head{}, err
+// Entries are read in keyset pages, one short transaction each; the anchor
+// and the first page share one REPEATABLE READ transaction. A break at the
+// start or at a page boundary can be a prune that ran meanwhile: Verify then
+// re-reads the anchor once and restarts if it moved. Truncation of the last
+// entries can't be seen here: compare the head with an exported one.
+func Verify(ctx context.Context, run Runner, tenantID string, from Head) (Head, error) {
+	h, err := verifyChain(ctx, run, tenantID, from)
+	if errors.Is(err, ErrBroken) {
+		metrics.AuditVerifyFailures.Inc()
 	}
-	for i, e := range events {
-		switch {
-		case i == 0 && (e.Seq != 1 || !bytes.Equal(e.PrevHash, zeroHash)):
-			return Head{}, fmt.Errorf("%w: chain starts at seq %d, not 1", ErrBroken, e.Seq)
-		case i > 0 && !bytes.Equal(e.PrevHash, events[i-1].Hash):
-			return Head{}, fmt.Errorf("%w: seq %d doesn't link to the previous entry", ErrBroken, e.Seq)
-		case !bytes.Equal(e.Hash, Hash(e)):
-			return Head{}, fmt.Errorf("%w: seq %d was modified", ErrBroken, e.Seq)
+	return h, err
+}
+
+func verifyChain(ctx context.Context, run Runner, tenantID string, from Head) (Head, error) {
+	for restarted := false; ; restarted = true {
+		head, anchor, err := walk(ctx, run, tenantID, from)
+		var b boundaryError
+		if !errors.As(err, &b) {
+			return head, err
+		}
+		var now Head
+		if err := run(ctx, false, func(tx *ent.Tx) error {
+			var err error
+			now, err = readAnchor(ctx, tx, tenantID)
+			return err
+		}); err != nil {
+			return Head{}, err
+		}
+		if restarted || now.Seq <= anchor.Seq {
+			return Head{}, b.err
 		}
 	}
-	if len(events) == 0 {
-		return Head{}, nil
+}
+
+// boundaryError is a break on the first entry after the start or a page
+// boundary, where a concurrent prune could have moved the chain's start.
+type boundaryError struct{ err error }
+
+func (b boundaryError) Error() string { return b.err.Error() }
+func (b boundaryError) Unwrap() error { return b.err }
+
+func walk(ctx context.Context, run Runner, tenantID string, from Head) (head, anchor Head, err error) {
+	var page []*ent.AuditEvent
+	err = run(ctx, true, func(tx *ent.Tx) error { // the anchor and the first page from one snapshot
+		var err error
+		if anchor, err = readAnchor(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		head = anchor
+		if from.Seq > anchor.Seq {
+			e, err := tx.AuditEvent.Query().Where(auditevent.TenantID(tenantID), auditevent.Seq(from.Seq)).Only(ctx)
+			switch {
+			case ent.IsNotFound(err):
+				return boundaryError{fmt.Errorf("%w: resume head seq %d is gone", ErrBroken, from.Seq)}
+			case err != nil:
+				return err
+			case !bytes.Equal(e.Hash, from.Hash) || !bytes.Equal(e.Hash, Hash(e)):
+				return fmt.Errorf("%w: resume head seq %d was modified", ErrBroken, from.Seq)
+			}
+			head = from
+		} else if anchor.Seq > 0 {
+			left, err := tx.AuditEvent.Query().Where(auditevent.TenantID(tenantID), auditevent.SeqLTE(anchor.Seq)).Exist(ctx)
+			if err != nil {
+				return err
+			}
+			if left {
+				return fmt.Errorf("%w: entries at or below the anchor (seq %d) remain", ErrBroken, anchor.Seq)
+			}
+		}
+		page, err = nextPage(ctx, tx, tenantID, head.Seq)
+		return err
+	})
+	if err != nil {
+		return Head{}, anchor, err
 	}
-	last := events[len(events)-1]
-	return Head{Seq: last.Seq, Hash: last.Hash}, nil
+	for {
+		for i, e := range page {
+			prev := head.Hash
+			if head.Seq == 0 {
+				prev = zeroHash
+			}
+			if e.Seq != head.Seq+1 || !bytes.Equal(e.PrevHash, prev) {
+				err := fmt.Errorf("%w: seq %d doesn't follow seq %d", ErrBroken, e.Seq, head.Seq)
+				if i == 0 {
+					return Head{}, anchor, boundaryError{err}
+				}
+				return Head{}, anchor, err
+			}
+			if !bytes.Equal(e.Hash, Hash(e)) {
+				return Head{}, anchor, fmt.Errorf("%w: seq %d was modified", ErrBroken, e.Seq)
+			}
+			head = Head{Seq: e.Seq, Hash: e.Hash}
+		}
+		if len(page) < pageSize {
+			return head, anchor, nil
+		}
+		if err := run(ctx, false, func(tx *ent.Tx) error {
+			var err error
+			page, err = nextPage(ctx, tx, tenantID, head.Seq)
+			return err
+		}); err != nil {
+			return Head{}, anchor, err
+		}
+	}
+}
+
+func nextPage(ctx context.Context, tx *ent.Tx, tenantID string, after int64) ([]*ent.AuditEvent, error) {
+	return tx.AuditEvent.Query().Where(auditevent.TenantID(tenantID), auditevent.SeqGT(after)).
+		Order(ent.Asc(auditevent.FieldSeq)).Limit(pageSize).All(ctx)
 }
