@@ -116,6 +116,7 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
 	t.Setenv("LICENSEFORGE_MASTER_KEYS", keys)
 	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "SESSION_IDLE_TIMEOUT", "SESSION_MAX_AGE", "LOGIN_BANNER",
+		"AUDIT_OTLP_ENDPOINT", "AUDIT_OTLP_CA_FILE", "AUDIT_OTLP_CERT_FILE", "AUDIT_OTLP_KEY_FILE", "AUDIT_OTLP_HEADERS",
 		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID"} {
 		t.Setenv("LICENSEFORGE_"+k, "")
 	}
@@ -251,6 +252,7 @@ func TestServeRefuses(t *testing.T) {
 		"OIDC without client":  {env.TenantURL, env.PlatformURL, testKeys, "", "client ID"},
 		"syslog without port":  {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_SYSLOG_*"},
 		"syslog cert, no key":  {env.TenantURL, env.PlatformURL, testKeys, "", "both the certificate and the key"},
+		"OTLP over plain http": {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_OTLP_*"},
 		"bad idle timeout":     {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_SESSION_IDLE_TIMEOUT: want a duration"},
 		"idle timeout too low": {env.TenantURL, env.PlatformURL, testKeys, "", "idle timeout 1m0s"},
 		"max age over a day":   {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
@@ -266,6 +268,8 @@ func TestServeRefuses(t *testing.T) {
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", "")
 		case "platform as identity":
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.PlatformURL)
+		case "OTLP over plain http":
+			t.Setenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT", "http://otel.example:4318/v1/logs")
 		case "syslog without port":
 			t.Setenv("LICENSEFORGE_AUDIT_SYSLOG_ADDR", "siem.example")
 		case "syslog cert, no key":
@@ -327,6 +331,7 @@ func TestServeStartsAuditExport(t *testing.T) {
 	addr := closed.Addr().String()
 	_ = closed.Close()
 	t.Setenv("LICENSEFORGE_AUDIT_SYSLOG_ADDR", addr)
+	t.Setenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT", "http://"+addr+"/v1/logs")
 	d, err := store.Open(context.Background(), store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +343,8 @@ func TestServeStartsAuditExport(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before := testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("syslog"))
+	before := map[string]float64{"syslog": testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("syslog")),
+		"otlp": testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("otlp"))}
 	_, _, stop := startServe(t)
 	defer func() { _ = stop() }()
 	owner, err := sql.Open("pgx", env.OwnerURL)
@@ -348,13 +354,15 @@ func TestServeStartsAuditExport(t *testing.T) {
 	defer func() { _ = owner.Close() }()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var registered bool
-		_ = owner.QueryRow(`SELECT EXISTS (SELECT 1 FROM audit_export_sinks WHERE id = 'syslog')`).Scan(&registered)
-		if registered && testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("syslog")) > before {
+		var registered int
+		_ = owner.QueryRow(`SELECT count(*) FROM audit_export_sinks WHERE id IN ('syslog', 'otlp')`).Scan(&registered)
+		running := testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("syslog")) > before["syslog"] &&
+			testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("otlp")) > before["otlp"]
+		if registered == 2 && running {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("sink registered=%v, export failures %v→%v", registered, before, testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues("syslog")))
+			t.Fatalf("%d of 2 sinks registered, both exporters running: %v", registered, running)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

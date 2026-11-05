@@ -29,6 +29,9 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_SERVER_NAME` | no | the address's host | Name the collector's certificate must carry |
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
+| `LICENSEFORGE_AUDIT_OTLP_ENDPOINT` | no | unset = no OTLP export | OTLP/HTTP logs URL with the JSON encoding, `https://…/v1/logs` (http only on loopback; ADR-0036). TLS 1.2+, verified. A batch is delivered only on a 2xx rejecting no record |
+| `LICENSEFORGE_AUDIT_OTLP_CA_FILE`, `_CERT_FILE`, `_KEY_FILE` | no | system roots, no client certificate | As for syslog (chart: `audit.export.otlp.caSecret`, `clientSecret`) |
+| `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: pass it with `secretKeyRef` (chart: `headersSecret`) |
 
 `LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 

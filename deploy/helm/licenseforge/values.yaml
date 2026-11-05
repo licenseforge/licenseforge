@@ -72,6 +72,15 @@ audit:
       sdID: ""            # structured data ID name@PEN; default licenseforge@32473
       # NetworkPolicy egress to the collector. Empty: any destination on port.
       to: []
+    # OTLP logs over HTTP with the JSON encoding. Delivered only on a 2xx that
+    # rejects no record. Empty endpoint: no export.
+    otlp:
+      endpoint: ""        # e.g. https://otel-collector.monitoring:4318/v1/logs
+      port: 4318          # the endpoint's port, for the NetworkPolicy
+      caSecret: ""        # Secret with ca.crt; empty: system roots
+      clientSecret: ""    # kubernetes.io/tls Secret for mTLS; empty: no client cert
+      headersSecret: ""   # Secret with key headers: k=v,k2=v2 (e.g. an API key)
+      to: []
 
 resources:
   requests: {cpu: 100m, memory: 64Mi}
