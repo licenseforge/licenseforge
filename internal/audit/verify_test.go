@@ -204,3 +204,81 @@ func TestWriteFailuresAreCounted(t *testing.T) {
 		t.Errorf("write failures: tenant %v→%v, platform %v→%v", bt, gt, bp, gp)
 	}
 }
+
+// A resume head that was deleted is reported; one older than an anchor that
+// moved during the run restarts from the anchor.
+func TestVerifyResumeHeadGoneOrPruned(t *testing.T) {
+	smallPages(t, 7)
+	d := openDB(t)
+	owner := sqlDB(t, env.OwnerURL)
+	tn, es := chain(t, d, 30)
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq >= 25`, tn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify(context.Background(), tenantRunner(d, tn), tn, headOf(es[29])); err == nil || !strings.Contains(err.Error(), "resume head seq 30 is gone") {
+		t.Errorf("resume from a deleted head: %v", err)
+	}
+
+	old := readAnchor
+	t.Cleanup(func() { readAnchor = old })
+	tn, es = chain(t, d, 30)
+	var anchor Head
+	readAnchor = func(context.Context, *ent.Tx, string) (Head, error) { return anchor, nil }
+	calls := 0
+	run := func(ctx context.Context, snap bool, fn func(*ent.Tx) error) error {
+		if calls++; calls == 2 { // after the first page from head 10: prune through 20
+			if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq <= 20`, tn); err != nil {
+				t.Fatal(err)
+			}
+			anchor = headOf(es[19])
+		}
+		return tenantRunner(d, tn)(ctx, snap, fn)
+	}
+	if h, err := Verify(context.Background(), run, tn, headOf(es[9])); err != nil || h.Seq != 30 {
+		t.Errorf("resume with the anchor moving past the head: %+v, %v", h, err)
+	}
+	// Resuming exactly at the anchor needs the anchor's hash.
+	if h, err := Verify(context.Background(), tenantRunner(d, tn), tn, headOf(es[19])); err != nil || h.Seq != 30 {
+		t.Errorf("resume at the anchor: %+v, %v", h, err)
+	}
+	bad := headOf(es[19])
+	bad.Hash = es[18].Hash
+	if _, err := Verify(context.Background(), tenantRunner(d, tn), tn, bad); err == nil || !strings.Contains(err.Error(), "doesn't match the anchor") {
+		t.Errorf("resume at the anchor with another hash: %v", err)
+	}
+}
+
+// Only broken chains count as verify failures, not errors such as a
+// cancelled context or a failing runner; a write that fails because the
+// caller went away is no audit write failure either.
+func TestPlainErrorsAreNotAuditFailures(t *testing.T) {
+	d := openDB(t)
+	tn, _ := chain(t, d, 3)
+	before := testutil.ToFloat64(metrics.AuditVerifyFailures)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Verify(ctx, tenantRunner(d, tn), tn, Head{}); err == nil || errors.Is(err, ErrBroken) {
+		t.Errorf("cancelled: %v", err)
+	}
+	failing := func(context.Context, bool, func(*ent.Tx) error) error { return errors.New("pool closed") }
+	if _, err := Verify(context.Background(), failing, tn, Head{}); err == nil || errors.Is(err, ErrBroken) {
+		t.Errorf("failing runner: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyFailures); got != before {
+		t.Errorf("verify failures %v→%v", before, got)
+	}
+
+	writes := metrics.AuditWriteFailures.WithLabelValues("tenant")
+	wb := testutil.ToFloat64(writes)
+	if err := d.WithTenant(context.Background(), tn, func(tx *ent.Tx) error {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := Record(ctx, tx, tn, Event{ActorType: auditevent.ActorTypeSystem, Action: "test.entry", Outcome: auditevent.OutcomeSuccess})
+		return err
+	}); err == nil {
+		t.Fatal("Record with a cancelled context succeeded")
+	}
+	if got := testutil.ToFloat64(writes); got != wb {
+		t.Errorf("write failures %v→%v after a client went away", wb, got)
+	}
+}
