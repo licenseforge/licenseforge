@@ -73,6 +73,11 @@ describe("verifyChain (newest first)", () => {
       expect(await verifyChain(p1([{ event: { ...first, ...bad }, rawDetails: D1 }]))).toEqual({ ok: false, seq: 1, reason: "hash" });
     }
   });
+  it("an uppercase prev_hash is malformed, even when its bytes match", async () => {
+    const upper = { ...second, prev_hash: H1.toUpperCase() };
+    upper.hash = await auditHash(upper, "{}"); // same bytes, so the hash recomputes
+    expect(await verifyChain(p1([{ event: upper, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({ ok: false, seq: 2, reason: "hash" });
+  });
   it("reports a page whose raw details couldn't be read", async () => {
     const entries = [chain[0]!, { ...chain[1]!, rawDetails: null, page: 2 }];
     expect(await verifyChain(entries)).toEqual({ ok: false, page: 2, reason: "page" });
@@ -87,6 +92,11 @@ describe("raw details and JSON.parse agree", () => {
     const body = `{"items":[{"details":{"a":1},"id":"x","details":{"b":2}}]}`;
     expect(detailsSpans(body)).toEqual(['{"b":2}']);
     expect((JSON.parse(body) as { items: { details: unknown }[] }).items[0]!.details).toEqual({ b: 2 });
+  });
+  it("a scalar must start exactly where a value does", () => {
+    expect(() => detailsSpans(`{"items":[{"details":x1}]}`)).toThrow();
+    // junk the width of a later number: a forward search would take that number and accept "x"
+    expect(() => detailsSpans(`{"items":[{"details":x}],"n":1}`)).toThrow();
   });
   it("numbers of any length are read", () => {
     expect(detailsSpans(`{"items":[{"details":{"n":${"9".repeat(80)}}}]}`)).toEqual([`{"n":${"9".repeat(80)}}`]);

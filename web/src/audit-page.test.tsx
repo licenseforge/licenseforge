@@ -110,6 +110,14 @@ it("a page it can't read exactly is still listed, and verify says which page", a
   await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Can't verify page 1"));
 });
 
+it("a page the scanner can't read (an entry without details) is still listed", async () => {
+  const noDetails = JSON.stringify({ ...second, details: undefined });
+  const r = await open("owner", true, `{"items":[${noDetails},${itemText(first, D1)}]}`);
+  await vi.waitFor(() => expect(r.el.querySelectorAll("tbody tr")).toHaveLength(2));
+  await act(async () => r.button("Verify loaded entries")!.click());
+  await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Can't verify page 1"));
+});
+
 it("drops a verify result when more entries load", async () => {
   const twoPages = { first: `{"items":[${itemText(second, "{}")}],"next_cursor":"c2"}`, second: `{"items":[${itemText(first, D1)}]}` };
   const r = await open("owner", true, { pages: twoPages } as never);
