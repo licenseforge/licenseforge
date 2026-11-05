@@ -81,7 +81,7 @@ func cleanText(s string, n int) string {
 // instances agree with seq order (AU-8).
 func Record(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.AuditEvent, error) {
 	r, err := write(ctx, tx, tenantID, e)
-	if err != nil { // the caller's action fails with it (AU-5); alert on this metric
+	if err != nil && ctx.Err() == nil { // the caller's action fails with it (AU-5); a client gone away is no audit failure
 		chain := "tenant"
 		if tenantID == PlatformTenant {
 			chain = "platform"
@@ -280,7 +280,10 @@ func walk(ctx context.Context, run Runner, tenantID string, from Head) (head, an
 				return fmt.Errorf("%w: resume head seq %d was modified", ErrBroken, from.Seq)
 			}
 			head = from
-		} else if anchor.Seq > 0 {
+		} else if from.Seq == anchor.Seq && anchor.Seq > 0 && !bytes.Equal(from.Hash, anchor.Hash) {
+			return fmt.Errorf("%w: resume head seq %d doesn't match the anchor", ErrBroken, from.Seq)
+		}
+		if from.Seq <= anchor.Seq && anchor.Seq > 0 { // starting at the anchor
 			left, err := tx.AuditEvent.Query().Where(auditevent.TenantID(tenantID), auditevent.SeqLTE(anchor.Seq)).Exist(ctx)
 			if err != nil {
 				return err
