@@ -61,6 +61,7 @@ type Config struct {
 	Licenses licenses.Service
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
+	Features  catalog.Features
 	Customers customers.Service
 	// SigningKeys: list, create, promote, discard (ADR-0026).
 	SigningKeys signing.Local
@@ -279,6 +280,7 @@ var queryParams = map[string][]string{
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor", "archived"},
+	"ListFeatures":    {"limit", "cursor", "product_id"},
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
