@@ -320,7 +320,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// the activation API decrypts license keys and signs leases.
 	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
-		Products: catalog.Products{DB: db}, Features: catalog.Features{DB: db}, Customers: customers.Service{DB: db}, Audit: audit.Log{DB: db}, SigningKeys: signing.Local{DB: db, Keys: keyring},
+		Products: catalog.Products{DB: db}, Features: catalog.Features{DB: db}, Plans: catalog.Plans{DB: db}, Customers: customers.Service{DB: db}, Audit: audit.Log{DB: db}, SigningKeys: signing.Local{DB: db, Keys: keyring},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},
 		Sessions:    sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {

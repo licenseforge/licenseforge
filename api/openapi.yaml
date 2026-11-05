@@ -915,6 +915,106 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/plans:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listPlans
+      summary: List plans in the caller's product scope, newest first, archived ones included.
+      description: "Needs catalog:read. A product_id naming a hidden or missing product gives an empty list."
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - { name: product_id, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlanPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createPlan
+      summary: Add a plan (one way of selling a product, ADR-0015).
+      description: "Needs catalog:write on the product. A missing or hidden product answers 422 on product_id, an archived one too; a slug already used on the product answers 409. Licenses copy the plan's terms when issued."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanCreate" }
+      responses:
+        "201":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/plans/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/PlanId"
+    get:
+      operationId: getPlan
+      summary: Get a plan.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updatePlan
+      summary: "Change a plan's name or terms (JSON Merge Patch). Slug and bind type never change; licenses already sold keep their terms."
+      description: "Needs catalog:write on its product. The merged terms are checked whole."
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/PlanPatch" }
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/plans/{id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/PlanId"
+    post:
+      operationId: archivePlan
+      summary: Archive a plan. No new license is issued from it; licenses already sold keep their terms.
+      description: "Needs catalog:write on its product. An archived plan answers 409 invalid_state."
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/customers:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1040,6 +1140,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: ftr_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    PlanId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: pln_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     ProductId:
       name: id
       in: path
@@ -1404,6 +1509,64 @@ components:
         name: { type: string, maxLength: 200 }
         description: { type: string, maxLength: 2000, nullable: true }
         unit: { type: string, maxLength: 40, nullable: true }
+    Plan:
+      type: object
+      required: [id, product_id, slug, name, duration_months, duration_seconds, expiry_basis, max_activations, max_rehosts, bind_type, offline_allowed, lease_seconds, max_offline_seconds, grace_seconds, archived_at, created_at]
+      properties:
+        id: { type: string, example: pln_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        product_id: { type: string }
+        slug: { type: string, description: "Copied into licenses. Immutable." }
+        name: { type: string }
+        duration_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual." }
+        duration_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true, description: "Whole seconds (trials, fixed periods)." }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
+        max_activations: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        max_rehosts: { type: integer, minimum: 0, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        offline_allowed: { type: boolean }
+        lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
+        max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
+        grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
+        bind_type: { type: string, enum: [none, machine, cluster], description: "What an activation binds to; none is a site license (no activations). Immutable." }
+        archived_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    PlanPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Plan" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    PlanCreate:
+      type: object
+      required: [product_id, slug, name]
+      description: "Defaults: expiry_basis from_issue, bind_type machine, offline_allowed false, lease_seconds 604800 (7 days), grace_seconds 0; the nullable terms absent are null."
+      properties:
+        product_id: { type: string }
+        slug: { type: string, maxLength: 63 }
+        name: { type: string, maxLength: 200 }
+        duration_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual." }
+        duration_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true, description: "Whole seconds (trials, fixed periods)." }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
+        max_activations: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        max_rehosts: { type: integer, minimum: 0, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        offline_allowed: { type: boolean }
+        lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
+        max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
+        grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
+        bind_type: { type: string, enum: [none, machine, cluster], description: "What an activation binds to; none is a site license (no activations). Immutable." }
+    PlanPatch:
+      type: object
+      description: "Absent fields stay; null clears a nullable term; name, expiry_basis, offline_allowed, lease_seconds and grace_seconds aren't nullable (null answers 422)."
+      properties:
+        name: { type: string, maxLength: 200 }
+        duration_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual." }
+        duration_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true, description: "Whole seconds (trials, fixed periods)." }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation], nullable: true }
+        max_activations: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        max_rehosts: { type: integer, minimum: 0, maximum: 1000000, nullable: true, description: "Null is unlimited." }
+        offline_allowed: { type: boolean, nullable: true }
+        lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true }
+        max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
+        grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
     Customer:
       type: object
       required: [id, name, email, external_refs, archived_at, created_at]
