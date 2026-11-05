@@ -287,7 +287,18 @@ func (d *DB) TryPlatformLock(ctx context.Context, key int64) (l *SessionLock, ok
 	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&ok); err != nil || !ok {
 		return nil, false, errors.Join(err, conn.Close())
 	}
-	return &SessionLock{conn: conn, key: key}, true, nil
+	l = &SessionLock{conn: conn, key: key}
+	// The server notices a dead holder in about 90 s instead of the OS
+	// default of hours, so the lock frees up for another replica.
+	if _, err := conn.ExecContext(ctx, `SET tcp_keepalives_idle = 60`); err != nil {
+		l.Release()
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `SET tcp_keepalives_interval = 10`); err != nil {
+		l.Release()
+		return nil, false, err
+	}
+	return l, true, nil
 }
 
 // Alive reports whether the lock is still held: a session advisory lock

@@ -53,10 +53,14 @@ const (
 type Job struct {
 	DB           *store.DB
 	Log          *slog.Logger
-	Interval     time.Duration // also the time limit of one run
+	Interval     time.Duration // also the time limit of an incremental run
 	FullInterval time.Duration
+	FullTimeout  time.Duration // limit of a run of the full pass; 0: FullInterval / 4
 
-	heads    map[string]audit.Head // verified heads by chain, this replica's memory only
+	heads    map[string]audit.Head // last good head by chain, this replica's memory only
+	anchors  map[string]audit.Head // the anchor each chain was last verified from
+	broken   map[string]bool       // chains whose last verification failed: re-verified from the anchor
+	fullPass map[string]bool       // chains done in the full pass in progress; nil: none in progress
 	lastFull time.Time
 	lock     *store.SessionLock // held while this replica leads
 	now      func() time.Time
@@ -66,7 +70,8 @@ type Job struct {
 // New returns a Job with the default schedule.
 func New(db *store.DB, log *slog.Logger) *Job {
 	return &Job{DB: db, Log: log, Interval: DefaultInterval, FullInterval: DefaultFullInterval,
-		heads: map[string]audit.Head{}, now: time.Now, verify: audit.VerifyAnchored}
+		heads: map[string]audit.Head{}, anchors: map[string]audit.Head{}, broken: map[string]bool{},
+		now: time.Now, verify: audit.VerifyAnchored}
 }
 
 // Close gives up the lead, if this replica has it.
@@ -117,7 +122,10 @@ func (j *Job) Run(ctx context.Context) error {
 // connection dropped) is released and taken again if it's free.
 func (j *Job) lead(ctx context.Context) (bool, error) {
 	if j.lock != nil {
-		if err := j.lock.Alive(ctx); err == nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := j.lock.Alive(pingCtx)
+		cancel()
+		if err == nil {
 			return true, nil
 		} else if ctx.Err() == nil {
 			j.Log.Warn("audit verify: lost the leader lock; trying to take it again", "err", err)
@@ -132,19 +140,35 @@ func (j *Job) lead(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// Once runs one verification if this replica leads, within Interval: every
-// chain from its last verified head (from the anchor when there is none or a
-// full run is due), then the checkpoint entries. Only a run that completes
-// without errors moves licenseforge_audit_verify_last_success_timestamp_seconds
-// (a broken chain has its own alert) and, if full, the full schedule.
-func (j *Job) Once(ctx context.Context) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, j.Interval)
+// Once runs one verification if this replica leads. Every chain is
+// verified from its last good head, or from its anchor when there is none,
+// when it was broken last time, or in a full pass. A full pass starts every
+// FullInterval and may span several runs: each run of it may take
+// FullTimeout, and a run that runs out of time leaves the chains it finished
+// done, so the next run continues with the rest (others resume from their
+// heads). Incremental runs may take Interval.
+//
+// Each verified chain moves licenseforge_audit_verify_last_success_timestamp_seconds
+// (progress, also inside a long full pass); a broken chain has its own metric.
+func (j *Job) Once(parent context.Context) (Result, error) {
+	full := j.fullPass != nil || j.lastFull.IsZero() || j.now().Sub(j.lastFull) >= j.FullInterval
+	limit := j.Interval
+	if full {
+		limit = j.FullTimeout
+		if limit <= 0 {
+			limit = j.FullInterval / 4
+		}
+	}
+	ctx, cancel := context.WithTimeout(parent, limit)
 	defer cancel()
 	ok, err := j.lead(ctx)
 	if err != nil || !ok {
 		return Result{}, err
 	}
-	r := Result{Ran: true, Full: j.lastFull.IsZero() || j.now().Sub(j.lastFull) >= j.FullInterval}
+	if full && j.fullPass == nil {
+		j.fullPass = map[string]bool{}
+	}
+	r := Result{Ran: true, Full: full}
 	var chains []string
 	if err := j.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
 		var err error
@@ -158,44 +182,74 @@ func (j *Job) Once(ctx context.Context) (Result, error) {
 	listed := []head{} // "heads": [] in the entry, never null
 	var errs []error
 	for _, c := range chains {
-		prev, known := j.heads[c]
-		from := prev
-		if r.Full {
-			from = audit.Head{}
+		if ctx.Err() != nil { // out of time: the rest waits for the next run
+			errs = append(errs, ctx.Err())
+			break
 		}
-		h, anchor, err := j.verify(ctx, j.DB.ReadPlatform, c, from)
+		h, anchor, fromAnchor, err := j.chain(ctx, c, full)
 		switch {
 		case errors.Is(err, audit.ErrBroken):
-			// Forget the head: the break may be below it, which a resumed
-			// run wouldn't see. The next run starts from the anchor and
-			// counts the break again, until it is repaired.
-			delete(j.heads, c)
+			// Keep the last good head and verify from the anchor next time,
+			// checking that head again: the break, a truncation included,
+			// keeps counting until it is repaired.
+			j.broken[c] = true
 			r.Broken = append(r.Broken, c)
+			if full && fromAnchor {
+				j.fullPass[c] = true
+			}
 			continue
 		case err != nil:
 			errs = append(errs, fmt.Errorf("chain %s: %w", c, err))
 			continue
 		}
-		j.heads[c] = h
+		prev, known := j.heads[c]
+		prevAnchor := j.anchors[c]
+		j.heads[c], j.anchors[c] = h, anchor
+		delete(j.broken, c)
+		if full && fromAnchor {
+			j.fullPass[c] = true
+		}
+		metrics.AuditVerifyLastSuccess.Set(float64(j.now().Unix()))
 		if h.Seq == 0 {
 			continue
 		}
 		r.Verified++
-		if r.Full || !known || h.Seq != prev.Seq || !bytes.Equal(h.Hash, prev.Hash) {
+		moved := !known || h.Seq != prev.Seq || !bytes.Equal(h.Hash, prev.Hash) ||
+			anchor.Seq != prevAnchor.Seq || !bytes.Equal(anchor.Hash, prevAnchor.Hash)
+		if (full && fromAnchor) || moved {
 			listed = append(listed, head{TenantID: c, Seq: h.Seq, Hash: hex.EncodeToString(h.Hash),
 				Anchor: anchorOf(anchor)})
 		}
 	}
-	if err := j.checkpoint(ctx, r, listed); err != nil {
+	// The checkpoint gets its own time, so a run that ran out of time still
+	// records what it verified.
+	cpCtx, cpCancel := context.WithTimeout(parent, 30*time.Second)
+	defer cpCancel()
+	if err := j.checkpoint(cpCtx, r, listed); err != nil {
 		errs = append(errs, err)
 	}
-	if len(errs) == 0 {
-		metrics.AuditVerifyLastSuccess.Set(float64(j.now().Unix()))
-		if r.Full {
-			j.lastFull = j.now()
-		}
+	if full && len(errs) == 0 { // every chain was done in this pass
+		j.lastFull, j.fullPass = j.now(), nil
 	}
 	return r, errors.Join(errs...)
+}
+
+// chain verifies one chain and reports whether it started from the anchor.
+// After a verification from the anchor, a last good head above the anchor is
+// checked too (it must still be there, unchanged): the surviving chain
+// verifies on its own after its tail was removed.
+func (j *Job) chain(ctx context.Context, c string, full bool) (h, anchor audit.Head, fromAnchor bool, err error) {
+	prev, known := j.heads[c]
+	fromAnchor = !known || j.broken[c] || (full && !j.fullPass[c])
+	from := prev
+	if fromAnchor {
+		from = audit.Head{}
+	}
+	h, anchor, err = j.verify(ctx, j.DB.ReadPlatform, c, from)
+	if err == nil && fromAnchor && known && prev.Seq > anchor.Seq {
+		h, anchor, err = j.verify(ctx, j.DB.ReadPlatform, c, prev)
+	}
+	return h, anchor, fromAnchor, err
 }
 
 type head struct {

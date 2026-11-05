@@ -42,7 +42,9 @@ spec:
         - alert: LicenseForgeAuditVerifyStalled
           # The leader replica verifies every auditVerify.intervalMinutes; two
           # missed runs (or no data at all) mean nobody is verifying.
-          expr: (time() - max by (namespace) (licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })) > {{ mul 2 $verify 60 }} or absent(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })
+          # max_over_time keeps the last leader's value across a handover or a
+          # rolling deploy (its series vanish; the new leader's starts at 0).
+          expr: (time() - max by (namespace) (max_over_time(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} }[{{ add (mul 2 $verify) 15 }}m]))) > {{ mul 2 $verify 60 }} or absent(licenseforge_audit_verify_last_success_timestamp_seconds{ {{- $ns -}} })
           for: {{ $verify }}m
           labels: {severity: critical}
           annotations:
