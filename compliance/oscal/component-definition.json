@@ -738,7 +738,7 @@
                     "value": "partial"
                   }
                 ],
-                "remarks": "Not enforced yet: the policy is stored but sessions aren't checked against it per request, and there is no step-up login (ADR-0038 PR 2).",
+                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Not yet: the step-up login that asks the IdP for the stronger method, and the platform-admin policy (ADR-0038).",
                 "links": [
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
@@ -758,6 +758,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/tenants/tenants_test.go",
                     "rel": "reference",
                     "text": "TestSetMFAPolicy"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/mfa_test.go",
+                    "rel": "reference",
+                    "text": "TestMFAEnforcement"
                   }
                 ]
               },
@@ -807,7 +812,7 @@
                     "text": "TestAssess"
                   }
                 ],
-                "remarks": "As IA-2(1): recorded and settable, enforced with ADR-0038 PR 2. Each IdP's claims are verified by an integration test before support is claimed."
+                "remarks": "As IA-2(1). Each IdP's claims are verified by an integration test before support is claimed."
               },
               {
                 "uuid": "be29326b-aa2f-5724-bd6b-14a06044504a",

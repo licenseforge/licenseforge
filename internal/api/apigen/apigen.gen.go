@@ -1010,8 +1010,15 @@ type MfaPolicy string
 
 // MyTenant defines model for MyTenant.
 type MyTenant struct {
-	AllProducts bool   `json:"all_products"`
-	Name        string `json:"name"`
+	// Accessible Whether this session meets the tenant's MFA policy (ADR-0038). If not, the tenant's routes answer 403 mfa_required with a step-up URL.
+	Accessible  bool `json:"accessible"`
+	AllProducts bool `json:"all_products"`
+
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy MfaPolicy `json:"mfa_policy"`
+	Name      string    `json:"name"`
 
 	// ProductIds The scope when all_products is false; empty otherwise.
 	ProductIds []string   `json:"product_ids"`

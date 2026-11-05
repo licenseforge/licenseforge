@@ -1300,6 +1300,9 @@ export interface components {
         MyTenant: {
             /** @description Usable as {tenant} in paths. */
             tenant_id: string;
+            mfa_policy: components["schemas"]["MfaPolicy"];
+            /** @description Whether this session meets the tenant's MFA policy (ADR-0038). If not, the tenant's routes answer 403 mfa_required with a step-up URL. */
+            accessible: boolean;
             /** @description The dashboard's /t/{slug}/. */
             slug: string;
             name: string;
