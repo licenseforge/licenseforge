@@ -25,8 +25,8 @@ import (
 
 // Env is the database created for one test binary.
 type Env struct {
-	Name                                                    string // database name
-	AdminURL, OwnerURL, TenantURL, PlatformURL, IdentityURL string
+	Name                                                                  string // database name
+	AdminURL, OwnerURL, TenantURL, PlatformURL, IdentityURL, RetentionURL string
 }
 
 var (
@@ -112,12 +112,13 @@ func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error)
 		BEGIN CREATE ROLE licenseforge_app NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
 		BEGIN CREATE ROLE licenseforge_platform NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
 		BEGIN CREATE ROLE licenseforge_identity NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
+		BEGIN CREATE ROLE licenseforge_retention NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END;
 	END $$`); err != nil {
 		return err
 	}
 	s := Suffix()
 	env.Name = "lf_test_" + s
-	owner, api, adm, idn := "lf_own_"+s, "lf_api_"+s, "lf_adm_"+s, "lf_idn_"+s
+	owner, api, adm, idn, ret := "lf_own_"+s, "lf_api_"+s, "lf_adm_"+s, "lf_idn_"+s, "lf_ret_"+s
 	// The database goes first (roles holding privileges on a live database
 	// can't be dropped); the owner role goes last. Cleanups added by tests run
 	// in between (Main).
@@ -126,16 +127,18 @@ func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error)
 		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, api),
 		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, adm),
 		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, idn),
+		fmt.Sprintf(`DROP ROLE IF EXISTS %s`, ret),
 	)
 	if err := AdminExec(admin,
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test'`, owner),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_app`, api),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_platform`, adm),
 		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_identity`, idn),
+		fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD 'test' IN ROLE licenseforge_retention`, ret),
 		fmt.Sprintf(`CREATE DATABASE %s OWNER %s`, env.Name, owner),
 		fmt.Sprintf(`REVOKE CONNECT ON DATABASE %s FROM PUBLIC`, env.Name),
 		fmt.Sprintf(`REVOKE TEMPORARY ON DATABASE %s FROM PUBLIC`, env.Name),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s, %s, %s, %s`, env.Name, owner, api, adm, idn),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s, %s, %s, %s, %s`, env.Name, owner, api, adm, idn, ret),
 	); err != nil {
 		return err
 	}
@@ -143,5 +146,6 @@ func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error)
 	env.TenantURL = UserURL(env.AdminURL, api, env.Name)
 	env.PlatformURL = UserURL(env.AdminURL, adm, env.Name)
 	env.IdentityURL = UserURL(env.AdminURL, idn, env.Name)
+	env.RetentionURL = UserURL(env.AdminURL, ret, env.Name)
 	return migrate(context.Background(), env.OwnerURL)
 }

@@ -375,10 +375,19 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,
+			"retention_read":                 `SELECT licenseforge_retention true`,
 			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
 		},
+		"audit_anchors": { // ADR-0036: insert-only, by the retention login
+			"retention_read":   `SELECT licenseforge_retention true`,
+			"retention_anchor": `INSERT licenseforge_retention ((EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e.seq = audit_anchors.seq) AND (e.hash = audit_anchors.hash) AND (e.occurred_at < (now() - '365 days'::interval))))) AND (EXISTS ( SELECT 1 FROM audit_events e2 WHERE (((e2.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e2.seq > audit_anchors.seq)))) AND (seq > COALESCE(( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_anchors.tenant_id)::text)), (0)::bigint)))`,
+		},
 		"audit_events": {
-			"identity_audit": `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
+			"retention_read":                `SELECT licenseforge_retention true`,
+			"retention_record":              `INSERT licenseforge_retention (((action)::text = 'audit.retention'::text) AND ((actor_type)::text = 'system'::text) AND ((occurred_at >= now()) AND (occurred_at <= clock_timestamp())))`,
+			"retention_delete":              `DELETE licenseforge_retention true`,
+			"retention_floor (restrictive)": `DELETE licenseforge_retention ((occurred_at < (now() - '365 days'::interval)) AND (seq <= ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_events.tenant_id)::text))))`,
+			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
@@ -417,7 +426,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	}
 	// Global tables (no tenant_id), each with its exact policies (ADR-0029).
 	global := map[string]map[string]string{
-		"audit_export_sinks": {"platform_all": "ALL licenseforge_platform true true"}, // ADR-0036
+		"audit_export_sinks": {"platform_all": "ALL licenseforge_platform true true", "retention_read": "SELECT licenseforge_retention true"}, // ADR-0036
 		"sessions": {
 			"new_session (restrictive)": `INSERT licenseforge_identity (((created_at >= (clock_timestamp() - '00:05:00'::interval)) AND (created_at <= (clock_timestamp() + '00:05:00'::interval))) AND ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval))) AND (expires_at <= (clock_timestamp() + '1 day'::interval)) AND (EXISTS ( SELECT 1 FROM users u WHERE (((u.id)::text = (sessions.user_id)::text) AND (u.disabled_at IS NULL)))))`,
 			"seen_now (restrictive)":    `UPDATE licenseforge_identity true ((last_seen_at >= (clock_timestamp() - '00:05:00'::interval)) AND (last_seen_at <= (clock_timestamp() + '00:05:00'::interval)))`,
@@ -546,7 +555,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	if triggers+rules != 0 {
 		t.Errorf("%d triggers and %d rules on public tables: they run with owner rights, review before allowing", triggers, rules)
 	}
-	for _, role := range []string{AppRole, PlatformRole} {
+	for _, role := range []string{AppRole, PlatformRole, IdentityRole, RetentionRole} {
 		var any bool
 		if err := owner.QueryRow(`SELECT has_table_privilege($1, 'schema_migrations', 'SELECT,INSERT,UPDATE,DELETE')`, role).Scan(&any); err != nil {
 			t.Fatal(err)

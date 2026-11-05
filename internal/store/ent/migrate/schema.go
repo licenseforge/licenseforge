@@ -153,6 +153,35 @@ var (
 			},
 		},
 	}
+	// AuditAnchorsColumns holds the columns for the "audit_anchors" table.
+	AuditAnchorsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64},
+		{Name: "hash", Type: field.TypeBytes},
+		{Name: "cut_at", Type: field.TypeTime},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// AuditAnchorsTable holds the schema information for the "audit_anchors" table.
+	AuditAnchorsTable = &schema.Table{
+		Name:       "audit_anchors",
+		Columns:    AuditAnchorsColumns,
+		PrimaryKey: []*schema.Column{AuditAnchorsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "audit_anchors_tenants_audit_anchors",
+				Columns:    []*schema.Column{AuditAnchorsColumns[4]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "auditanchor_tenant_id_seq",
+				Unique:  true,
+				Columns: []*schema.Column{AuditAnchorsColumns[4], AuditAnchorsColumns[1]},
+			},
+		},
+	}
 	// AuditEventsColumns holds the columns for the "audit_events" table.
 	AuditEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -957,6 +986,7 @@ var (
 		APITokensTable,
 		APITokenProductsTable,
 		ActivationsTable,
+		AuditAnchorsTable,
 		AuditEventsTable,
 		AuditExportCursorsTable,
 		AuditExportSinksTable,
@@ -1008,6 +1038,13 @@ func init() {
 		"activations_seen_order":     "last_seen_at >= first_seen_at",
 		"activations_source":         "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
 		"activations_source_binding": "((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)",
+	}
+	AuditAnchorsTable.ForeignKeys[0].RefTable = TenantsTable
+	AuditAnchorsTable.Annotation = &entsql.Annotation{}
+	AuditAnchorsTable.Annotation.Checks = map[string]string{
+		"audit_anchors_hash_len":  "length(hash) = 32",
+		"audit_anchors_id_format": "(id)::text ~ '^anc_[a-z2-7]{26}$'::text",
+		"audit_anchors_seq":       "seq > 0",
 	}
 	AuditEventsTable.ForeignKeys[0].RefTable = TenantsTable
 	AuditEventsTable.Annotation = &entsql.Annotation{}
