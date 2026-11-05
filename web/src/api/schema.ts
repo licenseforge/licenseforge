@@ -548,7 +548,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List products in the caller's product scope, newest first.
+         * List products in the caller's product scope, newest first, archived ones included.
          * @description Needs catalog:read; a product-scoped caller sees only its products.
          */
         get: operations["listProducts"];
@@ -587,6 +587,30 @@ export interface paths {
          * @description Needs catalog:write on the product.
          */
         patch: operations["updateProduct"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/products/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
+         * @description Needs catalog:write on the product. Products are archived, never deleted (ADR-0015). An archived product answers 409 invalid_state.
+         */
+        post: operations["archiveProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/tenants/{tenant}/customers": {
@@ -936,6 +960,8 @@ export interface components {
             /** @description The license's product claim. Immutable. */
             slug: string;
             name: string;
+            /** Format: date-time */
+            archived_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -1965,6 +1991,8 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 /** @description Opaque; `next_cursor` of the previous page. */
                 cursor?: components["parameters"]["Cursor"];
+                /** @description Only archived products (true) or only active ones (false). */
+                archived?: boolean;
             };
             header?: never;
             path: {
@@ -2084,6 +2112,35 @@ export interface operations {
             404: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    archiveProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listCustomers: {
