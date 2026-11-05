@@ -17,7 +17,7 @@
 |---|---|
 | Server (API, dashboard, workers) | in progress |
 | `lf` CLI | planned (v0.2) |
-| Go SDK | planned (v0.1) |
+| Go SDK ([`sdk/go`](sdk/go/README.md)) | in progress: offline verification, fingerprints, clock guard, online client |
 | Java / TypeScript SDKs | planned (v0.2) |
 | In-cluster agent | planned (v0.3) |
 | Helm chart | planned (v0.1) |
@@ -25,6 +25,7 @@
 ## Docs
 - [Architecture Decision Records](docs/adr/README.md)
 - [License file format (`lf1`)](spec/license-format.md)
+- [Go SDK](sdk/go/README.md)
 - [Verifying a release](docs/verifying-releases.md): signatures, SBOMs and SLSA provenance of images, chart and binaries
 
 ## Contributing
