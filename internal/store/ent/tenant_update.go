@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
@@ -67,6 +68,47 @@ func (_u *TenantUpdate) SetName(v string) *TenantUpdate {
 func (_u *TenantUpdate) SetNillableName(v *string) *TenantUpdate {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_u *TenantUpdate) SetAuditRetentionDays(v int) *TenantUpdate {
+	_u.mutation.ResetAuditRetentionDays()
+	_u.mutation.SetAuditRetentionDays(v)
+	return _u
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_u *TenantUpdate) SetNillableAuditRetentionDays(v *int) *TenantUpdate {
+	if v != nil {
+		_u.SetAuditRetentionDays(*v)
+	}
+	return _u
+}
+
+// AddAuditRetentionDays adds value to the "audit_retention_days" field.
+func (_u *TenantUpdate) AddAuditRetentionDays(v int) *TenantUpdate {
+	_u.mutation.AddAuditRetentionDays(v)
+	return _u
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (_u *TenantUpdate) ClearAuditRetentionDays() *TenantUpdate {
+	_u.mutation.ClearAuditRetentionDays()
+	return _u
+}
+
+// SetMfaPolicy sets the "mfa_policy" field.
+func (_u *TenantUpdate) SetMfaPolicy(v tenant.MfaPolicy) *TenantUpdate {
+	_u.mutation.SetMfaPolicy(v)
+	return _u
+}
+
+// SetNillableMfaPolicy sets the "mfa_policy" field if the given value is not nil.
+func (_u *TenantUpdate) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantUpdate {
+	if v != nil {
+		_u.SetMfaPolicy(*v)
 	}
 	return _u
 }
@@ -204,6 +246,21 @@ func (_u *TenantUpdate) AddAuditExportCursors(v ...*AuditExportCursor) *TenantUp
 		ids[i] = v[i].ID
 	}
 	return _u.AddAuditExportCursorIDs(ids...)
+}
+
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (_u *TenantUpdate) AddAuditAnchorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddAuditAnchorIDs(ids...)
+	return _u
+}
+
+// AddAuditAnchors adds the "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdate) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditAnchorIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -400,6 +457,27 @@ func (_u *TenantUpdate) RemoveAuditExportCursors(v ...*AuditExportCursor) *Tenan
 	return _u.RemoveAuditExportCursorIDs(ids...)
 }
 
+// ClearAuditAnchors clears all "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdate) ClearAuditAnchors() *TenantUpdate {
+	_u.mutation.ClearAuditAnchors()
+	return _u
+}
+
+// RemoveAuditAnchorIDs removes the "audit_anchors" edge to AuditAnchor entities by IDs.
+func (_u *TenantUpdate) RemoveAuditAnchorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveAuditAnchorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditAnchors removes "audit_anchors" edges to AuditAnchor entities.
+func (_u *TenantUpdate) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditAnchorIDs(ids...)
+}
+
 // Save executes the query and returns the number of nodes affected by the update operation.
 func (_u *TenantUpdate) Save(ctx context.Context) (int, error) {
 	_u.defaults()
@@ -448,6 +526,11 @@ func (_u *TenantUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Tenant.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MfaPolicy(); ok {
+		if err := tenant.MfaPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -471,6 +554,18 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAuditRetentionDays(); ok {
+		_spec.AddField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if _u.mutation.AuditRetentionDaysCleared() {
+		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MfaPolicy(); ok {
+		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -877,6 +972,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditAnchorsIDs(); len(nodes) > 0 && !_u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditAnchorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -927,6 +1067,47 @@ func (_u *TenantUpdateOne) SetName(v string) *TenantUpdateOne {
 func (_u *TenantUpdateOne) SetNillableName(v *string) *TenantUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_u *TenantUpdateOne) SetAuditRetentionDays(v int) *TenantUpdateOne {
+	_u.mutation.ResetAuditRetentionDays()
+	_u.mutation.SetAuditRetentionDays(v)
+	return _u
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_u *TenantUpdateOne) SetNillableAuditRetentionDays(v *int) *TenantUpdateOne {
+	if v != nil {
+		_u.SetAuditRetentionDays(*v)
+	}
+	return _u
+}
+
+// AddAuditRetentionDays adds value to the "audit_retention_days" field.
+func (_u *TenantUpdateOne) AddAuditRetentionDays(v int) *TenantUpdateOne {
+	_u.mutation.AddAuditRetentionDays(v)
+	return _u
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (_u *TenantUpdateOne) ClearAuditRetentionDays() *TenantUpdateOne {
+	_u.mutation.ClearAuditRetentionDays()
+	return _u
+}
+
+// SetMfaPolicy sets the "mfa_policy" field.
+func (_u *TenantUpdateOne) SetMfaPolicy(v tenant.MfaPolicy) *TenantUpdateOne {
+	_u.mutation.SetMfaPolicy(v)
+	return _u
+}
+
+// SetNillableMfaPolicy sets the "mfa_policy" field if the given value is not nil.
+func (_u *TenantUpdateOne) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantUpdateOne {
+	if v != nil {
+		_u.SetMfaPolicy(*v)
 	}
 	return _u
 }
@@ -1064,6 +1245,21 @@ func (_u *TenantUpdateOne) AddAuditExportCursors(v ...*AuditExportCursor) *Tenan
 		ids[i] = v[i].ID
 	}
 	return _u.AddAuditExportCursorIDs(ids...)
+}
+
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (_u *TenantUpdateOne) AddAuditAnchorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddAuditAnchorIDs(ids...)
+	return _u
+}
+
+// AddAuditAnchors adds the "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdateOne) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditAnchorIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -1260,6 +1456,27 @@ func (_u *TenantUpdateOne) RemoveAuditExportCursors(v ...*AuditExportCursor) *Te
 	return _u.RemoveAuditExportCursorIDs(ids...)
 }
 
+// ClearAuditAnchors clears all "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdateOne) ClearAuditAnchors() *TenantUpdateOne {
+	_u.mutation.ClearAuditAnchors()
+	return _u
+}
+
+// RemoveAuditAnchorIDs removes the "audit_anchors" edge to AuditAnchor entities by IDs.
+func (_u *TenantUpdateOne) RemoveAuditAnchorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveAuditAnchorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditAnchors removes "audit_anchors" edges to AuditAnchor entities.
+func (_u *TenantUpdateOne) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditAnchorIDs(ids...)
+}
+
 // Where appends a list predicates to the TenantUpdate builder.
 func (_u *TenantUpdateOne) Where(ps ...predicate.Tenant) *TenantUpdateOne {
 	_u.mutation.Where(ps...)
@@ -1321,6 +1538,11 @@ func (_u *TenantUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Tenant.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MfaPolicy(); ok {
+		if err := tenant.MfaPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1361,6 +1583,18 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAuditRetentionDays(); ok {
+		_spec.AddField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+	}
+	if _u.mutation.AuditRetentionDaysCleared() {
+		_spec.ClearField(tenant.FieldAuditRetentionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MfaPolicy(); ok {
+		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
 	}
 	if _u.mutation.ProductsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1760,6 +1994,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditAnchorsIDs(); len(nodes) > 0 && !_u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditAnchorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

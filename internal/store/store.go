@@ -29,6 +29,9 @@ const (
 	AppRole      = "licenseforge_app"
 	PlatformRole = "licenseforge_platform"
 	IdentityRole = "licenseforge_identity" // the login path: identity tables only
+	// RetentionRole prunes audit chains (ADR-0036): the only role with DELETE
+	// on audit entries, used by `licenseforge audit prune`, never by serving pods.
+	RetentionRole = "licenseforge_retention"
 )
 
 // minPostgres is the oldest supported server (server_version_num, ADR-0028).
@@ -81,6 +84,31 @@ func Open(ctx context.Context, l Logins) (*DB, error) {
 		tenantDB: dbs[0], platformDB: dbs[1], identityDB: dbs[2],
 	}, nil
 }
+
+// Retention is the audit retention job's connection (ADR-0036), separate
+// from DB: serving processes never hold it.
+type Retention struct {
+	client *ent.Client
+	db     *sql.DB
+}
+
+// OpenRetention connects the retention login and refuses one that could
+// bypass row-level security or is a member of any other role, like Open.
+func OpenRetention(ctx context.Context, dsn string) (*Retention, error) {
+	db, err := openChecked(ctx, dsn, RetentionRole)
+	if err != nil {
+		return nil, fmt.Errorf("retention login: %w", err)
+	}
+	return &Retention{client: ent.NewClient(ent.Driver(entsql.OpenDB("postgres", db))), db: db}, nil
+}
+
+// Tx runs fn in a READ COMMITTED transaction of the retention login.
+func (r *Retention) Tx(ctx context.Context, fn func(*ent.Tx) error) error {
+	return inTx(ctx, r.client, nil, fn)
+}
+
+// Close closes the connection pool.
+func (r *Retention) Close() error { return r.db.Close() }
 
 // Ping checks that every pool can reach the database.
 func (d *DB) Ping(ctx context.Context) error {

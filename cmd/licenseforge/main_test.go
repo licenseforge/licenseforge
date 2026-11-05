@@ -110,6 +110,7 @@ const testKeys = "k1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 func setEnv(t *testing.T, tenant, platform, keys string) {
 	t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", "")
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", "")
 	t.Setenv("LICENSEFORGE_DRAIN", "0s")
 	t.Setenv("LICENSEFORGE_DATABASE_URL", tenant)
 	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", platform)
@@ -238,32 +239,35 @@ func TestServe(t *testing.T) {
 
 func TestServeRefuses(t *testing.T) {
 	for name, c := range map[string]struct{ tenant, platform, keys, owner, want string }{
-		"no tenant URL":        {"", env.PlatformURL, testKeys, "", "LICENSEFORGE_DATABASE_URL is not set"},
-		"no platform URL":      {env.TenantURL, "", testKeys, "", "LICENSEFORGE_PLATFORM_DATABASE_URL is not set"},
-		"no keys":              {env.TenantURL, env.PlatformURL, "", "", "LICENSEFORGE_MASTER_KEYS is not set"},
-		"bad keys":             {env.TenantURL, env.PlatformURL, "k1=short", "", "LICENSEFORGE_MASTER_KEYS: secrets:"},
-		"owner as tenant":      {env.OwnerURL, env.PlatformURL, testKeys, "", "unsafe database role"},
-		"owner as platform":    {env.TenantURL, env.OwnerURL, testKeys, "", "unsafe database role"},
-		"pools swapped":        {env.PlatformURL, env.TenantURL, testKeys, "", "unsafe database role"},
-		"owner login in env":   {env.TenantURL, env.PlatformURL, testKeys, env.OwnerURL, "must not hold the owner login"},
-		"negative drain":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_DRAIN"},
-		"no identity URL":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_IDENTITY_DATABASE_URL is not set"},
-		"platform as identity": {env.TenantURL, env.PlatformURL, testKeys, "", "identity pool"},
-		"OIDC without client":  {env.TenantURL, env.PlatformURL, testKeys, "", "client ID"},
-		"syslog without port":  {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_SYSLOG_*"},
-		"syslog cert, no key":  {env.TenantURL, env.PlatformURL, testKeys, "", "both the certificate and the key"},
-		"bad idle timeout":     {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_SESSION_IDLE_TIMEOUT: want a duration"},
-		"idle timeout too low": {env.TenantURL, env.PlatformURL, testKeys, "", "idle timeout 1m0s"},
-		"max age over a day":   {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
-		"max age below idle":   {env.TenantURL, env.PlatformURL, testKeys, "", "below the idle timeout"},
-		"bad banner":           {env.TenantURL, env.PlatformURL, testKeys, "", "login banner"},
-		"bad trusted proxy":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_TRUSTED_PROXIES"},
-		"negative rate limit":  {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_LOGIN"},
-		"bad rate limit":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_MANAGEMENT"},
+		"no tenant URL":          {"", env.PlatformURL, testKeys, "", "LICENSEFORGE_DATABASE_URL is not set"},
+		"no platform URL":        {env.TenantURL, "", testKeys, "", "LICENSEFORGE_PLATFORM_DATABASE_URL is not set"},
+		"no keys":                {env.TenantURL, env.PlatformURL, "", "", "LICENSEFORGE_MASTER_KEYS is not set"},
+		"bad keys":               {env.TenantURL, env.PlatformURL, "k1=short", "", "LICENSEFORGE_MASTER_KEYS: secrets:"},
+		"owner as tenant":        {env.OwnerURL, env.PlatformURL, testKeys, "", "unsafe database role"},
+		"owner as platform":      {env.TenantURL, env.OwnerURL, testKeys, "", "unsafe database role"},
+		"pools swapped":          {env.PlatformURL, env.TenantURL, testKeys, "", "unsafe database role"},
+		"owner login in env":     {env.TenantURL, env.PlatformURL, testKeys, env.OwnerURL, "must not hold the owner login"},
+		"retention login in env": {env.TenantURL, env.PlatformURL, testKeys, "", "must not hold the retention login"},
+		"negative drain":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_DRAIN"},
+		"no identity URL":        {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_IDENTITY_DATABASE_URL is not set"},
+		"platform as identity":   {env.TenantURL, env.PlatformURL, testKeys, "", "identity pool"},
+		"OIDC without client":    {env.TenantURL, env.PlatformURL, testKeys, "", "client ID"},
+		"syslog without port":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_SYSLOG_*"},
+		"syslog cert, no key":    {env.TenantURL, env.PlatformURL, testKeys, "", "both the certificate and the key"},
+		"bad idle timeout":       {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_SESSION_IDLE_TIMEOUT: want a duration"},
+		"idle timeout too low":   {env.TenantURL, env.PlatformURL, testKeys, "", "idle timeout 1m0s"},
+		"max age over a day":     {env.TenantURL, env.PlatformURL, testKeys, "", "max age 25h0m0s"},
+		"max age below idle":     {env.TenantURL, env.PlatformURL, testKeys, "", "below the idle timeout"},
+		"bad banner":             {env.TenantURL, env.PlatformURL, testKeys, "", "login banner"},
+		"bad trusted proxy":      {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_TRUSTED_PROXIES"},
+		"negative rate limit":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_LOGIN"},
+		"bad rate limit":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_MANAGEMENT"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
 		switch name {
+		case "retention login in env":
+			t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.RetentionURL)
 		case "negative drain":
 			t.Setenv("LICENSEFORGE_DRAIN", "-1s")
 		case "no identity URL":
@@ -325,6 +329,30 @@ func TestServeFailsWithMetricsListener(t *testing.T) {
 	defer cancel()
 	if err := serve(ctx, listen(t), mln, quiet); err == nil || !strings.Contains(err.Error(), "metrics listener") {
 		t.Errorf("serve = %v, want a metrics listener error", err)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "")
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", "")
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_RETENTION_DATABASE_URL is not set") {
+		t.Errorf("prune without the login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.PlatformURL)
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "unsafe database role") {
+		t.Errorf("prune with the platform login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.RetentionURL)
+	for _, bad := range []string{"30", "1y", "-400", "36501"} {
+		t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", bad)
+		if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS") {
+			t.Errorf("platform days %q: %v", bad, err)
+		}
+	}
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "400")
+	if err := prune(ctx, quiet); err != nil {
+		t.Errorf("prune = %v", err)
 	}
 }
 

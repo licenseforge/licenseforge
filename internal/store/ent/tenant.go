@@ -25,6 +25,10 @@ type Tenant struct {
 	Slug string `json:"slug,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
+	// AuditRetentionDays holds the value of the "audit_retention_days" field.
+	AuditRetentionDays *int `json:"audit_retention_days,omitempty"`
+	// MfaPolicy holds the value of the "mfa_policy" field.
+	MfaPolicy tenant.MfaPolicy `json:"mfa_policy,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the TenantQuery when eager-loading is set.
 	Edges        TenantEdges `json:"edges"`
@@ -51,9 +55,11 @@ type TenantEdges struct {
 	IdempotencyKeys []*IdempotencyKey `json:"idempotency_keys,omitempty"`
 	// AuditExportCursors holds the value of the audit_export_cursors edge.
 	AuditExportCursors []*AuditExportCursor `json:"audit_export_cursors,omitempty"`
+	// AuditAnchors holds the value of the audit_anchors edge.
+	AuditAnchors []*AuditAnchor `json:"audit_anchors,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [9]bool
+	loadedTypes [10]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -137,12 +143,23 @@ func (e TenantEdges) AuditExportCursorsOrErr() ([]*AuditExportCursor, error) {
 	return nil, &NotLoadedError{edge: "audit_export_cursors"}
 }
 
+// AuditAnchorsOrErr returns the AuditAnchors value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) AuditAnchorsOrErr() ([]*AuditAnchor, error) {
+	if e.loadedTypes[9] {
+		return e.AuditAnchors, nil
+	}
+	return nil, &NotLoadedError{edge: "audit_anchors"}
+}
+
 // scanValues returns the types for scanning values from sql.Rows.
 func (*Tenant) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case tenant.FieldID, tenant.FieldSlug, tenant.FieldName:
+		case tenant.FieldAuditRetentionDays:
+			values[i] = new(sql.NullInt64)
+		case tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy:
 			values[i] = new(sql.NullString)
 		case tenant.FieldCreatedAt, tenant.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -190,6 +207,19 @@ func (_m *Tenant) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field name", values[i])
 			} else if value.Valid {
 				_m.Name = value.String
+			}
+		case tenant.FieldAuditRetentionDays:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field audit_retention_days", values[i])
+			} else if value.Valid {
+				_m.AuditRetentionDays = new(int)
+				*_m.AuditRetentionDays = int(value.Int64)
+			}
+		case tenant.FieldMfaPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field mfa_policy", values[i])
+			} else if value.Valid {
+				_m.MfaPolicy = tenant.MfaPolicy(value.String)
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -249,6 +279,11 @@ func (_m *Tenant) QueryAuditExportCursors() *AuditExportCursorQuery {
 	return NewTenantClient(_m.config).QueryAuditExportCursors(_m)
 }
 
+// QueryAuditAnchors queries the "audit_anchors" edge of the Tenant entity.
+func (_m *Tenant) QueryAuditAnchors() *AuditAnchorQuery {
+	return NewTenantClient(_m.config).QueryAuditAnchors(_m)
+}
+
 // Update returns a builder for updating this Tenant.
 // Note that you need to call Tenant.Unwrap() before calling this method if this Tenant
 // was returned from a transaction, and the transaction was committed or rolled back.
@@ -283,6 +318,14 @@ func (_m *Tenant) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
+	builder.WriteString(", ")
+	if v := _m.AuditRetentionDays; v != nil {
+		builder.WriteString("audit_retention_days=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("mfa_policy=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MfaPolicy))
 	builder.WriteByte(')')
 	return builder.String()
 }

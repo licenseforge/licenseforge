@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"licenseforge.io/licenseforge/internal/authz"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +21,14 @@ func TestSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie, err := s.NewSession(ctx, u.ID)
+	cookie, err := s.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cookie) != cookieLen {
 		t.Errorf("cookie length %d", len(cookie))
 	}
-	got, err := s.Session(ctx, cookie)
+	got, _, err := s.Session(ctx, cookie)
 	if err != nil || got.ID != u.ID {
 		t.Fatalf("Session = %v, %v", got, err)
 	}
@@ -51,14 +52,14 @@ func TestSessions(t *testing.T) {
 		return ago
 	}
 	age(`UPDATE sessions SET last_seen_at = now() - interval '30 minutes'`)
-	if _, err := s.Session(ctx, cookie); err != nil {
+	if _, _, err := s.Session(ctx, cookie); err != nil {
 		t.Fatal(err)
 	}
 	if ago := seen(); ago > 5 {
 		t.Errorf("activity not recorded: last seen %vs ago", ago)
 	}
 	age(`UPDATE sessions SET last_seen_at = now() - interval '30 seconds'`)
-	if _, err := s.Session(ctx, cookie); err != nil {
+	if _, _, err := s.Session(ctx, cookie); err != nil {
 		t.Fatal(err)
 	}
 	if ago := seen(); ago < 25 {
@@ -66,51 +67,51 @@ func TestSessions(t *testing.T) {
 	}
 	// Activity keeps it alive; idle too long ends it.
 	age(`UPDATE sessions SET last_seen_at = now() - interval '59 minutes'`)
-	if _, err := s.Session(ctx, cookie); err != nil {
+	if _, _, err := s.Session(ctx, cookie); err != nil {
 		t.Errorf("active session refused: %v", err)
 	}
 	age(`UPDATE sessions SET last_seen_at = now() - interval '61 minutes'`)
-	if _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
+	if _, _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
 		t.Errorf("idle session: %v", err)
 	}
 	// Absolute expiry.
 	age(`UPDATE sessions SET last_seen_at = now(), created_at = now() - interval '13 hours', expires_at = now() - interval '1 hour'`)
-	if _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
+	if _, _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
 		t.Errorf("expired session: %v", err)
 	}
 	// Unknown and malformed cookies.
 	for _, c := range []string{"", "short", strings.Repeat("a", cookieLen)} {
-		if _, err := s.Session(ctx, c); !errors.Is(err, ErrNoSession) {
+		if _, _, err := s.Session(ctx, c); !errors.Is(err, ErrNoSession) {
 			t.Errorf("cookie %q: %v", c, err)
 		}
 	}
 	// Logout ends it.
-	cookie2, err := s.NewSession(ctx, u.ID)
+	cookie2, err := s.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.EndSession(ctx, cookie2); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Session(ctx, cookie2); !errors.Is(err, ErrNoSession) {
+	if _, _, err := s.Session(ctx, cookie2); !errors.Is(err, ErrNoSession) {
 		t.Errorf("after logout: %v", err)
 	}
 	// Suspension ends every session at once and refuses new ones.
-	cookie3, err := s.NewSession(ctx, u.ID)
+	cookie3, err := s.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Session(ctx, cookie3); !errors.Is(err, ErrNoSession) {
+	if _, _, err := s.Session(ctx, cookie3); !errors.Is(err, ErrNoSession) {
 		t.Errorf("session of a suspended user: %v", err)
 	}
 	var n int
 	if err := owner.QueryRow(`SELECT count(*) FROM sessions WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("sessions left after suspension: %d %v", n, err)
 	}
-	if _, err := s.NewSession(ctx, u.ID); !errors.Is(err, ErrDisabled) {
+	if _, err := s.NewSession(ctx, u.ID, none); !errors.Is(err, ErrDisabled) {
 		t.Errorf("new session for a suspended user: %v", err)
 	}
 	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error { return nil }); err == nil {
@@ -127,7 +128,7 @@ func TestSessionOfUserDisabledDirectly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie, err := s.NewSession(ctx, u.ID)
+	cookie, err := s.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestSessionOfUserDisabledDirectly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
+	if _, _, err := s.Session(ctx, cookie); !errors.Is(err, ErrNoSession) {
 		t.Errorf("session of a disabled user: %v", err)
 	}
 }
@@ -212,7 +213,7 @@ func TestNewSessionDuringDisable(t *testing.T) {
 	if err := d.DisableUser(ctx, u.ID, func(*ent.Tx) error {
 		// users is updated and sessions deleted, not yet committed: NewSession
 		// must wait for this transaction (proven by its lock wait).
-		go func() { _, err := s.NewSession(ctx, u.ID); done <- err }()
+		go func() { _, err := s.NewSession(ctx, u.ID, none); done <- err }()
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 			var waiting int
 			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity
@@ -299,7 +300,7 @@ func TestConfiguredSessionTimeouts(t *testing.T) {
 		}
 	}
 
-	c, err := def.NewSession(ctx, u.ID)
+	c, err := def.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,13 +308,13 @@ func TestConfiguredSessionTimeouts(t *testing.T) {
 		t.Errorf("default lifetime %vs, SessionMaxAge %v", got, def.SessionMaxAge())
 	}
 	idle(c, "11 minutes")
-	if _, err := def.Session(ctx, c); err != nil {
+	if _, _, err := def.Session(ctx, c); err != nil {
 		t.Errorf("default idle timeout ended a session idle 11 minutes: %v", err)
 	}
 
 	short := def
 	short.IdleTimeout, short.MaxAge = 10*time.Minute, 24*time.Hour // the maximum the database allows
-	c, err = short.NewSession(ctx, u.ID)
+	c, err = short.NewSession(ctx, u.ID, none)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,11 +322,13 @@ func TestConfiguredSessionTimeouts(t *testing.T) {
 		t.Errorf("configured lifetime %vs, SessionMaxAge %v", got, short.SessionMaxAge())
 	}
 	idle(c, "9 minutes")
-	if _, err := short.Session(ctx, c); err != nil {
+	if _, _, err := short.Session(ctx, c); err != nil {
 		t.Errorf("session idle 9 of 10 minutes: %v", err)
 	}
 	idle(c, "11 minutes")
-	if _, err := short.Session(ctx, c); !errors.Is(err, ErrNoSession) {
+	if _, _, err := short.Session(ctx, c); !errors.Is(err, ErrNoSession) {
 		t.Errorf("session idle 11 of 10 minutes: %v", err)
 	}
 }
+
+var none = SessionAuth{Assurance: authz.AssuranceNone}

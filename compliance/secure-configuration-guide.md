@@ -38,7 +38,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 ## Database logins
 
-Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029). There are three group roles and four logins, and none is shared. Replace the script's placeholder passwords (`change-me-*`) before running it:
+Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029, ADR-0036). There are four group roles and five logins, and none is shared. Replace the script's placeholder passwords (`change-me-*`) before running it:
 
 | Login | Group | Used by | Can |
 |---|---|---|---|
@@ -46,10 +46,13 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 | `licenseforge_api` | `licenseforge_app` | Every tenant request | Only rows of the tenant set for the transaction |
 | `licenseforge_admin` | `licenseforge_platform` | Platform-admin work | All tenants, through explicit grants |
 | `licenseforge_login` | `licenseforge_identity` | Login, sessions, invitation acceptance | Identity tables only; no licensing data |
+| `licenseforge_pruner` | `licenseforge_retention` | Audit retention only (ADR-0036) | The only login that deletes audit entries. The database lets it delete only entries at least 365 days old and at or below its chain's newest anchor, and lets it anchor only on a real entry that is at least 365 days old and not the chain's last. That the deleted entries form a prefix is checked by the job's count check (a mismatch rolls the batch back) and detected by Verify and the SIEM's continuity check if bypassed, not enforced by the database. No other table. Upgrading: create the group before `licenseforge migrate` |
+
+**Upgrading to audit retention (ADR-0036).** Before running `licenseforge migrate` (the Helm migration Job) on an install that predates it, create the group role as a database admin: `CREATE ROLE licenseforge_retention NOLOGIN;`, then the pruner login (`deploy/database-setup.sql`). The migration stops with that message otherwise. Retention runs as `licenseforge audit prune` (the chart's `auditRetention` CronJob) with `LICENSEFORGE_RETENTION_DATABASE_URL`; `LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS` (365 to 36,500, unset keeps everything) sets the platform chain's retention, and tenant owners set their own chain's (365 to 36,500 days, audited). Every cut is recorded in the chain as an `audit.retention` entry with the retention period in force (AU-11), and nothing a registered SIEM sink hasn't received is pruned.
 
 **Why the server must never hold the owner login.** Tenant isolation is enforced by forced row-level security, and RLS is a backstop only if the serving process can't turn it off. The owner sees every row, can alter or drop policies and switch RLS off, and can rewrite the audit chain. A serving pod with the owner login would turn any bug or compromise in the internet-facing process into full access to every tenant. So:
 
-- the server exits if `LICENSEFORGE_OWNER_DATABASE_URL` is set, and the chart gives the owner URL only to the migration Job, from its own Secret;
+- the server exits if `LICENSEFORGE_OWNER_DATABASE_URL` or `LICENSEFORGE_RETENTION_DATABASE_URL` is set, and the chart gives the owner URL only to the migration Job, from its own Secret;
 - `store.Open` refuses a serving login that has SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION (directly or through its group), belongs to any role other than its own group, owns the database, schema or any table, can create temporary tables or objects, switched role in the connection string, or has `app.tenant_id` preset. Don't "fix" a refusal by granting more.
 
 Also:
@@ -88,7 +91,9 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 
 - Register a client for the Authorization Code flow with PKCE (S256), redirect URI `https://<host>/auth/callback`, scopes `openid email profile`. A confidential client (with `LICENSEFORGE_OIDC_CLIENT_SECRET`) is preferred; a public client works with PKCE alone.
 - The server verifies the ID token's signature, issuer, audience, `azp`, expiry and nonce, and bounds every IdP call to 10 s.
-- **Enforce MFA in the IdP**, phishing-resistant where required (passkeys, PIV/CAC). Per-tenant enforcement through `acr`/`amr` is *planned* (Roadmap v0.1).
+- **Enforce MFA in the IdP**, phishing-resistant where required (passkeys, PIV/CAC). LicenseForge records what the IdP asserts in the ID token (`amr`, `acr`, Entra's `acrs`) as each session's assurance, and owners can set a per-tenant MFA policy (ADR-0038); per-request enforcement follows in ADR-0038's second step. **Enforcement is only as strong as the IdP's assertions**: configure the IdP to emit them.
+  - Defaults (RFC 8176): `amr` `hwk`, `sc` or `pop` is phishing-resistant; `mfa`, `otp` or `swk` is MFA; `pwd`, `sms` and `tel` never count. Change the sets with `LICENSEFORGE_OIDC_MFA_AMR` and `LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR`, and add IdP-specific `acr` values with `LICENSEFORGE_OIDC_MFA_ACR` and `LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR` (comma lists, checked at start; `pwd`, `sms`, `tel` are refused in any case; `none` alone in an AMR variable disables `amr` counting for that level).
+  - Okta: `acr` `phr` / `phrh` for phishing-resistant. Entra ID: a Conditional Access authentication context that requires the *Phishing-resistant MFA* strength, returned in `acrs`, the signal of record: set `LICENSEFORGE_OIDC_MFA_AMR=none` and `LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR=none` (`none` alone disables `amr` counting) and list the contexts in the `_ACR` variables, so only configured `acrs` values count. Keycloak: the "Authentication Method Reference" mapper with a reference value per authenticator (`hwk` for WebAuthn, `sc` for X.509/PIV), or LoA levels as `acr`. Support for each IdP is claimed only after an integration test.
 - An email counts only when the IdP sends `email_verified: true`, and invitations are accepted by verified email. A verified email is only as trustworthy as its IdP, so configure only IdPs that verify emails.
 - Sessions last 1 hour idle (activity is recorded at most once a minute) and 12 hours at most by default; set `LICENSEFORGE_SESSION_IDLE_TIMEOUT` and `LICENSEFORGE_SESSION_MAX_AGE` to your policy (for example `15m` idle). Changing them needs a restart.
 - Set `LICENSEFORGE_LOGIN_BANNER` where a system use notification is required (AC-8). Each completed login logs `login banner acknowledged` with the user and banner ID.

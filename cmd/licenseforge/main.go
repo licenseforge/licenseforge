@@ -8,6 +8,8 @@
 //	LICENSEFORGE_PLATFORM_DATABASE_URL  platform pool login (licenseforge_admin)
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
+//	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
+//	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, 365 to 36,500 days; unset = keep everything
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
@@ -31,9 +33,13 @@
 //	LICENSEFORGE_RATE_LIMIT_ACTIVATION  requests per client address per minute, per replica, on the activation API; default 1200, 0 = off
 //	LICENSEFORGE_RATE_LIMIT_MANAGEMENT  the same for the rest of /api/v1 and /auth/ (except login); default 600, 0 = off
 //	LICENSEFORGE_RATE_LIMIT_LOGIN       the same for /auth/login and /auth/callback; default 60, 0 = off
+//	LICENSEFORGE_OIDC_MFA_AMR                amr values that count as MFA (comma list; default mfa,otp,swk; ADR-0038)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR amr values that count as phishing-resistant MFA (default hwk,sc,pop)
+//	LICENSEFORGE_OIDC_MFA_ACR                acr/acrs values that count as MFA (default none)
+//	LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR acr/acrs values that count as phishing-resistant (default none; e.g. phr,phrh on Okta)
 //
-// The serving process refuses to start if the owner login is in its
-// environment: serving pods must never hold it (ADR-0009).
+// The serving process refuses to start if the owner or the retention login is
+// in its environment: serving pods must never hold them (ADR-0009, ADR-0036).
 package main
 
 import (
@@ -47,6 +53,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -55,6 +62,8 @@ import (
 	"licenseforge.io/licenseforge/internal/api"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/auditexport"
+	"licenseforge.io/licenseforge/internal/catalog"
+	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -63,9 +72,11 @@ import (
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/ratelimit"
+	"licenseforge.io/licenseforge/internal/retention"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
 )
@@ -78,7 +89,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]   run the server\n       licenseforge migrate   apply database migrations\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -93,12 +104,9 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
-	if flag.NArg() > 1 {
-		flag.Usage()
-		os.Exit(2)
-	}
+	cmd := strings.Join(flag.Args(), " ")
 	var err error
-	switch flag.Arg(0) {
+	switch cmd {
 	case "":
 		var ln, mln net.Listener
 		if ln, err = net.Listen("tcp", *addr); err == nil {
@@ -110,6 +118,8 @@ func main() {
 		}
 	case "migrate":
 		err = migrate(ctx, log)
+	case "audit prune":
+		err = prune(ctx, log)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -118,6 +128,35 @@ func main() {
 		log.Error("stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// prune applies audit retention (ADR-0036) with the retention login:
+// tenants' audit_retention_days, and LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
+// (unset: keep everything) for the platform chain. Run it as the CronJob.
+func prune(ctx context.Context, log *slog.Logger) error {
+	dsn, err := mustEnv("LICENSEFORGE_RETENTION_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	platformDays := 0
+	if v := os.Getenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS"); v != "" {
+		if platformDays, err = strconv.Atoi(v); err != nil || platformDays < retention.MinDays || platformDays > retention.MaxDays {
+			return fmt.Errorf("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS: want whole days, %d to %d; got %q", retention.MinDays, retention.MaxDays, v)
+		}
+	}
+	r, err := store.OpenRetention(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+	cuts, err := retention.Prune(ctx, r, platformDays)
+	var deleted int64
+	for _, c := range cuts {
+		deleted += c.Deleted
+		log.Info("audit retention cut", "chain", c.TenantID, "through_seq", c.Through, "deleted", c.Deleted)
+	}
+	log.Info("audit retention done", "cuts", len(cuts), "deleted", deleted, "platform_days", platformDays)
+	return err
 }
 
 func migrate(ctx context.Context, log *slog.Logger) error {
@@ -138,6 +177,9 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	defer func() { _ = ln.Close(); _ = mln.Close() }()
 	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
 		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
+	}
+	if os.Getenv("LICENSEFORGE_RETENTION_DATABASE_URL") != "" { // ADR-0036: no DELETE on audit entries in serving pods
+		return errors.New("LICENSEFORGE_RETENTION_DATABASE_URL is set: the server must not hold the retention login; use it for `licenseforge audit prune` only")
 	}
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
 	if err != nil || drain < 0 {
@@ -209,6 +251,11 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Fail at start on a malformed policy, not at the first login.
+	assurance, err := identity.AssurancePolicyFromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
 	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -220,6 +267,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
 			// Read only here, at start: a later change needs a restart.
 			BootstrapAdmin: os.Getenv("LICENSEFORGE_BOOTSTRAP_ADMIN"),
+			Assurance:      &assurance,
 		}, ids, log)
 		cancel()
 		if err != nil {
@@ -233,8 +281,9 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// API tokens need only the tenant pool (hashes, no keyring); license keys
 	// and stored idempotent responses (which can hold one) are encrypted, and
 	// the activation API decrypts license keys and signs leases.
-	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Identity: ids,
+	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
+		Products: catalog.Products{DB: db}, Customers: customers.Service{DB: db},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},
 		Sessions:    sessions, APIHost: os.Getenv("LICENSEFORGE_API_HOST"), Log: log}))
 	if !web.Embedded {

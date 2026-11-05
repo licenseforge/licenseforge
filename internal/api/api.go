@@ -28,6 +28,8 @@ import (
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/catalog"
+	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -35,6 +37,7 @@ import (
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -54,8 +57,13 @@ type Config struct {
 	Tokens   apitokens.Service
 	Members  members.Service
 	Licenses licenses.Service
+	// The catalog (slice 1: products) and customers.
+	Products  catalog.Products
+	Customers customers.Service
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
+	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
+	Tenants tenants.Service
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
 	Identity    identity.Service
@@ -187,7 +195,7 @@ func (s *server) token(r *http.Request, auth []string) (authz.Principal, *proble
 }
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principal, *problem) {
-	u, code, err := s.Sessions.Check(w, r)
+	u, level, code, err := s.Sessions.Check(w, r)
 	switch code {
 	case 0:
 	case http.StatusUnauthorized:
@@ -202,7 +210,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		if userRoutes[r.URL.EscapedPath()] {
 			// A principal with no tenant: authz denies every permission to
 			// it; only user routes, which act for the user, accept it.
-			return authz.Principal{Kind: authz.User, ID: u.ID}, nil
+			return authz.Principal{Kind: authz.User, ID: u.ID, Assurance: level}, nil
 		}
 		return authz.Principal{}, errNotFound
 	}
@@ -218,7 +226,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
-	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope}, nil
+	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: tenantID, Role: g.Role, Scope: g.Scope, Assurance: level}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -263,6 +271,9 @@ var queryParams = map[string][]string{
 	"ListMembers":     {"limit", "cursor"},
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
+	"ListProducts":    {"limit", "cursor"},
+	"ListCustomers":   {"limit", "cursor"},
+	"ListActivations": {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
 }
@@ -440,8 +451,20 @@ func mapErr(err error) *problem {
 	var invalidMember *members.InvalidError
 	var invalidLicense *licenses.InvalidError
 	var invalidInvitation *invitations.InvalidError
+	var invalidCatalog *catalog.InvalidError
+	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, customers.ErrNotFound), errors.Is(err, activations.ErrNotFound):
+		p = errNotFound
+	case errors.As(err, &invalidCatalog) && invalidCatalog.Conflict:
+		p = &problem{status: http.StatusConflict, code: "conflict", detail: "A value is already taken.", fields: []fieldError{{invalidCatalog.Field, invalidCatalog.Message}}}
+	case errors.As(err, &invalidCatalog):
+		p = invalid(fieldError{invalidCatalog.Field, invalidCatalog.Message})
+	case errors.As(err, &invalidCustomer):
+		p = invalid(fieldError{invalidCustomer.Field, invalidCustomer.Message})
+	case errors.Is(err, customers.ErrState):
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The customer is already archived."}
 	case activationProblem(err) != nil:
 		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):
@@ -458,6 +481,10 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{invalidInvitation.Field, invalidInvitation.Message})
 	case errors.Is(err, store.ErrInvitation): // one answer for every reason (no oracle)
 		p = invalid(fieldError{"/token", "invalid, expired, revoked or used, or not for this account"})
+	case errors.Is(err, tenants.ErrPolicyUnmet):
+		p = &problem{status: http.StatusConflict, code: "mfa_policy_unmet", detail: "Your session doesn't meet this MFA policy: sign in with the stronger method first, so you can't lock yourself out.", err: err}
+	case errors.Is(err, tenants.ErrInvalid):
+		p = invalid(fieldError{"/mfa_policy", "must be none, mfa or phishing_resistant"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
 	case errors.Is(err, licenses.ErrState):

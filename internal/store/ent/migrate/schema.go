@@ -153,6 +153,35 @@ var (
 			},
 		},
 	}
+	// AuditAnchorsColumns holds the columns for the "audit_anchors" table.
+	AuditAnchorsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64},
+		{Name: "hash", Type: field.TypeBytes},
+		{Name: "cut_at", Type: field.TypeTime},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// AuditAnchorsTable holds the schema information for the "audit_anchors" table.
+	AuditAnchorsTable = &schema.Table{
+		Name:       "audit_anchors",
+		Columns:    AuditAnchorsColumns,
+		PrimaryKey: []*schema.Column{AuditAnchorsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "audit_anchors_tenants_audit_anchors",
+				Columns:    []*schema.Column{AuditAnchorsColumns[4]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "auditanchor_tenant_id_seq",
+				Unique:  true,
+				Columns: []*schema.Column{AuditAnchorsColumns[4], AuditAnchorsColumns[1]},
+			},
+		},
+	}
 	// AuditEventsColumns holds the columns for the "audit_events" table.
 	AuditEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
@@ -837,6 +866,11 @@ var (
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "expires_at", Type: field.TypeTime},
 		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "assurance", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
+		{Name: "amr", Type: field.TypeString, Size: 1040, Default: ""},
+		{Name: "acr", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "acrs", Type: field.TypeString, Size: 4095, Default: ""},
+		{Name: "auth_time", Type: field.TypeTime, Nullable: true},
 		{Name: "user_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// SessionsTable holds the schema information for the "sessions" table.
@@ -847,7 +881,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "sessions_users_sessions",
-				Columns:    []*schema.Column{SessionsColumns[5]},
+				Columns:    []*schema.Column{SessionsColumns[10]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
@@ -861,7 +895,7 @@ var (
 			{
 				Name:    "session_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{SessionsColumns[5]},
+				Columns: []*schema.Column{SessionsColumns[10]},
 			},
 		},
 	}
@@ -919,6 +953,8 @@ var (
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "slug", Type: field.TypeString, Unique: true, Size: 63, SchemaType: map[string]string{"postgres": "varchar(63)"}},
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "audit_retention_days", Type: field.TypeInt, Nullable: true},
+		{Name: "mfa_policy", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
 	}
 	// TenantsTable holds the schema information for the "tenants" table.
 	TenantsTable = &schema.Table{
@@ -957,6 +993,7 @@ var (
 		APITokensTable,
 		APITokenProductsTable,
 		ActivationsTable,
+		AuditAnchorsTable,
 		AuditEventsTable,
 		AuditExportCursorsTable,
 		AuditExportSinksTable,
@@ -1008,6 +1045,13 @@ func init() {
 		"activations_seen_order":     "last_seen_at >= first_seen_at",
 		"activations_source":         "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
 		"activations_source_binding": "((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)",
+	}
+	AuditAnchorsTable.ForeignKeys[0].RefTable = TenantsTable
+	AuditAnchorsTable.Annotation = &entsql.Annotation{}
+	AuditAnchorsTable.Annotation.Checks = map[string]string{
+		"audit_anchors_hash_len":  "length(hash) = 32",
+		"audit_anchors_id_format": "(id)::text ~ '^anc_[a-z2-7]{26}$'::text",
+		"audit_anchors_seq":       "seq > 0",
 	}
 	AuditEventsTable.ForeignKeys[0].RefTable = TenantsTable
 	AuditEventsTable.Annotation = &entsql.Annotation{}
@@ -1180,6 +1224,10 @@ func init() {
 	SessionsTable.ForeignKeys[0].RefTable = UsersTable
 	SessionsTable.Annotation = &entsql.Annotation{}
 	SessionsTable.Annotation.Checks = map[string]string{
+		"sessions_acr":       "acr ~ '^[!-~]{1,255}$'",
+		"sessions_acrs":      "acrs ~ '^$|^[!-~]{1,255}( [!-~]{1,255}){0,15}$'",
+		"sessions_amr":       "amr ~ '^$|^[A-Za-z0-9_.:-]{1,64}( [A-Za-z0-9_.:-]{1,64}){0,15}$'",
+		"sessions_assurance": "(assurance)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
 		"sessions_expiry":    "expires_at > created_at AND expires_at <= (created_at + '1 day'::interval)",
 		"sessions_hash_len":  "length(token_hash) = 32",
 		"sessions_id_format": "id ~ '^ses_[a-z2-7]{26}$'",
@@ -1198,9 +1246,11 @@ func init() {
 	}
 	TenantsTable.Annotation = &entsql.Annotation{}
 	TenantsTable.Annotation.Checks = map[string]string{
-		"tenants_id_format":      "id ~ '^tnt_[a-z2-7]{26}$'",
-		"tenants_name_not_blank": "btrim(name) <> ''",
-		"tenants_slug_format":    "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"tenants_audit_retention": "audit_retention_days IS NULL OR (audit_retention_days >= 365 AND audit_retention_days <= 36500)",
+		"tenants_id_format":       "id ~ '^tnt_[a-z2-7]{26}$'",
+		"tenants_mfa_policy":      "(mfa_policy)::text = ANY (ARRAY['none'::text, 'mfa'::text, 'phishing_resistant'::text])",
+		"tenants_name_not_blank":  "btrim(name) <> ''",
+		"tenants_slug_format":     "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
 	}
 	UsersTable.Annotation = &entsql.Annotation{}
 	UsersTable.Annotation.Checks = map[string]string{

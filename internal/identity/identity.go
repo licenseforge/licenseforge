@@ -40,6 +40,12 @@ type Claims struct {
 	Email         string
 	EmailVerified bool
 	Name          string
+	// Authentication context (ADR-0038), as the IdP asserted it: amr
+	// (RFC 8176), acr, Entra's acrs, auth_time (zero if absent).
+	AMR      []string
+	ACR      string
+	ACRs     []string
+	AuthTime time.Time
 }
 
 // Service runs on the identity pool. Zero timeouts mean the defaults; set

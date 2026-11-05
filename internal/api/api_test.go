@@ -22,11 +22,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/catalog"
+	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -39,6 +42,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
+	"licenseforge.io/licenseforge/internal/tenants"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -74,8 +78,9 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
+		Products: catalog.Products{DB: d}, Customers: customers.Service{DB: d}, Activations: activations.Service{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
@@ -167,7 +172,13 @@ func header(k, v string) opt { return func(r *http.Request) { r.Header.Set(k, v)
 // session signs user in and sends the cookie and, with csrf, its token.
 func (f *fixture) session(t *testing.T, user string, csrf bool) opt {
 	t.Helper()
-	cookie, err := identity.Service{DB: f.db}.NewSession(context.Background(), user)
+	return f.sessionAt(t, user, csrf, authz.AssuranceNone)
+}
+
+// sessionAt is session for a login that proved assurance a (ADR-0038).
+func (f *fixture) sessionAt(t *testing.T, user string, csrf bool, a authz.Assurance) opt {
+	t.Helper()
+	cookie, err := identity.Service{DB: f.db}.NewSession(context.Background(), user, identity.SessionAuth{Assurance: a})
 	if err != nil {
 		t.Fatal(err)
 	}

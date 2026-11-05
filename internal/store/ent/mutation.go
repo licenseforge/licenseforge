@@ -14,6 +14,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
 	"licenseforge.io/licenseforge/internal/store/ent/apitokenproduct"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportsink"
@@ -49,6 +50,7 @@ const (
 	TypeAPIToken          = "APIToken"
 	TypeAPITokenProduct   = "APITokenProduct"
 	TypeActivation        = "Activation"
+	TypeAuditAnchor       = "AuditAnchor"
 	TypeAuditEvent        = "AuditEvent"
 	TypeAuditExportCursor = "AuditExportCursor"
 	TypeAuditExportSink   = "AuditExportSink"
@@ -2967,6 +2969,590 @@ func (m *ActivationMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown Activation edge %s", name)
+}
+
+// AuditAnchorMutation represents an operation that mutates the AuditAnchor nodes in the graph.
+type AuditAnchorMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *string
+	seq           *int64
+	addseq        *int64
+	hash          *[]byte
+	cut_at        *time.Time
+	clearedFields map[string]struct{}
+	tenant        *string
+	clearedtenant bool
+	done          bool
+	oldValue      func(context.Context) (*AuditAnchor, error)
+	predicates    []predicate.AuditAnchor
+}
+
+var _ ent.Mutation = (*AuditAnchorMutation)(nil)
+
+// auditanchorOption allows management of the mutation configuration using functional options.
+type auditanchorOption func(*AuditAnchorMutation)
+
+// newAuditAnchorMutation creates new mutation for the AuditAnchor entity.
+func newAuditAnchorMutation(c config, op Op, opts ...auditanchorOption) *AuditAnchorMutation {
+	m := &AuditAnchorMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeAuditAnchor,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withAuditAnchorID sets the ID field of the mutation.
+func withAuditAnchorID(id string) auditanchorOption {
+	return func(m *AuditAnchorMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *AuditAnchor
+		)
+		m.oldValue = func(ctx context.Context) (*AuditAnchor, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().AuditAnchor.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withAuditAnchor sets the old AuditAnchor of the mutation.
+func withAuditAnchor(node *AuditAnchor) auditanchorOption {
+	return func(m *AuditAnchorMutation) {
+		m.oldValue = func(context.Context) (*AuditAnchor, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m AuditAnchorMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m AuditAnchorMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of AuditAnchor entities.
+func (m *AuditAnchorMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *AuditAnchorMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *AuditAnchorMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().AuditAnchor.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetTenantID sets the "tenant_id" field.
+func (m *AuditAnchorMutation) SetTenantID(s string) {
+	m.tenant = &s
+}
+
+// TenantID returns the value of the "tenant_id" field in the mutation.
+func (m *AuditAnchorMutation) TenantID() (r string, exists bool) {
+	v := m.tenant
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTenantID returns the old "tenant_id" field's value of the AuditAnchor entity.
+// If the AuditAnchor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditAnchorMutation) OldTenantID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTenantID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTenantID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTenantID: %w", err)
+	}
+	return oldValue.TenantID, nil
+}
+
+// ResetTenantID resets all changes to the "tenant_id" field.
+func (m *AuditAnchorMutation) ResetTenantID() {
+	m.tenant = nil
+}
+
+// SetSeq sets the "seq" field.
+func (m *AuditAnchorMutation) SetSeq(i int64) {
+	m.seq = &i
+	m.addseq = nil
+}
+
+// Seq returns the value of the "seq" field in the mutation.
+func (m *AuditAnchorMutation) Seq() (r int64, exists bool) {
+	v := m.seq
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSeq returns the old "seq" field's value of the AuditAnchor entity.
+// If the AuditAnchor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditAnchorMutation) OldSeq(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSeq is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSeq requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSeq: %w", err)
+	}
+	return oldValue.Seq, nil
+}
+
+// AddSeq adds i to the "seq" field.
+func (m *AuditAnchorMutation) AddSeq(i int64) {
+	if m.addseq != nil {
+		*m.addseq += i
+	} else {
+		m.addseq = &i
+	}
+}
+
+// AddedSeq returns the value that was added to the "seq" field in this mutation.
+func (m *AuditAnchorMutation) AddedSeq() (r int64, exists bool) {
+	v := m.addseq
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSeq resets all changes to the "seq" field.
+func (m *AuditAnchorMutation) ResetSeq() {
+	m.seq = nil
+	m.addseq = nil
+}
+
+// SetHash sets the "hash" field.
+func (m *AuditAnchorMutation) SetHash(b []byte) {
+	m.hash = &b
+}
+
+// Hash returns the value of the "hash" field in the mutation.
+func (m *AuditAnchorMutation) Hash() (r []byte, exists bool) {
+	v := m.hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldHash returns the old "hash" field's value of the AuditAnchor entity.
+// If the AuditAnchor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditAnchorMutation) OldHash(ctx context.Context) (v []byte, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldHash: %w", err)
+	}
+	return oldValue.Hash, nil
+}
+
+// ResetHash resets all changes to the "hash" field.
+func (m *AuditAnchorMutation) ResetHash() {
+	m.hash = nil
+}
+
+// SetCutAt sets the "cut_at" field.
+func (m *AuditAnchorMutation) SetCutAt(t time.Time) {
+	m.cut_at = &t
+}
+
+// CutAt returns the value of the "cut_at" field in the mutation.
+func (m *AuditAnchorMutation) CutAt() (r time.Time, exists bool) {
+	v := m.cut_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCutAt returns the old "cut_at" field's value of the AuditAnchor entity.
+// If the AuditAnchor object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditAnchorMutation) OldCutAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCutAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCutAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCutAt: %w", err)
+	}
+	return oldValue.CutAt, nil
+}
+
+// ResetCutAt resets all changes to the "cut_at" field.
+func (m *AuditAnchorMutation) ResetCutAt() {
+	m.cut_at = nil
+}
+
+// ClearTenant clears the "tenant" edge to the Tenant entity.
+func (m *AuditAnchorMutation) ClearTenant() {
+	m.clearedtenant = true
+	m.clearedFields[auditanchor.FieldTenantID] = struct{}{}
+}
+
+// TenantCleared reports if the "tenant" edge to the Tenant entity was cleared.
+func (m *AuditAnchorMutation) TenantCleared() bool {
+	return m.clearedtenant
+}
+
+// TenantIDs returns the "tenant" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// TenantID instead. It exists only for internal usage by the builders.
+func (m *AuditAnchorMutation) TenantIDs() (ids []string) {
+	if id := m.tenant; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetTenant resets all changes to the "tenant" edge.
+func (m *AuditAnchorMutation) ResetTenant() {
+	m.tenant = nil
+	m.clearedtenant = false
+}
+
+// Where appends a list predicates to the AuditAnchorMutation builder.
+func (m *AuditAnchorMutation) Where(ps ...predicate.AuditAnchor) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the AuditAnchorMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *AuditAnchorMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.AuditAnchor, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *AuditAnchorMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *AuditAnchorMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (AuditAnchor).
+func (m *AuditAnchorMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *AuditAnchorMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m.tenant != nil {
+		fields = append(fields, auditanchor.FieldTenantID)
+	}
+	if m.seq != nil {
+		fields = append(fields, auditanchor.FieldSeq)
+	}
+	if m.hash != nil {
+		fields = append(fields, auditanchor.FieldHash)
+	}
+	if m.cut_at != nil {
+		fields = append(fields, auditanchor.FieldCutAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *AuditAnchorMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case auditanchor.FieldTenantID:
+		return m.TenantID()
+	case auditanchor.FieldSeq:
+		return m.Seq()
+	case auditanchor.FieldHash:
+		return m.Hash()
+	case auditanchor.FieldCutAt:
+		return m.CutAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *AuditAnchorMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case auditanchor.FieldTenantID:
+		return m.OldTenantID(ctx)
+	case auditanchor.FieldSeq:
+		return m.OldSeq(ctx)
+	case auditanchor.FieldHash:
+		return m.OldHash(ctx)
+	case auditanchor.FieldCutAt:
+		return m.OldCutAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown AuditAnchor field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditAnchorMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case auditanchor.FieldTenantID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTenantID(v)
+		return nil
+	case auditanchor.FieldSeq:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSeq(v)
+		return nil
+	case auditanchor.FieldHash:
+		v, ok := value.([]byte)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetHash(v)
+		return nil
+	case auditanchor.FieldCutAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCutAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AuditAnchor field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *AuditAnchorMutation) AddedFields() []string {
+	var fields []string
+	if m.addseq != nil {
+		fields = append(fields, auditanchor.FieldSeq)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *AuditAnchorMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case auditanchor.FieldSeq:
+		return m.AddedSeq()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AuditAnchorMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case auditanchor.FieldSeq:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSeq(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AuditAnchor numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *AuditAnchorMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *AuditAnchorMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *AuditAnchorMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown AuditAnchor nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *AuditAnchorMutation) ResetField(name string) error {
+	switch name {
+	case auditanchor.FieldTenantID:
+		m.ResetTenantID()
+		return nil
+	case auditanchor.FieldSeq:
+		m.ResetSeq()
+		return nil
+	case auditanchor.FieldHash:
+		m.ResetHash()
+		return nil
+	case auditanchor.FieldCutAt:
+		m.ResetCutAt()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditAnchor field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *AuditAnchorMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.tenant != nil {
+		edges = append(edges, auditanchor.EdgeTenant)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *AuditAnchorMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case auditanchor.EdgeTenant:
+		if id := m.tenant; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *AuditAnchorMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *AuditAnchorMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *AuditAnchorMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedtenant {
+		edges = append(edges, auditanchor.EdgeTenant)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *AuditAnchorMutation) EdgeCleared(name string) bool {
+	switch name {
+	case auditanchor.EdgeTenant:
+		return m.clearedtenant
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *AuditAnchorMutation) ClearEdge(name string) error {
+	switch name {
+	case auditanchor.EdgeTenant:
+		m.ClearTenant()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditAnchor unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *AuditAnchorMutation) ResetEdge(name string) error {
+	switch name {
+	case auditanchor.EdgeTenant:
+		m.ResetTenant()
+		return nil
+	}
+	return fmt.Errorf("unknown AuditAnchor edge %s", name)
 }
 
 // AuditEventMutation represents an operation that mutates the AuditEvent nodes in the graph.
@@ -17978,6 +18564,11 @@ type SessionMutation struct {
 	created_at    *time.Time
 	expires_at    *time.Time
 	last_seen_at  *time.Time
+	assurance     *session.Assurance
+	amr           *string
+	acr           *string
+	acrs          *string
+	auth_time     *time.Time
 	clearedFields map[string]struct{}
 	user          *string
 	cleareduser   bool
@@ -18270,6 +18861,212 @@ func (m *SessionMutation) ResetLastSeenAt() {
 	m.last_seen_at = nil
 }
 
+// SetAssurance sets the "assurance" field.
+func (m *SessionMutation) SetAssurance(s session.Assurance) {
+	m.assurance = &s
+}
+
+// Assurance returns the value of the "assurance" field in the mutation.
+func (m *SessionMutation) Assurance() (r session.Assurance, exists bool) {
+	v := m.assurance
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAssurance returns the old "assurance" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAssurance(ctx context.Context) (v session.Assurance, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAssurance is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAssurance requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAssurance: %w", err)
+	}
+	return oldValue.Assurance, nil
+}
+
+// ResetAssurance resets all changes to the "assurance" field.
+func (m *SessionMutation) ResetAssurance() {
+	m.assurance = nil
+}
+
+// SetAmr sets the "amr" field.
+func (m *SessionMutation) SetAmr(s string) {
+	m.amr = &s
+}
+
+// Amr returns the value of the "amr" field in the mutation.
+func (m *SessionMutation) Amr() (r string, exists bool) {
+	v := m.amr
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAmr returns the old "amr" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAmr(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAmr is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAmr requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAmr: %w", err)
+	}
+	return oldValue.Amr, nil
+}
+
+// ResetAmr resets all changes to the "amr" field.
+func (m *SessionMutation) ResetAmr() {
+	m.amr = nil
+}
+
+// SetAcr sets the "acr" field.
+func (m *SessionMutation) SetAcr(s string) {
+	m.acr = &s
+}
+
+// Acr returns the value of the "acr" field in the mutation.
+func (m *SessionMutation) Acr() (r string, exists bool) {
+	v := m.acr
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAcr returns the old "acr" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAcr(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAcr is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAcr requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAcr: %w", err)
+	}
+	return oldValue.Acr, nil
+}
+
+// ClearAcr clears the value of the "acr" field.
+func (m *SessionMutation) ClearAcr() {
+	m.acr = nil
+	m.clearedFields[session.FieldAcr] = struct{}{}
+}
+
+// AcrCleared returns if the "acr" field was cleared in this mutation.
+func (m *SessionMutation) AcrCleared() bool {
+	_, ok := m.clearedFields[session.FieldAcr]
+	return ok
+}
+
+// ResetAcr resets all changes to the "acr" field.
+func (m *SessionMutation) ResetAcr() {
+	m.acr = nil
+	delete(m.clearedFields, session.FieldAcr)
+}
+
+// SetAcrs sets the "acrs" field.
+func (m *SessionMutation) SetAcrs(s string) {
+	m.acrs = &s
+}
+
+// Acrs returns the value of the "acrs" field in the mutation.
+func (m *SessionMutation) Acrs() (r string, exists bool) {
+	v := m.acrs
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAcrs returns the old "acrs" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAcrs(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAcrs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAcrs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAcrs: %w", err)
+	}
+	return oldValue.Acrs, nil
+}
+
+// ResetAcrs resets all changes to the "acrs" field.
+func (m *SessionMutation) ResetAcrs() {
+	m.acrs = nil
+}
+
+// SetAuthTime sets the "auth_time" field.
+func (m *SessionMutation) SetAuthTime(t time.Time) {
+	m.auth_time = &t
+}
+
+// AuthTime returns the value of the "auth_time" field in the mutation.
+func (m *SessionMutation) AuthTime() (r time.Time, exists bool) {
+	v := m.auth_time
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAuthTime returns the old "auth_time" field's value of the Session entity.
+// If the Session object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SessionMutation) OldAuthTime(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAuthTime is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAuthTime requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAuthTime: %w", err)
+	}
+	return oldValue.AuthTime, nil
+}
+
+// ClearAuthTime clears the value of the "auth_time" field.
+func (m *SessionMutation) ClearAuthTime() {
+	m.auth_time = nil
+	m.clearedFields[session.FieldAuthTime] = struct{}{}
+}
+
+// AuthTimeCleared returns if the "auth_time" field was cleared in this mutation.
+func (m *SessionMutation) AuthTimeCleared() bool {
+	_, ok := m.clearedFields[session.FieldAuthTime]
+	return ok
+}
+
+// ResetAuthTime resets all changes to the "auth_time" field.
+func (m *SessionMutation) ResetAuthTime() {
+	m.auth_time = nil
+	delete(m.clearedFields, session.FieldAuthTime)
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *SessionMutation) ClearUser() {
 	m.cleareduser = true
@@ -18331,7 +19128,7 @@ func (m *SessionMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *SessionMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 10)
 	if m.user != nil {
 		fields = append(fields, session.FieldUserID)
 	}
@@ -18346,6 +19143,21 @@ func (m *SessionMutation) Fields() []string {
 	}
 	if m.last_seen_at != nil {
 		fields = append(fields, session.FieldLastSeenAt)
+	}
+	if m.assurance != nil {
+		fields = append(fields, session.FieldAssurance)
+	}
+	if m.amr != nil {
+		fields = append(fields, session.FieldAmr)
+	}
+	if m.acr != nil {
+		fields = append(fields, session.FieldAcr)
+	}
+	if m.acrs != nil {
+		fields = append(fields, session.FieldAcrs)
+	}
+	if m.auth_time != nil {
+		fields = append(fields, session.FieldAuthTime)
 	}
 	return fields
 }
@@ -18365,6 +19177,16 @@ func (m *SessionMutation) Field(name string) (ent.Value, bool) {
 		return m.ExpiresAt()
 	case session.FieldLastSeenAt:
 		return m.LastSeenAt()
+	case session.FieldAssurance:
+		return m.Assurance()
+	case session.FieldAmr:
+		return m.Amr()
+	case session.FieldAcr:
+		return m.Acr()
+	case session.FieldAcrs:
+		return m.Acrs()
+	case session.FieldAuthTime:
+		return m.AuthTime()
 	}
 	return nil, false
 }
@@ -18384,6 +19206,16 @@ func (m *SessionMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldExpiresAt(ctx)
 	case session.FieldLastSeenAt:
 		return m.OldLastSeenAt(ctx)
+	case session.FieldAssurance:
+		return m.OldAssurance(ctx)
+	case session.FieldAmr:
+		return m.OldAmr(ctx)
+	case session.FieldAcr:
+		return m.OldAcr(ctx)
+	case session.FieldAcrs:
+		return m.OldAcrs(ctx)
+	case session.FieldAuthTime:
+		return m.OldAuthTime(ctx)
 	}
 	return nil, fmt.Errorf("unknown Session field %s", name)
 }
@@ -18428,6 +19260,41 @@ func (m *SessionMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetLastSeenAt(v)
 		return nil
+	case session.FieldAssurance:
+		v, ok := value.(session.Assurance)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAssurance(v)
+		return nil
+	case session.FieldAmr:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAmr(v)
+		return nil
+	case session.FieldAcr:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAcr(v)
+		return nil
+	case session.FieldAcrs:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAcrs(v)
+		return nil
+	case session.FieldAuthTime:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAuthTime(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Session field %s", name)
 }
@@ -18457,7 +19324,14 @@ func (m *SessionMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *SessionMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(session.FieldAcr) {
+		fields = append(fields, session.FieldAcr)
+	}
+	if m.FieldCleared(session.FieldAuthTime) {
+		fields = append(fields, session.FieldAuthTime)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -18470,6 +19344,14 @@ func (m *SessionMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *SessionMutation) ClearField(name string) error {
+	switch name {
+	case session.FieldAcr:
+		m.ClearAcr()
+		return nil
+	case session.FieldAuthTime:
+		m.ClearAuthTime()
+		return nil
+	}
 	return fmt.Errorf("unknown Session nullable field %s", name)
 }
 
@@ -18491,6 +19373,21 @@ func (m *SessionMutation) ResetField(name string) error {
 		return nil
 	case session.FieldLastSeenAt:
 		m.ResetLastSeenAt()
+		return nil
+	case session.FieldAssurance:
+		m.ResetAssurance()
+		return nil
+	case session.FieldAmr:
+		m.ResetAmr()
+		return nil
+	case session.FieldAcr:
+		m.ResetAcr()
+		return nil
+	case session.FieldAcrs:
+		m.ResetAcrs()
+		return nil
+	case session.FieldAuthTime:
+		m.ResetAuthTime()
 		return nil
 	}
 	return fmt.Errorf("unknown Session field %s", name)
@@ -19458,6 +20355,9 @@ type TenantMutation struct {
 	updated_at                  *time.Time
 	slug                        *string
 	name                        *string
+	audit_retention_days        *int
+	addaudit_retention_days     *int
+	mfa_policy                  *tenant.MfaPolicy
 	clearedFields               map[string]struct{}
 	products                    map[string]struct{}
 	removedproducts             map[string]struct{}
@@ -19486,6 +20386,9 @@ type TenantMutation struct {
 	audit_export_cursors        map[string]struct{}
 	removedaudit_export_cursors map[string]struct{}
 	clearedaudit_export_cursors bool
+	audit_anchors               map[string]struct{}
+	removedaudit_anchors        map[string]struct{}
+	clearedaudit_anchors        bool
 	done                        bool
 	oldValue                    func(context.Context) (*Tenant, error)
 	predicates                  []predicate.Tenant
@@ -19737,6 +20640,112 @@ func (m *TenantMutation) OldName(ctx context.Context) (v string, err error) {
 // ResetName resets all changes to the "name" field.
 func (m *TenantMutation) ResetName() {
 	m.name = nil
+}
+
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (m *TenantMutation) SetAuditRetentionDays(i int) {
+	m.audit_retention_days = &i
+	m.addaudit_retention_days = nil
+}
+
+// AuditRetentionDays returns the value of the "audit_retention_days" field in the mutation.
+func (m *TenantMutation) AuditRetentionDays() (r int, exists bool) {
+	v := m.audit_retention_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAuditRetentionDays returns the old "audit_retention_days" field's value of the Tenant entity.
+// If the Tenant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TenantMutation) OldAuditRetentionDays(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAuditRetentionDays is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAuditRetentionDays requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAuditRetentionDays: %w", err)
+	}
+	return oldValue.AuditRetentionDays, nil
+}
+
+// AddAuditRetentionDays adds i to the "audit_retention_days" field.
+func (m *TenantMutation) AddAuditRetentionDays(i int) {
+	if m.addaudit_retention_days != nil {
+		*m.addaudit_retention_days += i
+	} else {
+		m.addaudit_retention_days = &i
+	}
+}
+
+// AddedAuditRetentionDays returns the value that was added to the "audit_retention_days" field in this mutation.
+func (m *TenantMutation) AddedAuditRetentionDays() (r int, exists bool) {
+	v := m.addaudit_retention_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearAuditRetentionDays clears the value of the "audit_retention_days" field.
+func (m *TenantMutation) ClearAuditRetentionDays() {
+	m.audit_retention_days = nil
+	m.addaudit_retention_days = nil
+	m.clearedFields[tenant.FieldAuditRetentionDays] = struct{}{}
+}
+
+// AuditRetentionDaysCleared returns if the "audit_retention_days" field was cleared in this mutation.
+func (m *TenantMutation) AuditRetentionDaysCleared() bool {
+	_, ok := m.clearedFields[tenant.FieldAuditRetentionDays]
+	return ok
+}
+
+// ResetAuditRetentionDays resets all changes to the "audit_retention_days" field.
+func (m *TenantMutation) ResetAuditRetentionDays() {
+	m.audit_retention_days = nil
+	m.addaudit_retention_days = nil
+	delete(m.clearedFields, tenant.FieldAuditRetentionDays)
+}
+
+// SetMfaPolicy sets the "mfa_policy" field.
+func (m *TenantMutation) SetMfaPolicy(tp tenant.MfaPolicy) {
+	m.mfa_policy = &tp
+}
+
+// MfaPolicy returns the value of the "mfa_policy" field in the mutation.
+func (m *TenantMutation) MfaPolicy() (r tenant.MfaPolicy, exists bool) {
+	v := m.mfa_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMfaPolicy returns the old "mfa_policy" field's value of the Tenant entity.
+// If the Tenant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TenantMutation) OldMfaPolicy(ctx context.Context) (v tenant.MfaPolicy, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMfaPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMfaPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMfaPolicy: %w", err)
+	}
+	return oldValue.MfaPolicy, nil
+}
+
+// ResetMfaPolicy resets all changes to the "mfa_policy" field.
+func (m *TenantMutation) ResetMfaPolicy() {
+	m.mfa_policy = nil
 }
 
 // AddProductIDs adds the "products" edge to the Product entity by ids.
@@ -20225,6 +21234,60 @@ func (m *TenantMutation) ResetAuditExportCursors() {
 	m.removedaudit_export_cursors = nil
 }
 
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by ids.
+func (m *TenantMutation) AddAuditAnchorIDs(ids ...string) {
+	if m.audit_anchors == nil {
+		m.audit_anchors = make(map[string]struct{})
+	}
+	for i := range ids {
+		m.audit_anchors[ids[i]] = struct{}{}
+	}
+}
+
+// ClearAuditAnchors clears the "audit_anchors" edge to the AuditAnchor entity.
+func (m *TenantMutation) ClearAuditAnchors() {
+	m.clearedaudit_anchors = true
+}
+
+// AuditAnchorsCleared reports if the "audit_anchors" edge to the AuditAnchor entity was cleared.
+func (m *TenantMutation) AuditAnchorsCleared() bool {
+	return m.clearedaudit_anchors
+}
+
+// RemoveAuditAnchorIDs removes the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (m *TenantMutation) RemoveAuditAnchorIDs(ids ...string) {
+	if m.removedaudit_anchors == nil {
+		m.removedaudit_anchors = make(map[string]struct{})
+	}
+	for i := range ids {
+		delete(m.audit_anchors, ids[i])
+		m.removedaudit_anchors[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedAuditAnchors returns the removed IDs of the "audit_anchors" edge to the AuditAnchor entity.
+func (m *TenantMutation) RemovedAuditAnchorsIDs() (ids []string) {
+	for id := range m.removedaudit_anchors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// AuditAnchorsIDs returns the "audit_anchors" edge IDs in the mutation.
+func (m *TenantMutation) AuditAnchorsIDs() (ids []string) {
+	for id := range m.audit_anchors {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetAuditAnchors resets all changes to the "audit_anchors" edge.
+func (m *TenantMutation) ResetAuditAnchors() {
+	m.audit_anchors = nil
+	m.clearedaudit_anchors = false
+	m.removedaudit_anchors = nil
+}
+
 // Where appends a list predicates to the TenantMutation builder.
 func (m *TenantMutation) Where(ps ...predicate.Tenant) {
 	m.predicates = append(m.predicates, ps...)
@@ -20259,7 +21322,7 @@ func (m *TenantMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TenantMutation) Fields() []string {
-	fields := make([]string, 0, 4)
+	fields := make([]string, 0, 6)
 	if m.created_at != nil {
 		fields = append(fields, tenant.FieldCreatedAt)
 	}
@@ -20271,6 +21334,12 @@ func (m *TenantMutation) Fields() []string {
 	}
 	if m.name != nil {
 		fields = append(fields, tenant.FieldName)
+	}
+	if m.audit_retention_days != nil {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	if m.mfa_policy != nil {
+		fields = append(fields, tenant.FieldMfaPolicy)
 	}
 	return fields
 }
@@ -20288,6 +21357,10 @@ func (m *TenantMutation) Field(name string) (ent.Value, bool) {
 		return m.Slug()
 	case tenant.FieldName:
 		return m.Name()
+	case tenant.FieldAuditRetentionDays:
+		return m.AuditRetentionDays()
+	case tenant.FieldMfaPolicy:
+		return m.MfaPolicy()
 	}
 	return nil, false
 }
@@ -20305,6 +21378,10 @@ func (m *TenantMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldSlug(ctx)
 	case tenant.FieldName:
 		return m.OldName(ctx)
+	case tenant.FieldAuditRetentionDays:
+		return m.OldAuditRetentionDays(ctx)
+	case tenant.FieldMfaPolicy:
+		return m.OldMfaPolicy(ctx)
 	}
 	return nil, fmt.Errorf("unknown Tenant field %s", name)
 }
@@ -20342,6 +21419,20 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetName(v)
 		return nil
+	case tenant.FieldAuditRetentionDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAuditRetentionDays(v)
+		return nil
+	case tenant.FieldMfaPolicy:
+		v, ok := value.(tenant.MfaPolicy)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMfaPolicy(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)
 }
@@ -20349,13 +21440,21 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 // AddedFields returns all numeric fields that were incremented/decremented during
 // this mutation.
 func (m *TenantMutation) AddedFields() []string {
-	return nil
+	var fields []string
+	if m.addaudit_retention_days != nil {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	return fields
 }
 
 // AddedField returns the numeric value that was incremented/decremented on a field
 // with the given name. The second boolean return value indicates that this field
 // was not set, or was not defined in the schema.
 func (m *TenantMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case tenant.FieldAuditRetentionDays:
+		return m.AddedAuditRetentionDays()
+	}
 	return nil, false
 }
 
@@ -20364,6 +21463,13 @@ func (m *TenantMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *TenantMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case tenant.FieldAuditRetentionDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAuditRetentionDays(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Tenant numeric field %s", name)
 }
@@ -20371,7 +21477,11 @@ func (m *TenantMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *TenantMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(tenant.FieldAuditRetentionDays) {
+		fields = append(fields, tenant.FieldAuditRetentionDays)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -20384,6 +21494,11 @@ func (m *TenantMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *TenantMutation) ClearField(name string) error {
+	switch name {
+	case tenant.FieldAuditRetentionDays:
+		m.ClearAuditRetentionDays()
+		return nil
+	}
 	return fmt.Errorf("unknown Tenant nullable field %s", name)
 }
 
@@ -20403,13 +21518,19 @@ func (m *TenantMutation) ResetField(name string) error {
 	case tenant.FieldName:
 		m.ResetName()
 		return nil
+	case tenant.FieldAuditRetentionDays:
+		m.ResetAuditRetentionDays()
+		return nil
+	case tenant.FieldMfaPolicy:
+		m.ResetMfaPolicy()
+		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)
 }
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *TenantMutation) AddedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 10)
 	if m.products != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -20436,6 +21557,9 @@ func (m *TenantMutation) AddedEdges() []string {
 	}
 	if m.audit_export_cursors != nil {
 		edges = append(edges, tenant.EdgeAuditExportCursors)
+	}
+	if m.audit_anchors != nil {
+		edges = append(edges, tenant.EdgeAuditAnchors)
 	}
 	return edges
 }
@@ -20498,13 +21622,19 @@ func (m *TenantMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeAuditAnchors:
+		ids := make([]ent.Value, 0, len(m.audit_anchors))
+		for id := range m.audit_anchors {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *TenantMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 10)
 	if m.removedproducts != nil {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -20531,6 +21661,9 @@ func (m *TenantMutation) RemovedEdges() []string {
 	}
 	if m.removedaudit_export_cursors != nil {
 		edges = append(edges, tenant.EdgeAuditExportCursors)
+	}
+	if m.removedaudit_anchors != nil {
+		edges = append(edges, tenant.EdgeAuditAnchors)
 	}
 	return edges
 }
@@ -20593,13 +21726,19 @@ func (m *TenantMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case tenant.EdgeAuditAnchors:
+		ids := make([]ent.Value, 0, len(m.removedaudit_anchors))
+		for id := range m.removedaudit_anchors {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *TenantMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 9)
+	edges := make([]string, 0, 10)
 	if m.clearedproducts {
 		edges = append(edges, tenant.EdgeProducts)
 	}
@@ -20627,6 +21766,9 @@ func (m *TenantMutation) ClearedEdges() []string {
 	if m.clearedaudit_export_cursors {
 		edges = append(edges, tenant.EdgeAuditExportCursors)
 	}
+	if m.clearedaudit_anchors {
+		edges = append(edges, tenant.EdgeAuditAnchors)
+	}
 	return edges
 }
 
@@ -20652,6 +21794,8 @@ func (m *TenantMutation) EdgeCleared(name string) bool {
 		return m.clearedidempotency_keys
 	case tenant.EdgeAuditExportCursors:
 		return m.clearedaudit_export_cursors
+	case tenant.EdgeAuditAnchors:
+		return m.clearedaudit_anchors
 	}
 	return false
 }
@@ -20694,6 +21838,9 @@ func (m *TenantMutation) ResetEdge(name string) error {
 		return nil
 	case tenant.EdgeAuditExportCursors:
 		m.ResetAuditExportCursors()
+		return nil
+	case tenant.EdgeAuditAnchors:
+		m.ResetAuditAnchors()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant edge %s", name)

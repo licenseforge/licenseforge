@@ -14,6 +14,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
@@ -42,6 +43,7 @@ type TenantQuery struct {
 	withAPITokens          *APITokenQuery
 	withIdempotencyKeys    *IdempotencyKeyQuery
 	withAuditExportCursors *AuditExportCursorQuery
+	withAuditAnchors       *AuditAnchorQuery
 	modifiers              []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -277,6 +279,28 @@ func (_q *TenantQuery) QueryAuditExportCursors() *AuditExportCursorQuery {
 	return query
 }
 
+// QueryAuditAnchors chains the current query on the "audit_anchors" edge.
+func (_q *TenantQuery) QueryAuditAnchors() *AuditAnchorQuery {
+	query := (&AuditAnchorClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(auditanchor.Table, auditanchor.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.AuditAnchorsTable, tenant.AuditAnchorsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // First returns the first Tenant entity from the query.
 // Returns a *NotFoundError when no Tenant was found.
 func (_q *TenantQuery) First(ctx context.Context) (*Tenant, error) {
@@ -478,6 +502,7 @@ func (_q *TenantQuery) Clone() *TenantQuery {
 		withAPITokens:          _q.withAPITokens.Clone(),
 		withIdempotencyKeys:    _q.withIdempotencyKeys.Clone(),
 		withAuditExportCursors: _q.withAuditExportCursors.Clone(),
+		withAuditAnchors:       _q.withAuditAnchors.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -583,6 +608,17 @@ func (_q *TenantQuery) WithAuditExportCursors(opts ...func(*AuditExportCursorQue
 	return _q
 }
 
+// WithAuditAnchors tells the query-builder to eager-load the nodes that are connected to
+// the "audit_anchors" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithAuditAnchors(opts ...func(*AuditAnchorQuery)) *TenantQuery {
+	query := (&AuditAnchorClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAuditAnchors = query
+	return _q
+}
+
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
 //
@@ -661,7 +697,7 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 	var (
 		nodes       = []*Tenant{}
 		_spec       = _q.querySpec()
-		loadedTypes = [9]bool{
+		loadedTypes = [10]bool{
 			_q.withProducts != nil,
 			_q.withCustomers != nil,
 			_q.withSigningKeys != nil,
@@ -671,6 +707,7 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 			_q.withAPITokens != nil,
 			_q.withIdempotencyKeys != nil,
 			_q.withAuditExportCursors != nil,
+			_q.withAuditAnchors != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -756,6 +793,13 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 			func(n *Tenant, e *AuditExportCursor) {
 				n.Edges.AuditExportCursors = append(n.Edges.AuditExportCursors, e)
 			}); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAuditAnchors; query != nil {
+		if err := _q.loadAuditAnchors(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.AuditAnchors = []*AuditAnchor{} },
+			func(n *Tenant, e *AuditAnchor) { n.Edges.AuditAnchors = append(n.Edges.AuditAnchors, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -1017,6 +1061,36 @@ func (_q *TenantQuery) loadAuditExportCursors(ctx context.Context, query *AuditE
 	}
 	query.Where(predicate.AuditExportCursor(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(tenant.AuditExportCursorsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadAuditAnchors(ctx context.Context, query *AuditAnchorQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *AuditAnchor)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(auditanchor.FieldTenantID)
+	}
+	query.Where(predicate.AuditAnchor(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.AuditAnchorsColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {
