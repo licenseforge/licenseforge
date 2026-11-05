@@ -1,0 +1,237 @@
+package api
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+
+	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ids"
+)
+
+type catalog struct{ prodQ, planP, planQ, customer, bProduct, bPlan, bCustomer string }
+
+// catalog adds a plan for prodA, a second product with a plan, a customer,
+// and the same in tenant b.
+func (f *fixture) catalog(t *testing.T) catalog {
+	t.Helper()
+	ctx := context.Background()
+	var c catalog
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		mk := func(tenant, product string) (string, string, error) {
+			if product == "" {
+				p, err := tx.Product.Create().SetTenantID(tenant).SetSlug("p" + strings.ToLower(ids.New("x")[2:10])).SetName("P").Save(ctx)
+				if err != nil {
+					return "", "", err
+				}
+				product = p.ID
+			}
+			pl, err := tx.Plan.Create().SetTenantID(tenant).SetProductID(product).SetSlug("pro").SetName("Pro").SetDurationMonths(12).Save(ctx)
+			if err != nil {
+				return "", "", err
+			}
+			return product, pl.ID, nil
+		}
+		var err error
+		if _, c.planP, err = mk(f.a.ID, f.prodA); err != nil {
+			return err
+		}
+		if c.prodQ, c.planQ, err = mk(f.a.ID, ""); err != nil {
+			return err
+		}
+		if c.bProduct, c.bPlan, err = mk(f.b.ID, ""); err != nil {
+			return err
+		}
+		cu, err := tx.Customer.Create().SetTenantID(f.a.ID).SetName("Contoso").Save(ctx)
+		if err != nil {
+			return err
+		}
+		bc, err := tx.Customer.Create().SetTenantID(f.b.ID).SetName("Other").Save(ctx)
+		c.customer, c.bCustomer = cu.ID, bc.ID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func issueBody(product, plan, customer string, extra ...string) string {
+	return `{"product_id":"` + product + `","plan_id":"` + plan + `","customer_id":"` + customer + `"` + strings.Join(extra, "") + `}`
+}
+
+func TestLicenseEndpoints(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	ok := issueBody(f.prodA, c.planP, c.customer)
+	issued := f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"type":"trial","overrides":{},"external_refs":{"order":"SO-1"}`), owner)
+	key, _ := issued.body["key"].(string)
+	if issued.code != 201 || key == "" || !strings.HasSuffix(key, issued.body["key_hint"].(string)) || issued.body["status"] != "active" ||
+		issued.body["type"] != "trial" || issued.body["expires_at"] == nil {
+		t.Fatalf("issue: %d %s", issued.code, issued.raw)
+	}
+	id := issued.body["id"].(string)
+	// Get and list never show the key.
+	got := f.do(t, "GET", p+"/"+id, "", owner)
+	if got.code != 200 || got.body["id"] != id || strings.Contains(got.raw, key) || got.body["key"] != nil {
+		t.Fatalf("get: %d %s", got.code, got.raw)
+	}
+	second := f.do(t, "POST", p, ok, owner)
+	qLic := f.do(t, "POST", p, issueBody(c.prodQ, c.planQ, c.customer), owner)
+	l := f.do(t, "GET", p+"?limit=2", "", owner)
+	items, _ := l.body["items"].([]any)
+	if l.code != 200 || len(items) != 2 || items[0].(map[string]any)["id"] != qLic.body["id"] || l.body["next_cursor"] == nil || strings.Contains(l.raw, key) {
+		t.Fatalf("list: %s", l.raw)
+	}
+	listIDs := func(q string, o opt) []any {
+		r := f.do(t, "GET", p+q, "", o)
+		var out []any
+		for _, it := range r.body["items"].([]any) {
+			out = append(out, it.(map[string]any)["id"])
+		}
+		return out
+	}
+	if got := listIDs("?product_id="+f.prodA, owner); !reflect.DeepEqual(got, []any{second.body["id"], id}) {
+		t.Errorf("product filter: %v", got)
+	}
+	// A product-scoped manager sees only its product's licenses; others are not found.
+	scoped := f.session(t, f.join(t, f.a.ID, invitation.RoleManager, f.ownerA, c.prodQ), true)
+	if got := listIDs("", scoped); !reflect.DeepEqual(got, []any{qLic.body["id"]}) {
+		t.Errorf("scoped list: %v", got)
+	}
+	missing := f.do(t, "GET", p+"/"+ids.License(), "", owner).problem(t, 404, "not_found")
+	for name, c := range map[string]struct {
+		path string
+		o    opt
+	}{
+		"hidden":           {p + "/" + id, scoped},
+		"another tenant's": {Prefix + "/tenants/" + f.b.Slug + "/licenses/" + id, f.session(t, f.ownerB, true)},
+		"malformed":        {p + "/x", owner},
+		"hidden suspend":   {p + "/" + id + "/suspend", scoped},
+	} {
+		method := "GET"
+		if strings.HasSuffix(c.path, "/suspend") {
+			method = "POST"
+		}
+		if got := f.do(t, method, c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	// Body references: 422 on the field; hidden is missing.
+	refs := map[string]struct {
+		body  string
+		o     opt
+		field string
+	}{
+		"unknown product":           {issueBody(ids.Product(), c.planP, c.customer), owner, "/product_id"},
+		"hidden product":            {issueBody(f.prodA, c.planP, c.customer), scoped, "/product_id"},
+		"another tenant's product":  {issueBody(c.bProduct, c.bPlan, c.bCustomer), owner, "/product_id"},
+		"another product's plan":    {issueBody(f.prodA, c.planQ, c.customer), owner, "/plan_id"},
+		"unknown customer":          {issueBody(f.prodA, c.planP, ids.Customer()), owner, "/customer_id"},
+		"another tenant's customer": {issueBody(f.prodA, c.planP, c.bCustomer), owner, "/customer_id"},
+		"unknown feature":           {issueBody(f.prodA, c.planP, c.customer, `,"overrides":{"a/b":{}}`), owner, "/overrides/a~1b"},
+		"type":                      {issueBody(f.prodA, c.planP, c.customer, `,"type":"gold"`), owner, "/type"},
+	}
+	var unknownProduct map[string]any
+	for name, r := range refs {
+		got := f.do(t, "POST", p, r.body, r.o).problem(t, 422, "validation_failed")
+		if errs, _ := got["errors"].([]any); len(errs) != 1 || errs[0].(map[string]any)["field"] != r.field {
+			t.Errorf("%s: %v", name, got)
+		}
+		if r.field == "/product_id" {
+			if unknownProduct == nil {
+				unknownProduct = got
+			} else if !reflect.DeepEqual(got, unknownProduct) {
+				t.Errorf("%s: %v differs from %v", name, got, unknownProduct)
+			}
+		}
+	}
+	// Rights before values.
+	viewer := f.session(t, f.viewerA, true)
+	f.do(t, "POST", p, issueBody(f.prodA, "x", "y"), viewer).problem(t, 403, "forbidden")
+	f.do(t, "POST", p+"/"+id+"/suspend", "", viewer).problem(t, 403, "forbidden")
+	// Transitions: 200 with the license; a status that doesn't allow it is 409.
+	for _, step := range []struct{ verb, want string }{{"suspend", "suspended"}, {"reinstate", "active"}, {"suspend", "suspended"}, {"revoke", "revoked"}} {
+		if r := f.do(t, "POST", p+"/"+id+"/"+step.verb, "", owner); r.code != 200 || r.body["status"] != step.want {
+			t.Fatalf("%s: %d %s", step.verb, r.code, r.raw)
+		}
+	}
+	f.do(t, "POST", p+"/"+id+"/reinstate", "", owner).problem(t, 409, "invalid_state")
+	f.do(t, "POST", p+"/"+id+"/revoke", "", owner).problem(t, 409, "invalid_state")
+	if got := listIDs("?status=revoked", owner); !reflect.DeepEqual(got, []any{id}) {
+		t.Errorf("status filter: %v", got)
+	}
+	if got := listIDs("?created_after="+strings.ReplaceAll(second.body["created_at"].(string), "+", "%2B"), owner); !reflect.DeepEqual(got, []any{qLic.body["id"]}) {
+		t.Errorf("created_after: %v", got)
+	}
+	for _, q := range []string{"?status=gone", "?product_id=x", "?customer_id=x", "?created_after=yesterday", "?plan_id=" + c.planP} {
+		f.do(t, "GET", p+q, "", owner).problem(t, 400, "invalid_request")
+	}
+	if got := listIDs("?customer_id="+ids.Customer(), owner); len(got) != 0 {
+		t.Errorf("unknown customer filter: %v", got)
+	}
+}
+
+func TestIssueLicenseIdempotency(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	body := issueBody(f.prodA, c.planP, c.customer)
+	key := header("Idempotency-Key", "order-1")
+	first := f.do(t, "POST", p, body, owner, key)
+	if first.code != 201 || first.body["key"] == nil {
+		t.Fatalf("first: %d %s", first.code, first.raw)
+	}
+	// A retry gets the same license and key; nothing new is issued.
+	again := f.do(t, "POST", p, body, owner, key)
+	if again.code != 201 || again.body["id"] != first.body["id"] || again.body["key"] != first.body["key"] {
+		t.Fatalf("replay: %d %s", again.code, again.raw)
+	}
+	if r := f.do(t, "GET", p, "", owner); len(r.body["items"].([]any)) != 1 {
+		t.Errorf("issued twice: %s", r.raw)
+	}
+	// The same key with another body; another credential's key space.
+	f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"type":"trial"`), owner, key).problem(t, 422, "idempotency_key_reused")
+	tok := f.token(t, f.a.ID, f.ownerA, authz.Admin)
+	if r := f.do(t, "POST", p, body, bearer(tok.Token), key); r.code != 201 || r.body["id"] == first.body["id"] {
+		t.Errorf("another credential: %d %s", r.code, r.raw)
+	}
+	// A refusal is stored and replayed as it was.
+	bad := header("Idempotency-Key", "order-2")
+	r1 := f.do(t, "POST", p, issueBody(f.prodA, c.planQ, c.customer), owner, bad).problem(t, 422, "validation_failed")
+	r2 := f.do(t, "POST", p, issueBody(f.prodA, c.planQ, c.customer), owner, bad).problem(t, 422, "validation_failed")
+	if !reflect.DeepEqual(r1["errors"], r2["errors"]) {
+		t.Errorf("refusal replay: %v, %v", r1, r2)
+	}
+	// A replay re-checks the caller's rights: an admin demoted to viewer
+	// gets 403, not the stored license and key.
+	admin := f.session(t, f.adminA, true)
+	k3 := header("Idempotency-Key", "order-3")
+	if r := f.do(t, "POST", p, body, admin, k3); r.code != 201 {
+		t.Fatalf("admin issue: %d %s", r.code, r.raw)
+	}
+	if err := f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(context.Background(), `UPDATE memberships SET role = 'viewer' WHERE id = $1`, f.mem[f.adminA])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do(t, "POST", p, body, admin, k3).problem(t, 403, "forbidden"); r["key"] != nil {
+		t.Errorf("replay leaked: %v", r)
+	}
+	// Malformed keys.
+	for _, k := range []string{strings.Repeat("k", 256), "é", ""} {
+		r := f.do(t, "POST", p, body, owner, header("Idempotency-Key", k))
+		if k == "" {
+			continue // an empty header is no header (Go's http.Header.Get)
+		}
+		if r.code != 400 || r.body["code"] != "invalid_request" {
+			t.Errorf("key %q: %d %s", k, r.code, r.raw)
+		}
+	}
+}
