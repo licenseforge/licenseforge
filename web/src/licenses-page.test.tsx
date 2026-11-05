@@ -27,7 +27,7 @@ afterEach(() => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const acme = { id: "cus_1", name: "Acme", email: null, external_refs: {}, archived_at: null, created_at: "" };
 const names = {
-  products: [{ id: "prd_1", slug: "db", name: "DB", created_at: "" }],
+  products: [{ id: "prd_1", slug: "db", name: "DB", archived_at: null, created_at: "" }],
   customers: [acme],
   issuable: [acme],
   complete: true,
