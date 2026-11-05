@@ -70,6 +70,20 @@ func (_c *TenantCreate) SetName(v string) *TenantCreate {
 	return _c
 }
 
+// SetAuditRetentionDays sets the "audit_retention_days" field.
+func (_c *TenantCreate) SetAuditRetentionDays(v int) *TenantCreate {
+	_c.mutation.SetAuditRetentionDays(v)
+	return _c
+}
+
+// SetNillableAuditRetentionDays sets the "audit_retention_days" field if the given value is not nil.
+func (_c *TenantCreate) SetNillableAuditRetentionDays(v *int) *TenantCreate {
+	if v != nil {
+		_c.SetAuditRetentionDays(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *TenantCreate) SetID(v string) *TenantCreate {
 	_c.mutation.SetID(v)
@@ -362,6 +376,10 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(tenant.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.AuditRetentionDays(); ok {
+		_spec.SetField(tenant.FieldAuditRetentionDays, field.TypeInt, value)
+		_node.AuditRetentionDays = &value
 	}
 	if nodes := _c.mutation.ProductsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{

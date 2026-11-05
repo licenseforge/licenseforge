@@ -60,6 +60,15 @@ export function TenantLayout() {
         <Link to="/t/$slug" params={{ slug }} activeOptions={{ exact: true }} className={link}>
           {t("nav.overview")}
         </Link>
+        <Link to="/t/$slug/products" params={{ slug }} className={link}>
+          {t("nav.products")}
+        </Link>
+        <Link to="/t/$slug/customers" params={{ slug }} className={link}>
+          {t("nav.customers")}
+        </Link>
+        <Link to="/t/$slug/licenses" params={{ slug }} className={link}>
+          {t("nav.licenses")}
+        </Link>
         <Link to="/t/$slug/settings/members" params={{ slug }} className={link}>
           {t("nav.members")}
         </Link>
