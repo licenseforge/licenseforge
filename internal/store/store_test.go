@@ -8,13 +8,16 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
@@ -392,6 +395,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"retention_floor (restrictive)": `DELETE licenseforge_retention ((occurred_at < (now() - '365 days'::interval)) AND (seq <= ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_events.tenant_id)::text))))`,
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
+		"products": { // ADR-0015: archive is one-way, at the database clock
+			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
@@ -736,6 +742,234 @@ func TestAuditExportPrivileges(t *testing.T) {
 			if any {
 				t.Errorf("%s has privileges on %s", role, table)
 			}
+		}
+	}
+}
+
+// Products are archived, never deleted (ADR-0015): the exact privileges on
+// products, table and column ACLs, of every grantee except the table owner
+// (PUBLIC included), with their grant options, are pinned. The app and
+// platform pools insert and read; they may update only name, archived_at and
+// updated_at; nobody else has anything, and nobody may pass a privilege on.
+func TestProductPrivileges(t *testing.T) {
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	rows, err := owner.Query(`
+		WITH acl AS (
+			SELECT a.grantee, a.privilege_type, a.is_grantable, '' AS col
+			FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = 'public.products'::regclass
+			UNION ALL
+			SELECT a.grantee, a.privilege_type, a.is_grantable, att.attname
+			FROM pg_attribute att, aclexplode(att.attacl) a
+			WHERE att.attrelid = 'public.products'::regclass AND att.attacl IS NOT NULL)
+		SELECT COALESCE(r.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable, acl.col
+		FROM acl LEFT JOIN pg_roles r ON r.oid = acl.grantee
+		WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = 'public.products'::regclass)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var role, priv, col string
+		var grantable bool
+		if err := rows.Scan(&role, &priv, &grantable, &col); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s %s %s grantable=%v", role, priv, col, grantable))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, role := range []string{AppRole, PlatformRole} {
+		want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
+		for _, col := range []string{"name", "updated_at", "archived_at"} {
+			want = append(want, role+" UPDATE "+col+" grantable=false")
+		}
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("privileges on products:\n got %q\nwant %q", got, want)
+	}
+}
+
+// Archive is one-way and at the database clock (archive_once): the serving
+// pools can't un-archive a product or set another time, and renaming an
+// archived product still works.
+func TestProductArchiveIsOneWay(t *testing.T) {
+	d := openDB(t)
+	ctx := context.Background()
+	tn := createTenants(t, d, 1)[0]
+	var id string
+	if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+		p, err := tx.Product.Create().SetTenantID(tn.ID).SetSlug("db").SetName("DB").Save(ctx)
+		if err == nil {
+			id = p.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(platform bool, q string) error {
+		run := func(tx *ent.Tx) error { _, err := tx.ExecContext(ctx, q, id); return err }
+		if platform {
+			return d.WithPlatform(ctx, run)
+		}
+		return d.WithTenant(ctx, tn.ID, run)
+	}
+	for _, platform := range []bool{false, true} {
+		for name, q := range map[string]string{
+			"backdated archive": `UPDATE products SET archived_at = clock_timestamp() - interval '1 day' WHERE id = $1`,
+			"future archive":    `UPDATE products SET archived_at = clock_timestamp() + interval '1 day' WHERE id = $1`,
+		} {
+			if err := exec(platform, q); err == nil {
+				t.Errorf("platform=%v %s: allowed", platform, name)
+			}
+		}
+	}
+	for _, platform := range []bool{false, true} {
+		if err := exec(platform, `UPDATE products SET name = 'Database', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
+			t.Errorf("platform=%v rename active: %v", platform, err)
+		}
+	}
+	if err := exec(false, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	for _, platform := range []bool{false, true} {
+		for name, q := range map[string]string{
+			"un-archive": `UPDATE products SET archived_at = NULL WHERE id = $1`,
+			"re-archive": `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`,
+			"backdate":   `UPDATE products SET archived_at = archived_at - interval '1 hour' WHERE id = $1`,
+		} {
+			if err := exec(platform, q); err == nil {
+				t.Errorf("platform=%v %s: allowed", platform, name)
+			}
+		}
+		if err := exec(platform, `UPDATE products SET name = 'Old DB', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
+			t.Errorf("platform=%v rename archived: %v", platform, err)
+		}
+	}
+}
+
+// archive_once holds under concurrency: an update that waited for a
+// concurrent archive (READ COMMITTED rechecks it against the newer row)
+// changes nothing, and an upsert is refused, so the archive is neither
+// erased nor re-dated.
+func TestProductArchiveRace(t *testing.T) {
+	d := openDB(t)
+	ctx := context.Background()
+	tn := createTenants(t, d, 1)[0]
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	// waitForB returns once B waits on a lock, or has already finished (an
+	// upsert may be refused at once).
+	waitForB := func(done chan error) error {
+		for range 100 {
+			if len(done) > 0 {
+				return nil
+			}
+			var n int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return errors.New("B never waited")
+	}
+	for i, c := range []struct {
+		name     string
+		platform bool
+		q        string
+	}{
+		{"un-archive", false, `UPDATE products SET archived_at = NULL WHERE id = $1`},
+		{"re-date", false, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`},
+		{"un-archive, platform", true, `UPDATE products SET archived_at = NULL WHERE id = $1`},
+		{"re-date, platform", true, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`},
+		{"upsert", false, `INSERT INTO products (id, tenant_id, slug, name, created_at, updated_at) VALUES ($2, $3, $4, 'x', now(), now())
+			ON CONFLICT (tenant_id, slug) DO UPDATE SET archived_at = NULL`},
+	} {
+		upsert := strings.HasPrefix(c.q, "INSERT")
+		slug := fmt.Sprintf("p%d", i)
+		var id string
+		if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+			p, err := tx.Product.Create().SetTenantID(tn.ID).SetSlug(slug).SetName("P").Save(ctx)
+			if err == nil {
+				id = p.ID
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		var archived time.Time
+		// A archives and, before committing, lets B run against the locked row.
+		if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+			rows, err := tx.QueryContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1 RETURNING archived_at`, id)
+			if err != nil {
+				return err
+			}
+			if !rows.Next() {
+				_ = rows.Close()
+				return errors.New("the archive updated nothing")
+			}
+			if err := errors.Join(rows.Scan(&archived), rows.Close()); err != nil {
+				return err
+			}
+			go func() {
+				run := func(tx *ent.Tx) error {
+					args := []any{id}
+					if upsert {
+						args = []any{id, ids.Product(), tn.ID, slug}
+					}
+					_, err := tx.ExecContext(ctx, c.q, args...)
+					return err
+				}
+				if c.platform {
+					done <- d.WithPlatform(ctx, run)
+				} else {
+					done <- d.WithTenant(ctx, tn.ID, run)
+				}
+			}()
+			if err := waitForB(done); err != nil {
+				return fmt.Errorf("%s: %w", c.name, err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if upsert && err == nil {
+				t.Errorf("%s: allowed", c.name)
+			}
+			if !upsert && err != nil {
+				t.Errorf("%s: %v (want no change, not an error)", c.name, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s didn't finish", c.name)
+		}
+		var got sql.NullTime
+		if err := owner.QueryRow(`SELECT archived_at FROM products WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Valid || !got.Time.Equal(archived) {
+			t.Errorf("%s: archived_at = %v, want %v", c.name, got, archived)
 		}
 	}
 }

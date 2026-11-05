@@ -30,7 +30,7 @@ func (s *server) ListProducts(ctx context.Context, req apigen.ListProductsReques
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.Products.List(ctx, limit+1, at, after)
+	rows, err := s.Products.List(ctx, req.Params.Archived, limit+1, at, after)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,14 @@ func (s *server) UpdateProduct(ctx context.Context, req apigen.UpdateProductRequ
 		return nil, err
 	}
 	return apigen.UpdateProduct200JSONResponse(productView(p)), nil
+}
+
+func (s *server) ArchiveProduct(ctx context.Context, req apigen.ArchiveProductRequestObject) (apigen.ArchiveProductResponseObject, error) {
+	p, err := s.Products.Archive(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ArchiveProduct200JSONResponse(productView(p)), nil
 }
 
 func (s *server) ListCustomers(ctx context.Context, req apigen.ListCustomersRequestObject) (apigen.ListCustomersResponseObject, error) {
@@ -136,7 +144,12 @@ func (s *server) ArchiveCustomer(ctx context.Context, req apigen.ArchiveCustomer
 }
 
 func productView(p *ent.Product) apigen.Product {
-	return apigen.Product{Id: p.ID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt.UTC()}
+	v := apigen.Product{Id: p.ID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt.UTC()}
+	if p.ArchivedAt != nil {
+		t := p.ArchivedAt.UTC()
+		v.ArchivedAt = &t
+	}
+	return v
 }
 
 func customerView(c *ent.Customer) apigen.Customer {
