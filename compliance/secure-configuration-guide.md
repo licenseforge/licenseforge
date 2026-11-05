@@ -63,7 +63,7 @@ Also compare the heads in `audit.checkpoint` events (`details.heads[].seq` and `
 
 ## Database logins
 
-Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029). There are three group roles and four logins, and none is shared. Replace the script's placeholder passwords (`change-me-*`) before running it:
+Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as a database admin (ADR-0009, ADR-0029, ADR-0036). There are four group roles and five logins, and none is shared. Replace the script's placeholder passwords (`change-me-*`) before running it:
 
 | Login | Group | Used by | Can |
 |---|---|---|---|
@@ -71,10 +71,13 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 | `licenseforge_api` | `licenseforge_app` | Every tenant request | Only rows of the tenant set for the transaction |
 | `licenseforge_admin` | `licenseforge_platform` | Platform-admin work | All tenants, through explicit grants |
 | `licenseforge_login` | `licenseforge_identity` | Login, sessions, invitation acceptance | Identity tables only; no licensing data |
+| `licenseforge_pruner` | `licenseforge_retention` | Audit retention only (ADR-0036) | The only login that deletes audit entries. The database lets it delete only entries at least 365 days old and at or below its chain's newest anchor, and lets it anchor only on a real entry that is at least 365 days old and not the chain's last. That the deleted entries form a prefix is checked by the job's count check (a mismatch rolls the batch back) and detected by Verify and the SIEM's continuity check if bypassed, not enforced by the database. No other table. Upgrading: create the group before `licenseforge migrate` |
+
+**Upgrading to audit retention (ADR-0036).** Before running `licenseforge migrate` (the Helm migration Job) on an install that predates it, create the group role as a database admin: `CREATE ROLE licenseforge_retention NOLOGIN;`, then the pruner login (`deploy/database-setup.sql`). The migration stops with that message otherwise. Retention runs as `licenseforge audit prune` (the chart's `auditRetention` CronJob) with `LICENSEFORGE_RETENTION_DATABASE_URL`; `LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS` (365 to 36,500, unset keeps everything) sets the platform chain's retention, and tenant owners set their own chain's (365 to 36,500 days, audited). Every cut is recorded in the chain as an `audit.retention` entry with the retention period in force (AU-11), and nothing a registered SIEM sink hasn't received is pruned.
 
 **Why the server must never hold the owner login.** Tenant isolation is enforced by forced row-level security, and RLS is a backstop only if the serving process can't turn it off. The owner sees every row, can alter or drop policies and switch RLS off, and can rewrite the audit chain. A serving pod with the owner login would turn any bug or compromise in the internet-facing process into full access to every tenant. So:
 
-- the server exits if `LICENSEFORGE_OWNER_DATABASE_URL` is set, and the chart gives the owner URL only to the migration Job, from its own Secret;
+- the server exits if `LICENSEFORGE_OWNER_DATABASE_URL` or `LICENSEFORGE_RETENTION_DATABASE_URL` is set, and the chart gives the owner URL only to the migration Job, from its own Secret;
 - `store.Open` refuses a serving login that has SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION (directly or through its group), belongs to any role other than its own group, owns the database, schema or any table, can create temporary tables or objects, switched role in the connection string, or has `app.tenant_id` preset. Don't "fix" a refusal by granting more.
 
 Also:

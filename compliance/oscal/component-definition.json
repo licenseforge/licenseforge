@@ -151,7 +151,7 @@
               {
                 "uuid": "93b3a4e2-7739-566f-8ff3-381fa11ea638",
                 "control-id": "ac-5",
-                "description": "Built-in tenant roles (owner, admin, manager, support, viewer; sdk for tokens) separate key management, access management, license operations and read-only support. Database duties are split across four logins: owner (migrations only), api (tenant requests), admin (platform operations) and login (the login path). The server refuses to start with the owner login in its environment.",
+                "description": "Built-in tenant roles (owner, admin, manager, support, viewer; sdk for tokens) separate key management, access management, license operations and read-only support. Database duties are split across five logins: owner (migrations only), api (tenant requests), admin (platform operations), login (the login path) and pruner (audit retention, the only login that deletes audit entries). The server refuses to start with the owner or the retention login in its environment.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -507,15 +507,27 @@
               {
                 "uuid": "b0fd6354-21b0-5995-be78-5caea53ea53d",
                 "control-id": "au-11",
-                "description": "A per-tenant retention setting; the retention job deletes only a prefix of the chain. The default keeps everything.",
+                "description": "A per-tenant retention setting (owners only, 365 to 36,500 days; every change and every refused change is audited) and an install setting for the platform chain; the `licenseforge audit prune` CronJob, with its own login, cuts the prefix of entries older than the period in batches behind an anchor, never the chain's last entry and never what a registered SIEM sink hasn't received, and records each cut as a chained audit.retention entry with the period in force. The database enforces the 365-day floor and the anchor bound. The default keeps everything (ADR-0036).",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "partial"
                   }
                 ],
-                "remarks": "No retention job yet: everything is kept (Roadmap v0.1: audit log configurable retention)."
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/retention/retention_test.go",
+                    "rel": "reference",
+                    "text": "TestPruneCutsTheOldPrefix"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/retention_test.go",
+                    "rel": "reference",
+                    "text": "TestRetentionFloorAndAnchors"
+                  }
+                ],
+                "remarks": "No REST endpoint for the tenant setting yet (it is a service function); long-term retention beyond the active store is the SIEM's (e.g. OMB M-21-31)."
               },
               {
                 "uuid": "00e192a5-5cfe-5c0c-ae45-c044db63d4cf",

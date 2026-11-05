@@ -306,6 +306,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/activations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a license's activations (machines or clusters), deactivated ones included, newest first.
+         * @description Needs activation:read on the license's product. A hidden license answers 404 like a missing one.
+         */
+        get: operations["listActivations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+                activation_id: components["parameters"]["ActivationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
+         * @description Needs activation:manage on the license's product; audited. Allowed
+         *     whatever the license's status. Deactivating an activation that is
+         *     already deactivated changes nothing and answers 200 with it.
+         *     Deactivating doesn't count as a seat move; activating a new machine
+         *     afterwards may (ADR-0034).
+         */
+        post: operations["deactivateActivation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/tenants": {
         parameters: {
             query?: never;
@@ -397,6 +450,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List products in the caller's product scope, newest first.
+         * @description Needs catalog:read; a product-scoped caller sees only its products.
+         */
+        get: operations["listProducts"];
+        put?: never;
+        /**
+         * Add a product.
+         * @description Needs catalog:write on every product (creating is tenant-wide). The slug is the license's product claim and never changes; a taken slug answers 409.
+         */
+        post: operations["createProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        /** Get a product. */
+        get: operations["getProduct"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a product (JSON Merge Patch). The slug is immutable.
+         * @description Needs catalog:write on the product.
+         */
+        patch: operations["updateProduct"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List customers (archived included), newest first.
+         * @description Customers are tenant-wide: customer:read on every product; a product-scoped caller sees none.
+         */
+        get: operations["listCustomers"];
+        put?: never;
+        /**
+         * Add a customer.
+         * @description Needs customer:write (managers and up).
+         */
+        post: operations["createCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/customers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        /** Get a customer. */
+        get: operations["getCustomer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a customer (JSON Merge Patch): email null clears it; external_refs merges key by key.
+         * @description Needs customer:write.
+         */
+        patch: operations["updateCustomer"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/customers/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a customer. Its licenses stay; no new license can be issued for it.
+         * @description Needs customer:write. An archived customer answers 409 invalid_state.
+         */
+        post: operations["archiveCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -438,6 +619,39 @@ export interface components {
             expires_at: string;
             /** Format: date-time */
             refresh_after: string;
+        };
+        Activation: {
+            /** @example act_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            license_id: string;
+            /** @description The lease's bind.fp (a hash, never the raw machine ID). */
+            fingerprint: string;
+            /** @enum {string} */
+            fp_source: "override" | "env" | "kubernetes" | "machine-id";
+            /** @enum {string} */
+            binding: "machine" | "cluster";
+            /** @enum {string} */
+            mode: "online" | "offline";
+            /** @description As the SDK last reported it. */
+            hostname: string | null;
+            app_version: string | null;
+            sdk_version: string | null;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /**
+             * Format: date-time
+             * @description Null while it holds a seat.
+             */
+            deactivated_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ActivationPage: {
+            items: components["schemas"]["Activation"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
         };
         Problem: {
             /** @example about:blank */
@@ -505,6 +719,8 @@ export interface components {
              */
             expires_at: string | null;
             max_activations: number | null;
+            /** @description Seats taken now (activations not deactivated). */
+            active_activations: number;
             entitlements: {
                 features: string[];
                 limits: {
@@ -557,6 +773,63 @@ export interface components {
         LicenseIssued: components["schemas"]["License"] & {
             /** @description The license key. Shown once (and on an idempotent replay to the same credential) */
             key: string;
+        };
+        Product: {
+            /** @example prd_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            /** @description The license's product claim. Immutable. */
+            slug: string;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ProductPage: {
+            items: components["schemas"]["Product"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        ProductCreate: {
+            /** @description Lowercase words joined by single dashes, e.g. db-server. */
+            slug: string;
+            name: string;
+        };
+        /** @description Absent fields stay; none is nullable (null answers 422). */
+        ProductPatch: {
+            name?: string;
+        };
+        Customer: {
+            /** @example cus_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            name: string;
+            email: string | null;
+            external_refs: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CustomerPage: {
+            items: components["schemas"]["Customer"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        CustomerCreate: {
+            name: string;
+            email?: string;
+            /** @description Order, CRM or ERP IDs; at most 20, keys of 1-64 [a-z0-9_.-]. */
+            external_refs?: {
+                [key: string]: string;
+            };
+        };
+        /** @description Absent fields stay; email null clears it; name and external_refs aren't nullable (null answers 422). external_refs merges key by key (RFC 7396): a value sets its key, a null member removes it, absent keys stay; the merged refs are checked whole. */
+        CustomerPatch: {
+            name?: string;
+            email?: string | null;
+            external_refs?: {
+                [key: string]: string | null;
+            };
         };
         /** @enum {string} */
         MemberRole: "owner" | "admin" | "manager" | "support" | "viewer";
@@ -700,7 +973,10 @@ export interface components {
         };
     };
     parameters: {
+        ProductId: string;
+        CustomerId: string;
         LicenseId: string;
+        ActivationId: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
         /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
@@ -1228,6 +1504,67 @@ export interface operations {
             409: components["responses"]["Problem"];
         };
     };
+    listActivations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deactivateActivation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+                activation_id: components["parameters"]["ActivationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The activation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     listMyTenants: {
         parameters: {
             query?: never;
@@ -1350,6 +1687,288 @@ export interface operations {
             404: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listProducts: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductCreate"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["ProductPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    listCustomers: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerCreate"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["CustomerPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    archiveCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
 }

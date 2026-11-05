@@ -22,11 +22,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/apitoken"
 	"licenseforge.io/licenseforge/internal/apitokens"
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/catalog"
+	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
@@ -76,6 +79,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
+		Products: catalog.Products{DB: d}, Customers: customers.Service{DB: d}, Activations: activations.Service{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {

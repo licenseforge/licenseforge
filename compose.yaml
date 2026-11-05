@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_PASSWORD: dev
     volumes:
-      # Creates the four logins and the database, as an operator would (ADR-0009, ADR-0029).
+      # Creates the five logins and the database, as an operator would (ADR-0009, ADR-0029, ADR-0036).
       - ./deploy/database-setup.sql:/docker-entrypoint-initdb.d/setup.sql:ro
     healthcheck:
       # Over TCP: during init, Postgres listens on the socket only, so a socket

@@ -45,6 +45,18 @@ func (f ActivationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, 
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ActivationMutation", m)
 }
 
+// The AuditAnchorFunc type is an adapter to allow the use of ordinary
+// function as AuditAnchor mutator.
+type AuditAnchorFunc func(context.Context, *ent.AuditAnchorMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AuditAnchorFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AuditAnchorMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AuditAnchorMutation", m)
+}
+
 // The AuditEventFunc type is an adapter to allow the use of ordinary
 // function as AuditEvent mutator.
 type AuditEventFunc func(context.Context, *ent.AuditEventMutation) (ent.Value, error)

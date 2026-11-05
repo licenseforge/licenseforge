@@ -13,14 +13,14 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-type catalog struct{ prodQ, planP, planQ, customer, bProduct, bPlan, bCustomer string }
+type testCatalog struct{ prodQ, planP, planQ, customer, bProduct, bPlan, bCustomer string }
 
 // catalog adds a plan for prodA, a second product with a plan, a customer,
 // and the same in tenant b.
-func (f *fixture) catalog(t *testing.T) catalog {
+func (f *fixture) catalog(t *testing.T) testCatalog {
 	t.Helper()
 	ctx := context.Background()
-	var c catalog
+	var c testCatalog
 	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
 		mk := func(tenant, product string) (string, string, error) {
 			if product == "" {
