@@ -234,3 +234,19 @@ func TestCanAssign(t *testing.T) {
 		}
 	}
 }
+
+func TestAssuranceMeets(t *testing.T) {
+	levels := []Assurance{AssuranceNone, AssuranceMFA, AssurancePhishingResistant}
+	for i, a := range levels {
+		for j, req := range levels {
+			if got := a.Meets(req); got != (i >= j) {
+				t.Errorf("%s meets %s = %v", a, req, got)
+			}
+		}
+	}
+	for _, bad := range []Assurance{"", "MFA", "hwk"} {
+		if bad.Meets(AssuranceNone) || AssurancePhishingResistant.Meets(bad) || bad.Valid() {
+			t.Errorf("%q treated as a level", bad)
+		}
+	}
+}

@@ -3,6 +3,7 @@
 package tenant
 
 import (
+	"fmt"
 	"time"
 
 	"entgo.io/ent/dialect/sql"
@@ -22,6 +23,10 @@ const (
 	FieldSlug = "slug"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldAuditRetentionDays holds the string denoting the audit_retention_days field in the database.
+	FieldAuditRetentionDays = "audit_retention_days"
+	// FieldMfaPolicy holds the string denoting the mfa_policy field in the database.
+	FieldMfaPolicy = "mfa_policy"
 	// EdgeProducts holds the string denoting the products edge name in mutations.
 	EdgeProducts = "products"
 	// EdgeCustomers holds the string denoting the customers edge name in mutations.
@@ -123,6 +128,8 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldSlug,
 	FieldName,
+	FieldAuditRetentionDays,
+	FieldMfaPolicy,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -152,6 +159,33 @@ var (
 	IDValidator func(string) error
 )
 
+// MfaPolicy defines the type for the "mfa_policy" enum field.
+type MfaPolicy string
+
+// MfaPolicyNone is the default value of the MfaPolicy enum.
+const DefaultMfaPolicy = MfaPolicyNone
+
+// MfaPolicy values.
+const (
+	MfaPolicyNone              MfaPolicy = "none"
+	MfaPolicyMfa               MfaPolicy = "mfa"
+	MfaPolicyPhishingResistant MfaPolicy = "phishing_resistant"
+)
+
+func (mp MfaPolicy) String() string {
+	return string(mp)
+}
+
+// MfaPolicyValidator is a validator for the "mfa_policy" field enum values. It is called by the builders before save.
+func MfaPolicyValidator(mp MfaPolicy) error {
+	switch mp {
+	case MfaPolicyNone, MfaPolicyMfa, MfaPolicyPhishingResistant:
+		return nil
+	default:
+		return fmt.Errorf("tenant: invalid enum value for mfa_policy field: %q", mp)
+	}
+}
+
 // OrderOption defines the ordering options for the Tenant queries.
 type OrderOption func(*sql.Selector)
 
@@ -178,6 +212,16 @@ func BySlug(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByAuditRetentionDays orders the results by the audit_retention_days field.
+func ByAuditRetentionDays(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAuditRetentionDays, opts...).ToFunc()
+}
+
+// ByMfaPolicy orders the results by the mfa_policy field.
+func ByMfaPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMfaPolicy, opts...).ToFunc()
 }
 
 // ByProductsCount orders the results by products count.

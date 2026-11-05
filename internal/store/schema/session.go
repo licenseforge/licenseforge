@@ -27,6 +27,12 @@ func (Session) Fields() []ent.Field {
 		field.Time("created_at").Immutable().Default(time.Now),
 		field.Time("expires_at").Immutable(),
 		field.Time("last_seen_at").Default(time.Now),
+		// How the login authenticated (ADR-0038), from the verified ID token.
+		field.Enum("assurance").Values(assuranceLevels...).Default("none").Immutable(),
+		field.String("amr").Default("").Immutable().MaxLen(1040).Comment("space-separated RFC 8176 values, at most 16"),
+		field.String("acr").Optional().Nillable().Immutable().MaxLen(255),
+		field.String("acrs").Default("").Immutable().MaxLen(4095).Comment("Entra acrs, space-separated, at most 16"),
+		field.Time("auth_time").Optional().Nillable().Immutable(),
 	}
 }
 
@@ -41,6 +47,10 @@ func (Session) Annotations() []schema.Annotation {
 		"sessions_id_format": `id ~ '^ses_` + idChars + `$'`,
 		"sessions_hash_len":  `length(token_hash) = 32`,
 		"sessions_expiry":    `expires_at > created_at AND expires_at <= (created_at + '1 day'::interval)`,
+		"sessions_assurance": enumCheck("assurance", assuranceLevels),
+		"sessions_amr":       `amr ~ '^$|^[A-Za-z0-9_.:-]{1,64}( [A-Za-z0-9_.:-]{1,64}){0,15}$'`,
+		"sessions_acr":       `acr ~ '^[!-~]{1,255}$'`,
+		"sessions_acrs":      `acrs ~ '^$|^[!-~]{1,255}( [!-~]{1,255}){0,15}$'`,
 	}}}
 }
 

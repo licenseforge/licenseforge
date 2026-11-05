@@ -410,13 +410,8 @@ func (s Service) Deactivate(ctx context.Context, req Request) error {
 			return err
 		}
 		ev.ObjectID = act.ID
-		res, err := tx.ExecContext(ctx, `UPDATE activations SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
-			WHERE id = $1 AND deactivated_at IS NULL`, act.ID)
-		if err != nil {
+		if err := free(ctx, tx, act.ID); err != nil {
 			return err
-		}
-		if n, err := res.RowsAffected(); err != nil || n != 1 {
-			return errors.Join(ErrNotActivated, err)
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
 		_, err = audit.Record(ctx, tx, req.TenantID, ev)
@@ -424,6 +419,21 @@ func (s Service) Deactivate(ctx context.Context, req Request) error {
 	})
 	if err != nil {
 		return s.refused(ctx, req.TenantID, ev, err)
+	}
+	return nil
+}
+
+// free deactivates activation id, freeing its seat. The caller holds its
+// license FOR NO KEY UPDATE (seats are counted under that lock) and records
+// the audit entry after (lock order: license row, then the audit lock).
+func free(ctx context.Context, tx *ent.Tx, id string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE activations SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
+		WHERE id = $1 AND deactivated_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(ErrNotActivated, err)
 	}
 	return nil
 }

@@ -25,6 +25,10 @@ type Tenant struct {
 	Slug string `json:"slug,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
+	// AuditRetentionDays holds the value of the "audit_retention_days" field.
+	AuditRetentionDays *int `json:"audit_retention_days,omitempty"`
+	// MfaPolicy holds the value of the "mfa_policy" field.
+	MfaPolicy tenant.MfaPolicy `json:"mfa_policy,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the TenantQuery when eager-loading is set.
 	Edges        TenantEdges `json:"edges"`
@@ -153,7 +157,9 @@ func (*Tenant) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case tenant.FieldID, tenant.FieldSlug, tenant.FieldName:
+		case tenant.FieldAuditRetentionDays:
+			values[i] = new(sql.NullInt64)
+		case tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy:
 			values[i] = new(sql.NullString)
 		case tenant.FieldCreatedAt, tenant.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -201,6 +207,19 @@ func (_m *Tenant) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field name", values[i])
 			} else if value.Valid {
 				_m.Name = value.String
+			}
+		case tenant.FieldAuditRetentionDays:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field audit_retention_days", values[i])
+			} else if value.Valid {
+				_m.AuditRetentionDays = new(int)
+				*_m.AuditRetentionDays = int(value.Int64)
+			}
+		case tenant.FieldMfaPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field mfa_policy", values[i])
+			} else if value.Valid {
+				_m.MfaPolicy = tenant.MfaPolicy(value.String)
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -299,6 +318,14 @@ func (_m *Tenant) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
+	builder.WriteString(", ")
+	if v := _m.AuditRetentionDays; v != nil {
+		builder.WriteString("audit_retention_days=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("mfa_policy=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MfaPolicy))
 	builder.WriteByte(')')
 	return builder.String()
 }
