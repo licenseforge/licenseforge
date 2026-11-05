@@ -189,7 +189,7 @@ func (s Service) Create(ctx context.Context, in Input) (*ent.Customer, error) {
 	return c, nil
 }
 
-// Update changes name, email or external refs (replaced whole). Order
+// Update changes name, email or external refs (merged key by key, RFC 7396). Order
 // (ADR-0032): visible (else ErrNotFound), customer:write, then the values.
 func (s Service) Update(ctx context.Context, id string, patch Patch) (*ent.Customer, error) {
 	return s.change(ctx, "customer.update", id, func(tx *ent.Tx, c *ent.Customer) (*ent.Customer, map[string]any, error) {

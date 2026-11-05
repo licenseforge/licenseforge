@@ -12,6 +12,16 @@ All notable changes to this project are documented here. The format follows [Kee
   - Active customers, present only for callers with `customer:read` on every product.
   - Each counter is an object, so counters (for example activations) can be added without breaking clients. Lists still carry no totals.
   - `licenses.Service.Counts` and `customers.Service.CountActive`.
+- Dashboard licenses screen at `/t/{slug}/licenses` (ADR-0020).
+  - The list filters by product, customer and status, and shows key hints, never keys.
+  - The details show the entitlement snapshot and dates. Suspend and revoke ask for confirmation, and revoke says it is final; reinstate doesn't ask.
+  - Issuing a license (product, customer, plan ID, type, external references) sends an `Idempotency-Key`, so a retry never issues twice: it is kept after a network error, a 5xx or an idempotency conflict, and replaced after a definitive 4xx (a fixable form error). Archived customers aren't offered, and a caller who can't list customers enters a customer ID. The web lint refuses `console` calls, so secrets can't be logged. The key is shown once and kept only in the dialog.
+  - Actions are hidden below manager.
+  - Activations aren't shown yet: the API has no management endpoints for them.
+- Dashboard products and customers screens (ADR-0020), at `/t/{slug}/products` and `/t/{slug}/customers`.
+  - Products: list (a product-scoped caller sees only its products), create (slug and name; the slug is immutable) and rename (JSON Merge Patch).
+  - Customers: list, create (with `key=value` external references), edit name, email and external references (JSON Merge Patch that sends only the changes: an emptied email and a removed reference are sent as `null`, and untouched references are left out), and archive with a confirmation.
+  - Actions the caller's role can't perform are hidden: product create needs admin with every product, rename admin, and customer changes manager with every product. The API stays the real check.
 - Catalog API slice 1 (ADR-0015, ADR-0019, ADR-0032): products (`internal/catalog`: list, get, create, rename by merge patch; product-scoped, a hidden product answers like a missing one; creating needs `catalog:write` on every product; a taken slug is 409) and customers (`internal/customers`: list, get, create, merge patch with a nullable email, archive once; tenant-wide, managers and up write; audit details without names, emails or refs). `apitokens.Revoke` re-checks the caller's membership first in its transaction.
 - Dashboard members and invitations screen at `/t/{slug}/settings/members` (ADR-0020, ADR-0035).
   - Members: role changes use a JSON Merge Patch. A confirmation previews the API tokens and pending invitations the change would revoke (mirroring the server's rules, from the token and invitation lists), with a toggle for each, and the result shows the IDs actually revoked.
