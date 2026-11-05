@@ -395,6 +395,9 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"retention_floor (restrictive)": `DELETE licenseforge_retention ((occurred_at < (now() - '365 days'::interval)) AND (seq <= ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_events.tenant_id)::text))))`,
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
+		"features": { // ADR-0015: archive is one-way, at the database clock
+			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+		},
 		"products": { // ADR-0015: archive is one-way, at the database clock
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
@@ -746,112 +749,155 @@ func TestAuditExportPrivileges(t *testing.T) {
 	}
 }
 
-// Products are archived, never deleted (ADR-0015): the exact privileges on
-// products, table and column ACLs, of every grantee except the table owner
-// (PUBLIC included), with their grant options, are pinned. The app and
-// platform pools insert and read; they may update only name, archived_at and
-// updated_at; nobody else has anything, and nobody may pass a privilege on.
-func TestProductPrivileges(t *testing.T) {
+// archivable is a table whose rows are archived, never deleted, with a
+// one-way archive_once policy (ADR-0015).
+type archivable struct {
+	table     string
+	updatable []string // the serving pools' UPDATE columns
+	// create makes a row with key (slug or feature key) and returns its ID.
+	create func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error)
+	// upsert hits the row with key: $1 new ID, $2 tenant, $3 key, $4 product.
+	upsert string // $3 is the key as create got it (products: dashes)
+}
+
+func archivables() []archivable {
+	product := func(ctx context.Context, tx *ent.Tx, tenant, slug string) (*ent.Product, error) {
+		return tx.Product.Create().SetTenantID(tenant).SetSlug(slug).SetName("P").Save(ctx)
+	}
+	return []archivable{
+		{"products", []string{"name", "updated_at", "archived_at"},
+			func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error) {
+				p, err := product(ctx, tx, tenant, strings.ReplaceAll(key, "_", "-"))
+				if err != nil {
+					return "", err
+				}
+				return p.ID, nil
+			},
+			`INSERT INTO products (id, tenant_id, slug, name, created_at, updated_at) VALUES ($1, $2, $3, 'x', now(), now())
+				ON CONFLICT (tenant_id, slug) DO UPDATE SET archived_at = NULL`},
+		{"features", []string{"name", "description", "unit", "updated_at", "archived_at"},
+			func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error) {
+				p, err := product(ctx, tx, tenant, "f-"+strings.ReplaceAll(key, "_", "-"))
+				if err != nil {
+					return "", err
+				}
+				f, err := tx.Feature.Create().SetTenantID(tenant).SetProductID(p.ID).SetKey(key).SetName("F").SetType("boolean").Save(ctx)
+				if err != nil {
+					return "", err
+				}
+				return f.ID, nil
+			},
+			`INSERT INTO features (id, tenant_id, product_id, key, name, type, created_at, updated_at)
+				SELECT $1::text, $2::text, product_id, $3::text, 'x', 'boolean', now(), now() FROM features WHERE key = $3::text AND tenant_id = $2::text
+				ON CONFLICT (product_id, key) DO UPDATE SET archived_at = NULL`},
+	}
+}
+
+// Archived, never deleted (ADR-0015): the exact privileges on each
+// archivable table, table and column ACLs, of every grantee except the table
+// owner (PUBLIC included), with their grant options, are pinned. The app and
+// platform pools insert and read and update only the listed columns; nobody
+// else has anything, and nobody may pass a privilege on.
+func TestArchivablePrivileges(t *testing.T) {
 	owner, err := sql.Open("pgx", env.OwnerURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = owner.Close() }()
-	rows, err := owner.Query(`
-		WITH acl AS (
-			SELECT a.grantee, a.privilege_type, a.is_grantable, '' AS col
-			FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = 'public.products'::regclass
-			UNION ALL
-			SELECT a.grantee, a.privilege_type, a.is_grantable, att.attname
-			FROM pg_attribute att, aclexplode(att.attacl) a
-			WHERE att.attrelid = 'public.products'::regclass AND att.attacl IS NOT NULL)
-		SELECT COALESCE(r.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable, acl.col
-		FROM acl LEFT JOIN pg_roles r ON r.oid = acl.grantee
-		WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = 'public.products'::regclass)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	var got []string
-	for rows.Next() {
-		var role, priv, col string
-		var grantable bool
-		if err := rows.Scan(&role, &priv, &grantable, &col); err != nil {
+	for _, a := range archivables() {
+		rows, err := owner.Query(`
+			WITH acl AS (
+				SELECT a.grantee, a.privilege_type, a.is_grantable, '' AS col
+				FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = $1::regclass
+				UNION ALL
+				SELECT a.grantee, a.privilege_type, a.is_grantable, att.attname
+				FROM pg_attribute att, aclexplode(att.attacl) a
+				WHERE att.attrelid = $1::regclass AND att.attacl IS NOT NULL)
+			SELECT COALESCE(r.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable, acl.col
+			FROM acl LEFT JOIN pg_roles r ON r.oid = acl.grantee
+			WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = $1::regclass)`, "public."+a.table)
+		if err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, fmt.Sprintf("%s %s %s grantable=%v", role, priv, col, grantable))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	var want []string
-	for _, role := range []string{AppRole, PlatformRole} {
-		want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
-		for _, col := range []string{"name", "updated_at", "archived_at"} {
-			want = append(want, role+" UPDATE "+col+" grantable=false")
+		var got []string
+		for rows.Next() {
+			var role, priv, col string
+			var grantable bool
+			if err := rows.Scan(&role, &priv, &grantable, &col); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, fmt.Sprintf("%s %s %s grantable=%v", role, priv, col, grantable))
 		}
-	}
-	slices.Sort(got)
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Errorf("privileges on products:\n got %q\nwant %q", got, want)
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			t.Fatal(err)
+		}
+		var want []string
+		for _, role := range []string{AppRole, PlatformRole} {
+			want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
+			for _, col := range a.updatable {
+				want = append(want, role+" UPDATE "+col+" grantable=false")
+			}
+		}
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("privileges on %s:\n got %q\nwant %q", a.table, got, want)
+		}
 	}
 }
 
 // Archive is one-way and at the database clock (archive_once): the serving
-// pools can't un-archive a product or set another time, and renaming an
-// archived product still works.
-func TestProductArchiveIsOneWay(t *testing.T) {
+// pools can't un-archive a row or set another time; renaming an active or an
+// archived row still works.
+func TestArchiveIsOneWay(t *testing.T) {
 	d := openDB(t)
 	ctx := context.Background()
 	tn := createTenants(t, d, 1)[0]
-	var id string
-	if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
-		p, err := tx.Product.Create().SetTenantID(tn.ID).SetSlug("db").SetName("DB").Save(ctx)
-		if err == nil {
-			id = p.ID
+	for _, a := range archivables() {
+		var id string
+		if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+			var err error
+			id, err = a.create(ctx, tx, tn.ID, "one_way")
+			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	exec := func(platform bool, q string) error {
-		run := func(tx *ent.Tx) error { _, err := tx.ExecContext(ctx, q, id); return err }
-		if platform {
-			return d.WithPlatform(ctx, run)
+		exec := func(platform bool, q string) error {
+			run := func(tx *ent.Tx) error { _, err := tx.ExecContext(ctx, fmt.Sprintf(q, a.table), id); return err }
+			if platform {
+				return d.WithPlatform(ctx, run)
+			}
+			return d.WithTenant(ctx, tn.ID, run)
 		}
-		return d.WithTenant(ctx, tn.ID, run)
-	}
-	for _, platform := range []bool{false, true} {
-		for name, q := range map[string]string{
-			"backdated archive": `UPDATE products SET archived_at = clock_timestamp() - interval '1 day' WHERE id = $1`,
-			"future archive":    `UPDATE products SET archived_at = clock_timestamp() + interval '1 day' WHERE id = $1`,
-		} {
-			if err := exec(platform, q); err == nil {
-				t.Errorf("platform=%v %s: allowed", platform, name)
+		for _, platform := range []bool{false, true} {
+			for name, q := range map[string]string{
+				"backdated archive": `UPDATE %s SET archived_at = clock_timestamp() - interval '1 day' WHERE id = $1`,
+				"future archive":    `UPDATE %s SET archived_at = clock_timestamp() + interval '1 day' WHERE id = $1`,
+			} {
+				if err := exec(platform, q); err == nil {
+					t.Errorf("%s platform=%v %s: allowed", a.table, platform, name)
+				}
+			}
+			if err := exec(platform, `UPDATE %s SET name = 'Active', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
+				t.Errorf("%s platform=%v rename active: %v", a.table, platform, err)
 			}
 		}
-	}
-	for _, platform := range []bool{false, true} {
-		if err := exec(platform, `UPDATE products SET name = 'Database', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
-			t.Errorf("platform=%v rename active: %v", platform, err)
+		if err := exec(false, `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`); err != nil {
+			t.Fatalf("%s archive: %v", a.table, err)
 		}
-	}
-	if err := exec(false, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`); err != nil {
-		t.Fatalf("archive: %v", err)
-	}
-	for _, platform := range []bool{false, true} {
-		for name, q := range map[string]string{
-			"un-archive": `UPDATE products SET archived_at = NULL WHERE id = $1`,
-			"re-archive": `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`,
-			"backdate":   `UPDATE products SET archived_at = archived_at - interval '1 hour' WHERE id = $1`,
-		} {
-			if err := exec(platform, q); err == nil {
-				t.Errorf("platform=%v %s: allowed", platform, name)
+		for _, platform := range []bool{false, true} {
+			for name, q := range map[string]string{
+				"un-archive": `UPDATE %s SET archived_at = NULL WHERE id = $1`,
+				"re-archive": `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`,
+				"backdate":   `UPDATE %s SET archived_at = archived_at - interval '1 hour' WHERE id = $1`,
+			} {
+				if err := exec(platform, q); err == nil {
+					t.Errorf("%s platform=%v %s: allowed", a.table, platform, name)
+				}
 			}
-		}
-		if err := exec(platform, `UPDATE products SET name = 'Old DB', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
-			t.Errorf("platform=%v rename archived: %v", platform, err)
+			if err := exec(platform, `UPDATE %s SET name = 'Old', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
+				t.Errorf("%s platform=%v rename archived: %v", a.table, platform, err)
+			}
 		}
 	}
 }
@@ -860,7 +906,7 @@ func TestProductArchiveIsOneWay(t *testing.T) {
 // concurrent archive (READ COMMITTED rechecks it against the newer row)
 // changes nothing, and an upsert is refused, so the archive is neither
 // erased nor re-dated.
-func TestProductArchiveRace(t *testing.T) {
+func TestArchiveRace(t *testing.T) {
 	d := openDB(t)
 	ctx := context.Background()
 	tn := createTenants(t, d, 1)[0]
@@ -892,84 +938,90 @@ func TestProductArchiveRace(t *testing.T) {
 		}
 		return errors.New("B never waited")
 	}
-	for i, c := range []struct {
-		name     string
-		platform bool
-		q        string
-	}{
-		{"un-archive", false, `UPDATE products SET archived_at = NULL WHERE id = $1`},
-		{"re-date", false, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`},
-		{"un-archive, platform", true, `UPDATE products SET archived_at = NULL WHERE id = $1`},
-		{"re-date, platform", true, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1`},
-		{"upsert", false, `INSERT INTO products (id, tenant_id, slug, name, created_at, updated_at) VALUES ($2, $3, $4, 'x', now(), now())
-			ON CONFLICT (tenant_id, slug) DO UPDATE SET archived_at = NULL`},
-	} {
-		upsert := strings.HasPrefix(c.q, "INSERT")
-		slug := fmt.Sprintf("p%d", i)
-		var id string
-		if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
-			p, err := tx.Product.Create().SetTenantID(tn.ID).SetSlug(slug).SetName("P").Save(ctx)
-			if err == nil {
-				id = p.ID
-			}
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan error, 1)
-		var archived time.Time
-		// A archives and, before committing, lets B run against the locked row.
-		if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
-			rows, err := tx.QueryContext(ctx, `UPDATE products SET archived_at = clock_timestamp() WHERE id = $1 RETURNING archived_at`, id)
-			if err != nil {
+	for _, a := range archivables() {
+		for i, c := range []struct {
+			name     string
+			platform bool
+			q        string
+		}{
+			{"un-archive", false, `UPDATE %s SET archived_at = NULL WHERE id = $1`},
+			{"re-date", false, `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`},
+			{"un-archive, platform", true, `UPDATE %s SET archived_at = NULL WHERE id = $1`},
+			{"re-date, platform", true, `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`},
+			{"upsert", false, ""},
+		} {
+			upsert := c.q == ""
+			key := fmt.Sprintf("race_%d", i)
+			var id string
+			if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+				var err error
+				id, err = a.create(ctx, tx, tn.ID, key)
 				return err
+			}); err != nil {
+				t.Fatal(err)
 			}
-			if !rows.Next() {
-				_ = rows.Close()
-				return errors.New("the archive updated nothing")
-			}
-			if err := errors.Join(rows.Scan(&archived), rows.Close()); err != nil {
-				return err
-			}
-			go func() {
-				run := func(tx *ent.Tx) error {
-					args := []any{id}
-					if upsert {
-						args = []any{id, ids.Product(), tn.ID, slug}
-					}
-					_, err := tx.ExecContext(ctx, c.q, args...)
+			done := make(chan error, 1)
+			var archived time.Time
+			// A archives and, before committing, lets B run against the locked row.
+			if err := d.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+				rows, err := tx.QueryContext(ctx, fmt.Sprintf(`UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1 RETURNING archived_at`, a.table), id)
+				if err != nil {
 					return err
 				}
-				if c.platform {
-					done <- d.WithPlatform(ctx, run)
-				} else {
-					done <- d.WithTenant(ctx, tn.ID, run)
+				if !rows.Next() {
+					_ = rows.Close()
+					return errors.New("the archive updated nothing")
 				}
-			}()
-			if err := waitForB(done); err != nil {
-				return fmt.Errorf("%s: %w", c.name, err)
+				if err := errors.Join(rows.Scan(&archived), rows.Close()); err != nil {
+					return err
+				}
+				go func() {
+					run := func(tx *ent.Tx) error {
+						if upsert {
+							k := key
+							if a.table == "products" {
+								k = strings.ReplaceAll(key, "_", "-")
+							}
+							_, err := tx.ExecContext(ctx, a.upsert, map[string]string{"products": ids.Product(), "features": ids.Feature()}[a.table], tn.ID, k)
+							return err
+						}
+						_, err := tx.ExecContext(ctx, fmt.Sprintf(c.q, a.table), id)
+						return err
+					}
+					if c.platform {
+						done <- d.WithPlatform(ctx, run)
+					} else {
+						done <- d.WithTenant(ctx, tn.ID, run)
+					}
+				}()
+				if err := waitForB(done); err != nil {
+					return fmt.Errorf("%s %s: %w", a.table, c.name, err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
 			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case err := <-done:
-			if upsert && err == nil {
-				t.Errorf("%s: allowed", c.name)
+			select {
+			case err := <-done:
+				if upsert && err == nil {
+					t.Errorf("%s %s: allowed", a.table, c.name)
+				}
+				if upsert && err != nil && !strings.Contains(err.Error(), "archive_once") {
+					t.Errorf("%s upsert refused for another reason: %v", a.table, err)
+				}
+				if !upsert && err != nil {
+					t.Errorf("%s %s: %v (want no change, not an error)", a.table, c.name, err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%s %s didn't finish", a.table, c.name)
 			}
-			if !upsert && err != nil {
-				t.Errorf("%s: %v (want no change, not an error)", c.name, err)
+			var got sql.NullTime
+			if err := owner.QueryRow(fmt.Sprintf(`SELECT archived_at FROM %s WHERE id = $1`, a.table), id).Scan(&got); err != nil {
+				t.Fatal(err)
 			}
-		case <-time.After(10 * time.Second):
-			t.Fatalf("%s didn't finish", c.name)
-		}
-		var got sql.NullTime
-		if err := owner.QueryRow(`SELECT archived_at FROM products WHERE id = $1`, id).Scan(&got); err != nil {
-			t.Fatal(err)
-		}
-		if !got.Valid || !got.Time.Equal(archived) {
-			t.Errorf("%s: archived_at = %v, want %v", c.name, got, archived)
+			if !got.Valid || !got.Time.Equal(archived) {
+				t.Errorf("%s %s: archived_at = %v, want %v", a.table, c.name, got, archived)
+			}
 		}
 	}
 }

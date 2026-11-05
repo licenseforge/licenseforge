@@ -1,4 +1,4 @@
-h1:QG1Irhs4pvZJDQdzJ5vVY93mVcgXddcsbmO4/jjOUMI=
+h1:cDfoizxbe4t2GCZlxgEvh4obrA3mMmdulPBisKk72mA=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -32,5 +32,6 @@ h1:QG1Irhs4pvZJDQdzJ5vVY93mVcgXddcsbmO4/jjOUMI=
 20261105051159_tenant_mfa_security.sql h1:k9soSny+I0xRXH7EfKpmkXL+Vhoy2rYdJwM4JgPNIvI=
 20261105051200_product_archive.sql h1:jXvk2UqGKXHqS+TCBFJvm3yezE4V13BO4aQJ8jsgb7I=
 20261105051201_product_archive_security.sql h1:8kp0Y7LtraXpJfgSPgxliMdk2YqwYoY5JpFvQeMizX0=
-20261105160000_tenant_mfa_enforce_security.sql h1:QN0Z8PvU1h2hnvpNuFL949GF/Ya9aC9TVudq85na+6Y=
-20261105215658_mfa_refusal_index.sql h1:IHX5IGFCmY4+SbuuuK4E9nL/Q3bnHyToGJ5JxdY9l+A=
+20261105051300_feature_archive_security.sql h1:CbPg+tx9dSEI6sZUGwsXnKAsIP954IKI9N+uDlY9fGA=
+20261105160000_tenant_mfa_enforce_security.sql h1:WDXsDdiSi93HN5VIx5S0rHsSx8L87bOvTgJpjEWecLQ=
+20261105215658_mfa_refusal_index.sql h1:RD4mBZMTeXGopEDH+DywwjF/1p5D6cyJoYoTHjBRdbI=

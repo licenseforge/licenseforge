@@ -375,7 +375,16 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 		}
 	}
 	if len(overrides) > 0 {
-		catalog, err := tx.Feature.Query().Where(feature.ProductID(pl.ProductID), feature.KeyIn(slices.Collect(maps.Keys(overrides))...)).ForShare().All(ctx)
+		lock := func() ([]*ent.Feature, error) {
+			return tx.Feature.Query().Where(feature.ProductID(pl.ProductID), feature.KeyIn(slices.Collect(maps.Keys(overrides))...)).ForShare().All(ctx)
+		}
+		catalog, err := lock()
+		if err == nil && len(catalog) < len(overrides) {
+			// A feature locked after waiting for a concurrent archive is
+			// rechecked as its newer version, which archive_once filters: a
+			// second statement sees it (archived), or it is really unknown.
+			catalog, err = lock()
+		}
 		if err != nil {
 			return schema.LicenseEntitlements{}, err
 		}
