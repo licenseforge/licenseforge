@@ -238,8 +238,17 @@ type held struct {
 // lock, so taking the audit lock between tokens and invitations here would
 // deadlock with them.
 func lockHeld(ctx context.Context, tx *ent.Tx, m *ent.Membership) (held, error) {
-	toks, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
-		Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
+	lockTokens := func() ([]*ent.APIToken, error) {
+		return tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
+			Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
+	}
+	toks, err := lockTokens()
+	if err == nil {
+		// A token this lock waited for a concurrent use of is rechecked as
+		// the used row, which use_moves_forward filters (its subquery reads
+		// this statement's snapshot): a second statement locks it too.
+		toks, err = lockTokens()
+	}
 	if err != nil {
 		return held{}, err
 	}

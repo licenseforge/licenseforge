@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
@@ -148,4 +149,26 @@ func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error)
 	env.IdentityURL = UserURL(env.AdminURL, idn, env.Name)
 	env.RetentionURL = UserURL(env.AdminURL, ret, env.Name)
 	return migrate(context.Background(), env.OwnerURL)
+}
+
+// WaitForLockWaiter returns once a backend of e's database waits on a lock
+// (at most 2 s).
+func WaitForLockWaiter(t testing.TB, e Env) {
+	t.Helper()
+	admin, err := sql.Open("pgx", e.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for range 100 {
+		var n int
+		if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, e.Name).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("nothing waited on a lock")
 }

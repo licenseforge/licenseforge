@@ -283,13 +283,26 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 		}
 		// The database clock (the policies bound revoked_at to it), and count
 		// the row: ent's UpdateOneID would hide a zero-row update.
-		res, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
-			WHERE id = $1 AND revoked_at IS NULL`, tokenID)
-		if err != nil {
-			return dbRefusal(err)
+		revoke := func() (int64, error) {
+			res, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+				WHERE id = $1 AND revoked_at IS NULL`, tokenID)
+			if err != nil {
+				return 0, dbRefusal(err)
+			}
+			return res.RowsAffected()
 		}
-		if n, err := res.RowsAffected(); err != nil || n != 1 { // revoked concurrently since the query: not ours to record
-			return errors.Join(ErrNotFound, err)
+		n, err := revoke()
+		if err == nil && n == 0 {
+			// After waiting for a concurrent use, the update is rechecked
+			// against the used row, which use_moves_forward filters (its
+			// subquery reads this statement's snapshot): a second one sees it.
+			n, err = revoke()
+		}
+		if err != nil {
+			return err
+		}
+		if n != 1 { // revoked concurrently since the query: not ours to record
+			return ErrNotFound
 		}
 		if row, err = tx.APIToken.Query().Where(entapitoken.ID(tokenID)).WithProducts().Only(ctx); err != nil {
 			return err
