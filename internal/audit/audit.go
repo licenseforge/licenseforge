@@ -75,6 +75,14 @@ func cleanText(s string, n int) string {
 	return s
 }
 
+// LockChain takes tenantID's chain lock for the rest of tx, the lock Record
+// appends under. Retention takes it before choosing a cut, so no entry is
+// appended between the cut and its audit.retention entry.
+func LockChain(ctx context.Context, tx *ent.Tx, tenantID string) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenantID)
+	return err
+}
+
 // Record appends e to tenantID's chain in tx, which must be READ COMMITTED
 // (the default): the head is read after taking a transaction-scoped advisory
 // lock for the tenant, so concurrent writers never fork the chain. The time
@@ -108,7 +116,7 @@ func write(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.Audi
 		e.SourceIP = ip.Unmap().String()
 	}
 	e.UserAgent = cleanText(e.UserAgent, maxUserAgent)
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.audit:' || $1, 0))`, tenantID); err != nil {
+	if err := LockChain(ctx, tx, tenantID); err != nil {
 		return nil, err
 	}
 	// A separate statement, so the clock is read after the lock is held.

@@ -306,3 +306,27 @@ func TestServeFailsWithMetricsListener(t *testing.T) {
 		t.Errorf("serve = %v, want a metrics listener error", err)
 	}
 }
+
+func TestPrune(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "")
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", "")
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_RETENTION_DATABASE_URL is not set") {
+		t.Errorf("prune without the login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.PlatformURL)
+	if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "unsafe database role") {
+		t.Errorf("prune with the platform login = %v", err)
+	}
+	t.Setenv("LICENSEFORGE_RETENTION_DATABASE_URL", env.RetentionURL)
+	for _, bad := range []string{"30", "1y", "-400"} {
+		t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", bad)
+		if err := prune(ctx, quiet); err == nil || !strings.Contains(err.Error(), "LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS") {
+			t.Errorf("platform days %q: %v", bad, err)
+		}
+	}
+	t.Setenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS", "400")
+	if err := prune(ctx, quiet); err != nil {
+		t.Errorf("prune = %v", err)
+	}
+}

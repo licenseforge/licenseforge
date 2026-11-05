@@ -1,4 +1,4 @@
-h1:Oltiw6qLvl3YfQ8PLujc6x8xPUVwjH8s6OiOQD2Hqtk=
+h1:hCeX6iRCbDUQzCUxx2NTv3WRtctrWN62+zbf4+ELWhc=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -26,3 +26,5 @@ h1:Oltiw6qLvl3YfQ8PLujc6x8xPUVwjH8s6OiOQD2Hqtk=
 20261105001847_audit_export_security.sql h1:QN1mioztjxIFSm37brZXQrcPAXxAXQz++fYrjvI4iPg=
 20261105014358_audit_anchors.sql h1:NEVU/Y525uz7AQ8l++7DeXllFkrV1SEfheW8GfwkWSU=
 20261105014359_audit_anchors_security.sql h1:b40c+q+G8eedZlumZm7O2yaU2pZcPfndkigCewD8EBA=
+20261105020007_audit_retention.sql h1:eRcLBZ65hJfNLHIsK3CqzEDguKNiEBrUsBEaH6yHatE=
+20261105020008_audit_retention_security.sql h1:skHm1qD/UKAYBCGRTzMTDN0t+jKVx5sLXEhGMpDb8mk=

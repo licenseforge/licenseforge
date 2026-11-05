@@ -57,6 +57,17 @@ oidc:
     port: 443
     to: []
 
+# Audit retention (ADR-0036): a CronJob runs `licenseforge audit prune` with
+# the retention login, the only one that deletes audit entries (never given
+# to the serving pods). Tenants set their own retention (owners only, at least
+# 365 days); platformDays is the platform chain's (empty: keep everything).
+auditRetention:
+  enabled: false
+  secret: ""          # Secret with retention-database-url (the licenseforge_pruner login)
+  schedule: "17 3 * * *"
+  platformDays: ""    # e.g. 730; at least 365
+  activeDeadlineSeconds: 3600
+
 resources:
   requests: {cpu: 100m, memory: 64Mi}
   limits: {memory: 256Mi}

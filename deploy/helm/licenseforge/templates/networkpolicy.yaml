@@ -30,6 +30,22 @@ spec:
       to: {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- end }}
+{{- if (.Values.auditRetention | default dict).enabled }}
+---
+# The audit retention CronJob: DNS and the database only, no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "licenseforge.fullname" . }}-audit-prune
+  labels: {{- include "licenseforge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "licenseforge.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: audit-prune
+  policyTypes: [Ingress, Egress]
+  egress: {{- include "licenseforge.egress" . | nindent 4 }}
+{{- end }}
 {{- if .Values.migrate.enabled }}
 ---
 # The migration Job runs as a pre-install/pre-upgrade hook, before normal

@@ -9,6 +9,7 @@
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
+//	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, at least 365; unset = keep everything
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
@@ -37,6 +38,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -51,6 +54,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/retention"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
@@ -66,7 +70,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]   run the server\n       licenseforge migrate   apply database migrations\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -81,12 +85,9 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
-	if flag.NArg() > 1 {
-		flag.Usage()
-		os.Exit(2)
-	}
+	cmd := strings.Join(flag.Args(), " ")
 	var err error
-	switch flag.Arg(0) {
+	switch cmd {
 	case "":
 		var ln, mln net.Listener
 		if ln, err = net.Listen("tcp", *addr); err == nil {
@@ -98,6 +99,8 @@ func main() {
 		}
 	case "migrate":
 		err = migrate(ctx, log)
+	case "audit prune":
+		err = prune(ctx, log)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -106,6 +109,35 @@ func main() {
 		log.Error("stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// prune applies audit retention (ADR-0036) with the retention login:
+// tenants' audit_retention_days, and LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
+// (unset: keep everything) for the platform chain. Run it as the CronJob.
+func prune(ctx context.Context, log *slog.Logger) error {
+	dsn, err := mustEnv("LICENSEFORGE_RETENTION_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	platformDays := 0
+	if v := os.Getenv("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS"); v != "" {
+		if platformDays, err = strconv.Atoi(v); err != nil || platformDays < retention.MinDays {
+			return fmt.Errorf("LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS: want whole days, at least %d; got %q", retention.MinDays, v)
+		}
+	}
+	r, err := store.OpenRetention(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+	cuts, err := retention.Prune(ctx, r, platformDays)
+	var deleted int64
+	for _, c := range cuts {
+		deleted += c.Deleted
+		log.Info("audit retention cut", "chain", c.TenantID, "through_seq", c.Through, "deleted", c.Deleted)
+	}
+	log.Info("audit retention done", "cuts", len(cuts), "deleted", deleted, "platform_days", platformDays)
+	return err
 }
 
 func migrate(ctx context.Context, log *slog.Logger) error {

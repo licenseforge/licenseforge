@@ -78,6 +78,13 @@ URL, or without a port.
   in-cluster database). On OpenShift set `networkPolicy.dns.ports: [5353]`.
   The migration policy is a hook resource: `helm uninstall` leaves it behind
   (it selects only migration pods); delete it with the release's namespace.
+- **Audit retention** (ADR-0036): set `auditRetention.enabled` and
+  `auditRetention.secret` (a Secret with `retention-database-url`, the
+  `licenseforge_pruner` login) to run `licenseforge audit prune` on
+  `auditRetention.schedule` (`concurrencyPolicy: Forbid`). Tenant owners set
+  their own retention (at least 365 days); `auditRetention.platformDays` sets
+  the platform chain's (empty keeps everything). Nothing a registered SIEM
+  sink hasn't received is pruned.
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;
