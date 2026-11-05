@@ -49,4 +49,5 @@ func Session() string           { return New("ses") }
 func PlatformAdmin() string     { return New("pad") }
 func AuditEvent() string        { return New("aud") }
 func AuditExportCursor() string { return New("aec") }
+func AuditAnchor() string       { return New("anc") }
 func IdempotencyKey() string    { return New("idk") }

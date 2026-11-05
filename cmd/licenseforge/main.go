@@ -8,6 +8,7 @@
 //	LICENSEFORGE_PLATFORM_DATABASE_URL  platform pool login (licenseforge_admin)
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
+//	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
@@ -28,8 +29,8 @@
 //	LICENSEFORGE_AUDIT_SYSLOG_SD_ID     structured data ID name@PEN, default licenseforge@32473
 //	LICENSEFORGE_BOOTSTRAP_ADMIN        issuer|subject (or a verified email) made platform admin at login while there is none
 //
-// The serving process refuses to start if the owner login is in its
-// environment: serving pods must never hold it (ADR-0009).
+// The serving process refuses to start if the owner or the retention login is
+// in its environment: serving pods must never hold them (ADR-0009, ADR-0036).
 package main
 
 import (
@@ -132,6 +133,9 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	defer func() { _ = ln.Close(); _ = mln.Close() }()
 	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
 		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
+	}
+	if os.Getenv("LICENSEFORGE_RETENTION_DATABASE_URL") != "" { // ADR-0036: no DELETE on audit entries in serving pods
+		return errors.New("LICENSEFORGE_RETENTION_DATABASE_URL is set: the server must not hold the retention login; use it for `licenseforge audit prune` only")
 	}
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
 	if err != nil || drain < 0 {

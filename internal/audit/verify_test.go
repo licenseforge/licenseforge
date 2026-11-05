@@ -13,6 +13,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
 // smallPages makes Verify page every n entries for the test.
@@ -280,5 +281,41 @@ func TestPlainErrorsAreNotAuditFailures(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(writes); got != wb {
 		t.Errorf("write failures %v→%v after a client went away", wb, got)
+	}
+}
+
+// Verify starts at the chain's real anchor (audit_anchors), on the tenant
+// and the platform pool.
+func TestVerifyFromStoredAnchor(t *testing.T) {
+	d := openDB(t)
+	tn, es := chain(t, d, 10)
+	owner := sqlDB(t, env.OwnerURL)
+	// As the retention job would: anchor at 4, then the prefix removed (the
+	// owner here, as the entries are too young for the retention login).
+	if _, err := owner.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) VALUES ($1, $2, 4, $3, now())`,
+		ids.AuditAnchor(), tn, es[3].Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify(context.Background(), tenantRunner(d, tn), tn, Head{}); err == nil || !strings.Contains(err.Error(), "at or below the anchor") {
+		t.Errorf("entries below the stored anchor: %v", err)
+	}
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq <= 4`, tn); err != nil {
+		t.Fatal(err)
+	}
+	for name, run := range map[string]Runner{"tenant": tenantRunner(d, tn), "platform": d.ReadPlatform} {
+		if h, err := Verify(context.Background(), run, tn, Head{}); err != nil || h.Seq != 10 {
+			t.Errorf("%s pool from the stored anchor: %+v, %v", name, h, err)
+		}
+	}
+	// A later anchor wins; one with a wrong hash breaks the first link.
+	if _, err := owner.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) VALUES ($1, $2, 6, $3, now())`,
+		ids.AuditAnchor(), tn, es[4].Hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq <= 6`, tn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify(context.Background(), tenantRunner(d, tn), tn, Head{}); !errors.Is(err, ErrBroken) {
+		t.Errorf("anchor with the wrong hash: %v", err)
 	}
 }
