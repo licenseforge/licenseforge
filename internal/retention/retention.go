@@ -150,7 +150,7 @@ var ErrCountMismatch = errors.New("retention: deleted count doesn't match the cu
 func pruneBatch(ctx context.Context, r *store.Retention, tenantID string, days int) (Cut, error) {
 	cut := Cut{TenantID: tenantID}
 	err := r.Tx(ctx, func(tx *ent.Tx) error {
-		if err := audit.LockChain(ctx, tx, tenantID); err != nil {
+		if err := audit.Lock(ctx, tx, tenantID); err != nil { // no entry appended between the cut and its record
 			return err
 		}
 		var anchor, head, firstYoung, gate sql.NullInt64

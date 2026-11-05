@@ -272,7 +272,8 @@ func TestOfflineFileRevokedWhileSigning(t *testing.T) {
 	if file, err := is.OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) || file != "" {
 		t.Errorf("OfflineFile = %q, %v", file, err)
 	}
-	if e := f.lastEvent(t); before != nil || e == nil || e.Seq != 1 || e.Outcome != auditevent.OutcomeFailure {
+	// The fixture's key creation is the only entry before (signing_key.create).
+	if e := f.lastEvent(t); before == nil || before.Action != "signing_key.create" || e == nil || e.Seq != before.Seq+1 || e.Outcome != auditevent.OutcomeFailure {
 		t.Errorf("want exactly one failure entry, no success: %+v", e)
 	}
 }
@@ -416,13 +417,14 @@ func (c changeWhileSigning) Sign(ctx context.Context, tenantID, kid string, msg 
 func TestOfflineFileChangedWhileSigning(t *testing.T) {
 	f := setup(t)
 	l := f.newLicense(t, nil)
+	before := f.lastEvent(t)
 	keys := changeWhileSigning{Local: f.keys, f: f, change: func(ctx context.Context, tx *ent.Tx) error {
 		return tx.License.UpdateOneID(l.ID).SetEntitlements(schema.LicenseEntitlements{Features: []string{"sso", "audit"}}).Exec(ctx)
 	}}
 	if file, err := (Issuer{DB: f.db, Keys: keys}).OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) || file != "" {
 		t.Errorf("OfflineFile = %q, %v", file, err)
 	}
-	if e := f.lastEvent(t); e == nil || e.Seq != 1 || e.Outcome != auditevent.OutcomeFailure {
+	if e := f.lastEvent(t); before == nil || e == nil || e.Seq != before.Seq+1 || e.Outcome != auditevent.OutcomeFailure {
 		t.Errorf("want exactly one failure entry: %+v", e)
 	}
 }
