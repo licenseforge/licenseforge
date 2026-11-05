@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - Dashboard products and customers screens (ADR-0020), at `/t/{slug}/products` and `/t/{slug}/customers`.
   - Products: list (a product-scoped caller sees only its products), create (slug and name; the slug is immutable) and rename (JSON Merge Patch).
-  - Customers: list, create (with `key=value` external references), edit name and email (JSON Merge Patch that sends only the changes; an emptied email is sent as `null`), and archive with a confirmation.
+  - Customers: list, create (with `key=value` external references), edit name, email and external references (JSON Merge Patch that sends only the changes: an emptied email and a removed reference are sent as `null`, and untouched references are left out), and archive with a confirmation.
   - Actions the caller's role can't perform are hidden: product create needs admin with every product, rename admin, and customer changes manager with every product. The API stays the real check.
 - Catalog API slice 1 (ADR-0015, ADR-0019, ADR-0032): products (`internal/catalog`: list, get, create, rename by merge patch; product-scoped, a hidden product answers like a missing one; creating needs `catalog:write` on every product; a taken slug is 409) and customers (`internal/customers`: list, get, create, merge patch with a nullable email, archive once; tenant-wide, managers and up write; audit details without names, emails or refs). `apitokens.Revoke` re-checks the caller's membership first in its transaction.
 - Dashboard members and invitations screen at `/t/{slug}/settings/members` (ADR-0020, ADR-0035).

@@ -51,19 +51,36 @@ export async function archiveCustomer(tenant: string, id: string): Promise<Custo
 }
 
 /**
- * The JSON Merge Patch (RFC 7396) from a customer's name and email as they
- * were to as edited: only what changed; an emptied email is null (cleared),
- * since absent would mean "keep".
+ * The JSON Merge Patch (RFC 7396) from a customer as it was to as edited:
+ * only what changed. An emptied email is null (cleared), since absent would
+ * mean "keep". external_refs merges key by key on the server: a new or
+ * changed key carries its value, a removed key is null, and untouched keys
+ * are left out (external_refs is absent if no key changed).
  */
-export function customerPatch(before: Pick<Customer, "name" | "email">, after: { name: string; email: string }): CustomerPatch {
+export function customerPatch(
+  before: Pick<Customer, "name" | "email" | "external_refs">,
+  after: { name: string; email: string; refs?: Record<string, string> },
+): CustomerPatch {
   const patch: CustomerPatch = {};
   const name = after.name.trim();
   const email = after.email.trim();
   if (name !== before.name) patch.name = name;
   if (email === "" && before.email !== null) patch.email = null;
   else if (email !== "" && email !== before.email) patch.email = email;
+  if (after.refs) {
+    const refs: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(after.refs)) if (before.external_refs[k] !== v) refs[k] = v;
+    for (const k of Object.keys(before.external_refs)) if (!(k in after.refs)) refs[k] = null;
+    if (Object.keys(refs).length > 0) patch.external_refs = refs;
+  }
   return patch;
 }
+
+/** External references as the "key=value" lines parseRefs reads. */
+export const formatRefs = (refs: Record<string, string>) =>
+  Object.entries(refs)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
 
 /** External references from "key=value" lines; blank lines are skipped. Throws on a line without "=". */
 export function parseRefs(text: string): Record<string, string> {
