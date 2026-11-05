@@ -401,6 +401,42 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for SigningKeyAlg.
+const (
+	Ed25519 SigningKeyAlg = "ed25519"
+)
+
+// Valid indicates whether the value is a known member of the SigningKeyAlg enum.
+func (e SigningKeyAlg) Valid() bool {
+	switch e {
+	case Ed25519:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SigningKeyStatus.
+const (
+	SigningKeyStatusActive  SigningKeyStatus = "active"
+	SigningKeyStatusPending SigningKeyStatus = "pending"
+	SigningKeyStatusRetired SigningKeyStatus = "retired"
+)
+
+// Valid indicates whether the value is a known member of the SigningKeyStatus enum.
+func (e SigningKeyStatus) Valid() bool {
+	switch e {
+	case SigningKeyStatusActive:
+		return true
+	case SigningKeyStatusPending:
+		return true
+	case SigningKeyStatusRetired:
+		return true
+	default:
+		return false
+	}
+}
+
 // AcceptedInvitation defines model for AcceptedInvitation.
 type AcceptedInvitation struct {
 	AllProducts  bool       `json:"all_products"`
@@ -982,6 +1018,39 @@ type ProductPatch struct {
 // Role defines model for Role.
 type Role string
 
+// SigningKey A signing key's public part. Private keys are never returned.
+type SigningKey struct {
+	ActivatedAt *time.Time    `json:"activated_at"`
+	Alg         SigningKeyAlg `json:"alg"`
+	CreatedAt   time.Time     `json:"created_at"`
+
+	// Kid Example: sk_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Kid string `json:"kid"`
+
+	// PublicKey Base64url without padding (RFC 4648 §5), as in the trusted key set (License File Format).
+	//
+	// Example: K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k
+	PublicKey string     `json:"public_key"`
+	RetiredAt *time.Time `json:"retired_at"`
+
+	// Status pending: published, never signs; active: signs everything new (at most one); retired: never signs again, private key erased.
+	Status SigningKeyStatus `json:"status"`
+}
+
+// SigningKeyAlg defines model for SigningKey.Alg.
+type SigningKeyAlg string
+
+// SigningKeyStatus pending: published, never signs; active: signs everything new (at most one); retired: never signs again, private key erased.
+type SigningKeyStatus string
+
+// SigningKeyPage defines model for SigningKeyPage.
+type SigningKeyPage struct {
+	Items []SigningKey `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
 // Summary Each counter is an object, so a counter can gain members and new counters can be added without breaking clients.
 type Summary struct {
 	// Customers Present only for callers with customer:read on every product.
@@ -1036,6 +1105,9 @@ type CustomerId = string
 
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
+
+// Kid Example: sk_01jcz5b2y3c4d5e6f7g8h9j0k1
+type Kid = string
 
 // LicenseId Example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1
 type LicenseId = string
@@ -1154,6 +1226,14 @@ type UpdateMemberParams struct {
 
 // ListProductsParams defines parameters for ListProducts.
 type ListProductsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListSigningKeysParams defines parameters for ListSigningKeys.
+type ListSigningKeysParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Cursor Opaque; `next_cursor` of the previous page.
@@ -1300,6 +1380,18 @@ type ServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
+	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
+	// (GET /tenants/{tenant}/signing-keys)
+	ListSigningKeys(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListSigningKeysParams)
+	// CreateSigningKey Generate a signing key. The tenant's first key is active; later keys are pending until promoted.
+	// (POST /tenants/{tenant}/signing-keys)
+	CreateSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant)
+	// DiscardSigningKey Retire the pending key without it ever signing (rotation abandoned, or the pending key leaked).
+	// (POST /tenants/{tenant}/signing-keys/{kid}/discard)
+	DiscardSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant, kid Kid)
+	// PromoteSigningKey Make the pending key active and retire the active key, erasing its private key. Can't be undone.
+	// (POST /tenants/{tenant}/signing-keys/{kid}/promote)
+	PromoteSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant, kid Kid)
 	// GetSummary Exact counts for the dashboard overview, within the caller's scope.
 	// (GET /tenants/{tenant}/summary)
 	GetSummary(w http.ResponseWriter, r *http.Request, tenant Tenant)
@@ -2708,6 +2800,157 @@ func (siw *ServerInterfaceWrapper) UpdateProduct(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListSigningKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListSigningKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSigningKeysParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSigningKeys(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSigningKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateSigningKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSigningKey(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DiscardSigningKey operation middleware
+func (siw *ServerInterfaceWrapper) DiscardSigningKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kid" -------------
+	var kid Kid
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kid", r.PathValue("kid"), &kid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DiscardSigningKey(w, r, tenant, kid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PromoteSigningKey operation middleware
+func (siw *ServerInterfaceWrapper) PromoteSigningKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kid" -------------
+	var kid Kid
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kid", r.PathValue("kid"), &kid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PromoteSigningKey(w, r, tenant, kid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSummary operation middleware
 func (siw *ServerInterfaceWrapper) GetSummary(w http.ResponseWriter, r *http.Request) {
 
@@ -2875,6 +3118,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", wrapper.DeactivateActivation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/audit-events", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/signing-keys", wrapper.ListSigningKeys)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys", wrapper.CreateSigningKey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys/{kid}/promote", wrapper.PromoteSigningKey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys/{kid}/discard", wrapper.DiscardSigningKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
@@ -7509,6 +7756,509 @@ func (response UpdateProduct422ApplicationProblemPlusJSONResponse) VisitUpdatePr
 	return err
 }
 
+type ListSigningKeysRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListSigningKeysParams
+}
+
+type ListSigningKeysResponseObject interface {
+	VisitListSigningKeysResponse(w http.ResponseWriter) error
+}
+
+type ListSigningKeys200JSONResponse SigningKeyPage
+
+func (response ListSigningKeys200JSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListSigningKeys400ApplicationProblemPlusJSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListSigningKeys401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListSigningKeys401ResponseHeaders
+}
+
+func (response ListSigningKeys401ApplicationProblemPlusJSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListSigningKeys403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListSigningKeys403ResponseHeaders
+}
+
+func (response ListSigningKeys403ApplicationProblemPlusJSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListSigningKeys404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListSigningKeys404ResponseHeaders
+}
+
+func (response ListSigningKeys404ApplicationProblemPlusJSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSigningKeyRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+}
+
+type CreateSigningKeyResponseObject interface {
+	VisitCreateSigningKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateSigningKey201JSONResponse SigningKey
+
+func (response CreateSigningKey201JSONResponse) VisitCreateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSigningKey401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSigningKey401ApplicationProblemPlusJSONResponse) VisitCreateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSigningKey403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateSigningKey403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateSigningKey403ResponseHeaders
+}
+
+func (response CreateSigningKey403ApplicationProblemPlusJSONResponse) VisitCreateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSigningKey404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateSigningKey404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateSigningKey404ResponseHeaders
+}
+
+func (response CreateSigningKey404ApplicationProblemPlusJSONResponse) VisitCreateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSigningKey409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateSigningKey409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateSigningKey409ResponseHeaders
+}
+
+func (response CreateSigningKey409ApplicationProblemPlusJSONResponse) VisitCreateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKeyRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Kid    Kid    `json:"kid"`
+}
+
+type DiscardSigningKeyResponseObject interface {
+	VisitDiscardSigningKeyResponse(w http.ResponseWriter) error
+}
+
+type DiscardSigningKey200JSONResponse SigningKey
+
+func (response DiscardSigningKey200JSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKey400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DiscardSigningKey400ApplicationProblemPlusJSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKey401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DiscardSigningKey401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DiscardSigningKey401ResponseHeaders
+}
+
+func (response DiscardSigningKey401ApplicationProblemPlusJSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKey403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DiscardSigningKey403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DiscardSigningKey403ResponseHeaders
+}
+
+func (response DiscardSigningKey403ApplicationProblemPlusJSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKey404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DiscardSigningKey404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DiscardSigningKey404ResponseHeaders
+}
+
+func (response DiscardSigningKey404ApplicationProblemPlusJSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscardSigningKey409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DiscardSigningKey409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DiscardSigningKey409ResponseHeaders
+}
+
+func (response DiscardSigningKey409ApplicationProblemPlusJSONResponse) VisitDiscardSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKeyRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Kid    Kid    `json:"kid"`
+}
+
+type PromoteSigningKeyResponseObject interface {
+	VisitPromoteSigningKeyResponse(w http.ResponseWriter) error
+}
+
+type PromoteSigningKey200JSONResponse SigningKey
+
+func (response PromoteSigningKey200JSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKey400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response PromoteSigningKey400ApplicationProblemPlusJSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKey401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type PromoteSigningKey401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers PromoteSigningKey401ResponseHeaders
+}
+
+func (response PromoteSigningKey401ApplicationProblemPlusJSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKey403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type PromoteSigningKey403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers PromoteSigningKey403ResponseHeaders
+}
+
+func (response PromoteSigningKey403ApplicationProblemPlusJSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKey404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type PromoteSigningKey404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers PromoteSigningKey404ResponseHeaders
+}
+
+func (response PromoteSigningKey404ApplicationProblemPlusJSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteSigningKey409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type PromoteSigningKey409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers PromoteSigningKey409ResponseHeaders
+}
+
+func (response PromoteSigningKey409ApplicationProblemPlusJSONResponse) VisitPromoteSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSummaryRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 }
@@ -7723,6 +8473,18 @@ type StrictServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(ctx context.Context, request UpdateProductRequestObject) (UpdateProductResponseObject, error)
+	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
+	// (GET /tenants/{tenant}/signing-keys)
+	ListSigningKeys(ctx context.Context, request ListSigningKeysRequestObject) (ListSigningKeysResponseObject, error)
+	// CreateSigningKey Generate a signing key. The tenant's first key is active; later keys are pending until promoted.
+	// (POST /tenants/{tenant}/signing-keys)
+	CreateSigningKey(ctx context.Context, request CreateSigningKeyRequestObject) (CreateSigningKeyResponseObject, error)
+	// DiscardSigningKey Retire the pending key without it ever signing (rotation abandoned, or the pending key leaked).
+	// (POST /tenants/{tenant}/signing-keys/{kid}/discard)
+	DiscardSigningKey(ctx context.Context, request DiscardSigningKeyRequestObject) (DiscardSigningKeyResponseObject, error)
+	// PromoteSigningKey Make the pending key active and retire the active key, erasing its private key. Can't be undone.
+	// (POST /tenants/{tenant}/signing-keys/{kid}/promote)
+	PromoteSigningKey(ctx context.Context, request PromoteSigningKeyRequestObject) (PromoteSigningKeyResponseObject, error)
 	// GetSummary Exact counts for the dashboard overview, within the caller's scope.
 	// (GET /tenants/{tenant}/summary)
 	GetSummary(ctx context.Context, request GetSummaryRequestObject) (GetSummaryResponseObject, error)
@@ -8733,6 +9495,113 @@ func (sh *strictHandler) UpdateProduct(w http.ResponseWriter, r *http.Request, t
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProductResponseObject); ok {
 		if err := validResponse.VisitUpdateProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSigningKeys operation middleware
+func (sh *strictHandler) ListSigningKeys(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListSigningKeysParams) {
+	var request ListSigningKeysRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSigningKeys(ctx, request.(ListSigningKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSigningKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSigningKeysResponseObject); ok {
+		if err := validResponse.VisitListSigningKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSigningKey operation middleware
+func (sh *strictHandler) CreateSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request CreateSigningKeyRequestObject
+
+	request.Tenant = tenant
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSigningKey(ctx, request.(CreateSigningKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSigningKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSigningKeyResponseObject); ok {
+		if err := validResponse.VisitCreateSigningKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DiscardSigningKey operation middleware
+func (sh *strictHandler) DiscardSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant, kid Kid) {
+	var request DiscardSigningKeyRequestObject
+
+	request.Tenant = tenant
+	request.Kid = kid
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DiscardSigningKey(ctx, request.(DiscardSigningKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DiscardSigningKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DiscardSigningKeyResponseObject); ok {
+		if err := validResponse.VisitDiscardSigningKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PromoteSigningKey operation middleware
+func (sh *strictHandler) PromoteSigningKey(w http.ResponseWriter, r *http.Request, tenant Tenant, kid Kid) {
+	var request PromoteSigningKeyRequestObject
+
+	request.Tenant = tenant
+	request.Kid = kid
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PromoteSigningKey(ctx, request.(PromoteSigningKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PromoteSigningKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PromoteSigningKeyResponseObject); ok {
+		if err := validResponse.VisitPromoteSigningKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

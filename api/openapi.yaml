@@ -530,6 +530,85 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/signing-keys:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listSigningKeys
+      summary: List the tenant's signing keys (ADR-0026), newest first. Public keys only.
+      description: Needs key:read on every product. Each item's kid, alg and public_key is the trusted-key entry vendors embed in their builds.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SigningKeyPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createSigningKey
+      summary: Generate a signing key. The tenant's first key is active; later keys are pending until promoted.
+      description: |
+        Needs key:write (owners). A pending key never signs: publish its
+        public key for vendors to add to their trusted set, then promote
+        it. A tenant that already has a pending key answers 409
+        pending_key_exists. Audited.
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SigningKey" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/signing-keys/{kid}/promote:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/Kid"
+    post:
+      operationId: promoteSigningKey
+      summary: Make the pending key active and retire the active key, erasing its private key. Can't be undone.
+      description: |
+        Needs key:write (owners). Builds that don't trust this kid reject
+        every license and lease signed afterwards (ADR-0026). A key that
+        isn't the pending key answers 409 invalid_state. Audited.
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SigningKey" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/signing-keys/{kid}/discard:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/Kid"
+    post:
+      operationId: discardSigningKey
+      summary: Retire the pending key without it ever signing (rotation abandoned, or the pending key leaked).
+      description: Needs key:write (owners). A key that isn't the pending key answers 409 invalid_state. Audited.
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SigningKey" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /me/tenants:
     get:
       operationId: listMyTenants
@@ -850,6 +929,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: act_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    Kid:
+      name: kid
+      in: path
+      required: true
+      schema: { type: string, example: sk_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
@@ -981,6 +1065,27 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    SigningKey:
+      type: object
+      description: A signing key's public part. Private keys are never returned.
+      required: [kid, alg, public_key, status, created_at, activated_at, retired_at]
+      properties:
+        kid: { type: string, example: sk_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        alg: { type: string, enum: [ed25519] }
+        public_key: { type: string, description: "Base64url without padding (RFC 4648 §5), as in the trusted key set (License File Format).", example: K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k }
+        status:
+          type: string
+          enum: [pending, active, retired]
+          description: "pending: published, never signs; active: signs everything new (at most one); retired: never signs again, private key erased."
+        created_at: { type: string, format: date-time }
+        activated_at: { type: string, format: date-time, nullable: true }
+        retired_at: { type: string, format: date-time, nullable: true }
+    SigningKeyPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/SigningKey" } }
         next_cursor: { type: string, description: Absent on the last page. }
     Problem:
       type: object
