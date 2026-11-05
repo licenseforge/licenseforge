@@ -384,7 +384,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"audit_events": {
 			"retention_read":                `SELECT licenseforge_retention true`,
-			"retention_record":              `INSERT licenseforge_retention (((action)::text = 'audit.retention'::text) AND ((actor_type)::text = 'system'::text) AND (occurred_at >= now()))`,
+			"retention_record":              `INSERT licenseforge_retention (((action)::text = 'audit.retention'::text) AND ((actor_type)::text = 'system'::text) AND ((occurred_at >= now()) AND (occurred_at <= clock_timestamp())))`,
 			"retention_delete":              `DELETE licenseforge_retention true`,
 			"retention_floor (restrictive)": `DELETE licenseforge_retention ((occurred_at < (now() - '365 days'::interval)) AND (seq <= ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_events.tenant_id)::text))))`,
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,

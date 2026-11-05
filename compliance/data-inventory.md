@@ -7,7 +7,7 @@ What LicenseForge stores, where, and how it is protected. It covers the GDPR rec
 ## Protection that applies everywhere
 
 - **Tenant isolation**: every tenant table has forced row-level security. The tenant login sees only rows of the tenant set for the transaction (ADR-0009), and composite `*_same_tenant` keys stop cross-tenant references.
-- **Logins**: four database logins with separate grants ([Secure Configuration Guide](secure-configuration-guide.md#database-logins)). The login path (`licenseforge_login`) can't read licensing tables.
+- **Logins**: five database logins with separate grants ([Secure Configuration Guide](secure-configuration-guide.md#database-logins)). The login path (`licenseforge_login`) can't read licensing tables.
 - **At rest**: secrets are encrypted in the application (AES-256-GCM, keyring `LICENSEFORGE_MASTER_KEYS`, ADR-0025) or stored only as hashes. Disk and backup encryption are the operator's.
 - **Logs**: the server logs JSON to stdout. ent marks secret columns `Sensitive`, so they never appear in printed rows. Keyring errors never contain key material.
 
