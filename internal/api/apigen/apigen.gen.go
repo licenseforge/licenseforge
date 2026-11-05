@@ -101,6 +101,51 @@ func (e ActivationRequestFpSource) Valid() bool {
 	}
 }
 
+// Defines values for AuditEventActorType.
+const (
+	Platform AuditEventActorType = "platform"
+	System   AuditEventActorType = "system"
+	Token    AuditEventActorType = "token"
+	User     AuditEventActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuditEventActorType enum.
+func (e AuditEventActorType) Valid() bool {
+	switch e {
+	case Platform:
+		return true
+	case System:
+		return true
+	case Token:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuditEventOutcome.
+const (
+	Denied  AuditEventOutcome = "denied"
+	Failure AuditEventOutcome = "failure"
+	Success AuditEventOutcome = "success"
+)
+
+// Valid indicates whether the value is a known member of the AuditEventOutcome enum.
+func (e AuditEventOutcome) Valid() bool {
+	switch e {
+	case Denied:
+		return true
+	case Failure:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InvitationStatus.
 const (
 	InvitationStatusAccepted InvitationStatus = "accepted"
@@ -503,6 +548,58 @@ type ApiTokenPage struct {
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
+// AuditEvent One audit entry, the fields the SIEM export carries (ADR-0036).
+type AuditEvent struct {
+	// Action Example: license.issue
+	Action    string                 `json:"action"`
+	ActorId   *string                `json:"actor_id"`
+	ActorType AuditEventActorType    `json:"actor_type"`
+	Details   map[string]interface{} `json:"details"`
+
+	// Hash Hex SHA-256 (ADR-0027) over 15 values in this order, each written
+	// as its length in bytes (4 bytes, big-endian unsigned) followed by
+	// its bytes: the tag `lf-audit-v1`, `id`, `tenant_id`, `seq` (in
+	// decimal), `occurred_at` (exactly as sent), `actor_type`,
+	// `actor_id`, `action`, `object_type`, `object_id`, `outcome`,
+	// `source_ip`, `user_agent`, `details` (the JSON text exactly as
+	// sent, byte for byte: take it from the raw response, don't
+	// re-serialize it) and `prev_hash` as its raw 32 bytes (hex-decoded).
+	// A null field is the empty string (stored values are never empty).
+	Hash string `json:"hash"`
+
+	// Id Example: aud_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id         string  `json:"id"`
+	ObjectId   *string `json:"object_id"`
+	ObjectType *string `json:"object_type"`
+
+	// OccurredAt Database clock, UTC, always six fractional digits (2026-11-05T05:23:00.120000Z): the form `hash` covers.
+	OccurredAt time.Time         `json:"occurred_at"`
+	Outcome    AuditEventOutcome `json:"outcome"`
+
+	// PrevHash Hex; the previous entry's hash (zeros for seq 1).
+	PrevHash string `json:"prev_hash"`
+
+	// Seq 1, 2, … in the tenant's chain; retention removes a prefix.
+	Seq       int64   `json:"seq"`
+	SourceIp  *string `json:"source_ip"`
+	TenantId  string  `json:"tenant_id"`
+	UserAgent *string `json:"user_agent"`
+}
+
+// AuditEventActorType defines model for AuditEvent.ActorType.
+type AuditEventActorType string
+
+// AuditEventOutcome defines model for AuditEvent.Outcome.
+type AuditEventOutcome string
+
+// AuditEventPage defines model for AuditEventPage.
+type AuditEventPage struct {
+	Items []AuditEvent `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
 // Customer defines model for Customer.
 type Customer struct {
 	ArchivedAt   *time.Time        `json:"archived_at"`
@@ -885,6 +982,22 @@ type ProductPatch struct {
 // Role defines model for Role.
 type Role string
 
+// Summary Each counter is an object, so a counter can gain members and new counters can be added without breaking clients.
+type Summary struct {
+	// Customers Present only for callers with customer:read on every product.
+	Customers *struct {
+		// Active Customers that aren't archived.
+		Active int64 `json:"active"`
+	} `json:"customers,omitempty"`
+
+	// Licenses Licenses by status, in the caller's product scope.
+	Licenses struct {
+		Active    int64 `json:"active"`
+		Revoked   int64 `json:"revoked"`
+		Suspended int64 `json:"suspended"`
+	} `json:"licenses"`
+}
+
 // TenantPatch Absent fields stay; none is nullable (null answers 422).
 type TenantPatch struct {
 	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
@@ -957,6 +1070,17 @@ type ListApiTokensParams struct {
 
 	// Cursor Opaque; `next_cursor` of the previous page.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// AfterSeq Oldest first, from the entry after this seq (0: from the start). Not with cursor.
+	AfterSeq *int64 `form:"after_seq,omitempty" json:"after_seq,omitempty"`
 }
 
 // ListCustomersParams defines parameters for ListCustomers.
@@ -1104,6 +1228,9 @@ type ServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(w http.ResponseWriter, r *http.Request, tenant Tenant, id string)
+	// ListAuditEvents Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+	// (GET /tenants/{tenant}/audit-events)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListAuditEventsParams)
 	// ListCustomers List customers (archived included), newest first.
 	// (GET /tenants/{tenant}/customers)
 	ListCustomers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListCustomersParams)
@@ -1173,6 +1300,9 @@ type ServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
+	// GetSummary Exact counts for the dashboard overview, within the caller's scope.
+	// (GET /tenants/{tenant}/summary)
+	GetSummary(w http.ResponseWriter, r *http.Request, tenant Tenant)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1447,6 +1577,74 @@ func (siw *ServerInterfaceWrapper) RevokeApiToken(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeApiToken(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after_seq" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after_seq", r.URL.Query(), &params.AfterSeq, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after_seq"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after_seq", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, tenant, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2510,6 +2708,32 @@ func (siw *ServerInterfaceWrapper) UpdateProduct(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSummary(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -2641,6 +2865,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations", wrapper.CreateInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations/{id}/revoke", wrapper.RevokeInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invitations/accept", wrapper.AcceptInvitation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/summary", wrapper.GetSummary)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.ListLicenses)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.IssueLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
@@ -2649,6 +2874,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", wrapper.DeactivateActivation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/audit-events", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
@@ -3991,6 +4217,120 @@ type RevokeApiToken404ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response RevokeApiToken404ApplicationProblemPlusJSONResponse) VisitRevokeApiTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEventsRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListAuditEvents200JSONResponse AuditEventPage
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListAuditEvents400ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListAuditEvents401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListAuditEvents401ResponseHeaders
+}
+
+func (response ListAuditEvents401ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListAuditEvents403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListAuditEvents403ResponseHeaders
+}
+
+func (response ListAuditEvents403ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListAuditEvents404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListAuditEvents404ResponseHeaders
+}
+
+func (response ListAuditEvents404ApplicationProblemPlusJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -7169,6 +7509,119 @@ func (response UpdateProduct422ApplicationProblemPlusJSONResponse) VisitUpdatePr
 	return err
 }
 
+type GetSummaryRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+}
+
+type GetSummaryResponseObject interface {
+	VisitGetSummaryResponse(w http.ResponseWriter) error
+}
+
+type GetSummary200JSONResponse Summary
+
+func (response GetSummary200JSONResponse) VisitGetSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSummary400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetSummary400ApplicationProblemPlusJSONResponse) VisitGetSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSummary401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetSummary401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetSummary401ResponseHeaders
+}
+
+func (response GetSummary401ApplicationProblemPlusJSONResponse) VisitGetSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSummary403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetSummary403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetSummary403ResponseHeaders
+}
+
+func (response GetSummary403ApplicationProblemPlusJSONResponse) VisitGetSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSummary404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetSummary404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetSummary404ResponseHeaders
+}
+
+func (response GetSummary404ApplicationProblemPlusJSONResponse) VisitGetSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Activate Activate this machine or cluster and get a signed lease (SDKs).
@@ -7198,6 +7651,9 @@ type StrictServerInterface interface {
 	// RevokeApiToken Revoke an active API token. One-way.
 	// (POST /tenants/{tenant}/api-tokens/{id}/revoke)
 	RevokeApiToken(ctx context.Context, request RevokeApiTokenRequestObject) (RevokeApiTokenResponseObject, error)
+	// ListAuditEvents Read the tenant's audit log (ADR-0027), newest first, or from a seq onwards for export.
+	// (GET /tenants/{tenant}/audit-events)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
 	// ListCustomers List customers (archived included), newest first.
 	// (GET /tenants/{tenant}/customers)
 	ListCustomers(ctx context.Context, request ListCustomersRequestObject) (ListCustomersResponseObject, error)
@@ -7267,6 +7723,9 @@ type StrictServerInterface interface {
 	// UpdateProduct Rename a product (JSON Merge Patch). The slug is immutable.
 	// (PATCH /tenants/{tenant}/products/{id})
 	UpdateProduct(ctx context.Context, request UpdateProductRequestObject) (UpdateProductResponseObject, error)
+	// GetSummary Exact counts for the dashboard overview, within the caller's scope.
+	// (GET /tenants/{tenant}/summary)
+	GetSummary(ctx context.Context, request GetSummaryRequestObject) (GetSummaryResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -7576,6 +8035,33 @@ func (sh *strictHandler) RevokeApiToken(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeApiTokenResponseObject); ok {
 		if err := validResponse.VisitRevokeApiTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8247,6 +8733,32 @@ func (sh *strictHandler) UpdateProduct(w http.ResponseWriter, r *http.Request, t
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProductResponseObject); ok {
 		if err := validResponse.VisitUpdateProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSummary operation middleware
+func (sh *strictHandler) GetSummary(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request GetSummaryRequestObject
+
+	request.Tenant = tenant
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSummary(ctx, request.(GetSummaryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSummary")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSummaryResponseObject); ok {
+		if err := validResponse.VisitGetSummaryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

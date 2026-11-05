@@ -34,6 +34,12 @@ terminationGracePeriodSeconds: 30
 
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
+# Your ingress controller's or load balancer's addresses (CIDRs, comma-
+# separated): only their X-Forwarded-For is believed. Leave empty and every
+# client counts as the ingress for the per-address rate limit and in audit
+# entries. List proxies only, never client networks.
+trustedProxies: ""
+
 # Dashboard login through your OIDC provider (ADR-0003). Off: no login.
 oidc:
   enabled: false
@@ -71,6 +77,14 @@ audit:
       clientSecret: ""    # kubernetes.io/tls Secret (tls.crt, tls.key) for mTLS; empty: no client cert
       sdID: ""            # structured data ID name@PEN; default licenseforge@32473
       # NetworkPolicy egress to the collector. Empty: any destination on port.
+      to: []
+    # OTLP logs over HTTP with the JSON encoding. Delivered only on a 2xx that
+    # rejects no record. Empty endpoint: no export.
+    otlp:
+      endpoint: ""        # e.g. https://otel-collector.monitoring:4318/v1/logs (egress port taken from it; 443 if none)
+      caSecret: ""        # Secret with ca.crt; empty: system roots
+      clientSecret: ""    # kubernetes.io/tls Secret for mTLS; empty: no client cert
+      headersSecret: ""   # Secret with key headers: k=v,k2=v2 (e.g. an API key)
       to: []
 
 # Audit retention (ADR-0036): a CronJob runs `licenseforge audit prune` with

@@ -16,6 +16,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
 
@@ -243,12 +244,12 @@ func TestSigningKeysInDatabase(t *testing.T) {
 		"active loses key":           {`UPDATE signing_keys SET private_key_ciphertext = NULL WHERE id = $1`, next.ID},
 		"second active key":          {`UPDATE signing_keys SET status = 'active', retired_at = NULL, private_key_ciphertext = (SELECT private_key_ciphertext FROM signing_keys WHERE id = $2) WHERE id = $1`, k.ID, next.ID},
 		"active without activated":   {`UPDATE signing_keys SET activated_at = NULL WHERE id = $1`, next.ID},
-		"short public key":           {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('sk_aaaaaaaaaaaaaaaaaaaaaaaaaa', $1, now(), now(), 'ed25519', '\x00', 'retired', now())`, tn},
-		"pending with activated_at":  {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, activated_at, private_key_ciphertext) SELECT 'sk_aaaaaaaaaaaaaaaaaaaaaaaaad', tenant_id, now(), now(), alg, public_key, 'pending', now(), private_key_ciphertext FROM signing_keys WHERE id = $1`, next.ID},
+		"short public key":           {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('` + ids.SigningKey() + `', $1, now(), now(), 'ed25519', '\x00', 'retired', now())`, tn},
+		"pending with activated_at":  {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, activated_at, private_key_ciphertext) SELECT '` + ids.SigningKey() + `', tenant_id, now(), now(), alg, public_key, 'pending', now(), private_key_ciphertext FROM signing_keys WHERE id = $1`, next.ID},
 		"retired without retired_at": {`UPDATE signing_keys SET retired_at = NULL WHERE id = $1`, k.ID},
 		"malformed ciphertext":       {`UPDATE signing_keys SET private_key_ciphertext = 'v1.k1.short' WHERE id = $1`, next.ID},
 		"bad id":                     {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('sk_BAD', $1, now(), now(), 'ed25519', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn},
-		"unknown alg":                {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('sk_aaaaaaaaaaaaaaaaaaaaaaaaab', $1, now(), now(), 'rsa', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn},
+		"unknown alg":                {`INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('` + ids.SigningKey() + `', $1, now(), now(), 'rsa', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := owner.ExecContext(ctx, q[0].(string), q[1:]...)
@@ -258,8 +259,9 @@ func TestSigningKeysInDatabase(t *testing.T) {
 		})
 	}
 	// The same row shape is accepted when valid, so the cases above fail for
-	// their own reason.
-	if _, err := owner.ExecContext(ctx, `INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('sk_aaaaaaaaaaaaaaaaaaaaaaaaac', $1, now(), now(), 'ed25519', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn); err != nil {
+	// their own reason. Fresh IDs everywhere: the valid row stays, and a fixed
+	// ID would collide when the test runs again on the same database.
+	if _, err := owner.ExecContext(ctx, `INSERT INTO signing_keys (id, tenant_id, created_at, updated_at, alg, public_key, status, retired_at) VALUES ('`+ids.SigningKey()+`', $1, now(), now(), 'ed25519', decode(repeat('00', 32), 'hex'), 'retired', now())`, tn); err != nil {
 		t.Fatalf("valid retired key refused: %v", err)
 	}
 	// Grants: no DELETE, immutable identity, and the platform pool may only

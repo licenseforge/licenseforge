@@ -9,3 +9,13 @@ they watch. Set metrics.serviceMonitor.enabled=true (with the Prometheus
 Operator), or write equivalent rules for your monitoring (Secure
 Configuration Guide, "Audit verification and alerts").
 {{- end }}
+{{- if not (trim (.Values.trustedProxies | default "")) }}
+
+WARNING: trustedProxies is empty, so X-Forwarded-For is ignored. Behind an
+ingress or load balancer every client then counts as the proxy: they share
+one per-address rate limit (60 logins and 600 API requests per minute per
+replica by default), and audit entries record the proxy's address. Set
+trustedProxies to your ingress controller's addresses (CIDRs, /8 or longer for
+IPv4, /32 or longer for IPv6). The server also logs a warning, once, when it
+ignores the header.
+{{- end }}
