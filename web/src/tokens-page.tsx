@@ -1,7 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { ApiError, fieldErrors, onAuthError } from "@/api/client";
+import { type FormEvent, useState } from "react";
+import { fieldErrors, onAuthError } from "@/api/client";
+import { errorText, input, Modal } from "@/components/modal";
 import { tenantsQuery } from "@/api/tenants";
 import {
   type ApiToken,
@@ -15,10 +16,9 @@ import {
   tokensQuery,
 } from "@/api/tokens";
 import { Button } from "@/components/ui/button";
-import { problemMessage, t } from "@/i18n";
+import { t } from "@/i18n";
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-const errorText = (e: unknown) => problemMessage(e instanceof ApiError ? e.code : "unknown");
 
 export function TokensPage() {
   const { slug } = useParams({ from: "/app/t/$slug/settings/api-tokens" });
@@ -98,38 +98,7 @@ export function TokensPage() {
   );
 }
 
-/**
- * A native modal <dialog>: focus trap, Esc and inert background from the
- * browser, and no injected <style> (Radix's modal Dialog needs one, which the
- * CSP blocks). Closing unmounts the content, so its state is gone.
- */
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const d = ref.current;
-    if (d && !d.open) d.showModal();
-    return () => d?.close();
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      aria-labelledby="dialog-title"
-      onCancel={(e) => {
-        e.preventDefault(); // Esc: close through React so the state goes with it
-        onClose();
-      }}
-      className="m-auto w-full max-w-lg rounded-md border bg-popover p-6 text-popover-foreground shadow-md backdrop:bg-black/50"
-    >
-      <h2 id="dialog-title" className="mb-4 text-lg font-semibold">
-        {title}
-      </h2>
-      {children}
-    </dialog>
-  );
-}
-
 const ttlDays = [7, 30, 90, 180, 365];
-const input = "h-9 w-full rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string; member: Membership; onClose: () => void }) {
   const qc = useQueryClient();
