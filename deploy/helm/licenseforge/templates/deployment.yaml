@@ -5,6 +5,13 @@
 {{- $oidc := .Values.oidc | default dict }}
 {{- $sys := include "licenseforge.syslog" . | fromYaml }}
 {{- if and $sys.host (not (regexMatch "^[0-9]+$" (toString $sys.port))) }}{{ fail "audit.export.syslog.port must be a port number" }}{{ end }}
+{{- $otlp := include "licenseforge.otlp" . | fromYaml }}
+{{- /* Secret volumes of the export sinks: CA (ca.crt) and client certificate (tls.crt, tls.key). */}}
+{{- $mounts := list }}
+{{- range $sink := list (dict "name" "syslog" "on" $sys.host "ca" $sys.caSecret "client" $sys.clientSecret) (dict "name" "otlp" "on" $otlp.endpoint "ca" $otlp.caSecret "client" $otlp.clientSecret) }}
+{{- if and $sink.on $sink.ca }}{{ $mounts = append $mounts (dict "name" (printf "%s-ca" $sink.name) "dir" (printf "/etc/licenseforge/%s/ca" $sink.name) "secret" $sink.ca "client" false) }}{{ end }}
+{{- if and $sink.on $sink.client }}{{ $mounts = append $mounts (dict "name" (printf "%s-client" $sink.name) "dir" (printf "/etc/licenseforge/%s/client" $sink.name) "secret" $sink.client "client" true) }}{{ end }}
+{{- end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +65,10 @@ spec:
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
               value: {{ printf ":%s" (include "licenseforge.metricsPort" .) | quote }}
+            {{- with .Values.trustedProxies }}
+            - name: LICENSEFORGE_TRUSTED_PROXIES
+              value: {{ . | quote }}
+            {{- end }}
             {{- with $sys.host }}
             # SIEM export (ADR-0036): RFC 5424 over TLS, verification always on.
             - name: LICENSEFORGE_AUDIT_SYSLOG_ADDR
@@ -79,6 +90,25 @@ spec:
               value: /etc/licenseforge/syslog/client/tls.crt
             - name: LICENSEFORGE_AUDIT_SYSLOG_KEY_FILE
               value: /etc/licenseforge/syslog/client/tls.key
+            {{- end }}
+            {{- end }}
+            {{- with $otlp.endpoint }}
+            # SIEM export (ADR-0036): OTLP logs over HTTP (JSON), verification always on.
+            - name: LICENSEFORGE_AUDIT_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- if $otlp.caSecret }}
+            - name: LICENSEFORGE_AUDIT_OTLP_CA_FILE
+              value: /etc/licenseforge/otlp/ca/ca.crt
+            {{- end }}
+            {{- if $otlp.clientSecret }}
+            - name: LICENSEFORGE_AUDIT_OTLP_CERT_FILE
+              value: /etc/licenseforge/otlp/client/tls.crt
+            - name: LICENSEFORGE_AUDIT_OTLP_KEY_FILE
+              value: /etc/licenseforge/otlp/client/tls.key
+            {{- end }}
+            {{- with $otlp.headersSecret }}
+            - name: LICENSEFORGE_AUDIT_OTLP_HEADERS
+              valueFrom: {secretKeyRef: {name: {{ . | quote }}, key: headers}}
             {{- end }}
             {{- end }}
             {{- if $oidc.enabled }}
@@ -109,24 +139,23 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 2
           resources: {{- toYaml .Values.resources | nindent 12 }}
-          {{- if and $sys.host (or $sys.caSecret $sys.clientSecret) }}
+          {{- with $mounts }}
           volumeMounts:
-            {{- if $sys.caSecret }}
-            - {name: syslog-ca, mountPath: /etc/licenseforge/syslog/ca, readOnly: true}
+            {{- range . }}
+            - {name: {{ .name }}, mountPath: {{ .dir }}, readOnly: true}
             {{- end }}
-            {{- if $sys.clientSecret }}
-            - {name: syslog-client, mountPath: /etc/licenseforge/syslog/client, readOnly: true}
-            {{- end }}
-      volumes:
-        {{- with $sys.caSecret }}
-        - name: syslog-ca
-          secret: {secretName: {{ . | quote }}, items: [{key: ca.crt, path: ca.crt}]}
-        {{- end }}
-        {{- with $sys.clientSecret }}
-        - name: syslog-client
-          secret: {secretName: {{ . | quote }}, items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}], defaultMode: 0440}  # group: the pod's fsGroup
-        {{- end }}
           {{- end }}
+      {{- with $mounts }}
+      volumes:
+        {{- range . }}
+        - name: {{ .name }}
+          {{- if .client }}
+          secret: {secretName: {{ .secret | quote }}, items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}], defaultMode: 0440}  # group: the pod's fsGroup
+          {{- else }}
+          secret: {secretName: {{ .secret | quote }}, items: [{key: ca.crt, path: ca.crt}]}
+          {{- end }}
+        {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -109,20 +109,28 @@ func NewSyslog(c SyslogConfig) (*Syslog, error) {
 // client certificate loaded at each handshake, so rotated Secrets take
 // effect without a restart.
 func (s *Syslog) tlsConfig() (*tls.Config, error) {
-	t := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: s.serverName}
-	if s.caFile != "" {
-		pem, err := os.ReadFile(s.caFile)
+	return clientTLS("syslog", s.serverName, s.caFile, s.certFile, s.keyFile)
+}
+
+// clientTLS is a sink's TLS client configuration: TLS 1.2+, verification
+// always on, roots from caFile (re-read on every call; empty: system roots)
+// and an optional client certificate loaded at each handshake, so rotated
+// Secrets apply without a restart.
+func clientTLS(sink, serverName, caFile, certFile, keyFile string) (*tls.Config, error) {
+	t := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
 		if err != nil {
-			return nil, fmt.Errorf("syslog: CA: %w", err)
+			return nil, fmt.Errorf("%s: CA: %w", sink, err)
 		}
 		t.RootCAs = x509.NewCertPool()
 		if !t.RootCAs.AppendCertsFromPEM(pem) {
-			return nil, errors.New("syslog: CA file has no PEM certificates")
+			return nil, fmt.Errorf("%s: CA file has no PEM certificates", sink)
 		}
 	}
-	if s.certFile != "" {
+	if certFile != "" {
 		t.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			c, err := tls.LoadX509KeyPair(s.certFile, s.keyFile)
+			c, err := tls.LoadX509KeyPair(certFile, keyFile)
 			return &c, err
 		}
 	}

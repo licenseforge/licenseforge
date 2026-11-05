@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -857,6 +858,55 @@ func TestRecordKeyRevealRefusesMalformedIDs(t *testing.T) {
 	}
 	if e := f.lastEvent(t, f.a.id); e.Action != "license.key_reveal" || !strings.Contains(e.Details, f.a.prodP) {
 		t.Errorf("audit = %+v", e)
+	}
+}
+
+// Counts are exact per status, within the caller's product scope and tenant;
+// every status is present (zero included); no license:read is ErrDenied.
+func TestCounts(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	var onP []*ent.License
+	for range 4 {
+		got, err := f.s.Issue(ctx, mgr, f.req(f.a))
+		if err != nil {
+			t.Fatal(err)
+		}
+		onP = append(onP, got.License)
+	}
+	if _, err := f.s.Suspend(ctx, mgr, onP[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Revoke(ctx, mgr, onP[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Issue(ctx, mgr, IssueRequest{ProductID: f.a.prodQ, PlanID: f.a.planQ.ID, CustomerID: f.a.customer}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Issue(ctx, as(f.b.id, authz.Manager, all), f.req(f.b)); err != nil {
+		t.Fatal(err)
+	}
+	type counts = map[license.Status]int
+	for name, c := range map[string]struct {
+		p    authz.Principal
+		want counts
+	}{
+		"every product":                     {as(f.a.id, authz.Viewer, all), counts{license.StatusActive: 3, license.StatusSuspended: 1, license.StatusRevoked: 1}},
+		"scoped to Q":                       {as(f.a.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodQ}}), counts{license.StatusActive: 1, license.StatusSuspended: 0, license.StatusRevoked: 0}},
+		"scoped to P":                       {as(f.a.id, authz.Support, authz.Scope{Products: []string{f.a.prodP}}), counts{license.StatusActive: 2, license.StatusSuspended: 1, license.StatusRevoked: 1}},
+		"other tenant":                      {as(f.b.id, authz.Viewer, all), counts{license.StatusActive: 1, license.StatusSuspended: 0, license.StatusRevoked: 0}},
+		"another tenant's product in scope": {as(f.b.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodP}}), counts{license.StatusActive: 0, license.StatusSuspended: 0, license.StatusRevoked: 0}},
+	} {
+		got, err := f.s.Counts(ctx, c.p)
+		if err != nil || !maps.Equal(got, c.want) {
+			t.Errorf("%s: %v, %v; want %v", name, got, err, c.want)
+		}
+	}
+	// A well-formed principal without license:read: an sdk token.
+	sdk := authz.Principal{Kind: authz.Token, ID: "tok_test", TenantID: f.a.id, Role: authz.SDK, Scope: all}
+	if _, err := f.s.Counts(ctx, sdk); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("sdk token (no license:read): %v", err)
 	}
 }
 

@@ -122,6 +122,31 @@ type Principal struct {
 	TenantID string
 	Role     Role
 	Scope    Scope
+	// Assurance is what the session's login proved (ADR-0038); empty for
+	// API tokens, which carry no authentication context.
+	Assurance Assurance
+}
+
+// Assurance is how strongly a session's user was authenticated, as the
+// IdP asserted it (ADR-0038), and also a tenant's MFA policy: the level a
+// session must reach. Levels are ordered; an unknown or empty one is
+// below none and meets nothing.
+type Assurance string
+
+const (
+	AssuranceNone              Assurance = "none"
+	AssuranceMFA               Assurance = "mfa"
+	AssurancePhishingResistant Assurance = "phishing_resistant"
+)
+
+var assuranceRank = map[Assurance]int{AssuranceNone: 1, AssuranceMFA: 2, AssurancePhishingResistant: 3}
+
+// Valid reports whether a is one of the three levels.
+func (a Assurance) Valid() bool { return assuranceRank[a] > 0 }
+
+// Meets reports whether a reaches required: both must be valid levels.
+func (a Assurance) Meets(required Assurance) bool {
+	return a.Valid() && required.Valid() && assuranceRank[a] >= assuranceRank[required]
 }
 
 type ctxKey struct{}

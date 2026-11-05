@@ -257,7 +257,8 @@ func TestTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A can't insert into B (WITH CHECK), nor modify tenant rows at all, even its own.
+	// A can't insert into B (WITH CHECK), nor change its own tenant row beyond
+	// mfa_policy (ADR-0038: the only column granted; the name here is refused).
 	for name, op := range map[string]func(tx *ent.Tx) error{
 		"insert into B": func(tx *ent.Tx) error {
 			return tx.Product.Create().SetTenantID(b.ID).SetSlug("smuggled").SetName("x").Exec(ctx)
@@ -374,7 +375,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 	// this list, so it gets reviewed.
 	extra := map[string]map[string]string{ // ADR-0029: identity role and the invitation rules
 		"tenants": {
-			"tenant_settings": `UPDATE licenseforge_app ((id)::text = app_tenant_id()) ((id)::text = app_tenant_id())`, // ADR-0036: audit retention
+			"tenant_settings": `UPDATE licenseforge_app ((id)::text = app_tenant_id()) ((id)::text = app_tenant_id())`, // ADR-0036/0038: own row; columns by grant (retention, mfa_policy)
 			"retention_read":  `SELECT licenseforge_retention true`,
 			"identity_read":   `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
 		},

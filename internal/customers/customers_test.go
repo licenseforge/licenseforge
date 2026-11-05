@@ -242,3 +242,43 @@ func TestCustomerRefusals(t *testing.T) {
 		}
 	}
 }
+
+// CountActive counts non-archived customers of the caller's tenant, exactly,
+// and only for callers who see every customer (customer:read on every
+// product); for anyone else it reports "not available", never a partial count.
+func TestCountActive(t *testing.T) {
+	f := setup(t)
+	mgrA := as(f.a, authz.Manager)
+	var archived string
+	for i, name := range []string{"Contoso", "Fabrikam", "Northwind"} {
+		c, err := f.s.Create(mgrA, Input{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			archived = c.ID
+		}
+	}
+	if _, err := f.s.Archive(mgrA, archived); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Create(as(f.b, authz.Manager), Input{Name: "Other tenant"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		ctx context.Context
+		n   int
+		ok  bool
+	}{
+		"manager, every product":  {mgrA, 2, true},
+		"viewer, every product":   {as(f.a, authz.Viewer), 2, true},
+		"other tenant":            {as(f.b, authz.Viewer), 1, true},
+		"product-scoped caller":   {as(f.a, authz.Owner, ids.Product()), 0, false},
+		"sdk token (no customer)": {as(f.a, authz.SDK), 0, false},
+	} {
+		n, ok, err := f.s.CountActive(c.ctx)
+		if err != nil || n != c.n || ok != c.ok {
+			t.Errorf("%s: %d, %v, %v; want %d, %v", name, n, ok, err, c.n, c.ok)
+		}
+	}
+}

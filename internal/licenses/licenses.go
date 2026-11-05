@@ -259,6 +259,9 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		// this statement's snapshot): a second statement sees it archived.
 		pr, err = lock()
 	}
+	if ent.IsNotFound(err) { // gone since checkProduct: like a missing product
+		return refused(errNoProduct)
+	}
 	if err != nil {
 		return Issued{}, ev, err
 	} else if pr.ArchivedAt != nil {
@@ -549,6 +552,44 @@ type Filter struct {
 	ProductID, CustomerID       string
 	Status                      license.Status
 	CreatedAfter, CreatedBefore *time.Time
+}
+
+// Counts returns how many licenses p can see have each status, exactly
+// (license:read; a product-scoped principal counts its products only), with
+// every status present. One GROUP BY query under the tenant's RLS. Lists
+// carry no totals (ADR-0032); this is for the dashboard summary.
+func (s Service) Counts(ctx context.Context, p authz.Principal) (map[license.Status]int, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all, products, err := authz.Products(ctx, authz.LicenseRead)
+	if err != nil {
+		return nil, err
+	}
+	out := map[license.Status]int{license.StatusActive: 0, license.StatusSuspended: 0, license.StatusRevoked: 0}
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		q := tx.License.Query()
+		if !all {
+			q.Where(license.ProductIDIn(products...))
+		}
+		var rows []struct {
+			Status license.Status `json:"status"`
+			Count  int            `json:"count"`
+		}
+		if err := q.GroupBy(license.FieldStatus).Aggregate(ent.Count()).Scan(ctx, &rows); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			out[r.Status] = r.Count
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // List returns up to limit of p's tenant's licenses in p's product scope

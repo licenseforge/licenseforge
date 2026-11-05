@@ -19,6 +19,35 @@ security:
   - session: []
     csrf: []
 paths:
+  /tenants/{tenant}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    patch:
+      operationId: updateTenant
+      summary: Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
+      description: |
+        Owners only (tenant:write), from a dashboard session. Raising the MFA
+        policy needs a session that already meets the new level (409
+        mfa_policy_unmet), so an owner can't lock themselves out. Raising it
+        doesn't revoke API tokens; the answer reports how many are active.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/TenantPatch" }
+      responses:
+        "200":
+          description: The tenant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantUpdated" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/api-tokens:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -270,6 +299,31 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/summary:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: getSummary
+      summary: Exact counts for the dashboard overview, within the caller's scope.
+      description: |
+        Needs license:read. License counts cover the products the caller
+        can see: a product-scoped caller gets the counts of its products.
+        `customers` is present only for callers with customer:read on every
+        product (customers are tenant-wide), and absent otherwise.
+
+        Lists carry no totals (ADR-0032); this resource is where counts
+        live. More counters (for example activations) may be added as new
+        members; clients must ignore members they don't know.
+      responses:
+        "200":
+          description: The counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1028,6 +1082,25 @@ components:
         expires_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time, nullable: true }
         revoked_at: { type: string, format: date-time, nullable: true }
+    Summary:
+      type: object
+      required: [licenses]
+      description: Each counter is an object, so a counter can gain members and new counters can be added without breaking clients.
+      properties:
+        licenses:
+          type: object
+          required: [active, suspended, revoked]
+          description: Licenses by status, in the caller's product scope.
+          properties:
+            active: { type: integer, format: int64 }
+            suspended: { type: integer, format: int64 }
+            revoked: { type: integer, format: int64 }
+        customers:
+          type: object
+          required: [active]
+          description: Present only for callers with customer:read on every product.
+          properties:
+            active: { type: integer, format: int64, description: Customers that aren't archived. }
     LicenseStatus:
       type: string
       enum: [active, suspended, revoked]
@@ -1289,6 +1362,29 @@ components:
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/Member" } }
         next_cursor: { type: string, description: Absent on the last page. }
+    MfaPolicy:
+      type: string
+      enum: [none, mfa, phishing_resistant]
+      description: |
+        The assurance a session needs in this tenant (ADR-0038): none, MFA,
+        or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+        the identity provider asserts it in the ID token (amr/acr).
+    TenantPatch:
+      type: object
+      description: Absent fields stay; none is nullable (null answers 422).
+      properties:
+        mfa_policy: { $ref: "#/components/schemas/MfaPolicy" }
+    TenantUpdated:
+      type: object
+      required: [id, slug, name, mfa_policy, active_api_tokens]
+      properties:
+        id: { type: string, example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        slug: { type: string }
+        name: { type: string }
+        mfa_policy: { $ref: "#/components/schemas/MfaPolicy" }
+        active_api_tokens:
+          type: integer
+          description: Active API tokens, all created before this change and not revoked by it; review them in the token list.
     MemberPatch:
       type: object
       description: Absent fields stay; none is nullable (null answers 422).
