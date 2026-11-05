@@ -58,6 +58,7 @@ type Config struct {
 	Licenses licenses.Service
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
+	Features  catalog.Features
 	Customers customers.Service
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
@@ -269,6 +270,7 @@ var queryParams = map[string][]string{
 	"ListInvitations": {"limit", "cursor"},
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor", "archived"},
+	"ListFeatures":    {"limit", "cursor", "product_id"},
 	"ListCustomers":   {"limit", "cursor"},
 	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},

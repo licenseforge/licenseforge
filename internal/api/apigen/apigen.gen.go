@@ -41,6 +41,24 @@ func (e ActivationRequestFpSource) Valid() bool {
 	}
 }
 
+// Defines values for FeatureType.
+const (
+	FeatureTypeBoolean FeatureType = "boolean"
+	FeatureTypeLimit   FeatureType = "limit"
+)
+
+// Valid indicates whether the value is a known member of the FeatureType enum.
+func (e FeatureType) Valid() bool {
+	switch e {
+	case FeatureTypeBoolean:
+		return true
+	case FeatureTypeLimit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InvitationStatus.
 const (
 	InvitationStatusAccepted InvitationStatus = "accepted"
@@ -421,6 +439,55 @@ type DeactivationRequest struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
+// Feature defines model for Feature.
+type Feature struct {
+	ArchivedAt  *time.Time `json:"archived_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	Description *string    `json:"description"`
+
+	// Id Example: ftr_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// Key What apps check (hasFeature
+	Key       string      `json:"key"`
+	Name      string      `json:"name"`
+	ProductId string      `json:"product_id"`
+	Type      FeatureType `json:"type"`
+
+	// Unit For a limit, e.g. users.
+	Unit *string `json:"unit"`
+}
+
+// FeatureCreate defines model for FeatureCreate.
+type FeatureCreate struct {
+	Description *string `json:"description,omitempty"`
+
+	// Key snake_case, e.g. max_users.
+	Key       string      `json:"key"`
+	Name      string      `json:"name"`
+	ProductId string      `json:"product_id"`
+	Type      FeatureType `json:"type"`
+	Unit      *string     `json:"unit,omitempty"`
+}
+
+// FeaturePage defines model for FeaturePage.
+type FeaturePage struct {
+	Items []Feature `json:"items"`
+
+	// NextCursor Absent on the last page.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// FeaturePatch Absent fields stay; description and unit null clears them; name isn't nullable (null answers 422).
+type FeaturePatch struct {
+	Description *string `json:"description,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Unit        *string `json:"unit,omitempty"`
+}
+
+// FeatureType defines model for FeatureType.
+type FeatureType string
+
 // Invitation defines model for Invitation.
 type Invitation struct {
 	AcceptedAt  *time.Time `json:"accepted_at"`
@@ -763,6 +830,9 @@ type Cursor = string
 // CustomerId Example: cus_01jcz5b2y3c4d5e6f7g8h9j0k1
 type CustomerId = string
 
+// FeatureId Example: ftr_01jcz5b2y3c4d5e6f7g8h9j0k1
+type FeatureId = string
+
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
@@ -807,6 +877,15 @@ type ListCustomersParams struct {
 
 	// Cursor Opaque; `next_cursor` of the previous page.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListFeaturesParams defines parameters for ListFeatures.
+type ListFeaturesParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor    *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	ProductId *string `form:"product_id,omitempty" json:"product_id,omitempty"`
 }
 
 // ListInvitationsParams defines parameters for ListInvitations.
@@ -894,6 +973,12 @@ type CreateCustomerJSONRequestBody = CustomerCreate
 // UpdateCustomerApplicationMergePatchPlusJSONRequestBody defines body for UpdateCustomer for application/merge-patch+json ContentType.
 type UpdateCustomerApplicationMergePatchPlusJSONRequestBody = CustomerPatch
 
+// CreateFeatureJSONRequestBody defines body for CreateFeature for application/json ContentType.
+type CreateFeatureJSONRequestBody = FeatureCreate
+
+// UpdateFeatureApplicationMergePatchPlusJSONRequestBody defines body for UpdateFeature for application/merge-patch+json ContentType.
+type UpdateFeatureApplicationMergePatchPlusJSONRequestBody = FeaturePatch
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = InvitationCreate
 
@@ -950,6 +1035,21 @@ type ServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
+	// ListFeatures List features in the caller's product scope, newest first, archived ones included.
+	// (GET /tenants/{tenant}/features)
+	ListFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListFeaturesParams)
+	// CreateFeature Add a feature to a product (ADR-0015).
+	// (POST /tenants/{tenant}/features)
+	CreateFeature(w http.ResponseWriter, r *http.Request, tenant Tenant)
+	// GetFeature Get a feature.
+	// (GET /tenants/{tenant}/features/{id})
+	GetFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId)
+	// UpdateFeature Change a feature's name, description or unit (JSON Merge Patch). Key and type never change.
+	// (PATCH /tenants/{tenant}/features/{id})
+	UpdateFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId)
+	// ArchiveFeature Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
+	// (POST /tenants/{tenant}/features/{id}/archive)
+	ArchiveFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId)
 	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
 	// (GET /tenants/{tenant}/invitations)
 	ListInvitations(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListInvitationsParams)
@@ -1435,6 +1535,205 @@ func (siw *ServerInterfaceWrapper) ArchiveCustomer(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveCustomer(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFeatures operation middleware
+func (siw *ServerInterfaceWrapper) ListFeatures(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFeaturesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "product_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "product_id", r.URL.Query(), &params.ProductId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "product_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "product_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFeatures(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFeature operation middleware
+func (siw *ServerInterfaceWrapper) CreateFeature(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFeature(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFeature operation middleware
+func (siw *ServerInterfaceWrapper) GetFeature(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id FeatureId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFeature(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFeature operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFeature(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id FeatureId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFeature(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArchiveFeature operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveFeature(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id FeatureId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveFeature(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2397,6 +2696,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.GetProduct)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.UpdateProduct)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products/{id}/archive", wrapper.ArchiveProduct)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/features", wrapper.ListFeatures)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/features", wrapper.CreateFeature)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/features/{id}", wrapper.GetFeature)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/features/{id}", wrapper.UpdateFeature)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/features/{id}/archive", wrapper.ArchiveFeature)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.ListCustomers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.CreateCustomer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}", wrapper.GetCustomer)
@@ -4236,6 +4540,721 @@ type ArchiveCustomer409ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ArchiveCustomer409ApplicationProblemPlusJSONResponse) VisitArchiveCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeaturesRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params ListFeaturesParams
+}
+
+type ListFeaturesResponseObject interface {
+	VisitListFeaturesResponse(w http.ResponseWriter) error
+}
+
+type ListFeatures200JSONResponse FeaturePage
+
+func (response ListFeatures200JSONResponse) VisitListFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeatures400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListFeatures400ApplicationProblemPlusJSONResponse) VisitListFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeatures401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListFeatures401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListFeatures401ResponseHeaders
+}
+
+func (response ListFeatures401ApplicationProblemPlusJSONResponse) VisitListFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeatures403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListFeatures403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListFeatures403ResponseHeaders
+}
+
+func (response ListFeatures403ApplicationProblemPlusJSONResponse) VisitListFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFeatures404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListFeatures404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListFeatures404ResponseHeaders
+}
+
+func (response ListFeatures404ApplicationProblemPlusJSONResponse) VisitListFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeatureRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Body   *CreateFeatureJSONRequestBody
+}
+
+type CreateFeatureResponseObject interface {
+	VisitCreateFeatureResponse(w http.ResponseWriter) error
+}
+
+type CreateFeature201JSONResponse Feature
+
+func (response CreateFeature201JSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateFeature400ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature401ResponseHeaders
+}
+
+func (response CreateFeature401ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature403ResponseHeaders
+}
+
+func (response CreateFeature403ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature404ResponseHeaders
+}
+
+func (response CreateFeature404ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature409ResponseHeaders
+}
+
+func (response CreateFeature409ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature413ResponseHeaders
+}
+
+func (response CreateFeature413ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFeature422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateFeature422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateFeature422ResponseHeaders
+}
+
+func (response CreateFeature422ApplicationProblemPlusJSONResponse) VisitCreateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetFeatureRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     FeatureId `json:"id"`
+}
+
+type GetFeatureResponseObject interface {
+	VisitGetFeatureResponse(w http.ResponseWriter) error
+}
+
+type GetFeature200JSONResponse Feature
+
+func (response GetFeature200JSONResponse) VisitGetFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetFeature400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetFeature400ApplicationProblemPlusJSONResponse) VisitGetFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetFeature401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetFeature401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetFeature401ResponseHeaders
+}
+
+func (response GetFeature401ApplicationProblemPlusJSONResponse) VisitGetFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetFeature403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetFeature403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetFeature403ResponseHeaders
+}
+
+func (response GetFeature403ApplicationProblemPlusJSONResponse) VisitGetFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetFeature404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetFeature404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetFeature404ResponseHeaders
+}
+
+func (response GetFeature404ApplicationProblemPlusJSONResponse) VisitGetFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeatureRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     FeatureId `json:"id"`
+	Body   *UpdateFeatureApplicationMergePatchPlusJSONRequestBody
+}
+
+type UpdateFeatureResponseObject interface {
+	VisitUpdateFeatureResponse(w http.ResponseWriter) error
+}
+
+type UpdateFeature200JSONResponse Feature
+
+func (response UpdateFeature200JSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateFeature400ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateFeature401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateFeature401ResponseHeaders
+}
+
+func (response UpdateFeature401ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateFeature403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateFeature403ResponseHeaders
+}
+
+func (response UpdateFeature403ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateFeature404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateFeature404ResponseHeaders
+}
+
+func (response UpdateFeature404ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateFeature413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateFeature413ResponseHeaders
+}
+
+func (response UpdateFeature413ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFeature422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdateFeature422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdateFeature422ResponseHeaders
+}
+
+func (response UpdateFeature422ApplicationProblemPlusJSONResponse) VisitUpdateFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeatureRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     FeatureId `json:"id"`
+}
+
+type ArchiveFeatureResponseObject interface {
+	VisitArchiveFeatureResponse(w http.ResponseWriter) error
+}
+
+type ArchiveFeature200JSONResponse Feature
+
+func (response ArchiveFeature200JSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeature400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ArchiveFeature400ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeature401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveFeature401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveFeature401ResponseHeaders
+}
+
+func (response ArchiveFeature401ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeature403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveFeature403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveFeature403ResponseHeaders
+}
+
+func (response ArchiveFeature403ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeature404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveFeature404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveFeature404ResponseHeaders
+}
+
+func (response ArchiveFeature404ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveFeature409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ArchiveFeature409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ArchiveFeature409ResponseHeaders
+}
+
+func (response ArchiveFeature409ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -6672,6 +7691,21 @@ type StrictServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(ctx context.Context, request ArchiveCustomerRequestObject) (ArchiveCustomerResponseObject, error)
+	// ListFeatures List features in the caller's product scope, newest first, archived ones included.
+	// (GET /tenants/{tenant}/features)
+	ListFeatures(ctx context.Context, request ListFeaturesRequestObject) (ListFeaturesResponseObject, error)
+	// CreateFeature Add a feature to a product (ADR-0015).
+	// (POST /tenants/{tenant}/features)
+	CreateFeature(ctx context.Context, request CreateFeatureRequestObject) (CreateFeatureResponseObject, error)
+	// GetFeature Get a feature.
+	// (GET /tenants/{tenant}/features/{id})
+	GetFeature(ctx context.Context, request GetFeatureRequestObject) (GetFeatureResponseObject, error)
+	// UpdateFeature Change a feature's name, description or unit (JSON Merge Patch). Key and type never change.
+	// (PATCH /tenants/{tenant}/features/{id})
+	UpdateFeature(ctx context.Context, request UpdateFeatureRequestObject) (UpdateFeatureResponseObject, error)
+	// ArchiveFeature Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
+	// (POST /tenants/{tenant}/features/{id}/archive)
+	ArchiveFeature(ctx context.Context, request ArchiveFeatureRequestObject) (ArchiveFeatureResponseObject, error)
 	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
 	// (GET /tenants/{tenant}/invitations)
 	ListInvitations(ctx context.Context, request ListInvitationsRequestObject) (ListInvitationsResponseObject, error)
@@ -7147,6 +8181,154 @@ func (sh *strictHandler) ArchiveCustomer(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveCustomerResponseObject); ok {
 		if err := validResponse.VisitArchiveCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFeatures operation middleware
+func (sh *strictHandler) ListFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListFeaturesParams) {
+	var request ListFeaturesRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFeatures(ctx, request.(ListFeaturesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFeatures")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFeaturesResponseObject); ok {
+		if err := validResponse.VisitListFeaturesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateFeature operation middleware
+func (sh *strictHandler) CreateFeature(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request CreateFeatureRequestObject
+
+	request.Tenant = tenant
+
+	var body CreateFeatureJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateFeature(ctx, request.(CreateFeatureRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateFeature")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateFeatureResponseObject); ok {
+		if err := validResponse.VisitCreateFeatureResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetFeature operation middleware
+func (sh *strictHandler) GetFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId) {
+	var request GetFeatureRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetFeature(ctx, request.(GetFeatureRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetFeature")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetFeatureResponseObject); ok {
+		if err := validResponse.VisitGetFeatureResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateFeature operation middleware
+func (sh *strictHandler) UpdateFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId) {
+	var request UpdateFeatureRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	var body UpdateFeatureApplicationMergePatchPlusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateFeature(ctx, request.(UpdateFeatureRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateFeature")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateFeatureResponseObject); ok {
+		if err := validResponse.VisitUpdateFeatureResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveFeature operation middleware
+func (sh *strictHandler) ArchiveFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId) {
+	var request ArchiveFeatureRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveFeature(ctx, request.(ArchiveFeatureRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveFeature")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveFeatureResponseObject); ok {
+		if err := validResponse.VisitArchiveFeatureResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -473,6 +473,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List features in the caller's product scope, newest first, archived ones included.
+         * @description Needs catalog:read. A product_id naming a hidden or missing product gives an empty list.
+         */
+        get: operations["listFeatures"];
+        put?: never;
+        /**
+         * Add a feature to a product (ADR-0015).
+         * @description Needs catalog:write on the product. A missing or hidden product answers 422 on product_id, an archived one too; a key already used on the product (archived features included: keys are never reused) answers 409.
+         */
+        post: operations["createFeature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/features/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        /** Get a feature. */
+        get: operations["getFeature"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a feature's name, description or unit (JSON Merge Patch). Key and type never change.
+         * @description Needs catalog:write on its product.
+         */
+        patch: operations["updateFeature"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/features/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
+         * @description Needs catalog:write on its product. An archived feature answers 409 invalid_state.
+         */
+        post: operations["archiveFeature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/customers": {
         parameters: {
             query?: never;
@@ -735,6 +811,44 @@ export interface components {
         ProductPatch: {
             name?: string;
         };
+        /** @enum {string} */
+        FeatureType: "boolean" | "limit";
+        Feature: {
+            /** @example ftr_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            product_id: string;
+            /** @description What apps check (hasFeature */
+            key: string;
+            name: string;
+            description: string | null;
+            type: components["schemas"]["FeatureType"];
+            /** @description For a limit, e.g. users. */
+            unit: string | null;
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        FeaturePage: {
+            items: components["schemas"]["Feature"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        FeatureCreate: {
+            product_id: string;
+            /** @description snake_case, e.g. max_users. */
+            key: string;
+            name: string;
+            description?: string;
+            type: components["schemas"]["FeatureType"];
+            unit?: string;
+        };
+        /** @description Absent fields stay; description and unit null clears them; name isn't nullable (null answers 422). */
+        FeaturePatch: {
+            name?: string;
+            description?: string | null;
+            unit?: string | null;
+        };
         Customer: {
             /** @example cus_01jcz5b2y3c4d5e6f7g8h9j0k1 */
             id: string;
@@ -911,6 +1025,7 @@ export interface components {
         };
     };
     parameters: {
+        FeatureId: string;
         ProductId: string;
         CustomerId: string;
         LicenseId: string;
@@ -1714,6 +1829,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listFeatures: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                product_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturePage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureCreate"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feature"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feature"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["FeaturePatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feature"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    archiveFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feature"];
                 };
             };
             400: components["responses"]["Problem"];
