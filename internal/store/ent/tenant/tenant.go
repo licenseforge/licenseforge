@@ -40,6 +40,8 @@ const (
 	EdgeIdempotencyKeys = "idempotency_keys"
 	// EdgeAuditExportCursors holds the string denoting the audit_export_cursors edge name in mutations.
 	EdgeAuditExportCursors = "audit_export_cursors"
+	// EdgeAuditAnchors holds the string denoting the audit_anchors edge name in mutations.
+	EdgeAuditAnchors = "audit_anchors"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -105,6 +107,13 @@ const (
 	AuditExportCursorsInverseTable = "audit_export_cursors"
 	// AuditExportCursorsColumn is the table column denoting the audit_export_cursors relation/edge.
 	AuditExportCursorsColumn = "tenant_id"
+	// AuditAnchorsTable is the table that holds the audit_anchors relation/edge.
+	AuditAnchorsTable = "audit_anchors"
+	// AuditAnchorsInverseTable is the table name for the AuditAnchor entity.
+	// It exists in this package in order to avoid circular dependency with the "auditanchor" package.
+	AuditAnchorsInverseTable = "audit_anchors"
+	// AuditAnchorsColumn is the table column denoting the audit_anchors relation/edge.
+	AuditAnchorsColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -296,6 +305,20 @@ func ByAuditExportCursors(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOptio
 		sqlgraph.OrderByNeighborTerms(s, newAuditExportCursorsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByAuditAnchorsCount orders the results by audit_anchors count.
+func ByAuditAnchorsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAuditAnchorsStep(), opts...)
+	}
+}
+
+// ByAuditAnchors orders the results by audit_anchors terms.
+func ByAuditAnchors(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAuditAnchorsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -357,5 +380,12 @@ func newAuditExportCursorsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(AuditExportCursorsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, AuditExportCursorsTable, AuditExportCursorsColumn),
+	)
+}
+func newAuditAnchorsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AuditAnchorsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, AuditAnchorsTable, AuditAnchorsColumn),
 	)
 }

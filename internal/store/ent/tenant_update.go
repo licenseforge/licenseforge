@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"licenseforge.io/licenseforge/internal/store/ent/apitoken"
+	"licenseforge.io/licenseforge/internal/store/ent/auditanchor"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditexportcursor"
 	"licenseforge.io/licenseforge/internal/store/ent/customer"
@@ -206,6 +207,21 @@ func (_u *TenantUpdate) AddAuditExportCursors(v ...*AuditExportCursor) *TenantUp
 	return _u.AddAuditExportCursorIDs(ids...)
 }
 
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (_u *TenantUpdate) AddAuditAnchorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddAuditAnchorIDs(ids...)
+	return _u
+}
+
+// AddAuditAnchors adds the "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdate) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditAnchorIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -398,6 +414,27 @@ func (_u *TenantUpdate) RemoveAuditExportCursors(v ...*AuditExportCursor) *Tenan
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAuditExportCursorIDs(ids...)
+}
+
+// ClearAuditAnchors clears all "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdate) ClearAuditAnchors() *TenantUpdate {
+	_u.mutation.ClearAuditAnchors()
+	return _u
+}
+
+// RemoveAuditAnchorIDs removes the "audit_anchors" edge to AuditAnchor entities by IDs.
+func (_u *TenantUpdate) RemoveAuditAnchorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveAuditAnchorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditAnchors removes "audit_anchors" edges to AuditAnchor entities.
+func (_u *TenantUpdate) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditAnchorIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -877,6 +914,51 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditAnchorsIDs(); len(nodes) > 0 && !_u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditAnchorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -1064,6 +1146,21 @@ func (_u *TenantUpdateOne) AddAuditExportCursors(v ...*AuditExportCursor) *Tenan
 		ids[i] = v[i].ID
 	}
 	return _u.AddAuditExportCursorIDs(ids...)
+}
+
+// AddAuditAnchorIDs adds the "audit_anchors" edge to the AuditAnchor entity by IDs.
+func (_u *TenantUpdateOne) AddAuditAnchorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddAuditAnchorIDs(ids...)
+	return _u
+}
+
+// AddAuditAnchors adds the "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdateOne) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAuditAnchorIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -1258,6 +1355,27 @@ func (_u *TenantUpdateOne) RemoveAuditExportCursors(v ...*AuditExportCursor) *Te
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAuditExportCursorIDs(ids...)
+}
+
+// ClearAuditAnchors clears all "audit_anchors" edges to the AuditAnchor entity.
+func (_u *TenantUpdateOne) ClearAuditAnchors() *TenantUpdateOne {
+	_u.mutation.ClearAuditAnchors()
+	return _u
+}
+
+// RemoveAuditAnchorIDs removes the "audit_anchors" edge to AuditAnchor entities by IDs.
+func (_u *TenantUpdateOne) RemoveAuditAnchorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveAuditAnchorIDs(ids...)
+	return _u
+}
+
+// RemoveAuditAnchors removes "audit_anchors" edges to AuditAnchor entities.
+func (_u *TenantUpdateOne) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAuditAnchorIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -1760,6 +1878,51 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(auditexportcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAuditAnchorsIDs(); len(nodes) > 0 && !_u.mutation.AuditAnchorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AuditAnchorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.AuditAnchorsTable,
+			Columns: []string{tenant.AuditAnchorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

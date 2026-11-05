@@ -502,6 +502,29 @@ func HasAuditExportCursorsWith(preds ...predicate.AuditExportCursor) predicate.T
 	})
 }
 
+// HasAuditAnchors applies the HasEdge predicate on the "audit_anchors" edge.
+func HasAuditAnchors() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, AuditAnchorsTable, AuditAnchorsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAuditAnchorsWith applies the HasEdge predicate on the "audit_anchors" edge with a given conditions (other predicates).
+func HasAuditAnchorsWith(preds ...predicate.AuditAnchor) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newAuditAnchorsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Tenant) predicate.Tenant {
 	return predicate.Tenant(sql.AndPredicates(predicates...))

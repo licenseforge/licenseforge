@@ -15,6 +15,9 @@ type APITokenProduct func(*sql.Selector)
 // Activation is the predicate function for activation builders.
 type Activation func(*sql.Selector)
 
+// AuditAnchor is the predicate function for auditanchor builders.
+type AuditAnchor func(*sql.Selector)
+
 // AuditEvent is the predicate function for auditevent builders.
 type AuditEvent func(*sql.Selector)
 
