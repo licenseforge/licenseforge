@@ -632,6 +632,34 @@ func TestActivationManagement(t *testing.T) {
 	if n := a.events(t, "activation.deactivate"); n != before+1 {
 		t.Errorf("deactivate entries %d, want %d", n, before+1)
 	}
+	// A status change answers with the seats counted in its transaction.
+	if r := a.do(t, "POST", lp+"/suspend", "", a.session(t, a.ownerA, true)); r.code != 200 || r.body["active_activations"] != 2.0 {
+		t.Errorf("suspend: %d %s", r.code, r.raw)
+	}
+	// Activations created at the same instant page by ID: both come back.
+	tie := a.issue(t, "pro")
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		at := time.Now().UTC().Truncate(time.Microsecond)
+		for range 2 {
+			if _, err := tx.Activation.Create().SetTenantID(a.a.ID).SetLicenseID(tie.License.ID).SetFingerprint(newFP()).
+				SetFpSource(activation.FpSourceMachineID).SetBinding(activation.BindingMachine).SetMode(activation.ModeOnline).
+				SetFirstSeenAt(at).SetLastSeenAt(at).SetCreatedAt(at).SetUpdatedAt(at).Save(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tp := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + tie.License.ID + "/activations?limit=1"
+	r1 := a.do(t, "GET", tp, "", viewer)
+	c, _ := r1.body["next_cursor"].(string)
+	r2 := a.do(t, "GET", tp+"&cursor="+c, "", viewer)
+	i1, _ := r1.body["items"].([]any)
+	i2, _ := r2.body["items"].([]any)
+	if c == "" || len(i1) != 1 || len(i2) != 1 || i1[0].(map[string]any)["id"] == i2[0].(map[string]any)["id"] {
+		t.Errorf("tied pages: %s / %s", r1.raw, r2.raw)
+	}
 	// Seats are counted only in the caller's product scope.
 	q := authz.Principal{Kind: authz.User, ID: "usr_q", TenantID: a.a.ID, Role: authz.Viewer, Scope: authz.Scope{Products: []string{prodQ}}}
 	if got, err := a.srv.Activations.ActiveSeats(ctx, q, is.License.ID); err != nil || len(got) != 0 {

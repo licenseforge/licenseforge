@@ -77,30 +77,27 @@ func (s *server) GetLicense(ctx context.Context, req apigen.GetLicenseRequestObj
 }
 
 func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRequestObject) (apigen.SuspendLicenseResponseObject, error) {
-	l, err := s.Licenses.Suspend(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Suspend(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.view(ctx, l)
-	return apigen.SuspendLicense200JSONResponse(v), err
+	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 func (s *server) ReinstateLicense(ctx context.Context, req apigen.ReinstateLicenseRequestObject) (apigen.ReinstateLicenseResponseObject, error) {
-	l, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.view(ctx, l)
-	return apigen.ReinstateLicense200JSONResponse(v), err
+	return apigen.ReinstateLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 func (s *server) RevokeLicense(ctx context.Context, req apigen.RevokeLicenseRequestObject) (apigen.RevokeLicenseResponseObject, error) {
-	l, err := s.Licenses.Revoke(ctx, principal(ctx), req.Id)
+	c, err := s.Licenses.Revoke(ctx, principal(ctx), req.Id)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.view(ctx, l)
-	return apigen.RevokeLicense200JSONResponse(v), err
+	return apigen.RevokeLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
 // IssueLicense issues a license; with Idempotency-Key, at most once per key
