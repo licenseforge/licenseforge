@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -472,18 +473,69 @@ func TestLicenseTablesAreTenantIsolated(t *testing.T) {
 }
 
 // Rules that need the previous value are the licensing service's job (no
-// triggers, CHECKs can't see the old row). This test pins that decision: if the
-// database starts enforcing them, update ADR-0013 and the service.
+// triggers, CHECKs can't see the old row), except revocation, which the
+// database makes final (license_transitions, ADR-0013 as amended). This test
+// pins both: if that changes, update ADR-0013 and the service.
 func TestServiceEnforcedRulesAreNotInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	d := openDB(t)
 	l := newLicense(t, d, testKeyring(t))
-	for name, q := range []string{
-		`UPDATE licenses SET status = 'revoked', revoked_at = now() WHERE id = $1`,
-		`UPDATE licenses SET status = 'active', revoked_at = NULL WHERE id = $1`, // un-revoke
-	} {
-		if _, err := d.platformDB.ExecContext(ctx, q, l.license.ID); err != nil {
-			t.Fatalf("step %d: %v", name, err)
+	now := time.Now()
+	var act *ent.Activation
+	if err := d.WithTenant(ctx, l.tenant.ID, func(tx *ent.Tx) error {
+		var err error
+		act, err = tx.Activation.Create().SetTenantID(l.tenant.ID).SetLicenseID(l.license.ID).
+			SetFingerprint("sha256:" + string(bytes.Repeat([]byte("c"), 64))).SetFpSource(activation.FpSourceMachineID).
+			SetBinding(activation.BindingMachine).SetMode(activation.ModeOnline).SetFirstSeenAt(now).SetLastSeenAt(now).Save(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows := func(db *sql.DB, q string, arg string) int64 {
+		t.Helper()
+		res, err := db.ExecContext(ctx, q, arg)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
 		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// Service-enforced: the database lets a serving login undo a deactivation
+	// and move the first activation.
+	for _, q := range []string{
+		`UPDATE activations SET deactivated_at = now() WHERE id = $1`,
+		`UPDATE activations SET deactivated_at = NULL WHERE id = $1`, // un-deactivate
+	} {
+		if n := rows(d.platformDB, q, act.ID); n != 1 {
+			t.Errorf("%s: %d rows, want 1 (service-enforced)", q, n)
+		}
+	}
+	if n := rows(d.platformDB, `UPDATE licenses SET first_activated_at = issued_at WHERE id = $1`, l.license.ID); n != 1 {
+		t.Errorf("first_activated_at: %d rows, want 1 (service-enforced)", n)
+	}
+	// Database-enforced: once revoked, a license is out of the serving logins'
+	// reach (not even its external_refs, for GDPR erasure: the owner login
+	// runs that, exempt).
+	if n := rows(d.platformDB, `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() WHERE id = $1`, l.license.ID); n != 1 {
+		t.Fatalf("revoke: %d rows", n)
+	}
+	for _, q := range []string{
+		`UPDATE licenses SET status = 'active', revoked_at = NULL WHERE id = $1`, // un-revoke
+		`UPDATE licenses SET external_refs = '{}' WHERE id = $1`,
+	} {
+		if n := rows(d.platformDB, q, l.license.ID); n != 0 {
+			t.Errorf("%s on a revoked license: %d rows, want 0", q, n)
+		}
+	}
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if n := rows(owner, `UPDATE licenses SET external_refs = '{}' WHERE id = $1`, l.license.ID); n != 1 {
+		t.Errorf("owner login on a revoked license: %d rows, want 1 (exempt)", n)
 	}
 }

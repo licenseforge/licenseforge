@@ -116,7 +116,13 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 		// Lock order: the license row (what Activate and Deactivate lock to
 		// count and free seats), then the audit lock.
 		if _, err := tx.License.Query().Where(license.ID(l.ID)).
-			ForUpdate(func(o *sql.LockOptions) { o.Strength = sql.LockNoKeyUpdate }).Only(ctx); err != nil {
+			ForUpdate(func(o *sql.LockOptions) { o.Strength = sql.LockNoKeyUpdate }).Only(ctx); ent.IsNotFound(err) {
+			// Revoked: it can't be locked (license_transitions) and takes no
+			// new seats, so freeing one needs no lock.
+			if revoked, err := tx.License.Query().Where(license.ID(l.ID), license.RevokedAtNotNil()).Exist(ctx); err != nil || !revoked {
+				return errors.Join(ErrNotFound, err)
+			}
+		} else if err != nil {
 			return err
 		}
 		if act, err = tx.Activation.Get(ctx, act.ID); err != nil { // after the lock: a concurrent deactivate is visible
@@ -126,7 +132,12 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 			out = act
 			return nil
 		}
-		if err := free(ctx, tx, act.ID); err != nil {
+		if err := free(ctx, tx, act.ID); errors.Is(err, ErrNotActivated) {
+			// Freed concurrently (a revoked license is read unlocked): the same
+			// answer as an already deactivated activation, with no new entry.
+			out, err = tx.Activation.Get(ctx, act.ID)
+			return err
+		} else if err != nil {
 			return err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
