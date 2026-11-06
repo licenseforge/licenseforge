@@ -230,13 +230,24 @@ func TestOfflineFileNotIssuable(t *testing.T) {
 	is := Issuer{DB: f.db, Keys: f.keys}
 	past := time.Now().Add(-time.Hour)
 	for name, change := range map[string]func(*ent.LicenseCreate){
-		"suspended":     func(c *ent.LicenseCreate) { c.SetStatus(license.StatusSuspended).SetSuspendedAt(time.Now()) },
-		"revoked":       func(c *ent.LicenseCreate) { c.SetStatus(license.StatusRevoked).SetRevokedAt(time.Now()) },
+		"suspended":     nil, // set after the insert: a license is inserted active (insert_active)
+		"revoked":       nil,
 		"offline off":   func(c *ent.LicenseCreate) { c.SetOfflineAllowed(false) },
 		"machine bound": func(c *ent.LicenseCreate) { c.SetBindType(license.BindTypeMachine) },
 		"expired":       func(c *ent.LicenseCreate) { c.SetIssuedAt(past.Add(-time.Hour)).SetExpiresAt(past) },
 	} {
 		l := f.newLicense(t, change)
+		if change == nil {
+			if err := f.db.WithTenant(context.Background(), f.tenant, func(tx *ent.Tx) error {
+				u := tx.License.UpdateOneID(l.ID).SetStatus(license.StatusSuspended).SetSuspendedAt(time.Now())
+				if name == "revoked" {
+					u = tx.License.UpdateOneID(l.ID).SetStatus(license.StatusRevoked).SetRevokedAt(time.Now())
+				}
+				return u.Exec(context.Background())
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := is.OfflineFile(f.as(authz.Owner, all), l.ID); !errors.Is(err, ErrNotIssuable) {
 			t.Errorf("%s: err = %v", name, err)
 		}

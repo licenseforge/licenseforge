@@ -376,20 +376,25 @@ func TestKeyLookupIsPerTenant(t *testing.T) {
 // newLicenseIn adds a second license for l's customer inside tx.
 func newLicenseIn(t *testing.T, tx *ent.Tx, l licensed, kr *secrets.Keyring) *ent.License {
 	t.Helper()
-	ctx := context.Background()
-	key := licensekey.New()
-	id := ids.License()
-	ct, _ := kr.Encrypt([]byte(key), secrets.Binding{Purpose: secrets.PurposeLicenseKey, TenantID: l.tenant.ID, RowID: id})
-	lookup, _ := kr.LookupHash(secrets.PurposeLicenseKey, []byte(key))
-	lic, err := tx.License.Create().SetID(id).SetTenantID(l.tenant.ID).SetProductID(l.product.ID).SetPlanID(l.plan.ID).
-		SetCustomerID(l.customer.ID).SetKeyCiphertext(ct).SetKeyLookup(lookup).SetKeyHint(key[len(key)-6:]).
-		SetPlanSlug(l.plan.Slug).SetExpiryBasis(license.ExpiryBasisFromIssue).SetBindType(license.BindTypeMachine).
-		SetOfflineAllowed(false).SetLeaseSeconds(60).SetGraceSeconds(0).SetIssuedAt(time.Now()).
-		SetEntitlements(schema.LicenseEntitlements{}).Save(ctx) // nil features/limits: stored as [] and {}
+	lic, err := licenseCreate(tx, l, kr).Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return lic
+}
+
+// licenseCreate builds an active license for l's tenant, product, plan and
+// customer, with a new key.
+func licenseCreate(tx *ent.Tx, l licensed, kr *secrets.Keyring) *ent.LicenseCreate {
+	key := licensekey.New()
+	id := ids.License()
+	ct, _ := kr.Encrypt([]byte(key), secrets.Binding{Purpose: secrets.PurposeLicenseKey, TenantID: l.tenant.ID, RowID: id})
+	lookup, _ := kr.LookupHash(secrets.PurposeLicenseKey, []byte(key))
+	return tx.License.Create().SetID(id).SetTenantID(l.tenant.ID).SetProductID(l.product.ID).SetPlanID(l.plan.ID).
+		SetCustomerID(l.customer.ID).SetKeyCiphertext(ct).SetKeyLookup(lookup).SetKeyHint(key[len(key)-6:]).
+		SetPlanSlug(l.plan.Slug).SetExpiryBasis(license.ExpiryBasisFromIssue).SetBindType(license.BindTypeMachine).
+		SetOfflineAllowed(false).SetLeaseSeconds(60).SetGraceSeconds(0).SetIssuedAt(time.Now()).
+		SetEntitlements(schema.LicenseEntitlements{}) // nil features/limits: stored as [] and {}
 }
 
 func TestNilEntitlementsAreStoredEmpty(t *testing.T) {

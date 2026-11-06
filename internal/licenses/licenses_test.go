@@ -113,13 +113,15 @@ func setup(t *testing.T) fixture {
 				*ft.id = pf.ID
 			}
 			// Features of other states, for override checks.
-			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey("legacy").SetName("Legacy").
-				SetType(feature.TypeBoolean).SetArchivedAt(time.Now()).Save(ctx); err != nil {
-				return err
-			}
-			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey("legacy_seats").SetName("Legacy seats").
-				SetType(feature.TypeLimit).SetArchivedAt(time.Now()).Save(ctx); err != nil {
-				return err
+			// Inserted unarchived (insert_unarchived), then archived.
+			for key, typ := range map[string]feature.Type{"legacy": feature.TypeBoolean, "legacy_seats": feature.TypeLimit} {
+				fe, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(p.ID).SetKey(key).SetName(key).SetType(typ).Save(ctx)
+				if err != nil {
+					return err
+				}
+				if err := tx.Feature.UpdateOne(fe).SetArchivedAt(time.Now()).Exec(ctx); err != nil {
+					return err
+				}
 			}
 			if _, err := tx.Feature.Create().SetTenantID(td.id).SetProductID(q.ID).SetKey("q_only").SetName("Q only").
 				SetType(feature.TypeBoolean).Save(ctx); err != nil {
@@ -352,13 +354,20 @@ func TestIssueRefusals(t *testing.T) {
 	mgr := as(f.a.id, authz.Manager, all)
 	var archivedPlan, archivedCustomer string
 	f.tx(t, f.a.id, func(tx *ent.Tx) error {
-		pl, err := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug("old").SetName("Old").SetArchivedAt(time.Now()).Save(ctx)
+		// Inserted unarchived (insert_unarchived), then archived.
+		pl, err := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug("old").SetName("Old").Save(ctx)
 		if err != nil {
 			return err
 		}
-		c, err := tx.Customer.Create().SetTenantID(f.a.id).SetName("Gone").SetArchivedAt(time.Now()).Save(ctx)
+		if err := tx.Plan.UpdateOne(pl).SetArchivedAt(time.Now()).Exec(ctx); err != nil {
+			return err
+		}
+		c, err := tx.Customer.Create().SetTenantID(f.a.id).SetName("Gone").Save(ctx)
+		if err != nil {
+			return err
+		}
 		archivedPlan, archivedCustomer = pl.ID, c.ID
-		return err
+		return tx.Customer.UpdateOne(c).SetArchivedAt(time.Now()).Exec(ctx)
 	})
 	for _, tc := range []struct {
 		name    string
