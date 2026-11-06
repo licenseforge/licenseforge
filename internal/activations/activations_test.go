@@ -878,6 +878,16 @@ func TestDeactivateByIDOnRevokedLicense(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = admin.Close() }()
+	deactivations := func() int {
+		var n int
+		f.tx(t, f.a, func(tx *ent.Tx) error {
+			var err error
+			n, err = tx.AuditEvent.Query().Where(auditevent.Action("activation.deactivate")).Count(ctx)
+			return err
+		})
+		return n
+	}
+	before := deactivations()
 	done := make(chan error, 1)
 	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
 		if err := free(ctx, tx, got.ActivationID); err != nil {
@@ -908,5 +918,8 @@ func TestDeactivateByIDOnRevokedLicense(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Errorf("DeactivateByID racing a deactivation: %v", err)
+	}
+	if n := deactivations(); n != before { // the loser freed nothing: no entry
+		t.Errorf("deactivation entries %d → %d, want no new one", before, n)
 	}
 }
