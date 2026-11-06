@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Fixed
+- The serving logins (`licenseforge_app`, `licenseforge_platform`) can no longer insert a product, feature, plan or customer that is already archived, or a license that is already suspended or revoked: restrictive `FOR INSERT` policies (`insert_unarchived`, `insert_active`) require those columns to be unset, so a one-way state is only reached through the audited service update. The migrator stays exempt. Migration `20261106090000_insert_unarchived_security.sql`.
 - Web dev dependencies: `minimatch` 10.2.6 (pulled in by `eslint` and `typescript-eslint`) is overridden to 11.0.4, fixing GHSA-g3hv-75wg-m249 (denial of service via globparts amplification, fixed in 11.0.1). The override targets `minimatch@^10` only; `@redocly/openapi-core`'s 5.x is outside the affected range and stays.
 - `TestActivationRateLimitIgnoresUnknownKeys` no longer fails when a minute boundary falls mid-test: it runs the limiter on a fixed clock.
 - Signing keys: `signing.Local` `Create`, `Promote` and `Discard` now require `key:write` (owners, ADR-0019) on the whole tenant, in the tenant they act on; other roles, `sdk` and admin tokens, product-scoped principals, another tenant's principal and calls without a principal get `authz.ErrDenied` and change nothing.
