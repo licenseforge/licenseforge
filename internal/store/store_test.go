@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -396,11 +398,18 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
 		"features": { // ADR-0015: archive is one-way, at the database clock
+			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
 		"products": { // ADR-0015: archive is one-way, at the database clock
+			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
 			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
+		// One-way states start unset: no insert of an archived, suspended or
+		// revoked row.
+		"plans":     {"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`},
+		"customers": {"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`},
+		"licenses":  {"insert_active (restrictive)": `INSERT licenseforge_app,licenseforge_platform ((suspended_at IS NULL) AND (revoked_at IS NULL))`},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
@@ -1021,6 +1030,70 @@ func TestArchiveRace(t *testing.T) {
 			}
 			if !got.Valid || !got.Time.Equal(archived) {
 				t.Errorf("%s %s: archived_at = %v, want %v", a.table, c.name, got, archived)
+			}
+		}
+	}
+}
+
+// One-way states start unset: neither serving pool can insert a product,
+// feature, plan or customer already archived, or a license already
+// suspended or revoked (the services set those later, audited).
+func TestNoInsertWithOneWayStateSet(t *testing.T) {
+	d := openDB(t)
+	kr := testKeyring(t)
+	ctx := context.Background()
+	l := newLicense(t, d, kr)
+	tn, now := l.tenant.ID, time.Now()
+	slug := func() string { return "x" + strings.ToLower(storetest.Suffix()) }
+	for name, create := range map[string]func(tx *ent.Tx) error{
+		"product": func(tx *ent.Tx) error {
+			return tx.Product.Create().SetTenantID(tn).SetSlug(slug()).SetName("X").SetArchivedAt(now).Exec(ctx)
+		},
+		"feature": func(tx *ent.Tx) error {
+			return tx.Feature.Create().SetTenantID(tn).SetProductID(l.product.ID).SetKey(slug()).SetName("X").
+				SetType(feature.TypeBoolean).SetArchivedAt(now).Exec(ctx)
+		},
+		"plan": func(tx *ent.Tx) error {
+			return tx.Plan.Create().SetTenantID(tn).SetProductID(l.product.ID).SetSlug(slug()).SetName("X").SetArchivedAt(now).Exec(ctx)
+		},
+		"customer": func(tx *ent.Tx) error {
+			return tx.Customer.Create().SetTenantID(tn).SetName("X").SetArchivedAt(now).Exec(ctx)
+		},
+		"suspended license": func(tx *ent.Tx) error {
+			return licenseCreate(tx, l, kr).SetStatus(license.StatusSuspended).SetSuspendedAt(now).Exec(ctx)
+		},
+		"revoked license": func(tx *ent.Tx) error {
+			return licenseCreate(tx, l, kr).SetStatus(license.StatusRevoked).SetRevokedAt(now).Exec(ctx)
+		},
+		// The same inserts with the state unset go through, from both pools.
+		"active product": func(tx *ent.Tx) error {
+			return tx.Product.Create().SetTenantID(tn).SetSlug(slug()).SetName("X").Exec(ctx)
+		},
+		"active feature": func(tx *ent.Tx) error {
+			return tx.Feature.Create().SetTenantID(tn).SetProductID(l.product.ID).SetKey(slug()).SetName("X").
+				SetType(feature.TypeBoolean).Exec(ctx)
+		},
+		"active plan": func(tx *ent.Tx) error {
+			return tx.Plan.Create().SetTenantID(tn).SetProductID(l.product.ID).SetSlug(slug()).SetName("X").Exec(ctx)
+		},
+		"active customer": func(tx *ent.Tx) error {
+			return tx.Customer.Create().SetTenantID(tn).SetName("X").Exec(ctx)
+		},
+		"active license": func(tx *ent.Tx) error { return licenseCreate(tx, l, kr).Exec(ctx) },
+	} {
+		for _, platform := range []bool{false, true} {
+			var err error
+			if platform {
+				err = d.WithPlatform(ctx, create)
+			} else {
+				err = d.WithTenant(ctx, tn, create)
+			}
+			if strings.HasPrefix(name, "active ") {
+				if err != nil {
+					t.Errorf("%s, platform=%v: %v", name, platform, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "row-level security") {
+				t.Errorf("%s, platform=%v: want an RLS refusal, got %v", name, platform, err)
 			}
 		}
 	}
