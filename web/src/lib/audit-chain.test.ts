@@ -49,12 +49,14 @@ describe("verifyChain (newest first)", () => {
     forged.hash = await auditHash(forged, "{}");
     expect(await verifyChain(p1([{ event: forged, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({ ok: false, seq: 2, reason: "link" });
   });
-  it("finds a broken link deeper in: three entries, broken between 2 and 3", async () => {
-    const third = { ...second, id: "aud_ffffffffffffffffffffffffff", seq: 3, prev_hash: "ab".repeat(32) }; // not entry 2's hash
+  it("finds a broken link below the newest entry: 3 links to 2, but 2 doesn't link to 1", async () => {
+    const forged2 = { ...second, prev_hash: "ab".repeat(32) }; // not entry 1's hash
+    forged2.hash = await auditHash(forged2, "{}");
+    const third = { ...second, id: "aud_ffffffffffffffffffffffffff", seq: 3, prev_hash: forged2.hash }; // intact link to 2
     third.hash = await auditHash(third, "{}");
-    expect(await verifyChain(p1([{ event: third, rawDetails: "{}" }, { event: second, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({
+    expect(await verifyChain(p1([{ event: third, rawDetails: "{}" }, { event: forged2, rawDetails: "{}" }, { event: first, rawDetails: D1 }]))).toEqual({
       ok: false,
-      seq: 3,
+      seq: 2,
       reason: "link",
     });
   });
