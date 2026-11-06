@@ -953,3 +953,46 @@ func TestNoSeedAfterEarlierFullPasses(t *testing.T) {
 		t.Errorf("restart re-seeded the full-pass gauge to %v", got)
 	}
 }
+
+// An error taking the leader lock counts as a verification error.
+func TestLockErrorIsCounted(t *testing.T) {
+	d, err := store.Open(context.Background(), store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_ = d.Close() // the lock can't be taken: the pool is gone
+	errs := testutil.ToFloat64(metrics.AuditVerifyErrors)
+	if r, err := j.Once(context.Background()); err == nil || r.Ran {
+		t.Fatalf("Once on a closed pool = %+v, %v", r, err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyErrors); got != errs+1 {
+		t.Errorf("verify errors %v, want %v", got, errs+1)
+	}
+}
+
+// An error listing the chains counts as a verification error.
+func TestListingErrorIsCounted(t *testing.T) {
+	_, j, _ := setup(t)
+	boom := errors.New("connection reset")
+	j.tenants = func(context.Context) ([]string, error) { return nil, boom }
+	errs := testutil.ToFloat64(metrics.AuditVerifyErrors)
+	if _, err := j.Once(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("Once with a listing error: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.AuditVerifyErrors); got != errs+1 {
+		t.Errorf("verify errors %v, want %v", got, errs+1)
+	}
+}
+
+// If the seed query fails, the full-pass gauge isn't seeded: a missed seed
+// can't hide anything, a wrong one could.
+func TestNoSeedWhenTheQueryFails(t *testing.T) {
+	_, j, _ := setup(t)
+	j.hasFullCheckpoint = func(context.Context) (bool, error) { return false, errors.New("connection reset") }
+	metrics.AuditVerifyLastFull.Set(0)
+	j.seed(context.Background())
+	if got := testutil.ToFloat64(metrics.AuditVerifyLastFull); got != 0 {
+		t.Errorf("seeded to %v although the query failed", got)
+	}
+}
