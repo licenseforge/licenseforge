@@ -118,6 +118,17 @@ it("a page the scanner can't read (an entry without details) is still listed", a
   await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Can't verify page 1"));
 });
 
+it("names the page it can't verify: page 2 of two", async () => {
+  const noDetails = JSON.stringify({ ...first, details: undefined }); // page 2's entry lacks details
+  const twoPages = { first: `{"items":[${itemText(second, "{}")}],"next_cursor":"c2"}`, second: `{"items":[${noDetails}]}` };
+  const r = await open("owner", true, { pages: twoPages } as never);
+  await vi.waitFor(() => expect(r.button("Load more")).toBeDefined());
+  await act(async () => r.button("Load more")!.click());
+  await vi.waitFor(() => expect(r.el.querySelectorAll("tbody tr")).toHaveLength(2));
+  await act(async () => r.button("Verify loaded entries")!.click());
+  await vi.waitFor(() => expect(r.el.querySelector('[role="alert"]')?.textContent).toContain("Can't verify page 2"));
+});
+
 it("drops a verify result when more entries load", async () => {
   const twoPages = { first: `{"items":[${itemText(second, "{}")}],"next_cursor":"c2"}`, second: `{"items":[${itemText(first, D1)}]}` };
   const r = await open("owner", true, { pages: twoPages } as never);
