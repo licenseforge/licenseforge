@@ -1043,3 +1043,47 @@ func TestOverrideWaitsForFeatureArchive(t *testing.T) {
 		t.Fatal("issue didn't finish")
 	}
 }
+
+// A suspend that waits for a concurrent revoke answers the state error: the
+// revoked license can't be locked (license_transitions), so change reads it
+// unlocked rather than reporting it missing.
+func TestChangeWaitsForConcurrentRevoke(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	m := as(f.a.id, authz.Manager, all)
+	is, err := f.s.Issue(ctx, m, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() WHERE id = $1`, is.License.ID); err != nil {
+			return err
+		}
+		go func() {
+			_, err := f.s.Suspend(ctx, m, is.License.ID)
+			done <- err
+		}()
+		for i := 0; ; i++ {
+			var n int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			if i == 100 {
+				return errors.New("the suspend never waited")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+	if err := <-done; !errors.Is(err, ErrState) {
+		t.Errorf("suspend after a concurrent revoke: %v, want ErrState", err)
+	}
+}

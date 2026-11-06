@@ -15,7 +15,7 @@ A license key is a credential: whoever holds it can activate. Enterprise audits 
 ## Consequences
 - The database alone (backup, replica, SQL access) never exposes license keys.
 - Losing all master keys makes stored keys unrecoverable; licenses still verify (signatures don't depend on them) but keys can't be re-shown, only rotated. Operators must back up the master key Secret.
-- After a rotation, ciphertexts **and lookup hashes** must be rewritten under the new key (a re-encrypt job comes later); until then the old key stays in the keyring and in lookup queries.
+- After a rotation, ciphertexts **and lookup hashes** must be rewritten under the new key (a re-encrypt job comes later, run under the owner login: revoked licenses are out of the serving logins' reach, [ADR-0013 License data model hardening](0013-license-data-model-hardening.md)); until then the old key stays in the keyring and in lookup queries.
 
 ## Alternatives considered
 - **Hash only** (like API tokens): strongest, but vendors can't resend keys; support burden.

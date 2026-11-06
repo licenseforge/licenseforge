@@ -132,7 +132,12 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 			out = act
 			return nil
 		}
-		if err := free(ctx, tx, act.ID); err != nil {
+		if err := free(ctx, tx, act.ID); errors.Is(err, ErrNotActivated) {
+			// Freed concurrently (a revoked license is read unlocked): the same
+			// answer as an already deactivated activation, with no new entry.
+			out, err = tx.Activation.Get(ctx, act.ID)
+			return err
+		} else if err != nil {
 			return err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess

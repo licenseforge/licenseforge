@@ -14,7 +14,10 @@
 -- now, or what the row had (a suspended license's other updates). The
 -- subquery reads the statement's snapshot; a back-dated suspension racing a
 -- concurrent transition could slip through it, which only misdates a
--- reversible state. The migrator stays exempt. No triggers (ADR-0009).
+-- reversible state. The migrator stays exempt: updates a revoked license
+-- still needs (GDPR erasure of its external_refs, the ADR-0025 re-encrypt job)
+-- run as maintenance jobs under the owner login (ADR-0013 as amended). No
+-- triggers (ADR-0009).
 CREATE POLICY license_transitions ON "licenses" AS RESTRICTIVE FOR UPDATE TO licenseforge_app, licenseforge_platform
   USING ("revoked_at" IS NULL)
   WITH CHECK (

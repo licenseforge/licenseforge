@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -789,31 +790,58 @@ func TestFreeOnce(t *testing.T) {
 	}
 }
 
-// An activation that waits for a concurrent revoke answers "revoked": the
-// revoked license can't be locked (license_transitions), so authenticate
-// reads it unlocked rather than reporting an unknown key.
+// An activation or refresh that waits for a concurrent revoke answers
+// "revoked": the revoked license can't be locked (license_transitions), so
+// authenticate reads it unlocked rather than reporting an unknown key.
 func TestActivateWaitsForConcurrentRevoke(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	is := f.issue(t, "pro")
-	locked, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	go func() {
-		done <- f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for _, refresh := range []bool{false, true} {
+		is := f.issue(t, "pro")
+		machine := fp()
+		if refresh {
+			if _, err := f.s.Activate(ctx, f.req(is.Key, machine)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		done := make(chan error, 1)
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
 			if _, err := tx.ExecContext(ctx, `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() WHERE id = $1`, is.License.ID); err != nil {
 				return err
 			}
-			close(locked) // the row is locked, not yet committed
-			<-release
-			return nil
-		})
-	}()
-	<-locked
-	time.AfterFunc(300*time.Millisecond, func() { close(release) }) // Activate reaches the lock meanwhile
-	if _, err := f.s.Activate(ctx, f.req(is.Key, fp())); !errors.Is(err, ErrRevoked) {
-		t.Errorf("Activate = %v, want ErrRevoked", err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
+			go func() {
+				var err error
+				if refresh {
+					_, err = f.s.Refresh(ctx, f.req(is.Key, machine))
+				} else {
+					_, err = f.s.Activate(ctx, f.req(is.Key, machine))
+				}
+				done <- err
+			}()
+			for i := 0; ; i++ { // until it waits on the license row
+				var n int
+				if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+					return err
+				}
+				if n > 0 {
+					return nil
+				}
+				if i == 100 {
+					return errors.New("it never waited")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; !errors.Is(err, ErrRevoked) {
+			t.Errorf("refresh=%v: %v, want ErrRevoked", refresh, err)
+		}
 	}
 }
 
@@ -834,5 +862,51 @@ func TestDeactivateByIDOnRevokedLicense(t *testing.T) {
 	act, err := f.s.DeactivateByID(ctx, m, is.License.ID, got.ActivationID)
 	if err != nil || act.DeactivatedAt == nil {
 		t.Fatalf("DeactivateByID = %v, %v", act, err)
+	}
+	// A deactivation that waits for a concurrent one answers the activation,
+	// deactivated (no lock on a revoked license: the other freed the seat).
+	got, err = f.s.Activate(ctx, f.req(f.issue(t, "pro").Key, fp()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lic := got.Claims.LicenseID
+	if _, err := f.lic.Revoke(ctx, m, lic); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if err := free(ctx, tx, got.ActivationID); err != nil {
+			return err
+		}
+		go func() {
+			act, err := f.s.DeactivateByID(ctx, m, lic, got.ActivationID)
+			if err == nil && act.DeactivatedAt == nil {
+				err = errors.New("not deactivated")
+			}
+			done <- err
+		}()
+		for i := 0; ; i++ { // until the dashboard's free waits on the activation row
+			var n int
+			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			if i == 100 {
+				return errors.New("the deactivation never waited")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("DeactivateByID racing a deactivation: %v", err)
 	}
 }
