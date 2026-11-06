@@ -399,11 +399,11 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"features": { // ADR-0015: archive is one-way, at the database clock
 			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
 		"products": { // ADR-0015: archive is one-way, at the database clock
 			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
 		// One-way states start unset: no insert of an archived, suspended or
 		// revoked row.
