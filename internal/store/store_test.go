@@ -409,7 +409,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		// revoked row.
 		"plans":     {"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`},
 		"customers": {"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`},
-		"licenses":  {"insert_active (restrictive)": `INSERT licenseforge_app,licenseforge_platform ((suspended_at IS NULL) AND (revoked_at IS NULL))`},
+		"licenses": {
+			"insert_active (restrictive)":       `INSERT licenseforge_app,licenseforge_platform ((suspended_at IS NULL) AND (revoked_at IS NULL))`,
+			"license_transitions (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (revoked_at IS NULL) (((revoked_at IS NULL) OR ((revoked_at >= (clock_timestamp() - '00:05:00'::interval)) AND (revoked_at <= (clock_timestamp() + '00:05:00'::interval)))) AND ((suspended_at IS NULL) OR ((suspended_at >= (clock_timestamp() - '00:05:00'::interval)) AND (suspended_at <= (clock_timestamp() + '00:05:00'::interval))) OR (EXISTS ( SELECT 1 FROM licenses o WHERE (((o.id)::text = (licenses.id)::text) AND (o.suspended_at = licenses.suspended_at))))))`,
+		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
@@ -1095,6 +1098,166 @@ func TestNoInsertWithOneWayStateSet(t *testing.T) {
 			} else if err == nil || !strings.Contains(err.Error(), "row-level security") {
 				t.Errorf("%s, platform=%v: want an RLS refusal, got %v", name, platform, err)
 			}
+		}
+	}
+}
+
+// Revocation is final and license transitions use the database clock
+// (license_transitions): a revoked license can't be changed at all from a
+// serving pool, so it can't be un-revoked; revoked_at and suspended_at can
+// only be set to about now, not back- or forward-dated.
+func TestLicenseTransitionsAreBounded(t *testing.T) {
+	d := openDB(t)
+	kr := testKeyring(t)
+	ctx := context.Background()
+	l := newLicense(t, d, kr)
+	tn := l.tenant.ID
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	for _, platform := range []bool{false, true} {
+		run := func(fn func(tx *ent.Tx) error) error {
+			if platform {
+				return d.WithPlatform(ctx, fn)
+			}
+			return d.WithTenant(ctx, tn, fn)
+		}
+		// exec runs q on a new license in its own transaction and reports the rows changed.
+		exec := func(id, q string) (int64, error) {
+			var n int64
+			err := run(func(tx *ent.Tx) error {
+				res, err := tx.ExecContext(ctx, q, id)
+				if err != nil {
+					return err
+				}
+				n, err = res.RowsAffected()
+				return err
+			})
+			return n, err
+		}
+		fresh := func() string {
+			var id string
+			if err := d.WithTenant(ctx, tn, func(tx *ent.Tx) error {
+				lic, err := licenseCreate(tx, l, kr).Save(ctx)
+				if lic != nil {
+					id = lic.ID
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		must := func(id, q string) {
+			t.Helper()
+			if n, err := exec(id, q); err != nil || n != 1 {
+				t.Fatalf("platform=%v: %s: n=%d, %v", platform, q, n, err)
+			}
+		}
+		refused := func(id, q string) {
+			t.Helper()
+			if n, err := exec(id, q); err == nil || !strings.Contains(err.Error(), "row-level security") {
+				t.Errorf("platform=%v: %s: want an RLS refusal, got n=%d, %v", platform, q, n, err)
+			}
+		}
+		const (
+			suspend   = `UPDATE licenses SET status = 'suspended', suspended_at = clock_timestamp() WHERE id = $1`
+			reinstate = `UPDATE licenses SET status = 'active', suspended_at = NULL WHERE id = $1`
+			revoke    = `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp(), suspended_at = NULL WHERE id = $1`
+			unrevoke  = `UPDATE licenses SET status = 'active', revoked_at = NULL WHERE id = $1`
+			touch     = `UPDATE licenses SET updated_at = clock_timestamp() WHERE id = $1`
+		)
+		// The service's transitions, and other updates, still work.
+		id := fresh()
+		must(id, suspend)
+		must(id, touch) // a suspended license keeps its suspended_at on other updates
+		must(id, reinstate)
+		must(id, revoke)
+		// A revoked license is out of reach: nothing changes, not even updated_at.
+		for _, q := range []string{unrevoke, touch, reinstate} {
+			if n, err := exec(id, q); err != nil || n != 0 {
+				t.Errorf("platform=%v: on a revoked license, %s: n=%d, %v", platform, q, n, err)
+			}
+		}
+		// Back- or forward-dated transitions are refused.
+		refused(fresh(), `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() - interval '1 day' WHERE id = $1`)
+		refused(fresh(), `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() + interval '1 day' WHERE id = $1`)
+		refused(fresh(), `UPDATE licenses SET status = 'suspended', suspended_at = clock_timestamp() - interval '1 day' WHERE id = $1`)
+		id = fresh()
+		must(id, suspend)
+		refused(id, `UPDATE licenses SET suspended_at = clock_timestamp() - interval '1 day' WHERE id = $1`)
+		// A suspension from long ago keeps its date through other updates and
+		// can still be lifted (the migrator, exempt, dates it back).
+		if _, err := owner.ExecContext(ctx, `UPDATE licenses SET suspended_at = clock_timestamp() - interval '30 days' WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+		must(id, touch)
+		must(id, reinstate)
+	}
+}
+
+// An un-revoke that waits for a concurrent revoke changes nothing: the
+// policy's USING is evaluated on the row version the UPDATE finally sees.
+func TestUnrevokeRacingARevoke(t *testing.T) {
+	d := openDB(t)
+	kr := testKeyring(t)
+	ctx := context.Background()
+	l := newLicense(t, d, kr)
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for _, platform := range []bool{false, true} {
+		var id string
+		if err := d.WithTenant(ctx, l.tenant.ID, func(tx *ent.Tx) error {
+			lic, err := licenseCreate(tx, l, kr).Save(ctx)
+			if lic != nil {
+				id = lic.ID
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan int64, 1)
+		if err := d.WithTenant(ctx, l.tenant.ID, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() WHERE id = $1`, id); err != nil {
+				return err
+			}
+			go func() {
+				var n int64 = -1
+				un := func(tx *ent.Tx) error {
+					res, err := tx.ExecContext(ctx, `UPDATE licenses SET status = 'active', revoked_at = NULL WHERE id = $1`, id)
+					if err == nil {
+						n, err = res.RowsAffected()
+					}
+					return err
+				}
+				if platform {
+					_ = d.WithPlatform(ctx, un)
+				} else {
+					_ = d.WithTenant(ctx, l.tenant.ID, un)
+				}
+				done <- n
+			}()
+			for range 100 { // until the un-revoke waits on the row
+				var w int
+				if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock' AND query LIKE '%revoked_at = NULL%'`, env.Name).Scan(&w); err != nil {
+					return err
+				}
+				if w > 0 {
+					return nil
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			return errors.New("the un-revoke never waited")
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if n := <-done; n != 0 {
+			t.Errorf("platform=%v: un-revoke after a concurrent revoke changed %d rows", platform, n)
 		}
 	}
 }

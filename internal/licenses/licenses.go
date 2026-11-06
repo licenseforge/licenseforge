@@ -513,8 +513,19 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 			return err
 		}
 		if !rows.Next() {
-			_ = rows.Close()
-			return errors.Join(ErrNotFound, rows.Err())
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+				return err
+			}
+			// A revoked license can't be locked (license_transitions): it never
+			// changes again, so the answer is the state error, read unlocked.
+			rows, err = tx.QueryContext(ctx, `SELECT status FROM licenses WHERE id = $1 AND revoked_at IS NOT NULL`, l.ID)
+			if err != nil {
+				return err
+			}
+			if !rows.Next() {
+				_ = rows.Close()
+				return errors.Join(ErrNotFound, rows.Err())
+			}
 		}
 		err = rows.Scan(&l.Status)
 		if cerr := rows.Close(); err == nil {

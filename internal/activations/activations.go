@@ -464,7 +464,8 @@ var (
 // checks the key against its ciphertext: the lookup hash finds it, the decrypted key proves it (ADR-0025). The hashes under every
 // keyring key are tried, so lookups keep working during a rotation.
 func (s Service) authenticate(ctx context.Context, tx *ent.Tx, tenantID, key string, exclusive bool) (*ent.License, error) {
-	q := tx.License.Query().Where(license.KeyLookupIn(s.Keys.LookupHashes(secrets.PurposeLicenseKey, []byte(key))...))
+	byKey := license.KeyLookupIn(s.Keys.LookupHashes(secrets.PurposeLicenseKey, []byte(key))...)
+	q := tx.License.Query().Where(byKey)
 	if exclusive {
 		// NO KEY UPDATE, what licenses' transitions take: activation inserts
 		// (FOR KEY SHARE through the foreign key) don't wait for it.
@@ -473,6 +474,12 @@ func (s Service) authenticate(ctx context.Context, tx *ent.Tx, tenantID, key str
 		q = q.ForShare()
 	}
 	l, err := q.Only(ctx)
+	if ent.IsNotFound(err) {
+		// A revoked license can't be locked (license_transitions puts it out
+		// of an UPDATE's reach, waits included) and needs no lock: it never
+		// changes again. Read it unlocked, so the caller answers "revoked".
+		l, err = tx.License.Query().Where(byKey, license.RevokedAtNotNil()).Only(ctx)
+	}
 	if ent.IsNotFound(err) {
 		return nil, ErrUnauthenticated
 	}

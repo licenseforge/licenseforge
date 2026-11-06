@@ -122,6 +122,11 @@ func (i Issuer) check(ctx context.Context, tx *ent.Tx, licenseID string, now tim
 		q = q.ForShare()
 	}
 	l, err := q.Only(ctx)
+	if lock && ent.IsNotFound(err) {
+		// A revoked license can't be locked (license_transitions) and needs
+		// no lock: it never changes again.
+		l, err = tx.License.Query().Where(license.ID(licenseID), license.RevokedAtNotNil()).WithProduct().Only(ctx)
+	}
 	if ent.IsNotFound(err) {
 		return licensefile.Claims{}, authz.ErrDenied // as for another tenant's license: don't reveal it exists
 	}

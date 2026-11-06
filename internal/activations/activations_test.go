@@ -788,3 +788,51 @@ func TestFreeOnce(t *testing.T) {
 		t.Errorf("activations %+v", as)
 	}
 }
+
+// An activation that waits for a concurrent revoke answers "revoked": the
+// revoked license can't be locked (license_transitions), so authenticate
+// reads it unlocked rather than reporting an unknown key.
+func TestActivateWaitsForConcurrentRevoke(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "pro")
+	locked, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE licenses SET status = 'revoked', revoked_at = clock_timestamp() WHERE id = $1`, is.License.ID); err != nil {
+				return err
+			}
+			close(locked) // the row is locked, not yet committed
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	time.AfterFunc(300*time.Millisecond, func() { close(release) }) // Activate reaches the lock meanwhile
+	if _, err := f.s.Activate(ctx, f.req(is.Key, fp())); !errors.Is(err, ErrRevoked) {
+		t.Errorf("Activate = %v, want ErrRevoked", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A revoked license's seat can be freed from the dashboard too: the license
+// can't be locked (license_transitions) and takes no new seats.
+func TestDeactivateByIDOnRevokedLicense(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	m := manager(f.a)
+	is := f.issue(t, "pro")
+	got, err := f.s.Activate(ctx, f.req(is.Key, fp()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lic.Revoke(ctx, m, is.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	act, err := f.s.DeactivateByID(ctx, m, is.License.ID, got.ActivationID)
+	if err != nil || act.DeactivatedAt == nil {
+		t.Fatalf("DeactivateByID = %v, %v", act, err)
+	}
+}

@@ -1,4 +1,4 @@
-h1:6IaoDOaV1zg+CFNncV2SaBXiK7s0F8AjkiDKCENr/ts=
+h1:Rw6wqHNDwZCcm7MMDswUxh30tme2wn7PcW1YGIWBOs0=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -36,3 +36,4 @@ h1:6IaoDOaV1zg+CFNncV2SaBXiK7s0F8AjkiDKCENr/ts=
 20261105160000_tenant_mfa_enforce_security.sql h1:WDXsDdiSi93HN5VIx5S0rHsSx8L87bOvTgJpjEWecLQ=
 20261105215658_mfa_refusal_index.sql h1:RD4mBZMTeXGopEDH+DywwjF/1p5D6cyJoYoTHjBRdbI=
 20261106090000_insert_unarchived_security.sql h1:ciycbzznxjrpx9lD7FjK+DrJ1LFaCuW85eVBiLXm73Q=
+20261106120000_license_transitions_security.sql h1:Q6aUWJgQtOJB7H1fdtoj5Dhzj15csa8GsYFC1l/AaQE=
