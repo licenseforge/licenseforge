@@ -1,7 +1,8 @@
--- One-way states start unset (archive_once and the license transitions only
--- set them later, and audit it): the serving pools can't insert a row that
--- is already archived, suspended or revoked, which would skip the service,
--- its rights checks and its audit entry (ADR-0015, ADR-0013, ADR-0027).
+-- One-way states start unset: the serving pools can't insert a row that is
+-- already archived, suspended or revoked, which would skip the service, its
+-- rights checks and its audit entry (ADR-0015, ADR-0013, ADR-0027). Only
+-- products and features also bound the later UPDATE (archive_once); plans,
+-- customers and licenses get theirs in follow-ups.
 -- The migrator stays exempt (migrator_all). No triggers (ADR-0009).
 CREATE POLICY insert_unarchived ON "products" AS RESTRICTIVE FOR INSERT TO licenseforge_app, licenseforge_platform
   WITH CHECK ("archived_at" IS NULL);
