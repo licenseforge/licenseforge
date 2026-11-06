@@ -66,8 +66,9 @@ type Job struct {
 	broken   map[string]bool       // chains whose last verification failed: re-verified from the anchor
 	fullPass map[string]bool       // chains done in the full pass in progress; nil: none in progress
 	lastFull time.Time
-	lock     *store.SessionLock          // held while this replica leads
-	ping     func(context.Context) error // the lock's liveness check; nil: lock.Alive (tests replace it)
+	lock     *store.SessionLock                      // held while this replica leads
+	ping     func(context.Context) error             // the lock's liveness check; nil: lock.Alive (tests replace it)
+	tenants  func(context.Context) ([]string, error) // the tenant IDs; nil: listTenants (tests replace it)
 
 	hasFullCheckpoint func(context.Context) (bool, error) // tests replace it
 	now               func() time.Time
@@ -125,6 +126,17 @@ func (j *Job) Run(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+// listTenants returns every tenant's ID, as the platform pool sees them.
+func (j *Job) listTenants(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := j.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
+		var err error
+		ids, err = tx.Tenant.Query().IDs(ctx)
+		return err
+	})
+	return ids, err
 }
 
 // seed starts the full-pass gauge at the job's start on a new install (no
@@ -222,12 +234,12 @@ func (j *Job) Once(parent context.Context) (Result, error) {
 		j.fullPass = map[string]bool{}
 	}
 	r := Result{Ran: true, Full: full}
-	var chains []string
-	if err := j.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
-		var err error
-		chains, err = tx.Tenant.Query().IDs(ctx)
-		return err
-	}); err != nil {
+	list := j.tenants
+	if list == nil {
+		list = j.listTenants
+	}
+	chains, err := list(ctx)
+	if err != nil {
 		metrics.AuditVerifyErrors.Inc()
 		return r, err
 	}
