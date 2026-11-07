@@ -1216,6 +1216,16 @@ type PlanCreateBindType string
 // PlanCreateExpiryBasis defines model for PlanCreate.ExpiryBasis.
 type PlanCreateExpiryBasis string
 
+// PlanFeatures Feature key → true (a boolean feature granted) or the limit (a limit feature; -1 unlimited). Features the plan doesn't grant are absent.
+//
+// Example: {"max_users":50,"sso":true}
+type PlanFeatures map[string]interface{}
+
+// PlanFeaturesPatch Feature key → true, a whole number from -1 to 9007199254740991, or null (remove).
+//
+// Example: {"export":null,"max_users":-1}
+type PlanFeaturesPatch map[string]interface{}
+
 // PlanPage defines model for PlanPage.
 type PlanPage struct {
 	Items []Plan `json:"items"`
@@ -1599,6 +1609,9 @@ type CreatePlanJSONRequestBody = PlanCreate
 // UpdatePlanApplicationMergePatchPlusJSONRequestBody defines body for UpdatePlan for application/merge-patch+json ContentType.
 type UpdatePlanApplicationMergePatchPlusJSONRequestBody = PlanPatch
 
+// UpdatePlanFeaturesApplicationMergePatchPlusJSONRequestBody defines body for UpdatePlanFeatures for application/merge-patch+json ContentType.
+type UpdatePlanFeaturesApplicationMergePatchPlusJSONRequestBody = PlanFeaturesPatch
+
 // CreateProductJSONRequestBody defines body for CreateProduct for application/json ContentType.
 type CreateProductJSONRequestBody = ProductCreate
 
@@ -1727,6 +1740,12 @@ type ServerInterface interface {
 	// ArchivePlan Archive a plan. No new license is issued from it; licenses already sold keep their terms.
 	// (POST /tenants/{tenant}/plans/{id}/archive)
 	ArchivePlan(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId)
+	// GetPlanFeatures What the plan grants, by feature key (one column of the feature × plan matrix, ADR-0015).
+	// (GET /tenants/{tenant}/plans/{id}/features)
+	GetPlanFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId)
+	// UpdatePlanFeatures Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
+	// (PATCH /tenants/{tenant}/plans/{id}/features)
+	UpdatePlanFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId)
 	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListProductsParams)
@@ -3444,6 +3463,76 @@ func (siw *ServerInterfaceWrapper) ArchivePlan(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// GetPlanFeatures operation middleware
+func (siw *ServerInterfaceWrapper) GetPlanFeatures(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPlanFeatures(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePlanFeatures operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePlanFeatures(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePlanFeatures(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProducts operation middleware
 func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.Request) {
 
@@ -3984,6 +4073,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/plans", wrapper.CreatePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}", wrapper.GetPlan)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}", wrapper.UpdatePlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/features", wrapper.GetPlanFeatures)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/features", wrapper.UpdatePlanFeatures)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/archive", wrapper.ArchivePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.ListCustomers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.CreateCustomer)
@@ -9578,6 +9669,235 @@ func (response ArchivePlan409ApplicationProblemPlusJSONResponse) VisitArchivePla
 	return err
 }
 
+type GetPlanFeaturesRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     PlanId `json:"id"`
+}
+
+type GetPlanFeaturesResponseObject interface {
+	VisitGetPlanFeaturesResponse(w http.ResponseWriter) error
+}
+
+type GetPlanFeatures200JSONResponse PlanFeatures
+
+func (response GetPlanFeatures200JSONResponse) VisitGetPlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPlanFeatures401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetPlanFeatures401ApplicationProblemPlusJSONResponse) VisitGetPlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPlanFeatures404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetPlanFeatures404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetPlanFeatures404ResponseHeaders
+}
+
+func (response GetPlanFeatures404ApplicationProblemPlusJSONResponse) VisitGetPlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeaturesRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     PlanId `json:"id"`
+	Body   *UpdatePlanFeaturesApplicationMergePatchPlusJSONRequestBody
+}
+
+type UpdatePlanFeaturesResponseObject interface {
+	VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error
+}
+
+type UpdatePlanFeatures200JSONResponse PlanFeatures
+
+func (response UpdatePlanFeatures200JSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UpdatePlanFeatures400ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdatePlanFeatures401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdatePlanFeatures401ResponseHeaders
+}
+
+func (response UpdatePlanFeatures401ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdatePlanFeatures403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdatePlanFeatures403ResponseHeaders
+}
+
+func (response UpdatePlanFeatures403ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdatePlanFeatures404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdatePlanFeatures404ResponseHeaders
+}
+
+func (response UpdatePlanFeatures404ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdatePlanFeatures413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdatePlanFeatures413ResponseHeaders
+}
+
+func (response UpdatePlanFeatures413ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlanFeatures422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type UpdatePlanFeatures422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers UpdatePlanFeatures422ResponseHeaders
+}
+
+func (response UpdatePlanFeatures422ApplicationProblemPlusJSONResponse) VisitUpdatePlanFeaturesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListProductsRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListProductsParams
@@ -11031,6 +11351,12 @@ type StrictServerInterface interface {
 	// ArchivePlan Archive a plan. No new license is issued from it; licenses already sold keep their terms.
 	// (POST /tenants/{tenant}/plans/{id}/archive)
 	ArchivePlan(ctx context.Context, request ArchivePlanRequestObject) (ArchivePlanResponseObject, error)
+	// GetPlanFeatures What the plan grants, by feature key (one column of the feature × plan matrix, ADR-0015).
+	// (GET /tenants/{tenant}/plans/{id}/features)
+	GetPlanFeatures(ctx context.Context, request GetPlanFeaturesRequestObject) (GetPlanFeaturesResponseObject, error)
+	// UpdatePlanFeatures Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
+	// (PATCH /tenants/{tenant}/plans/{id}/features)
+	UpdatePlanFeatures(ctx context.Context, request UpdatePlanFeaturesRequestObject) (UpdatePlanFeaturesResponseObject, error)
 	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(ctx context.Context, request ListProductsRequestObject) (ListProductsResponseObject, error)
@@ -12270,6 +12596,67 @@ func (sh *strictHandler) ArchivePlan(w http.ResponseWriter, r *http.Request, ten
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchivePlanResponseObject); ok {
 		if err := validResponse.VisitArchivePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPlanFeatures operation middleware
+func (sh *strictHandler) GetPlanFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId) {
+	var request GetPlanFeaturesRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPlanFeatures(ctx, request.(GetPlanFeaturesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPlanFeatures")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPlanFeaturesResponseObject); ok {
+		if err := validResponse.VisitGetPlanFeaturesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePlanFeatures operation middleware
+func (sh *strictHandler) UpdatePlanFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId) {
+	var request UpdatePlanFeaturesRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	var body UpdatePlanFeaturesApplicationMergePatchPlusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePlanFeatures(ctx, request.(UpdatePlanFeaturesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePlanFeatures")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePlanFeaturesResponseObject); ok {
+		if err := validResponse.VisitUpdatePlanFeaturesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -1020,6 +1020,50 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/plans/{id}/features:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/PlanId"
+    get:
+      operationId: getPlanFeatures
+      summary: What the plan grants, by feature key (one column of the feature × plan matrix, ADR-0015).
+      description: "Needs catalog:read on its product."
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlanFeatures" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updatePlanFeatures
+      summary: "Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements."
+      description: |
+        true grants a boolean feature; a whole number from -1 (unlimited) to
+        9007199254740991 sets a limit feature; null removes the grant;
+        absent keys stay. Every key must be a feature of the plan's product;
+        an archived feature can't be granted anew, but its grant can change
+        or go. All or nothing; at most 1000 keys. Needs catalog:write on its
+        product; audited (plan.features.update, with the keys set and
+        removed), unless nothing changed.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/PlanFeaturesPatch" }
+      responses:
+        "200":
+          description: What the plan grants after the patch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlanFeatures" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/plans/{id}/archive:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1579,6 +1623,16 @@ components:
         max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
         grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
         bind_type: { type: string, enum: [none, machine, cluster], description: "What an activation binds to; none is a site license (no activations). Immutable." }
+    PlanFeatures:
+      type: object
+      description: "Feature key → true (a boolean feature granted) or the limit (a limit feature; -1 unlimited). Features the plan doesn't grant are absent."
+      additionalProperties: true
+      example: { sso: true, max_users: 50 }
+    PlanFeaturesPatch:
+      type: object
+      description: "Feature key → true, a whole number from -1 to 9007199254740991, or null (remove)."
+      additionalProperties: true
+      example: { export: null, max_users: -1 }
     PlanPatch:
       type: object
       description: "Absent fields stay; null clears a nullable term; name, expiry_basis, offline_allowed, lease_seconds and grace_seconds aren't nullable (null answers 422)."

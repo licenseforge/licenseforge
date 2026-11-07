@@ -112,3 +112,19 @@ func planView(p *ent.Plan) apigen.Plan {
 	}
 	return v
 }
+
+func (s *server) GetPlanFeatures(ctx context.Context, req apigen.GetPlanFeaturesRequestObject) (apigen.GetPlanFeaturesResponseObject, error) {
+	g, err := s.Plans.Features(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetPlanFeatures200JSONResponse(g), nil
+}
+
+func (s *server) UpdatePlanFeatures(ctx context.Context, req apigen.UpdatePlanFeaturesRequestObject) (apigen.UpdatePlanFeaturesResponseObject, error) {
+	g, err := s.Plans.PatchFeatures(ctx, req.Id, *req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.UpdatePlanFeatures200JSONResponse(g), nil
+}
