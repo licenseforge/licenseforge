@@ -283,13 +283,35 @@ func (s Service) Revoke(ctx context.Context, tokenID string) (*ent.APIToken, err
 		}
 		// The database clock (the policies bound revoked_at to it), and count
 		// the row: ent's UpdateOneID would hide a zero-row update.
-		res, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
-			WHERE id = $1 AND revoked_at IS NULL`, tokenID)
-		if err != nil {
-			return dbRefusal(err)
+		revoke := func() (int64, error) {
+			res, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+				WHERE id = $1 AND revoked_at IS NULL`, tokenID)
+			if err != nil {
+				return 0, dbRefusal(err)
+			}
+			return res.RowsAffected()
 		}
-		if n, err := res.RowsAffected(); err != nil || n != 1 { // revoked concurrently since the query: not ours to record
-			return errors.Join(ErrNotFound, err)
+		// After waiting for a concurrent use, the update is rechecked against
+		// the used row, which use_moves_forward filters (its subquery reads
+		// this statement's snapshot): it changes nothing, and a new statement
+		// sees the row. A plain read (no UPDATE policy) tells a token still
+		// active, to try again, from one revoked concurrently. Bounded, and
+		// loud: never a silent "done" while the token stays active.
+		for attempt := 0; ; attempt++ {
+			n, err := revoke()
+			if err != nil {
+				return err
+			}
+			if n == 1 {
+				break
+			}
+			active, err := tx.APIToken.Query().Where(entapitoken.ID(tokenID), entapitoken.RevokedAtIsNil()).Exist(ctx)
+			if err != nil || !active {
+				return errors.Join(ErrNotFound, err) // revoked concurrently since the query: not ours to record
+			}
+			if attempt == 4 {
+				return errors.New("apitokens: the token kept being used while revoking it; try again")
+			}
 		}
 		if row, err = tx.APIToken.Query().Where(entapitoken.ID(tokenID)).WithProducts().Only(ctx); err != nil {
 			return err
