@@ -1560,13 +1560,13 @@ components:
         name: { type: string, maxLength: 200 }
         duration_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual." }
         duration_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true, description: "Whole seconds (trials, fixed periods)." }
-        expiry_basis: { type: string, enum: [from_issue, from_first_activation], nullable: true }
+        expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
         max_activations: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: "Null is unlimited." }
         max_rehosts: { type: integer, minimum: 0, maximum: 1000000, nullable: true, description: "Null is unlimited." }
-        offline_allowed: { type: boolean, nullable: true }
-        lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000, nullable: true }
+        offline_allowed: { type: boolean }
+        lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
         max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
-        grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
+        grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
     Customer:
       type: object
       required: [id, name, email, external_refs, archived_at, created_at]

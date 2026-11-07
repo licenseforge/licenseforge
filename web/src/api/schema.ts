@@ -1363,19 +1363,19 @@ export interface components {
              * @description Whole seconds (trials, fixed periods).
              */
             duration_seconds?: number | null;
-            /** @enum {string|null} */
-            expiry_basis?: "from_issue" | "from_first_activation" | null;
+            /** @enum {string} */
+            expiry_basis?: "from_issue" | "from_first_activation";
             /** @description Null is unlimited. */
             max_activations?: number | null;
             /** @description Null is unlimited. */
             max_rehosts?: number | null;
-            offline_allowed?: boolean | null;
+            offline_allowed?: boolean;
             /** Format: int64 */
-            lease_seconds?: number | null;
+            lease_seconds?: number;
             /** Format: int64 */
             max_offline_seconds?: number | null;
             /** Format: int64 */
-            grace_seconds?: number | null;
+            grace_seconds?: number;
         };
         Customer: {
             /** @example cus_01jcz5b2y3c4d5e6f7g8h9j0k1 */

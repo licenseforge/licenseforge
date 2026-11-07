@@ -173,6 +173,8 @@ func TestPlanRefusals(t *testing.T) {
 		"rehosts range":     {func(in *PlanInput) { in.MaxRehosts = ptr(-1) }, "/max_rehosts"},
 		"lease range":       {func(in *PlanInput) { in.LeaseSeconds = 0 }, "/lease_seconds"},
 		"offline range":     {func(in *PlanInput) { in.MaxOfflineSeconds = ptr[int64](-1) }, "/max_offline_seconds"},
+		"lease above max":   {func(in *PlanInput) { in.LeaseSeconds = maxSeconds + 1 }, "/lease_seconds"},
+		"offline above max": {func(in *PlanInput) { in.MaxOfflineSeconds = ptr[int64](maxSeconds + 1) }, "/max_offline_seconds"},
 		"grace range":       {func(in *PlanInput) { in.GraceSeconds = 3153600001 }, "/grace_seconds"},
 		"site from activation": {func(in *PlanInput) {
 			in.BindType, in.ExpiryBasis = plan.BindTypeNone, plan.ExpiryBasisFromFirstActivation
@@ -221,31 +223,37 @@ func TestPlanChangeWaitsForArchive(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	admin := as(f.a, authz.Admin)
-	db, err := f.s.Create(admin, "db", "Database")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ps := Plans{DB: f.db}
 	adminDB, err := sql.Open("pgx", env.AdminURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = adminDB.Close() }()
+	archivePlan := `UPDATE plans SET archived_at = clock_timestamp() WHERE id = $1`
+	// The product archived while the change waits on its lock: the product
+	// row it waited for is filtered (archive_once), and it looks again.
+	archiveProduct := `UPDATE products SET archived_at = clock_timestamp() WHERE id = (SELECT product_id FROM plans WHERE id = $1)`
 	for name, c := range map[string]struct {
-		slug string
-		op   func(id string) error
-		want error
+		slug, first string
+		op          func(id string) error
+		want        error
 	}{
-		"archive": {"a", func(id string) error { _, err := ps.Archive(admin, id); return err }, ErrState},
-		"update":  {"u", func(id string) error { _, err := ps.Update(admin, id, PlanPatch{Name: ptr("Renamed")}); return err }, nil},
+		"archive":                   {"a", archivePlan, func(id string) error { _, err := ps.Archive(admin, id); return err }, ErrState},
+		"update":                    {"u", archivePlan, func(id string) error { _, err := ps.Update(admin, id, PlanPatch{Name: ptr("Renamed")}); return err }, nil},
+		"archive, product archived": {"pa", archiveProduct, func(id string) error { _, err := ps.Archive(admin, id); return err }, nil},
+		"update, product archived":  {"pu", archiveProduct, func(id string) error { _, err := ps.Update(admin, id, PlanPatch{Name: ptr("Renamed")}); return err }, nil},
 	} {
-		pl, err := ps.Create(admin, PlanInput{ProductID: db.ID, Slug: c.slug, Name: "P", Terms: defaultTerms()})
+		prod, err := f.s.Create(admin, "p-"+c.slug, "Product")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pl, err := ps.Create(admin, PlanInput{ProductID: prod.ID, Slug: c.slug, Name: "P", Terms: defaultTerms()})
 		if err != nil {
 			t.Fatal(err)
 		}
 		done := make(chan error, 1)
 		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
-			if _, err := tx.ExecContext(ctx, `UPDATE plans SET archived_at = clock_timestamp() WHERE id = $1`, pl.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, c.first, pl.ID); err != nil {
 				return err
 			}
 			go func() { done <- c.op(pl.ID) }()
@@ -268,7 +276,7 @@ func TestPlanChangeWaitsForArchive(t *testing.T) {
 		select {
 		case err := <-done:
 			if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
-				t.Errorf("%s after a concurrent archive: %v, want %v", name, err, c.want)
+				t.Errorf("%s concurrently: %v, want %v", name, err, c.want)
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s didn't finish", name)
