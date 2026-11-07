@@ -238,10 +238,35 @@ type held struct {
 // lock, so taking the audit lock between tokens and invitations here would
 // deadlock with them.
 func lockHeld(ctx context.Context, tx *ent.Tx, m *ent.Membership) (held, error) {
-	toks, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
-		Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
-	if err != nil {
-		return held{}, err
+	lockTokens := func() ([]*ent.APIToken, error) {
+		return tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).
+			Order(ent.Asc(entapitoken.FieldID)).WithProducts().ForUpdate().All(ctx)
+	}
+	// A token this lock waited for a concurrent use of is rechecked as the
+	// used row, which use_moves_forward filters (its subquery reads this
+	// statement's snapshot): it isn't locked or returned. A plain read (no
+	// UPDATE policy) of the same tokens shows any left out; lock again until
+	// none is. Bounded, and loud: a removal must never keep a token active.
+	var toks []*ent.APIToken
+	for attempt := 0; ; attempt++ {
+		var err error
+		if toks, err = lockTokens(); err != nil {
+			return held{}, err
+		}
+		active, err := tx.APIToken.Query().Where(entapitoken.CreatedBy(m.UserID), entapitoken.RevokedAtIsNil(), notExpired).IDs(ctx)
+		if err != nil {
+			return held{}, err
+		}
+		locked := make(map[string]bool, len(toks))
+		for _, t := range toks {
+			locked[t.ID] = true
+		}
+		if !slices.ContainsFunc(active, func(id string) bool { return !locked[id] }) {
+			break
+		}
+		if attempt == 4 {
+			return held{}, errors.New("members: the member's API tokens kept being used while locking them; try again")
+		}
 	}
 	invs, err := tx.Invitation.Query().Where(invitation.InvitedBy(m.UserID), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil(),
 		func(s *entsql.Selector) { s.Where(entsql.ExprP(s.C(invitation.FieldExpiresAt) + " > now()")) }).

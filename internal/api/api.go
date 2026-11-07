@@ -62,6 +62,7 @@ type Config struct {
 	// The catalog (slice 1: products) and customers.
 	Products  catalog.Products
 	Features  catalog.Features
+	Plans     catalog.Plans
 	Customers customers.Service
 	// SigningKeys: list, create, promote, discard (ADR-0026).
 	SigningKeys signing.Local
@@ -289,6 +290,7 @@ var queryParams = map[string][]string{
 	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
 	"ListProducts":    {"limit", "cursor", "archived"},
 	"ListFeatures":    {"limit", "cursor", "product_id"},
+	"ListPlans":       {"limit", "cursor", "product_id"},
 	"ListCustomers":   {"limit", "cursor"},
 	"ListAuditEvents": {"limit", "cursor", "after_seq"},
 	"ListActivations": {"limit", "cursor"},
@@ -511,7 +513,7 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{"/mfa_policy", "must be none, mfa or phishing_resistant"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
-	case errors.Is(err, licenses.ErrState):
+	case errors.Is(err, licenses.ErrState), errors.Is(err, activations.ErrState):
 		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The license's status doesn't allow this."}
 	case errors.Is(err, idempotency.ErrInvalidKey):
 		p = &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Idempotency-Key must be 1-255 printable ASCII characters."}

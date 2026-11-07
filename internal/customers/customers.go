@@ -141,11 +141,20 @@ func lookup(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Custome
 	if !ids.Valid("cus", id) || authz.Require(ctx, authz.CustomerRead, "") != nil {
 		return nil, ErrNotFound
 	}
-	q := tx.Customer.Query().Where(customer.ID(id))
-	if lock {
-		q.ForUpdate()
+	q := func() (*ent.Customer, error) {
+		q := tx.Customer.Query().Where(customer.ID(id))
+		if lock {
+			q.ForUpdate()
+		}
+		return q.Only(ctx)
 	}
-	c, err := q.Only(ctx)
+	c, err := q()
+	if lock && ent.IsNotFound(err) {
+		// Locked after waiting for a concurrent archive, the row is rechecked
+		// as its newer version, which archive_once filters (its subquery reads
+		// this statement's snapshot): a second statement sees it.
+		c, err = q()
+	}
 	if ent.IsNotFound(err) {
 		return nil, ErrNotFound
 	}

@@ -510,3 +510,38 @@ func TestList(t *testing.T) {
 		}
 	}
 }
+
+// A revoke that waits for a concurrent use of the token still revokes it:
+// its update, rechecked against the used row, changes nothing
+// (use_moves_forward matches the snapshot), so Revoke tries once more.
+func TestRevokeWaitsForUse(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	owner := f.as(f.a, f.ownerA, authz.Owner)
+	tok, err := f.s.Create(owner, "CI", authz.Viewer, all, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = clock_timestamp() WHERE id = $1`, tok.Row.ID); err != nil {
+			return err
+		}
+		go func() { _, err := f.s.Revoke(owner, tok.Row.ID); done <- err }()
+		storetest.WaitForLockWaiter(t, env)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("revoke after a concurrent use: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("revoke didn't finish")
+	}
+	if _, err := f.s.Authenticate(ctx, f.a, tok.Token); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("token still works: %v", err)
+	}
+}

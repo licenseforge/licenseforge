@@ -245,6 +245,7 @@ func licenseView(l *ent.License, seats int) apigen.License {
 	v := apigen.License{Id: l.ID, ProductId: l.ProductID, PlanId: l.PlanID, PlanSlug: l.PlanSlug, CustomerId: l.CustomerID,
 		Type: apigen.LicenseType(l.Type), Status: apigen.LicenseStatus(l.Status), KeyHint: l.KeyHint,
 		ExpiryBasis: apigen.LicenseExpiryBasis(l.ExpiryBasis), ExpiresAt: utc(l.ExpiresAt), MaxActivations: l.MaxActivations, ActiveActivations: seats,
+		MaxRehosts: l.MaxRehosts, RehostCount: l.RehostCount,
 		ExternalRefs: l.ExternalRefs, IssuedAt: l.IssuedAt.UTC(), SuspendedAt: utc(l.SuspendedAt), RevokedAt: utc(l.RevokedAt),
 		CreatedAt: l.CreatedAt.UTC()}
 	v.Entitlements.Features, v.Entitlements.Limits = l.Entitlements.Features, l.Entitlements.Limits
@@ -296,6 +297,18 @@ func (s *server) DeactivateActivation(ctx context.Context, req apigen.Deactivate
 		return nil, err
 	}
 	return apigen.DeactivateActivation200JSONResponse(activationView(a)), nil
+}
+
+func (s *server) ResetRehosts(ctx context.Context, req apigen.ResetRehostsRequestObject) (apigen.ResetRehostsResponseObject, error) {
+	l, err := s.Activations.ResetRehosts(ctx, principal(ctx), req.Id)
+	if err != nil {
+		return nil, err
+	}
+	seats, err := s.Activations.ActiveSeats(ctx, principal(ctx), l.ID)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ResetRehosts200JSONResponse(licenseView(l, seats[l.ID])), nil
 }
 
 func activationView(a *ent.Activation) apigen.Activation {

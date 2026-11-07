@@ -368,16 +368,22 @@ func TestLagAndFailureMetrics(t *testing.T) {
 	r := &recorder{fail: errors.New("siem down")}
 	x := exporter(t, d, name, r)
 	x.Interval = 10 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := x.Run(ctx); err != nil {
+	ran := make(chan error, 1)
+	go func() { ran <- x.Run(ctx) }()
+	// Until the first round has failed and set the lag, however slow the
+	// database is (a fixed run time made this flaky).
+	failures := func() float64 { return testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues(name)) }
+	lag := func() float64 { return testutil.ToFloat64(metrics.AuditExportLag.WithLabelValues(name)) }
+	for deadline := time.Now().Add(10 * time.Second); failures() < 1 || lag() <= 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("failures = %v, lag = %v; want >= 1 and > 0 while undelivered", failures(), lag())
+		}
+	}
+	cancel()
+	if err := <-ran; err != nil {
 		t.Fatal(err)
-	}
-	if n := testutil.ToFloat64(metrics.AuditExportFailures.WithLabelValues(name)); n < 1 {
-		t.Errorf("failures = %v", n)
-	}
-	if lag := testutil.ToFloat64(metrics.AuditExportLag.WithLabelValues(name)); lag <= 0 {
-		t.Errorf("lag = %v, want > 0 while undelivered", lag)
 	}
 }
 

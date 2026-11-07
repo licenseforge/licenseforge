@@ -282,3 +282,43 @@ func TestCountActive(t *testing.T) {
 		}
 	}
 }
+
+// An archive or update that waits for a concurrent archive sees the archived
+// customer (lookup looks again after archive_once filters the row it waited
+// for): a second archive is ErrState, an update succeeds.
+func TestChangeWaitsForArchive(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a, authz.Manager)
+	for name, c := range map[string]struct {
+		op   func(id string) error
+		want error
+	}{
+		"archive": {func(id string) error { _, err := f.s.Archive(mgr, id); return err }, ErrState},
+		"update":  {func(id string) error { _, err := f.s.Update(mgr, id, Patch{Name: ptr("Renamed")}); return err }, nil},
+	} {
+		cus, err := f.s.Create(mgr, Input{Name: "C"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `UPDATE customers SET archived_at = clock_timestamp() WHERE id = $1`, cus.ID); err != nil {
+				return err
+			}
+			go func() { done <- c.op(cus.ID) }()
+			storetest.WaitForLockWaiter(t, env)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+				t.Errorf("%s after a concurrent archive: %v, want %v", name, err, c.want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s didn't finish", name)
+		}
+	}
+}

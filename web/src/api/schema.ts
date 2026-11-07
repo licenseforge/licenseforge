@@ -415,6 +415,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/rehosts/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset the license's seat-move counter (support rehost, ADR-0039).
+         * @description Sets rehost_count to 0, so a customer at max_rehosts can move a seat
+         *     to a new machine again; free the old machine first with
+         *     deactivate. Needs activation:manage on the license's product;
+         *     audited (license.rehosts_reset, with the previous count). A count
+         *     already at 0 is answered unchanged, with no entry. A revoked license
+         *     answers 409 invalid_state.
+         */
+        post: operations["resetRehosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/audit-events": {
         parameters: {
             query?: never;
@@ -772,6 +801,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List plans in the caller's product scope, newest first, archived ones included.
+         * @description Needs catalog:read. A product_id naming a hidden or missing product gives an empty list.
+         */
+        get: operations["listPlans"];
+        put?: never;
+        /**
+         * Add a plan (one way of selling a product, ADR-0015).
+         * @description Needs catalog:write on the product. A missing or hidden product answers 422 on product_id, an archived one too; a slug already used on the product answers 409. Licenses copy the plan's terms when issued.
+         */
+        post: operations["createPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        /** Get a plan. */
+        get: operations["getPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a plan's name or terms (JSON Merge Patch). Slug and bind type never change; licenses already sold keep their terms.
+         * @description Needs catalog:write on its product. The merged terms are checked whole.
+         */
+        patch: operations["updatePlan"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/plans/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a plan. No new license is issued from it; licenses already sold keep their terms.
+         * @description Needs catalog:write on its product. An archived plan answers 409 invalid_state.
+         */
+        post: operations["archivePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/customers": {
         parameters: {
             query?: never;
@@ -1088,6 +1193,10 @@ export interface components {
             max_activations: number | null;
             /** @description Seats taken now (activations not deactivated). */
             active_activations: number;
+            /** @description Seat moves allowed (ADR-0034); null is unlimited. */
+            max_rehosts: number | null;
+            /** @description Seat moves used since issue or the last reset (ADR-0039). */
+            rehost_count: number;
             entitlements: {
                 features: string[];
                 limits: {
@@ -1203,6 +1312,103 @@ export interface components {
             name?: string;
             description?: string | null;
             unit?: string | null;
+        };
+        Plan: {
+            /** @example pln_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            product_id: string;
+            /** @description Copied into licenses. Immutable. */
+            slug: string;
+            name: string;
+            /** @description Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual. */
+            duration_months: number | null;
+            /**
+             * Format: int64
+             * @description Whole seconds (trials, fixed periods).
+             */
+            duration_seconds: number | null;
+            /** @enum {string} */
+            expiry_basis: "from_issue" | "from_first_activation";
+            /** @description Null is unlimited. */
+            max_activations: number | null;
+            /** @description Null is unlimited. */
+            max_rehosts: number | null;
+            offline_allowed: boolean;
+            /** Format: int64 */
+            lease_seconds: number;
+            /** Format: int64 */
+            max_offline_seconds: number | null;
+            /** Format: int64 */
+            grace_seconds: number;
+            /**
+             * @description What an activation binds to; none is a site license (no activations). Immutable.
+             * @enum {string}
+             */
+            bind_type: "none" | "machine" | "cluster";
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlanPage: {
+            items: components["schemas"]["Plan"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        /** @description Defaults: expiry_basis from_issue, bind_type machine, offline_allowed false, lease_seconds 604800 (7 days), grace_seconds 0; the nullable terms absent are null. */
+        PlanCreate: {
+            product_id: string;
+            slug: string;
+            name: string;
+            /** @description Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual. */
+            duration_months?: number | null;
+            /**
+             * Format: int64
+             * @description Whole seconds (trials, fixed periods).
+             */
+            duration_seconds?: number | null;
+            /** @enum {string} */
+            expiry_basis?: "from_issue" | "from_first_activation";
+            /** @description Null is unlimited. */
+            max_activations?: number | null;
+            /** @description Null is unlimited. */
+            max_rehosts?: number | null;
+            offline_allowed?: boolean;
+            /** Format: int64 */
+            lease_seconds?: number;
+            /** Format: int64 */
+            max_offline_seconds?: number | null;
+            /** Format: int64 */
+            grace_seconds?: number;
+            /**
+             * @description What an activation binds to; none is a site license (no activations). Immutable.
+             * @enum {string}
+             */
+            bind_type?: "none" | "machine" | "cluster";
+        };
+        /** @description Absent fields stay; null clears a nullable term; name, expiry_basis, offline_allowed, lease_seconds and grace_seconds aren't nullable (null answers 422). */
+        PlanPatch: {
+            name?: string;
+            /** @description Calendar months (monthly, yearly billing). At most one of duration_months and duration_seconds; neither is perpetual. */
+            duration_months?: number | null;
+            /**
+             * Format: int64
+             * @description Whole seconds (trials, fixed periods).
+             */
+            duration_seconds?: number | null;
+            /** @enum {string} */
+            expiry_basis?: "from_issue" | "from_first_activation";
+            /** @description Null is unlimited. */
+            max_activations?: number | null;
+            /** @description Null is unlimited. */
+            max_rehosts?: number | null;
+            offline_allowed?: boolean;
+            /** Format: int64 */
+            lease_seconds?: number;
+            /** Format: int64 */
+            max_offline_seconds?: number | null;
+            /** Format: int64 */
+            grace_seconds?: number;
         };
         Customer: {
             /** @example cus_01jcz5b2y3c4d5e6f7g8h9j0k1 */
@@ -1404,6 +1610,7 @@ export interface components {
     };
     parameters: {
         FeatureId: string;
+        PlanId: string;
         ProductId: string;
         CustomerId: string;
         LicenseId: string;
@@ -2058,6 +2265,34 @@ export interface operations {
             404: components["responses"]["Problem"];
         };
     };
+    resetRehosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
     listAuditEvents: {
         parameters: {
             query?: {
@@ -2637,6 +2872,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Feature"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listPlans: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+                product_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanCreate"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updatePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["PlanPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    archivePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
                 };
             };
             400: components["responses"]["Problem"];

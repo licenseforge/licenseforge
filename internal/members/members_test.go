@@ -804,3 +804,40 @@ func TestOwnInvitationRevokeVsMemberChange(t *testing.T) {
 		t.Fatal("revoke didn't finish")
 	}
 }
+
+// A removal that waits for a concurrent use of the member's token still
+// revokes it: the lock, rechecked against the used row, filters it
+// (use_moves_forward matches the snapshot), so lockHeld looks again.
+func TestRemovalWaitsForTokenUse(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	tok, err := (apitokens.Service{DB: f.db}).Create(as(f.a, f.adminA, authz.Admin), "CI", authz.Viewer, authz.Scope{All: true}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = clock_timestamp() WHERE id = $1`, tok.Row.ID); err != nil {
+			return err
+		}
+		go func() {
+			_, err := f.s.Remove(as(f.a, f.ownerA, authz.Owner), f.mem[f.adminA], both)
+			done <- err
+		}()
+		waitForLockWaiter(t)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("removal: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("removal didn't finish")
+	}
+	if f.tokenActive(t, tok.Token) {
+		t.Error("the removal kept the token used concurrently")
+	}
+}
