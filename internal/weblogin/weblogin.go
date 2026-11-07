@@ -243,8 +243,8 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		if ack == "" {
 			w.Header().Set("Cache-Control", "no-store")
 			loc := "/login"
-			if keep := (url.Values{"assurance": q["assurance"], "return": q["return"]}).Encode(); keep != "" {
-				loc += "?" + keep
+			if want != "" || ret != "/" { // the validated values only, never a second, unchecked one
+				loc += "?" + stepUpQuery(want, ret).Encode()
 			}
 			http.Redirect(w, r, loc, http.StatusSeeOther)
 			return
@@ -280,6 +280,18 @@ func safeReturn(p string) (string, bool) {
 		return "", false
 	}
 	return p, true
+}
+
+// stepUpQuery carries a validated step-up level and return path to /login.
+func stepUpQuery(want authz.Assurance, ret string) url.Values {
+	q := url.Values{}
+	if want != "" {
+		q.Set("assurance", string(want))
+	}
+	if ret != "/" {
+		q.Set("return", ret)
+	}
+	return q
 }
 
 // encodeReturn puts a return path in the flow cookie, whose separator is
@@ -469,7 +481,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	// that refused them (a loop).
 	if want != "" && !auth.Assurance.Meets(want) {
 		h.log.Warn("step-up not delivered", "user", u.ID, "wanted", want, "got", auth.Assurance)
-		http.Redirect(w, r, "/login?step_up_failed="+string(want), http.StatusSeeOther)
+		// The same step-up again from the login page's button: a plain login
+		// would reuse the IdP session at the level it just proved.
+		q := stepUpQuery(want, ret)
+		q.Set("step_up_failed", string(want))
+		http.Redirect(w, r, "/login?"+q.Encode(), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, ret, http.StatusSeeOther)

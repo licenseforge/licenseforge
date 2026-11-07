@@ -91,7 +91,7 @@ func TestStepUp(t *testing.T) {
 		t.Errorf("step-up asks for %v", q)
 	}
 	if code := f.finish(t, q, q.Get("state"), map[string]any{"sub": sub, "amr": []string{"pwd", "otp"}}); code != http.StatusSeeOther ||
-		f.last.Header.Get("Location") != "/login?step_up_failed=phishing_resistant" {
+		f.last.Header.Get("Location") != "/login?assurance=phishing_resistant&return=%2Ft%2Facme%2F&step_up_failed=phishing_resistant" {
 		t.Errorf("undelivered step-up: %d %q", code, f.last.Header.Get("Location"))
 	}
 	// Claims are what count, never the request: the session is the mfa one
@@ -165,6 +165,14 @@ func TestStepUpThroughBanner(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?assurance=mfa&return=%2Ft%2Facme%2F" {
 		t.Errorf("%d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}	// Only the validated first value goes on, never a second, unchecked one.
+	resp, err = f.client.Get(f.app.URL + "/auth/login?assurance=mfa&assurance=x&return=%2Fok&return=%2F%2Fevil.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?assurance=mfa&return=%2Fok" {
+		t.Errorf("repeated parameters: %d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
 
