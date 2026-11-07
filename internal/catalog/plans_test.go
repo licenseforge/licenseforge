@@ -153,7 +153,7 @@ func TestPlanRefusals(t *testing.T) {
 		}
 	}
 	bad := ok
-	bad.Slug, bad.Terms.LeaseSeconds = "BAD", 0
+	bad.Slug, bad.LeaseSeconds = "BAD", 0
 	if _, err := ps.Create(as(f.a, authz.Manager), bad); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("manager (rights before values): %v", err)
 	}
