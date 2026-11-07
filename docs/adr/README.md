@@ -42,3 +42,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0036](0036-audit-retention-and-siem-export.md) | Audit retention and SIEM export | accepted |
 | [ADR-0037](0037-user-routes.md) | User routes | accepted |
 | [ADR-0038](0038-per-tenant-mfa-policy.md) | Per-tenant MFA policy | accepted |
+| [ADR-0039](0039-support-rehost.md) | Support rehost | accepted |

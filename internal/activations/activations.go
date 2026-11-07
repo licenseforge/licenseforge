@@ -53,7 +53,8 @@ var (
 	ErrLimit = errors.New("activations: activation limit reached")
 	// ErrRehostLimit: the license's seats have moved max_rehosts times
 	// (ADR-0034). Support-side rehosts count in the same rehost_count. At the
-	// limit, support raises max_rehosts or resets rehost_count (each audited).
+	// limit, support resets rehost_count (ADR-0039, audited); selling more
+	// moves is an upgrade to a plan with a higher max_rehosts (ADR-0013).
 	ErrRehostLimit = errors.New("activations: rehost limit reached")
 	// ErrBinding: the fingerprint's binding isn't the license's (machine vs
 	// cluster), or the license is a site license, which has no activations.

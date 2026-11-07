@@ -513,7 +513,7 @@ func mapErr(err error) *problem {
 		p = invalid(fieldError{"/mfa_policy", "must be none, mfa or phishing_resistant"})
 	case errors.Is(err, members.ErrLastOwner):
 		p = &problem{status: http.StatusConflict, code: "last_owner", detail: "The tenant must keep an owner; make someone else owner first."}
-	case errors.Is(err, licenses.ErrState):
+	case errors.Is(err, licenses.ErrState), errors.Is(err, activations.ErrState):
 		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "The license's status doesn't allow this."}
 	case errors.Is(err, idempotency.ErrInvalidKey):
 		p = &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "Idempotency-Key must be 1-255 printable ASCII characters."}
