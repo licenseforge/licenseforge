@@ -877,7 +877,8 @@ export interface paths {
         /**
          * Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
          * @description true grants a boolean feature; a whole number from -1 (unlimited) to
-         *     9007199254740991 sets a limit feature; null removes the grant;
+         *     9007199254740991 sets a limit feature (numbers are read as IEEE
+         *     doubles: near 2^53 a fraction rounds to the nearest whole number); null removes the grant;
          *     absent keys stay. Every key must be a feature of the plan's product;
          *     an archived feature can't be granted anew, but its grant can change
          *     or go. All or nothing; at most 1000 keys. Needs catalog:write on its

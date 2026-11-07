@@ -62,8 +62,10 @@ func planGrants(ctx context.Context, tx *ent.Tx, planID string) (map[string]any,
 
 // PatchFeatures applies a merge patch (RFC 7396) to plan id's grants, keyed
 // by feature key: true grants a boolean feature, a whole number from -1
-// (unlimited) to 2^53-1 sets a limit feature's value (JSON numbers arrive as
-// float64), nil removes the grant. Every key must be a feature of the plan's
+// (unlimited) to 2^53-1 sets a limit feature's value, nil removes the
+// grant. JSON numbers arrive as float64 (the generated decoder), so near
+// 2^53 a fraction within float precision rounds to a whole number and is
+// taken as it. Every key must be a feature of the plan's
 // product; an archived feature can't be granted anew, but its grant can
 // change or go. All or nothing. Order (ADR-0032): visible (else
 // ErrNotFound), catalog:write on the product, then the values. Licenses
@@ -98,6 +100,9 @@ func (s Plans) PatchFeatures(ctx context.Context, id string, patch map[string]an
 				return &InvalidError{Message: "feature keys are snake_case (lowercase letters and digits joined by single underscores), at most 63"}
 			}
 		}
+		// Unlocked: a feature archive committing after this read lets a new
+		// grant through, the same end state as grant-then-archive, which is
+		// allowed (archiving doesn't touch plans).
 		feats, err := tx.Feature.Query().Where(feature.ProductID(p.ProductID), feature.KeyIn(keys...)).All(ctx)
 		if err != nil {
 			return err

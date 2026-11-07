@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -146,5 +149,84 @@ func TestPlanFeatures(t *testing.T) {
 	}
 	if _, err := ps.PatchFeatures(admin, pro.ID, big); !errors.Is(err, ErrInvalid) || field(err) != "" || !strings.Contains(err.Error(), "at most 1000") {
 		t.Errorf("oversized patch: %v", err)
+	}
+}
+
+// The plan_features lock contract: a patch locks the plan FOR UPDATE, so it
+// waits for an issue holding the plan FOR SHARE, which copies the grants
+// as they were before the patch, never half of it.
+func TestPlanFeaturesWaitForIssue(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	admin := as(f.a, authz.Admin)
+	prod, err := f.s.Create(admin, "db", "Database")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs, ps := Features{DB: f.db}, Plans{DB: f.db}
+	for _, k := range []string{"sso", "export"} {
+		if _, err := fs.Create(admin, FeatureInput{ProductID: prod.ID, Key: k, Name: k, Type: feature.TypeBoolean}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pl, err := ps.Create(admin, PlanInput{ProductID: prod.ID, Slug: "pro", Name: "Pro", Terms: defaultTerms()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.PatchFeatures(admin, pl.ID, map[string]any{"sso": true}); err != nil {
+		t.Fatal(err)
+	}
+	adminDB, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminDB.Close() }()
+	done := make(chan error, 1)
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		// What an issue holds: the product, then the plan, FOR SHARE.
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM products WHERE id = $1 FOR SHARE`, prod.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plans WHERE id = $1 FOR SHARE`, pl.ID); err != nil {
+			return err
+		}
+		go func() {
+			_, err := ps.PatchFeatures(admin, pl.ID, map[string]any{"sso": nil, "export": true})
+			done <- err
+		}()
+		for i := 0; ; i++ {
+			var n int
+			if err := adminDB.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				break
+			}
+			if i == 100 {
+				return errors.New("the patch never waited for the issue's plan lock")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		got, err := planGrants(ctx, tx, pl.ID)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, map[string]any{"sso": true}) {
+			t.Errorf("the issue saw %v mid-patch", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("patch: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the patch didn't finish")
+	}
+	if got, _ := ps.Features(admin, pl.ID); !reflect.DeepEqual(got, map[string]any{"export": true}) {
+		t.Errorf("after: %v", got)
 	}
 }

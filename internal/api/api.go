@@ -336,7 +336,7 @@ func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc
 // data, such as feature keys) only has to be an object.
 func exactKeys(raw []byte, t reflect.Type) bool {
 	var m map[string]json.RawMessage
-	return json.Unmarshal(raw, &m) == nil && m != nil && (t.Kind() == reflect.Map || keysOf(m, t))
+	return json.Unmarshal(raw, &m) == nil && m != nil && exactValue(raw, t)
 }
 
 func keysOf(m map[string]json.RawMessage, t reflect.Type) bool {
