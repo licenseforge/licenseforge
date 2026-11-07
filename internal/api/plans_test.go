@@ -78,3 +78,62 @@ func TestPlanEndpoints(t *testing.T) {
 		t.Errorf("archived product: %v", r)
 	}
 }
+
+// The feature × plan matrix over HTTP (ADR-0015): a merge patch keyed by
+// feature key; a license issued afterwards snapshots the grants (ADR-0013).
+func TestPlanFeatureEndpoints(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	tp := Prefix + "/tenants/" + f.a.Slug
+	for _, b := range []string{`{"key":"sso","name":"SSO","type":"boolean"}`, `{"key":"max_users","name":"Users","type":"limit"}`} {
+		if r := f.do(t, "POST", tp+"/features", `{"product_id":"`+f.prodA+`",`+b[1:], owner); r.code != 201 {
+			t.Fatalf("feature: %s", r.raw)
+		}
+	}
+	plan := f.do(t, "POST", tp+"/plans", `{"product_id":"`+f.prodA+`","slug":"pro","name":"Pro"}`, owner).body["id"].(string)
+	fp := tp + "/plans/" + plan + "/features"
+	if r := f.do(t, "GET", fp, "", owner); r.code != 200 || r.raw != "{}\n" {
+		t.Errorf("empty: %d %s", r.code, r.raw)
+	}
+	r := f.do(t, "PATCH", fp, `{"sso":true,"max_users":9007199254740991}`, owner)
+	if r.code != 200 || r.body["sso"] != true || r.body["max_users"] != float64(9007199254740991) {
+		t.Fatalf("patch: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", fp, `{"max_users":50}`, owner); r.code != 200 || r.raw != `{"max_users":50,"sso":true}`+"\n" {
+		t.Errorf("patch 2: %d %s", r.code, r.raw)
+	}
+	for body, field := range map[string]string{
+		`{"sso":5}`:                      "/sso",
+		`{"max_users":9007199254740993}`: "/max_users",
+		`{"nope":true}`:                  "/nope",
+	} {
+		if r := f.do(t, "PATCH", fp, body, owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), field) {
+			t.Errorf("%s: %v", body, r)
+		}
+	}
+	f.do(t, "PATCH", fp, `[]`, owner).problem(t, 400, "invalid_request")
+	// Hidden and missing alike; a viewer sees but can't change.
+	other := f.do(t, "POST", tp+"/products", `{"slug":"cache","name":"Cache"}`, owner).body["id"].(string)
+	elsewhere := f.session(t, f.join(t, f.a.ID, invitation.RoleAdmin, f.ownerA, other), true)
+	missing := f.do(t, "GET", tp+"/plans/"+ids.Plan()+"/features", "", owner).problem(t, 404, "not_found")
+	for _, m := range []string{"GET", "PATCH"} {
+		if got := f.do(t, m, fp, `{"sso":null}`, elsewhere).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("hidden %s: %v", m, got)
+		}
+	}
+	viewer := f.session(t, f.join(t, f.a.ID, invitation.RoleViewer, f.ownerA), true)
+	if r := f.do(t, "GET", fp, "", viewer); r.code != 200 {
+		t.Errorf("viewer read: %s", r.raw)
+	}
+	f.do(t, "PATCH", fp, `{"sso":null}`, viewer).problem(t, 403, "forbidden")
+	// A license copies the grants; a later patch doesn't touch it.
+	customer := f.do(t, "POST", tp+"/customers", `{"name":"Contoso"}`, owner).body["id"].(string)
+	lic := f.do(t, "POST", tp+"/licenses", issueBody(f.prodA, plan, customer), owner)
+	if lic.code != 201 || fmt.Sprint(lic.body["entitlements"]) != "map[features:[sso] limits:map[max_users:50]]" {
+		t.Fatalf("issue: %d %s", lic.code, lic.raw)
+	}
+	f.do(t, "PATCH", fp, `{"sso":null,"max_users":-1}`, owner)
+	if r := f.do(t, "GET", tp+"/licenses/"+lic.body["id"].(string), "", owner); fmt.Sprint(r.body["entitlements"]) != "map[features:[sso] limits:map[max_users:50]]" {
+		t.Errorf("sold license changed: %s", r.raw)
+	}
+}

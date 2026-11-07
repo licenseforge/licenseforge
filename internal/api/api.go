@@ -332,10 +332,11 @@ func strictInput(f apigen.StrictHandlerFunc, op string) apigen.StrictHandlerFunc
 
 // exactKeys reports whether raw is a JSON object (not null) whose keys, at
 // every level, are exactly the json names of struct t's fields:
-// encoding/json matches names case-insensitively.
+// encoding/json matches names case-insensitively. A map body (keys are
+// data, such as feature keys) only has to be an object.
 func exactKeys(raw []byte, t reflect.Type) bool {
 	var m map[string]json.RawMessage
-	return json.Unmarshal(raw, &m) == nil && m != nil && keysOf(m, t)
+	return json.Unmarshal(raw, &m) == nil && m != nil && exactValue(raw, t)
 }
 
 func keysOf(m map[string]json.RawMessage, t reflect.Type) bool {

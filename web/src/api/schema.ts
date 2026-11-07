@@ -853,6 +853,41 @@ export interface paths {
         patch: operations["updatePlan"];
         trace?: never;
     };
+    "/tenants/{tenant}/plans/{id}/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What the plan grants, by feature key (one column of the feature × plan matrix, ADR-0015).
+         * @description Needs catalog:read on its product.
+         */
+        get: operations["getPlanFeatures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
+         * @description true grants a boolean feature; a whole number from -1 (unlimited) to
+         *     9007199254740991 sets a limit feature (numbers are read as IEEE
+         *     doubles: near 2^53 a fraction rounds to the nearest whole number); null removes the grant;
+         *     absent keys stay. Every key must be a feature of the plan's product;
+         *     an archived feature can't be granted anew, but its grant can change
+         *     or go. All or nothing; at most 1000 keys. Needs catalog:write on its
+         *     product; audited (plan.features.update, with the keys set and
+         *     removed), unless nothing changed.
+         */
+        patch: operations["updatePlanFeatures"];
+        trace?: never;
+    };
     "/tenants/{tenant}/plans/{id}/archive": {
         parameters: {
             query?: never;
@@ -1385,6 +1420,26 @@ export interface components {
              * @enum {string}
              */
             bind_type?: "none" | "machine" | "cluster";
+        };
+        /**
+         * @description Feature key → true (a boolean feature granted) or the limit (a limit feature; -1 unlimited). Features the plan doesn't grant are absent.
+         * @example {
+         *       "sso": true,
+         *       "max_users": 50
+         *     }
+         */
+        PlanFeatures: {
+            [key: string]: unknown;
+        };
+        /**
+         * @description Feature key → true, a whole number from -1 to 9007199254740991, or null (remove).
+         * @example {
+         *       "export": null,
+         *       "max_users": -1
+         *     }
+         */
+        PlanFeaturesPatch: {
+            [key: string]: unknown;
         };
         /** @description Absent fields stay; null clears a nullable term; name, expiry_basis, offline_allowed, lease_seconds and grace_seconds aren't nullable (null answers 422). */
         PlanPatch: {
@@ -2999,6 +3054,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Plan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getPlanFeatures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanFeatures"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updatePlanFeatures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["PlanFeaturesPatch"];
+            };
+        };
+        responses: {
+            /** @description What the plan grants after the patch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanFeatures"];
                 };
             };
             400: components["responses"]["Problem"];
