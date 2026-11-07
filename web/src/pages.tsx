@@ -10,15 +10,22 @@ import { t } from "@/i18n";
 export function LoginPage() {
   const config = useQuery(authConfigQuery);
   const [agreed, setAgreed] = useState(false);
-  const href = loginHref(config.data, agreed);
+  const search = new URLSearchParams(window.location.search);
+  const href = loginHref(config.data, agreed, window.location.search);
   return (
     <main className="mx-auto flex min-h-svh max-w-xl flex-col justify-center gap-4 p-6">
       <h1 className="text-2xl font-semibold">{t("login.title")}</h1>
       <p className="text-muted-foreground">{t("login.body")}</p>
       {/* Set by the server when the banner changed after the user agreed. */}
-      {new URLSearchParams(window.location.search).has("banner_changed") && (
+      {search.has("banner_changed") && (
         <p role="alert" className="text-sm font-medium">
           {t("login.bannerChanged")}
+        </p>
+      )}
+      {/* Set by the server when the IdP didn't prove the level asked for (ADR-0038). */}
+      {search.has("step_up_failed") && (
+        <p role="alert" className="text-sm font-medium">
+          {t(search.get("step_up_failed") === "phishing_resistant" ? "login.stepUpFailedPhishingResistant" : "login.stepUpFailed")}
         </p>
       )}
       {config.data?.banner && (

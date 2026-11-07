@@ -42,6 +42,8 @@
 //	LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR amr values that count as phishing-resistant MFA (default hwk,sc,pop)
 //	LICENSEFORGE_OIDC_MFA_ACR                acr/acrs values that count as MFA (default none)
 //	LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR acr/acrs values that count as phishing-resistant (default none; e.g. phr,phrh on Okta)
+//	LICENSEFORGE_OIDC_STEP_UP_MFA_ACR        acr_values a step-up login to mfa asks for (comma list; default none: max_age=0 only)
+//	LICENSEFORGE_OIDC_STEP_UP_PHISHING_RESISTANT_ACR the same for phishing_resistant (e.g. phr on Okta)
 //
 // The serving process refuses to start if the owner or the retention login is
 // in its environment: serving pods must never hold them (ADR-0009, ADR-0036).

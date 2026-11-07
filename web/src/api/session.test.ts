@@ -94,4 +94,10 @@ describe("loginHref (banner gate)", () => {
   it("goes straight to login without a banner", () => {
     expect(loginHref({ banner: "", banner_id: "" }, false)).toBe("/auth/login");
   });
+  it("keeps a step-up's level and return path, and nothing else", () => {
+    const search = "?assurance=mfa&return=%2Ft%2Facme%2F&banner_changed=1&x=y";
+    expect(loginHref({ banner: "", banner_id: "" }, false, search)).toBe("/auth/login?assurance=mfa&return=%2Ft%2Facme%2F");
+    expect(loginHref(withBanner, true, search)).toBe("/auth/login?banner=a%2Fb%2Bc&assurance=mfa&return=%2Ft%2Facme%2F");
+    expect(loginHref(withBanner, false, search)).toBeNull();
+  });
 });

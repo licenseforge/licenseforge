@@ -747,7 +747,7 @@
                     "value": "partial"
                   }
                 ],
-                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Not yet: the step-up login that asks the IdP for the stronger method, and the platform-admin policy (ADR-0038).",
+                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Step-up login asks the IdP for a fresh authentication (max_age=0, requested, not verified) and configured acr_values, and judges the result by the returned claims. Not yet: the platform-admin policy (ADR-0038).",
                 "links": [
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",
