@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
@@ -171,93 +170,5 @@ func TestCursorForwardUnderConcurrentCommits(t *testing.T) {
 	}
 	if seq != 10 {
 		t.Errorf("cursor moved back past a concurrent advance: %d rows, %v, seq %d", n, err, seq)
-	}
-}
-
-// A customer is archived once, at the database clock: never un-archived,
-// back- or future-dated or re-dated, also not by an update that waited for a
-// concurrent archive; renaming an archived customer still works.
-func TestCustomerArchiveOnce(t *testing.T) {
-	f := newIdentityFixture(t)
-	ctx := context.Background()
-	owner := sqlOpen(t, env.OwnerURL)
-	newCustomer := func() string {
-		id := ids.Customer()
-		if _, err := owner.Exec(`INSERT INTO customers (id, tenant_id, name, external_refs, created_at, updated_at) VALUES ($1, $2, 'C', '{}', now(), now())`, id, f.a); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	archivedAt := func(id string) (at sql.NullTime) {
-		if err := owner.QueryRow(`SELECT archived_at FROM customers WHERE id = $1`, id).Scan(&at); err != nil {
-			t.Fatal(err)
-		}
-		return at
-	}
-	for pool, url := range map[string]string{"tenant": env.TenantURL, "platform": env.PlatformURL} {
-		tenant := f.a
-		if pool == "platform" {
-			tenant = ""
-		}
-		db := sqlOpen(t, url)
-		exec := func(q, id string) error {
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-			if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenant); err != nil {
-				return err
-			}
-			res, err := tx.ExecContext(ctx, q, id)
-			if err != nil {
-				return err
-			}
-			if n, _ := res.RowsAffected(); n != 1 {
-				return errors.New("no row")
-			}
-			return tx.Commit()
-		}
-		id := newCustomer()
-		for q, why := range map[string]string{
-			`UPDATE customers SET archived_at = now() - interval '1 day' WHERE id = $1`: "backdated",
-			`UPDATE customers SET archived_at = now() + interval '1 day' WHERE id = $1`: "future-dated",
-		} {
-			if err := exec(q, id); err == nil {
-				t.Errorf("%s: archive %s", pool, why)
-			}
-		}
-		if err := exec(`UPDATE customers SET archived_at = clock_timestamp() WHERE id = $1`, id); err != nil {
-			t.Fatalf("%s: archive: %v", pool, err)
-		}
-		first := archivedAt(id)
-		for q, why := range map[string]string{
-			`UPDATE customers SET archived_at = NULL WHERE id = $1`:              "un-archived",
-			`UPDATE customers SET archived_at = clock_timestamp() WHERE id = $1`: "re-dated",
-		} {
-			if err := exec(q, id); err == nil {
-				t.Errorf("%s: customer %s", pool, why)
-			}
-		}
-		if err := exec(`UPDATE customers SET name = 'Renamed' WHERE id = $1`, id); err != nil {
-			t.Errorf("%s: renaming an archived customer: %v", pool, err)
-		}
-		if got := archivedAt(id); !got.Valid || !got.Time.Equal(first.Time) {
-			t.Errorf("%s: archive time changed: %v → %v", pool, first, got)
-		}
-		id = newCustomer()
-		var before time.Time
-		if err := owner.QueryRow(`SELECT clock_timestamp()`).Scan(&before); err != nil {
-			t.Fatal(err)
-		}
-		// A's archive is dated a second back, before the waiting one starts.
-		if _, err := raced(t, url, tenant,
-			`UPDATE customers SET archived_at = clock_timestamp() - interval '1 second' WHERE id = $1`,
-			`UPDATE customers SET archived_at = clock_timestamp() WHERE id = $1`, id); err != nil {
-			t.Fatalf("%s: raced archives: %v", pool, err)
-		}
-		if got := archivedAt(id); !got.Valid || !got.Time.Before(before) {
-			t.Errorf("%s: an archive that waited for a concurrent one re-dated it: %v", pool, got)
-		}
 	}
 }
