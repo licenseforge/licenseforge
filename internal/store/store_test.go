@@ -417,7 +417,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 		},
 		"customers": { // ADR-0015: as for products
 			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
