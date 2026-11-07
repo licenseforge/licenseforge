@@ -152,7 +152,7 @@ func setup(admin *sql.DB, env *Env, migrate func(context.Context, string) error)
 }
 
 // WaitForLockWaiter returns once a backend of e's database waits on a lock
-// (at most 2 s).
+// (at most 10 s, as slow CI may need).
 func WaitForLockWaiter(t testing.TB, e Env) {
 	t.Helper()
 	admin, err := sql.Open("pgx", e.AdminURL)
@@ -160,7 +160,7 @@ func WaitForLockWaiter(t testing.TB, e Env) {
 		t.Fatal(err)
 	}
 	defer func() { _ = admin.Close() }()
-	for range 100 {
+	for range 500 {
 		var n int
 		if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'`, e.Name).Scan(&n); err != nil {
 			t.Fatal(err)
