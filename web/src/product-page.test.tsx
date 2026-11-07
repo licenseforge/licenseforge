@@ -31,9 +31,10 @@ const pro = {
   grace_seconds: 0, archived_at: null, created_at: "",
 };
 
-async function page(role: string, opts: { archived?: boolean } = {}) {
+async function page(role: string, opts: { archived?: boolean; planPost?: () => Response } = {}) {
   const posts: Request[] = [];
   const lists: URL[] = [];
+  let planArchived = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (req: Request) => {
@@ -42,12 +43,17 @@ async function page(role: string, opts: { archived?: boolean } = {}) {
       if (u.pathname === "/api/v1/me/tenants") return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: true, product_ids: [] }] });
       if (req.method === "POST") {
         posts.push(req.clone());
-        return json(u.pathname.endsWith("/plans") ? pro : sso, 201);
+        if (u.pathname.endsWith("/plans/pln_1/archive")) {
+          planArchived = true;
+          return json({ ...pro, archived_at: "2026-11-07T00:00:00Z" });
+        }
+        if (u.pathname.endsWith("/plans")) return opts.planPost?.() ?? json(pro, 201);
+        return json(sso, 201);
       }
       if (u.pathname.endsWith("/products/prd_1")) return json({ ...product, archived_at: opts.archived ? "2026-11-01T00:00:00Z" : null });
       lists.push(u);
       if (u.pathname.endsWith("/features")) return json({ items: [sso, users] });
-      if (u.pathname.endsWith("/plans")) return json({ items: [pro] });
+      if (u.pathname.endsWith("/plans")) return json({ items: [{ ...pro, archived_at: planArchived ? "2026-11-07T00:00:00Z" : null }] });
       return json({ items: [] });
     }),
   );
@@ -68,6 +74,7 @@ it("lists the product's features and plans, filtered by product", async () => {
   expect(el.textContent).toContain("max_users");
   expect(el.textContent).toContain("Limit users");
   expect(el.textContent).toContain("12 months");
+  expect(lists.length).toBeGreaterThanOrEqual(2);
   expect(lists.every((u) => u.searchParams.get("product_id") === "prd_1")).toBe(true);
 });
 
@@ -86,15 +93,22 @@ it("offers writes to admins on an active product only", async () => {
   expect(archived.button("Archive")).toBeUndefined();
 });
 
-it("creates a 14-day trial plan as seconds, with blank limits left out", async () => {
-  const { el, button, posts } = await page("admin");
-  await act(async () => button("New plan")!.click());
-  const set = (name: string, value: string) => {
+function setter(el: HTMLElement) {
+  return (name: string, value: string) => {
     const f = el.querySelector<HTMLInputElement | HTMLSelectElement>(`dialog [name="${name}"]`)!;
     const proto = f instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(f, value);
     f.dispatchEvent(new Event(f instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
   };
+}
+const submit = (el: HTMLElement) => act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+
+it("creates a 14-day trial plan as seconds, with blank limits left out, and refreshes the plans", async () => {
+  const { el, button, posts, lists } = await page("admin");
+  await act(async () => button("New plan")!.click());
+  const set = setter(el);
+  const planLists = () => lists.filter((u) => u.pathname.endsWith("/plans")).length;
+  const before = planLists();
   await act(async () => {
     set("slug", "trial");
     set("name", "Trial");
@@ -104,6 +118,55 @@ it("creates a 14-day trial plan as seconds, with blank limits left out", async (
   await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
   await vi.waitFor(() => expect(posts).toHaveLength(1));
   expect(JSON.parse(await posts[0]!.text())).toEqual({ product_id: "prd_1", slug: "trial", name: "Trial", bind_type: "machine", duration_seconds: 14 * 86400 });
+  await vi.waitFor(() => expect(planLists()).toBeGreaterThan(before));
+  expect(el.querySelector("dialog[open]")).toBeNull();
+});
+
+it("shows the server's term error under Term, after clearing the form's own", async () => {
+  const problem = { type: "about:blank", title: "x", status: 422, code: "validation_failed", request_id: "r", errors: [{ field: "/duration_seconds", message: "1 to 3153600000 (36,500 days)" }] };
+  const { el, button } = await page("admin", { planPost: () => json(problem, 422) });
+  await act(async () => button("New plan")!.click());
+  const set = setter(el);
+  await act(async () => {
+    set("slug", "long");
+    set("name", "Long");
+    set("term", "1.5");
+    set("term_unit", "days");
+  });
+  await submit(el);
+  await vi.waitFor(() => expect(el.textContent).toContain("A whole number."));
+  await act(async () => set("term", "40000"));
+  await submit(el);
+  await vi.waitFor(() => expect(document.getElementById("term-error")?.textContent).toBe("1 to 3153600000 (36,500 days)"));
+  expect(el.textContent).not.toContain("A whole number.");
+});
+
+it("archives a plan through the plan endpoint and shows it archived", async () => {
+  const { el, posts } = await page("admin");
+  const row = () => [...el.querySelectorAll("tr")].find((r) => r.textContent?.includes("Pro yearly"))!;
+  await act(async () => [...row().querySelectorAll("button")].find((b) => b.textContent === "Archive")!.click());
+  expect(el.textContent).toContain("no new licenses can be issued from this plan");
+  await act(async () => [...el.querySelectorAll<HTMLButtonElement>("dialog button")].find((b) => b.textContent === "Archive")!.click());
+  await vi.waitFor(() => expect(posts.map((p) => new URL(p.url).pathname)).toEqual(["/api/v1/tenants/acme/plans/pln_1/archive"]));
+  await vi.waitFor(() => expect(row().textContent).toContain("Archived"));
+});
+
+it("creates an on/off feature without a unit field", async () => {
+  const { el, button, posts } = await page("admin");
+  await act(async () => button("New feature")!.click());
+  expect(el.querySelector('dialog [name="unit"]')).toBeNull();
+  const set = setter(el);
+  await act(async () => {
+    set("key", "audit_log");
+    set("name", "Audit log");
+  });
+  await submit(el);
+  await vi.waitFor(() => expect(posts).toHaveLength(1));
+  expect(new URL(posts[0]!.url).pathname).toBe("/api/v1/tenants/acme/features");
+  expect(JSON.parse(await posts[0]!.text())).toEqual({ product_id: "prd_1", key: "audit_log", name: "Audit log", type: "boolean" });
+  await act(async () => button("New feature")!.click());
+  await act(async () => setter(el)("type", "limit"));
+  expect(el.querySelector('dialog [name="unit"]')).not.toBeNull();
 });
 
 it("refuses a term that isn't a whole number without a request", async () => {

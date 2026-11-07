@@ -168,6 +168,7 @@ function ProductDialog({ tenant, product, onClose }: { tenant: string; product: 
         : createProduct(tenant, String(f.get("slug") ?? "").trim(), String(f.get("name") ?? "").trim()),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
+      await qc.invalidateQueries({ queryKey: ["product", tenant] }); // the product page
       onClose();
     },
   });
@@ -340,6 +341,7 @@ export function ArchiveProductDialog({ tenant, product, onClose }: { tenant: str
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
       await qc.invalidateQueries({ queryKey: ["products-all", tenant] }); // the issue picker
+      await qc.invalidateQueries({ queryKey: ["product", tenant] }); // the product page
       onClose();
     },
   });

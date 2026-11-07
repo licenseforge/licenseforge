@@ -43,7 +43,7 @@ export function ProductPage() {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const write = canRenameProducts(caller) && product.data != null && product.data.archived_at == null;
   if (product.isError) return <p role="alert">{errorText(product.error)}</p>;
-  if (!product.data) return null;
+  if (!product.data) return <p role="status" className="text-muted-foreground">{t("product.loading")}</p>;
   const p = product.data;
   return (
     <>
@@ -190,6 +190,7 @@ function ArchiveDialog({ title, body, run, invalidate, onClose }: {
 
 function FeatureDialog({ tenant, product, onClose }: { tenant: string; product: string; onClose: () => void }) {
   const qc = useQueryClient();
+  const [type, setType] = useState<"boolean" | "limit">("boolean");
   const save = useMutation({
     mutationFn: (f: FormData) => {
       const unit = String(f.get("unit") ?? "").trim();
@@ -211,19 +212,18 @@ function FeatureDialog({ tenant, product, onClose }: { tenant: string; product: 
       <Field label={t("tokens.col.name")} name="name" required maxLength={200} error={fields.name} />
       <label className="flex flex-col gap-1 text-sm">
         {t("product.col.type")}
-        <select name="type" className={input} defaultValue="boolean">
+        <select name="type" className={input} value={type} onChange={(e) => setType(e.target.value === "limit" ? "limit" : "boolean")}>
           <option value="boolean">{t("product.type.boolean")}</option>
           <option value="limit">{t("product.type.limitPlain")}</option>
         </select>
       </label>
-      <Field label={t("product.unit")} name="unit" maxLength={40} error={fields.unit} help={t("product.unitHelp")} />
+      {type === "limit" && <Field label={t("product.unit")} name="unit" maxLength={40} error={fields.unit} help={t("product.unitHelp")} />}
     </FormDialog>
   );
 }
 
 function PlanDialog({ tenant, product, onClose }: { tenant: string; product: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [local, setLocal] = useState<string | null>(null); // a field the dialog refused before sending
   const save = useMutation({
     mutationFn: (f: FormData) => {
       const get = (k: string) => String(f.get(k) ?? "");
@@ -232,16 +232,15 @@ function PlanDialog({ tenant, product, onClose }: { tenant: string; product: str
         maxActivations: get("max_activations"), bindType: get("bind_type"),
       }));
     },
-    onMutate: () => setLocal(null),
-    onError: (e) => {
-      if (e instanceof ApiError) return;
-      setLocal(e.message); // planBody: the field that isn't a whole number
-    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: productPlansQuery(tenant, product).queryKey });
       onClose();
     },
   });
+  // planBody throws a plain Error naming the field it refused, before any
+  // request; the server's refusals are ApiErrors. Derived, so a new attempt
+  // clears it.
+  const local = save.error && !(save.error instanceof ApiError) ? save.error.message : null;
   const fields = { ...fieldErrors(save.error), ...(local ? { [local]: t("product.wholeNumber") } : {}) };
   const term = fields.duration_months ?? fields.duration_seconds ?? fields.term;
   return (
@@ -263,12 +262,12 @@ function PlanDialog({ tenant, product, onClose }: { tenant: string; product: str
       <Field label={t("product.col.activations")} name="max_activations" inputMode="numeric" error={fields.max_activations} help={t("product.activationsHelp")} />
       <label className="flex flex-col gap-1 text-sm">
         {t("product.col.binding")}
-        <select name="bind_type" className={input} defaultValue="machine">
+        <select name="bind_type" className={input} defaultValue="machine" aria-invalid={!!fields.bind_type} aria-describedby={fields.bind_type ? "bind_type-error" : undefined}>
           <option value="machine">{t("product.bind.machine")}</option>
           <option value="cluster">{t("product.bind.cluster")}</option>
           <option value="none">{t("product.bind.none")}</option>
         </select>
-        {fields.bind_type && <span>{fields.bind_type}</span>}
+        {fields.bind_type && <span id="bind_type-error">{fields.bind_type}</span>}
       </label>
       <p className="text-xs text-muted-foreground">{t("product.planDefaults")}</p>
     </FormDialog>
