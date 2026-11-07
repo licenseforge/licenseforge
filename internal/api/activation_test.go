@@ -670,6 +670,110 @@ func TestActivationManagement(t *testing.T) {
 	}
 }
 
+// Support rehost (ADR-0039): free the old machine, then reset the move
+// counter of a license at its limit, so the customer's new machine can move
+// in. activation:manage on the license's product; audited.
+func TestRehostReset(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is := a.issue(t, "pro")
+	for range 2 {
+		if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), licenseAuth(is.Key)); r.code != 200 {
+			t.Fatalf("activate: %s", r.raw)
+		}
+	}
+	// At the limit: one move allowed, one used.
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET max_rehosts = 1, rehost_count = 1 WHERE id = $1`, is.License.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var prodQ string
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		p, err := tx.Product.Create().SetTenantID(a.a.ID).SetSlug("other").SetName("Other").Save(ctx)
+		if err == nil {
+			prodQ = p.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	viewer, support := a.session(t, a.viewerA, true), a.session(t, a.join(t, a.a.ID, invitation.RoleSupport, a.ownerA), true)
+	scoped := a.session(t, a.join(t, a.a.ID, invitation.RoleSupport, a.ownerA, prodQ), true)
+	lp := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + is.License.ID
+	if r := a.do(t, "GET", lp, "", viewer); r.body["rehost_count"] != 1.0 || r.body["max_rehosts"] != 1.0 {
+		t.Errorf("license view: %s", r.raw)
+	}
+	// The dead machine freed, the new one is still a move past the limit.
+	if r := a.do(t, "POST", lp+"/activations/"+a.activations(t, is.License.ID)[0].ID+"/deactivate", "", support); r.code != 200 {
+		t.Fatalf("deactivate: %s", r.raw)
+	}
+	newMachine := newFP()
+	a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newMachine), licenseAuth(is.Key)).problem(t, 409, "rehost_limit_reached")
+
+	// Hidden, missing, malformed and another tenant's answer alike, audited;
+	// seen but not allowed is 403.
+	missing := a.do(t, "POST", Prefix+"/tenants/"+a.a.Slug+"/licenses/"+ids.License()+"/rehosts/reset", "", support).problem(t, 404, "not_found")
+	for name, c := range map[string]struct {
+		path string
+		o    opt
+	}{
+		"hidden":           {lp + "/rehosts/reset", scoped},
+		"malformed":        {Prefix + "/tenants/" + a.a.Slug + "/licenses/x/rehosts/reset", support},
+		"another tenant's": {Prefix + "/tenants/" + a.b.Slug + "/licenses/" + is.License.ID + "/rehosts/reset", a.session(t, a.ownerB, true)},
+	} {
+		if got := a.do(t, "POST", c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+			t.Errorf("%s: %v, missing %v", name, got, missing)
+		}
+	}
+	a.do(t, "POST", lp+"/rehosts/reset", "", scoped)
+	if e := a.lastEvent(t, a.a.ID); e.Action != "license.rehosts_reset" || e.Outcome != auditevent.OutcomeDenied {
+		t.Errorf("hidden reset audit = %+v", e)
+	}
+	a.do(t, "POST", lp+"/rehosts/reset", "", viewer).problem(t, 403, "forbidden")
+	if e := a.lastEvent(t, a.a.ID); e.Action != "license.rehosts_reset" || e.Outcome != auditevent.OutcomeDenied || *e.ObjectID != is.License.ID {
+		t.Errorf("denied reset audit = %+v", e)
+	}
+	if r := a.do(t, "GET", lp, "", viewer); r.body["rehost_count"] != 1.0 {
+		t.Errorf("refused resets changed the count: %s", r.raw)
+	}
+
+	// Reset: counted from zero again, audited with what it was.
+	before := a.events(t, "license.rehosts_reset")
+	r := a.do(t, "POST", lp+"/rehosts/reset", "", support)
+	if r.code != 200 || r.body["id"] != is.License.ID || r.body["rehost_count"] != 0.0 || r.body["max_rehosts"] != 1.0 || r.body["active_activations"] != 1.0 {
+		t.Fatalf("reset: %d %s", r.code, r.raw)
+	}
+	e := a.lastEvent(t, a.a.ID)
+	if e.Action != "license.rehosts_reset" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != is.License.ID ||
+		!strings.Contains(e.Details, `"previous_rehost_count":1`) || !strings.Contains(e.Details, `"max_rehosts":1`) {
+		t.Errorf("reset audit = %+v", e)
+	}
+	// The new machine moves in, using the move again.
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newMachine), licenseAuth(is.Key)); r.code != 200 {
+		t.Fatalf("activate after reset: %s", r.raw)
+	}
+	if r := a.do(t, "GET", lp, "", viewer); r.body["rehost_count"] != 1.0 {
+		t.Errorf("after the move: %s", r.raw)
+	}
+	// At zero: unchanged, no entry.
+	if r := a.do(t, "POST", lp+"/rehosts/reset", "", support); r.code != 200 || r.body["rehost_count"] != 0.0 {
+		t.Fatalf("second reset: %d %s", r.code, r.raw)
+	}
+	if r := a.do(t, "POST", lp+"/rehosts/reset", "", support); r.code != 200 || r.body["rehost_count"] != 0.0 {
+		t.Errorf("reset at zero: %d %s", r.code, r.raw)
+	}
+	if n := a.events(t, "license.rehosts_reset"); n != before+2 {
+		t.Errorf("reset entries %d, want %d", n, before+2)
+	}
+	// Revoked: nothing to prepare, 409.
+	if r := a.do(t, "POST", lp+"/revoke", "", a.session(t, a.ownerA, true)); r.code != 200 {
+		t.Fatalf("revoke: %s", r.raw)
+	}
+	a.do(t, "POST", lp+"/rehosts/reset", "", support).problem(t, 409, "invalid_state")
+}
+
 // A dashboard deactivate waits for the license lock, as the SDK's does, so
 // one landing while the SDK deactivates the same machine answers with the
 // activation, deactivated, instead of failing on the row.

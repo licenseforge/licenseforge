@@ -947,11 +947,17 @@ type License struct {
 	// KeyHint The key's last 6 characters
 	KeyHint        string `json:"key_hint"`
 	MaxActivations *int   `json:"max_activations"`
-	PlanId         string `json:"plan_id"`
+
+	// MaxRehosts Seat moves allowed (ADR-0034); null is unlimited.
+	MaxRehosts *int   `json:"max_rehosts"`
+	PlanId     string `json:"plan_id"`
 
 	// PlanSlug The plan's slug when issued.
-	PlanSlug    string        `json:"plan_slug"`
-	ProductId   string        `json:"product_id"`
+	PlanSlug  string `json:"plan_slug"`
+	ProductId string `json:"product_id"`
+
+	// RehostCount Seat moves used since issue or the last reset (ADR-0039).
+	RehostCount int           `json:"rehost_count"`
 	RevokedAt   *time.Time    `json:"revoked_at"`
 	Status      LicenseStatus `json:"status"`
 	SuspendedAt *time.Time    `json:"suspended_at"`
@@ -1013,11 +1019,17 @@ type LicenseIssued struct {
 	// KeyHint The key's last 6 characters
 	KeyHint        string `json:"key_hint"`
 	MaxActivations *int   `json:"max_activations"`
-	PlanId         string `json:"plan_id"`
+
+	// MaxRehosts Seat moves allowed (ADR-0034); null is unlimited.
+	MaxRehosts *int   `json:"max_rehosts"`
+	PlanId     string `json:"plan_id"`
 
 	// PlanSlug The plan's slug when issued.
-	PlanSlug    string            `json:"plan_slug"`
-	ProductId   string            `json:"product_id"`
+	PlanSlug  string `json:"plan_slug"`
+	ProductId string `json:"product_id"`
+
+	// RehostCount Seat moves used since issue or the last reset (ADR-0039).
+	RehostCount int               `json:"rehost_count"`
 	RevokedAt   *time.Time        `json:"revoked_at"`
 	Status      LicenseStatus     `json:"status"`
 	SuspendedAt *time.Time        `json:"suspended_at"`
@@ -1679,6 +1691,9 @@ type ServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId)
+	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
+	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
+	ResetRehosts(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -2907,6 +2922,41 @@ func (siw *ServerInterfaceWrapper) DeactivateActivation(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ResetRehosts operation middleware
+func (siw *ServerInterfaceWrapper) ResetRehosts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetRehosts(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReinstateLicense operation middleware
 func (siw *ServerInterfaceWrapper) ReinstateLicense(w http.ResponseWriter, r *http.Request) {
 
@@ -3910,6 +3960,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", wrapper.DeactivateActivation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/rehosts/reset", wrapper.ResetRehosts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/audit-events", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/signing-keys", wrapper.ListSigningKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys", wrapper.CreateSigningKey)
@@ -7837,6 +7888,120 @@ func (response DeactivateActivation404ApplicationProblemPlusJSONResponse) VisitD
 	return err
 }
 
+type ResetRehostsRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type ResetRehostsResponseObject interface {
+	VisitResetRehostsResponse(w http.ResponseWriter) error
+}
+
+type ResetRehosts200JSONResponse License
+
+func (response ResetRehosts200JSONResponse) VisitResetRehostsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetRehosts401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ResetRehosts401ApplicationProblemPlusJSONResponse) VisitResetRehostsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetRehosts403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ResetRehosts403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ResetRehosts403ResponseHeaders
+}
+
+func (response ResetRehosts403ApplicationProblemPlusJSONResponse) VisitResetRehostsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetRehosts404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ResetRehosts404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ResetRehosts404ResponseHeaders
+}
+
+func (response ResetRehosts404ApplicationProblemPlusJSONResponse) VisitResetRehostsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetRehosts409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ResetRehosts409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ResetRehosts409ResponseHeaders
+}
+
+func (response ResetRehosts409ApplicationProblemPlusJSONResponse) VisitResetRehostsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReinstateLicenseRequestObject struct {
 	Tenant Tenant    `json:"tenant"`
 	Id     LicenseId `json:"id"`
@@ -10830,6 +10995,9 @@ type StrictServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(ctx context.Context, request DeactivateActivationRequestObject) (DeactivateActivationResponseObject, error)
+	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
+	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
+	ResetRehosts(ctx context.Context, request ResetRehostsRequestObject) (ResetRehostsResponseObject, error)
 	// ReinstateLicense Make a suspended license active again. A revoked license stays revoked.
 	// (POST /tenants/{tenant}/licenses/{id}/reinstate)
 	ReinstateLicense(ctx context.Context, request ReinstateLicenseRequestObject) (ReinstateLicenseResponseObject, error)
@@ -11756,6 +11924,33 @@ func (sh *strictHandler) DeactivateActivation(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeactivateActivationResponseObject); ok {
 		if err := validResponse.VisitDeactivateActivationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResetRehosts operation middleware
+func (sh *strictHandler) ResetRehosts(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request ResetRehostsRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResetRehosts(ctx, request.(ResetRehostsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResetRehosts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResetRehostsResponseObject); ok {
+		if err := validResponse.VisitResetRehostsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

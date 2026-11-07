@@ -24,6 +24,10 @@ import (
 // outside the caller's product scope looks the same (ADR-0032).
 var ErrNotFound = errors.New("activations: not found")
 
+// ErrState: the license's status doesn't allow the change (a revoked
+// license's rehosts can't be reset).
+var ErrState = errors.New("activations: the license is revoked")
+
 // errHidden: a license outside the principal's product scope. Audited as
 // denied, answered as ErrNotFound.
 var errHidden = fmt.Errorf("%w: license outside the product scope", authz.ErrDenied)
@@ -149,6 +153,69 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 	})
 	if err != nil {
 		err = audit.Refused(ctx, s.DB, tenantID, ev, err, ErrNotFound)
+		if err == errHidden { //nolint:errorlint // exactly the recorded refusal (a recording failure is joined to it: a 500)
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResetRehosts sets licenseID's rehost_count to 0 for p, the support side
+// of a rehost (ADR-0039): with the old machine deactivated, the customer's
+// new one can move in although the license had reached max_rehosts. Order
+// of checks (ADR-0032): the license under p's product scope (missing and
+// hidden alike: ErrNotFound), then activation:manage (authz.ErrDenied),
+// then not revoked (ErrState). A count already at 0 is returned unchanged
+// and not audited. The license lock is the one activations take, so a
+// reset and a seat move serialize. Refusals are audited in a transaction of
+// their own.
+func (s Service) ResetRehosts(ctx context.Context, p authz.Principal, licenseID string) (*ent.License, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ev := audit.By(p, "license.rehosts_reset", "license", "")
+	if !ids.Valid("lic", licenseID) { // hostile input: not stored in the entry
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, ErrNotFound, ErrNotFound)
+	}
+	var out *ent.License
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		l, err := visible(ctx, tx, licenseID)
+		if l != nil {
+			ev.ObjectID, ev.Details = l.ID, map[string]any{"product_id": l.ProductID}
+		}
+		if err != nil {
+			return err
+		}
+		if err := authz.Require(ctx, authz.ActivationManage, l.ProductID); err != nil {
+			return err
+		}
+		// A revoked license can't be locked (license_transitions): nothing
+		// to reset there.
+		l, err = tx.License.Query().Where(license.ID(l.ID)).
+			ForUpdate(func(o *sql.LockOptions) { o.Strength = sql.LockNoKeyUpdate }).Only(ctx)
+		if ent.IsNotFound(err) {
+			return ErrState
+		}
+		if err != nil {
+			return err
+		}
+		if l.RehostCount == 0 {
+			out = l
+			return nil
+		}
+		ev.Details["previous_rehost_count"], ev.Details["max_rehosts"] = l.RehostCount, l.MaxRehosts
+		if out, err = tx.License.UpdateOne(l).SetRehostCount(0).Save(ctx); err != nil {
+			return err
+		}
+		ev.Outcome = auditevent.OutcomeSuccess
+		_, err = audit.Record(ctx, tx, tenantID, ev)
+		return err
+	})
+	if err != nil {
+		err = audit.Refused(ctx, s.DB, tenantID, ev, err, ErrNotFound, ErrState)
 		if err == errHidden { //nolint:errorlint // exactly the recorded refusal (a recording failure is joined to it: a 500)
 			return nil, ErrNotFound
 		}

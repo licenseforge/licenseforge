@@ -415,6 +415,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/rehosts/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset the license's seat-move counter (support rehost, ADR-0039).
+         * @description Sets rehost_count to 0, so a customer at max_rehosts can move a seat
+         *     to a new machine again; free the old machine first with
+         *     deactivate. Needs activation:manage on the license's product;
+         *     audited (license.rehosts_reset, with the previous count). A count
+         *     already at 0 is answered unchanged, with no entry. A revoked license
+         *     answers 409 invalid_state.
+         */
+        post: operations["resetRehosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/audit-events": {
         parameters: {
             query?: never;
@@ -1164,6 +1193,10 @@ export interface components {
             max_activations: number | null;
             /** @description Seats taken now (activations not deactivated). */
             active_activations: number;
+            /** @description Seat moves allowed (ADR-0034); null is unlimited. */
+            max_rehosts: number | null;
+            /** @description Seat moves used since issue or the last reset (ADR-0039). */
+            rehost_count: number;
             entitlements: {
                 features: string[];
                 limits: {
@@ -2230,6 +2263,34 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    resetRehosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listAuditEvents: {
