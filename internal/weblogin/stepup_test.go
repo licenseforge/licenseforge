@@ -165,7 +165,8 @@ func TestStepUpThroughBanner(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?assurance=mfa&return=%2Ft%2Facme%2F" {
 		t.Errorf("%d %q", resp.StatusCode, resp.Header.Get("Location"))
-	}	// Only the validated first value goes on, never a second, unchecked one.
+	}
+	// Only the validated first value goes on, never a second, unchecked one.
 	resp, err = f.client.Get(f.app.URL + "/auth/login?assurance=mfa&assurance=x&return=%2Fok&return=%2F%2Fevil.example")
 	if err != nil {
 		t.Fatal(err)
