@@ -59,10 +59,20 @@ export const authConfigQuery = queryOptions({ queryKey: ["auth-config"], queryFn
 /**
  * Where the login button goes, or null while it must stay disabled: a
  * banner (AC-8) needs an explicit agreement, sent back as its ID (the
- * server refuses a login without it).
+ * server refuses a login without it). A step-up's level and return path
+ * (ADR-0038), which the server sent here with the user, are passed on; the
+ * server validates them.
  */
-export function loginHref(config: AuthConfig | undefined, agreed: boolean): string | null {
+export function loginHref(config: AuthConfig | undefined, agreed: boolean, search = ""): string | null {
   if (!config) return null;
-  if (!config.banner_id) return "/auth/login";
-  return agreed ? `/auth/login?banner=${encodeURIComponent(config.banner_id)}` : null;
+  if (config.banner_id && !agreed) return null;
+  const from = new URLSearchParams(search);
+  const q = new URLSearchParams();
+  if (config.banner_id) q.set("banner", config.banner_id);
+  for (const k of ["assurance", "return"]) {
+    const v = from.get(k);
+    if (v) q.set(k, v);
+  }
+  const qs = q.toString();
+  return qs ? `/auth/login?${qs}` : "/auth/login";
 }

@@ -8,6 +8,10 @@ const en = {
   "login.bannerTitle": "System use notification",
   "login.agree": "I have read and agree to this notice",
   "login.bannerChanged": "The notice changed. Please read and agree to it again.",
+  "login.stepUpFailed":
+    "Your sign-in didn't use a second factor, which this tenant requires. Sign in again and choose a second factor, or ask your identity provider administrator to enable one.",
+  "login.stepUpFailedPhishingResistant":
+    "Your sign-in didn't use a passkey or security key, which this tenant requires. Sign in again with one, or ask your identity provider administrator to enable them.",
   "nav.skip": "Skip to content",
   "tenant.label": "Tenant",
   "tenant.none": "You are not a member of any tenant yet.",
