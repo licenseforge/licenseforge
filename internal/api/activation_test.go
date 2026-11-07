@@ -767,11 +767,93 @@ func TestRehostReset(t *testing.T) {
 	if n := a.events(t, "license.rehosts_reset"); n != before+2 {
 		t.Errorf("reset entries %d, want %d", n, before+2)
 	}
-	// Revoked: nothing to prepare, 409.
-	if r := a.do(t, "POST", lp+"/revoke", "", a.session(t, a.ownerA, true)); r.code != 200 {
+	// Suspended: support may prepare a reinstatement.
+	owner := a.session(t, a.ownerA, true)
+	if r := a.do(t, "POST", lp+"/suspend", "", owner); r.code != 200 {
+		t.Fatalf("suspend: %s", r.raw)
+	}
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET rehost_count = 1 WHERE id = $1`, is.License.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.do(t, "POST", lp+"/rehosts/reset", "", support); r.code != 200 || r.body["rehost_count"] != 0.0 || r.body["status"] != "suspended" {
+		t.Errorf("reset a suspended license: %d %s", r.code, r.raw)
+	}
+	// Revoked: nothing to prepare, 409, audited as a failure.
+	if r := a.do(t, "POST", lp+"/revoke", "", owner); r.code != 200 {
 		t.Fatalf("revoke: %s", r.raw)
 	}
 	a.do(t, "POST", lp+"/rehosts/reset", "", support).problem(t, 409, "invalid_state")
+	if e := a.lastEvent(t, a.a.ID); e.Action != "license.rehosts_reset" || e.Outcome != auditevent.OutcomeFailure || *e.ObjectID != is.License.ID {
+		t.Errorf("revoked reset audit = %+v", e)
+	}
+}
+
+// A reset takes the license lock activation takes, so a seat move landing
+// meanwhile is counted before the reset, and its entry records what it reset.
+func TestRehostResetWaitsForLicenseLock(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is := a.issue(t, "pro")
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET rehost_count = 1 WHERE id = $1`, is.License.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	locked, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+			// What a seat move does: the license lock, then the count.
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM licenses WHERE id = $1 FOR NO KEY UPDATE`, is.License.ID); err != nil {
+				close(locked)
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE licenses SET rehost_count = rehost_count + 1 WHERE id = $1`, is.License.ID)
+			close(locked)
+			<-release
+			return err
+		})
+	}()
+	<-locked
+	res := make(chan resp, 1)
+	go func() {
+		res <- a.do(t, "POST", Prefix+"/tenants/"+a.a.Slug+"/licenses/"+is.License.ID+"/rehosts/reset", "", a.session(t, a.ownerA, true))
+	}()
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		var n int
+		if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+			rows, err := tx.QueryContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rows.Close() }()
+			rows.Next()
+			return rows.Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("the reset never waited on a lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if r := <-res; r.code != 200 || r.body["rehost_count"] != 0.0 {
+		t.Fatalf("reset: %d %s", r.code, r.raw)
+	}
+	if e := a.lastEvent(t, a.a.ID); e.Action != "license.rehosts_reset" || !strings.Contains(e.Details, `"previous_rehost_count":2`) {
+		t.Errorf("reset audit = %+v (want the concurrent move counted)", e)
+	}
 }
 
 // A dashboard deactivate waits for the license lock, as the SDK's does, so

@@ -16,6 +16,7 @@
 - Checks run in [ADR-0032 REST API conventions](0032-rest-api-conventions.md) order: the license under the caller's product scope (missing and hidden both give 404), then `activation:manage` (403). Refusals are audited.
 - The license lock is the same one activation takes (`FOR NO KEY UPDATE` on the license row), so a reset and a concurrent seat move serialize.
 - License responses expose `rehost_count` and `max_rehosts` (null means unlimited), so the dashboard can show "moves used".
+- **Narrows [ADR-0034 Online leases and seat moves](0034-online-leases-and-seat-moves.md)**: there, at the limit "support raises the license's `max_rehosts` or resets `rehost_count`" and "the support-side rehost operation increments `rehost_count` too". Here support only resets. Raising the limit is an upgrade (see Alternatives). The move itself is counted when the customer activates the new machine, not by the support step.
 
 ## Alternatives considered
 - **Raise `max_rehosts` on the license**: it edits sold terms, which [ADR-0013 License data model hardening](0013-license-data-model-hardening.md) keeps as a snapshot changed only by an upgrade. That remains the way to sell more moves.
@@ -25,3 +26,4 @@
 ## Consequences
 - No schema change: `rehost_count` is already writable by the serving login and kept within limits by CHECKs.
 - Resets are visible in the audit log, so a vendor can review how often support grants extra moves.
+- **Trade-off, accepted**: any principal with `activation:manage` (support and above, and tokens with those roles) can reset as often as it likes. In effect, that grants as many moves as it chooses on top of `max_rehosts` as sold. The controls are the role assignment ([ADR-0019 Authorization model](0019-authorization-model.md)) and the audit trail: each reset carries `previous_rehost_count` and `max_rehosts` and reaches the SIEM export ([ADR-0036 Audit retention and SIEM export](0036-audit-retention-and-siem-export.md)), where a vendor can alert on how often resets happen. A free-text reason was left out: it would need an optional body (none of the API's POSTs has one), and a reason in the query string would end up in access logs. A ticket reference can be added later as an optional body field if vendors ask.
