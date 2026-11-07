@@ -1,4 +1,4 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api, unwrap } from "./client";
 import { everyPage } from "./members";
 import type { components } from "./schema";
@@ -8,6 +8,10 @@ export type Product = components["schemas"]["Product"];
 export type Customer = components["schemas"]["Customer"];
 export type CustomerCreate = components["schemas"]["CustomerCreate"];
 export type CustomerPatch = components["schemas"]["CustomerPatch"];
+export type Feature = components["schemas"]["Feature"];
+export type FeatureCreate = components["schemas"]["FeatureCreate"];
+export type Plan = components["schemas"]["Plan"];
+export type PlanCreate = components["schemas"]["PlanCreate"];
 
 const mergePatch = { "Content-Type": "application/merge-patch+json" };
 
@@ -61,6 +65,73 @@ export const allCustomers = (tenant: string) =>
   everyPage(async (cursor) =>
     unwrap(await api.GET("/tenants/{tenant}/customers", { params: { path: { tenant }, query: { cursor, limit: 200 } } })),
   );
+
+/** A product's features and plans, archived ones included, newest first (bounded paging). */
+export const productFeaturesQuery = (tenant: string, product: string) =>
+  queryOptions({
+    queryKey: ["features", tenant, product],
+    queryFn: () =>
+      everyPage(async (cursor) =>
+        unwrap(await api.GET("/tenants/{tenant}/features", { params: { path: { tenant }, query: { product_id: product, cursor, limit: 200 } } })),
+      ),
+  });
+export const productPlansQuery = (tenant: string, product: string) =>
+  queryOptions({
+    queryKey: ["plans", tenant, product],
+    queryFn: () =>
+      everyPage(async (cursor) =>
+        unwrap(await api.GET("/tenants/{tenant}/plans", { params: { path: { tenant }, query: { product_id: product, cursor, limit: 200 } } })),
+      ),
+  });
+
+export async function createFeature(tenant: string, body: FeatureCreate): Promise<Feature> {
+  return unwrap(await api.POST("/tenants/{tenant}/features", { params: { path: { tenant } }, body }));
+}
+
+/** Archives a feature, one-way: plans that grant it keep the grant; licenses keep their snapshot. */
+export async function archiveFeature(tenant: string, id: string): Promise<Feature> {
+  return unwrap(await api.POST("/tenants/{tenant}/features/{id}/archive", { params: { path: { tenant, id } } }));
+}
+
+export async function createPlan(tenant: string, body: PlanCreate): Promise<Plan> {
+  return unwrap(await api.POST("/tenants/{tenant}/plans", { params: { path: { tenant } }, body }));
+}
+
+/** Archives a plan, one-way: no new license from it; licenses already sold keep their terms. */
+export async function archivePlan(tenant: string, id: string): Promise<Plan> {
+  return unwrap(await api.POST("/tenants/{tenant}/plans/{id}/archive", { params: { path: { tenant, id } } }));
+}
+
+/**
+ * A plan's term in words-ready parts: months, a day count (whole days of
+ * duration_seconds), seconds otherwise, or perpetual.
+ */
+export function planTerm(p: Pick<Plan, "duration_months" | "duration_seconds">): { kind: "months" | "days" | "seconds"; n: number } | { kind: "perpetual" } {
+  if (p.duration_months != null) return { kind: "months", n: p.duration_months };
+  if (p.duration_seconds != null) return p.duration_seconds % 86400 === 0 ? { kind: "days", n: p.duration_seconds / 86400 } : { kind: "seconds", n: p.duration_seconds };
+  return { kind: "perpetual" };
+}
+
+/**
+ * A plan create body from the dialog's raw fields: a blank number is left
+ * out (the server's default: perpetual, unlimited); a term in days becomes
+ * seconds. Throws the field name of a number that isn't a whole number.
+ */
+export function planBody(product: string, f: { slug: string; name: string; term: string; termUnit: "months" | "days"; maxActivations: string; bindType: string }): PlanCreate {
+  const whole = (field: string, raw: string) => {
+    const s = raw.trim();
+    if (!/^\d+$/.test(s)) throw new Error(field);
+    return Number(s);
+  };
+  const body: PlanCreate = { product_id: product, slug: f.slug.trim(), name: f.name.trim(), bind_type: f.bindType as PlanCreate["bind_type"] };
+  if (f.term.trim() !== "") {
+    const n = whole("term", f.term);
+    if (f.termUnit === "months") body.duration_months = n;
+    else body.duration_seconds = n * 86400;
+  }
+  if (f.maxActivations.trim() !== "") body.max_activations = whole("max_activations", f.maxActivations);
+  return body;
+}
 
 export async function createCustomer(tenant: string, body: CustomerCreate): Promise<Customer> {
   return unwrap(await api.POST("/tenants/{tenant}/customers", { params: { path: { tenant } }, body }));

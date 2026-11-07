@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { fieldErrors } from "@/api/client";
 import {
@@ -32,14 +32,14 @@ const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2";
 
 /** The caller's membership here, and whether it has loaded (no notices or actions before). */
-function useCaller(slug: string): Membership & { loaded: boolean } {
+export function useCaller(slug: string): Membership & { loaded: boolean } {
   const { data: tenants, isSuccess } = useQuery(tenantsQuery);
   const m = tenants?.find((tn) => tn.slug === slug) ?? { role: "viewer" as const, scope: { all: false, products: [] } };
   return { ...m, loaded: isSuccess };
 }
 
 /** A form in a dialog: fields, a submit with the problem's message and field errors. */
-function FormDialog({ title, submit, onClose, onSubmit, error, busy, children }: {
+export function FormDialog({ title, submit, onClose, onSubmit, error, busy, children }: {
   title: string; submit: string; onClose: () => void; onSubmit: (f: FormData) => void; error: unknown; busy: boolean; children: ReactNode;
 }) {
   return (
@@ -72,7 +72,7 @@ function FormDialog({ title, submit, onClose, onSubmit, error, busy, children }:
 }
 
 /** A labelled input; aria-describedby names only help and error text that is on the page. */
-function Field({ label, name, error, help, ...rest }: { label: string; name: string; error?: string; help?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+export function Field({ label, name, error, help, ...rest }: { label: string; name: string; error?: string; help?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   const describedBy = [help && `${name}-help`, error && `${name}-error`].filter(Boolean).join(" ") || undefined;
   return (
     <label className="flex flex-col gap-1 text-sm">
@@ -114,7 +114,11 @@ export function ProductsPage() {
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id} className="border-b">
-                  <td className={`${td} font-medium`}>{p.name}</td>
+                  <td className={`${td} font-medium`}>
+                    <Link to="/t/$slug/products/$id" params={{ slug, id: p.id }} className="underline-offset-4 hover:underline">
+                      {p.name}
+                    </Link>
+                  </td>
                   <td className={`${td} font-mono text-xs`}>{p.slug}</td>
                   <td className={td}>{date.format(new Date(p.created_at))}</td>
                   <td className={td}>
