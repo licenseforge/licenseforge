@@ -56,7 +56,9 @@ func (e *InvalidError) Unwrap() error {
 type Service struct{ DB *store.DB }
 
 // Actor is who acts: a platform admin's user ID, or the system (empty: the
-// CLI on the platform login).
+// CLI on the platform login). The empty Actor skips the admin check, so only
+// operator commands on the platform login may construct it; API handlers
+// always pass the admitted user's ID.
 type Actor struct{ UserID string }
 
 func (a Actor) event(action, objectType string) audit.Event {
@@ -178,6 +180,39 @@ func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEma
 	return c, nil
 }
 
+// Refusals at the platform routes' gate (ADR-0042), audited once per session
+// on the platform chain: a polling client can't flood it.
+const (
+	ActionDenied      = "session.platform_denied" // not a platform admin
+	ActionMFARequired = "session.mfa_required"    // short of the platform MFA policy (ADR-0038)
+)
+
+// RecordSessionRefusal audits action (ActionDenied or ActionMFARequired) for
+// userID's session sessionID on the platform chain, unless that session's
+// refusal is already there. The check runs first without the chain lock
+// (a partial index finds it), so repeats never queue behind the chain's
+// writes, then again under the lock, so two replicas can't both record.
+func (s Service) RecordSessionRefusal(ctx context.Context, action, userID, sessionID string, details map[string]any) error {
+	return s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
+		exists := func() (bool, error) {
+			return tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action(action),
+				auditevent.ObjectType("session"), auditevent.ObjectID(sessionID)).Exist(ctx)
+		}
+		if done, err := exists(); err != nil || done {
+			return err
+		}
+		if err := audit.Lock(ctx, tx, audit.PlatformTenant); err != nil {
+			return err
+		}
+		if done, err := exists(); err != nil || done {
+			return err
+		}
+		_, err := audit.Record(ctx, tx, audit.PlatformTenant, audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID,
+			Action: action, ObjectType: "session", ObjectID: sessionID, Outcome: auditevent.OutcomeDenied, Details: details})
+		return err
+	})
+}
+
 // refused records a refusal on the platform chain, in its own transaction:
 // denied for ErrNotAdmin, failure for invalid values and conflicts. Other
 // errors (outages) are returned unrecorded.
@@ -191,7 +226,11 @@ func (s Service) refused(ctx context.Context, ev audit.Event, err error) error {
 		return err
 	}
 	ev.ObjectID = ""
+	via, cli := ev.Details["via"]
 	ev.Details = map[string]any{}
+	if cli {
+		ev.Details["via"] = via // a CLI refusal stays recognizable
+	}
 	if rerr := s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		_, err := audit.Record(ctx, tx, audit.PlatformTenant, ev)
 		return err
