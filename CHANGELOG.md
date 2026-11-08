@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Dashboard license issue: the plan is now picked from a list of the chosen product's active plans, instead of a "Plan ID" field asking to paste an ID that the dashboard showed nowhere (left from before the plans API). Choose the product first. Archived plans aren't offered, and a product without an active plan says so.
 
 ## [0.1.0-alpha.1] - 2026-11-08
 First alpha: online licensing, the data model, the admin dashboard core and the compliance baseline (v0.1 on the Roadmap). Not for production use yet; the license format and API can still change while 0.x and the spec is a draft. Verify artifacts as in [docs/verifying-releases.md](docs/verifying-releases.md).
