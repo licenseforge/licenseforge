@@ -3,7 +3,7 @@
 **Open-source, Kubernetes-native software licensing.** Define products, features and plans; issue licenses; control activations online and in air-gapped environments.
 
 > [!WARNING]
-> Pre-alpha. The design is settled ([ADRs](docs/adr/README.md)); the code is just starting. Not ready for production.
+> Alpha (`0.1.0-alpha.1`): online licensing, the admin dashboard core and the compliance baseline work; air-gapped activation and the other SDKs come next (design in the [ADRs](docs/adr/README.md)). The license format and API can change while 0.x and the spec is a draft. Not ready for production.
 
 ## Why
 - **Apache-2.0, all of it.** Server, SDKs, Helm chart. No paywalled self-hosting.
