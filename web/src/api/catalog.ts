@@ -149,13 +149,14 @@ export function planForm(p: Plan): PlanForm {
 export function planPatch(before: Plan, f: PlanForm): PlanPatch {
   const whole = (field: string, raw: string, size = 1) => {
     const s = raw.trim();
+    if (!/^\d{1,12}$/.test(s)) throw new FieldError(field);
     const n = Number(s) * size;
-    if (!/^\d{1,12}$/.test(s) || !Number.isSafeInteger(n)) throw new FieldError(field);
+    if (!Number.isSafeInteger(n)) throw new FieldError(field, "large"); // whole, but beyond any range the server takes
     return n;
   };
   const optional = (field: string, raw: string, size = 1) => (raw.trim() === "" ? null : whole(field, raw, size));
   const patch: PlanPatch = {};
-  if (f.name !== before.name) patch.name = f.name.trim();
+  if (f.name.trim() !== before.name) patch.name = f.name.trim(); // trailing spaces alone aren't a rename
   let months: number | null = null;
   let seconds: number | null = null;
   if (f.term.trim() !== "") {
@@ -196,7 +197,10 @@ export function planTerm(p: Pick<Plan, "duration_months" | "duration_seconds">):
 
 /** A form field refused before any request (planBody); field names it. */
 export class FieldError extends Error {
-  constructor(readonly field: string) {
+  constructor(
+    readonly field: string,
+    readonly reason: "whole" | "large" = "whole",
+  ) {
     super(field);
     this.name = "FieldError";
   }

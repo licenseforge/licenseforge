@@ -205,6 +205,7 @@ const en = {
   "product.activationsHelp": "Leave empty for unlimited. Site licenses (binding: none) have no activations.",
   "product.planDefaults": "Licenses count from issue, leases last 7 days, offline use is off. Licenses already sold keep the terms they were issued with.",
   "product.wholeNumber": "A whole number.",
+  "product.tooLarge": "Too large.",
   "product.unlimited": "Unlimited",
   "product.perpetual": "Perpetual",
   "product.term.months": "{n} months",

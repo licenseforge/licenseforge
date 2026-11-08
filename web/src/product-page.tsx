@@ -340,8 +340,8 @@ function PlanEditDialog({ tenant, product, plan, onClose }: { tenant: string; pr
       onClose();
     },
   });
-  const local = save.error instanceof FieldError ? save.error.field : null;
-  const fields = { ...fieldErrors(save.error), ...(local ? { [local]: t("product.wholeNumber") } : {}) };
+  const local = save.error instanceof FieldError ? save.error : null;
+  const fields = { ...fieldErrors(save.error), ...(local ? { [local.field]: t(local.reason === "large" ? "product.tooLarge" : "product.wholeNumber") } : {}) };
   const term = fields.duration_months ?? fields.duration_seconds ?? fields.term;
   return (
     <FormDialog title={t("product.editPlanTitle", { slug: plan.slug })} submit={t("product.save")} onClose={onClose} onSubmit={() => save.mutate()} error={local ? null : save.error} busy={save.isPending}>
@@ -350,11 +350,12 @@ function PlanEditDialog({ tenant, product, plan, onClose }: { tenant: string; pr
         onChange={(term, termUnit) => set({ term, termUnit: termUnit as PlanForm["termUnit"] })} />
       <label className="flex flex-col gap-1 text-sm">
         {t("product.expiryBasis")}
-        <select name="expiry_basis" className={input} value={f.expiryBasis} onChange={(e) => set({ expiryBasis: e.target.value as PlanForm["expiryBasis"] })}>
+        <select name="expiry_basis" className={input} value={f.expiryBasis} aria-invalid={!!fields.expiry_basis} aria-describedby={fields.expiry_basis ? "expiry_basis-error" : undefined}
+          onChange={(e) => set({ expiryBasis: e.target.value as PlanForm["expiryBasis"] })}>
           <option value="from_issue">{t("product.expiry.from_issue")}</option>
           <option value="from_first_activation">{t("product.expiry.from_first_activation")}</option>
         </select>
-        {fields.expiry_basis && <span>{fields.expiry_basis}</span>}
+        {fields.expiry_basis && <span id="expiry_basis-error">{fields.expiry_basis}</span>}
       </label>
       <Field label={t("product.col.activations")} name="max_activations" inputMode="numeric" value={f.maxActivations} onChange={(e) => set({ maxActivations: e.target.value })} error={fields.max_activations} help={t("product.activationsHelp")} />
       <Field label={t("product.maxRehosts")} name="max_rehosts" inputMode="numeric" value={f.maxRehosts} onChange={(e) => set({ maxRehosts: e.target.value })} error={fields.max_rehosts} help={t("product.rehostsHelp")} />

@@ -232,3 +232,17 @@ it("closes an untouched edit without a request; shows the server's term error un
   await submit(el);
   await vi.waitFor(() => expect(document.getElementById("term-error")?.textContent).toBe("1 to 1200"));
 });
+
+it("shows a seconds-term error from the server under Term in the edit dialog", async () => {
+  const problem = { type: "about:blank", title: "x", status: 422, code: "validation_failed", request_id: "r", errors: [{ field: "/duration_seconds", message: "1 to 3153600000 (36,500 days)" }] };
+  const { el } = await page("admin", { planPatch: () => json(problem, 422) });
+  await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Edit Pro yearly"]')!.click());
+  const unit = el.querySelector<HTMLSelectElement>('dialog fieldset select')!; // the term's unit
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(unit, "days");
+    unit.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => setter(el)("term", "40000"));
+  await submit(el);
+  await vi.waitFor(() => expect(document.getElementById("term-error")?.textContent).toBe("1 to 3153600000 (36,500 days)"));
+});

@@ -206,6 +206,7 @@ describe("editing a plan", () => {
   });
   it("sends nothing for an untouched form", () => {
     expect(planPatch(pro, planForm(pro))).toEqual({});
+    expect(planPatch(pro, { ...planForm(pro), name: "Pro  " })).toEqual({}); // trailing spaces aren't a rename
     const trial = { ...pro, duration_months: null, duration_seconds: 14 * 86400, max_offline_seconds: 3600, grace_seconds: 86400 };
     expect(planPatch(trial, planForm(trial))).toEqual({});
   });
@@ -221,5 +222,11 @@ describe("editing a plan", () => {
     expect(() => planPatch(pro, { ...planForm(pro), lease: "1.5" })).toThrow("lease_seconds");
     expect(() => planPatch(pro, { ...planForm(pro), grace: "" })).toThrow("grace_seconds");
     expect(() => planPatch(pro, { ...planForm(pro), maxRehosts: "-1" })).toThrow("max_rehosts");
+    try {
+      planPatch(pro, { ...planForm(pro), term: "999999999999", termUnit: "days" });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toMatchObject({ field: "term", reason: "large" }); // whole, too large: not "a whole number"
+    }
   });
 });
