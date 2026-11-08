@@ -194,22 +194,26 @@ export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string;
   return (
     <Modal title={t("tokens.new")} onClose={close}>
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
-        <label className="flex flex-col gap-1 text-sm">
-          {t("tokens.field.name")}
-          <input name="name" required maxLength={200} className={input} aria-invalid={!!fields.name} aria-describedby="name-error" />
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("tokens.field.name")}
+            <input name="name" required maxLength={200} className={input} aria-invalid={!!fields.name} aria-describedby="name-error" />
+          </label>
           {fieldError("name")}
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t("tokens.field.role")}
-          <select name="role" className={input} defaultValue="sdk" aria-invalid={!!fields.role} aria-describedby="role-error">
-            {roles.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+        </div>
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("tokens.field.role")}
+            <select name="role" className={input} defaultValue="sdk" aria-invalid={!!fields.role} aria-describedby="role-error">
+              {roles.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
           {fieldError("role")}
-        </label>
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="size-4" checked={all} onChange={(e) => setAll(e.target.checked)} />
           {t("tokens.field.allProducts")}
@@ -226,17 +230,19 @@ export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string;
           </label>
         )}
         {fieldError("product_ids")}
-        <label className="flex flex-col gap-1 text-sm">
-          {t("tokens.field.ttl")}
-          <select name="ttl_days" className={input} defaultValue="90" aria-invalid={!!fields.ttl_seconds} aria-describedby="ttl_seconds-error">
-            {ttlDays.map((d) => (
-              <option key={d} value={d}>
-                {t("tokens.ttl.days", { days: String(d) })}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("tokens.field.ttl")}
+            <select name="ttl_days" className={input} defaultValue="90" aria-invalid={!!fields.ttl_seconds} aria-describedby="ttl_seconds-error">
+              {ttlDays.map((d) => (
+                <option key={d} value={d}>
+                  {t("tokens.ttl.days", { days: String(d) })}
+                </option>
+              ))}
+            </select>
+          </label>
           {fieldError("ttl_seconds")}
-        </label>
+        </div>
         {error != null && (
           <p role="alert" className="text-sm font-medium">
             {errorText(error)}

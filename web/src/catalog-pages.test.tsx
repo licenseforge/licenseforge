@@ -193,6 +193,18 @@ it("archiving a product asks first, is one-way, and needs catalog:write", async 
   act(() => manager.root.unmount());
 });
 
+it("names a Field with help by its label alone", async () => {
+  const { Field } = await import("./catalog-pages");
+  const el = document.createElement("div");
+  document.body.append(el);
+  const root = createRoot(el);
+  await act(async () => root.render(<Field label="Slug" name="slug" help="Lowercase words joined by dashes." error="taken" />));
+  const f = el.querySelector("input")!;
+  expect(f.labels?.[0]?.textContent).toBe("Slug");
+  expect(f.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)?.textContent)).toEqual(["Lowercase words joined by dashes.", "taken"]);
+  act(() => root.unmount());
+});
+
 it("names each field by its label alone; help and errors are its description", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
   const el = document.createElement("div");
