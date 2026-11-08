@@ -371,12 +371,12 @@
               {
                 "uuid": "f23fe45c-968e-5a4a-8454-6ea41630f923",
                 "control-id": "au-3",
-                "description": "Each entry records actor type and ID, action, object type and ID, outcome (success, failure, denied), tenant, a database-clock timestamp, source IP, user agent and a details object. The details hold no secrets and no PHI.",
+                "description": "Each entry records actor type and ID, action, object type and ID, outcome (success, failure, denied), tenant, a database-clock timestamp, source IP, user agent and a details object. Actions through the API (and logins) take the source IP (the connection, or X-Forwarded-For from a trusted proxy) and user agent from the request, and the details carry its request_id (the response's X-Request-Id) to correlate with server logs. The details hold no secrets and no PHI.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "partial"
+                    "value": "implemented"
                   }
                 ],
                 "links": [
@@ -388,9 +388,19 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
                     "rel": "reference",
                     "text": "TestHashCoversEveryFieldUnambiguously"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/audit/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestRecordTakesTheRequest"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/api/api_test.go",
+                    "rel": "reference",
+                    "text": "TestAuditRecordsTheRequest"
                   }
                 ],
-                "remarks": "Source IP and user agent are filled in only once HTTP handlers exist (Roadmap v0.1: REST API)."
+                "remarks": "Background jobs (retention, verification) have no request: their entries carry neither."
               },
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",

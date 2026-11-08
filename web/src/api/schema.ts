@@ -1123,6 +1123,7 @@ export interface components {
             outcome: "success" | "failure" | "denied";
             source_ip: string | null;
             user_agent: string | null;
+            /** @description The action's details. Entries from an API request also carry request_id, that response's X-Request-Id. */
             details: {
                 [key: string]: unknown;
             };

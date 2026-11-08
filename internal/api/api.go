@@ -38,6 +38,7 @@ import (
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/platform"
+	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
@@ -122,7 +123,8 @@ func (s *server) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-Id", ri.id)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	r = r.WithContext(context.WithValue(r.Context(), reqKey{}, ri))
+	r = r.WithContext(audit.WithRequest(context.WithValue(r.Context(), reqKey{}, ri),
+		audit.Request{ID: ri.id, SourceIP: sourceIP(r), UserAgent: r.UserAgent()}))
 	if _, pattern := s.mux.Handler(r); pattern != "" { // before auth, so refusals get the route too
 		metrics.SetRoute(r.Context(), pattern)
 	}
@@ -625,4 +627,17 @@ func (p *problem) body(requestID string) []byte {
 		b, _ = json.Marshal(m)
 	}
 	return append(b, '\n')
+}
+
+// sourceIP is the client address for audit entries (AU-3): the rate
+// limiter's (the connection, or X-Forwarded-For from a trusted proxy), else
+// the connection's own (no proxy trusted: zone stripped, IPv4 unmapped).
+func sourceIP(r *http.Request) string {
+	if a, ok := ratelimit.Addr(r.Context()); ok {
+		return a.String()
+	}
+	if a, ok := ratelimit.ClientAddr(r, nil); ok {
+		return a.String()
+	}
+	return ""
 }

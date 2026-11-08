@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Audit entries from API actions record where they came from (AU-3): the client's address (the connection, or `X-Forwarded-For` from a trusted proxy) and user agent, and the request's `X-Request-Id` as `request_id` in the hashed details, so an entry leads to the request in the server logs. Before, only logins recorded the source. No schema or hash format change. ADR-0027 amended.
 - Platform tenant onboarding API (ADR-0042). Until now, tenants could only be created in SQL.
   - `POST /api/v1/platform/tenants` with `{slug, name, owner_email}` creates a tenant **and an owner invitation** (every product, open 7 days) in one transaction on the platform pool. The invitation token is in the response only.
   - The platform admin doesn't join the tenant: the first owner signs in with the invited, verified email and accepts, like any invitation.
