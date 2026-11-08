@@ -81,6 +81,7 @@ Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal
 
 ## Notes
 
+- **An OIDC provider with a private CA** (internal or enterprise PKI): put the CA's PEM in a Secret and set `extraCA.secretName` (and `extraCA.key`, `ca.crt` by default). The server trusts it in addition to the image's bundle, for every outgoing TLS connection; the SIEM sinks' own `caSecret` still applies to them.
 - **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
 
 - **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only

@@ -63,6 +63,15 @@ oidc:
     port: 443
     to: []
 
+# Extra CA certificates the server trusts for outgoing TLS, in addition to
+# the image's bundle: e.g. an OIDC provider with a certificate from an
+# internal or enterprise CA. secretName: a Secret with the PEM file (several
+# certificates may be concatenated) under key. Empty: the image's bundle only.
+# The SIEM sinks keep their own caSecret, which replaces it for that sink.
+extraCA:
+  secretName: ""
+  key: ca.crt
+
 # Audit export to a SIEM (ADR-0036): RFC 5424 syslog over TLS (RFC 5425),
 # certificate verification always on, TLS 1.2+. Every entry of every audit
 # chain is sent at least once, with its seq and hashes, so the SIEM can check

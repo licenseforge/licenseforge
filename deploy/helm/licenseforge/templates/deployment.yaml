@@ -12,6 +12,8 @@
 {{- if and $sink.on $sink.ca }}{{ $mounts = append $mounts (dict "name" (printf "%s-ca" $sink.name) "dir" (printf "/etc/licenseforge/%s/ca" $sink.name) "secret" $sink.ca "client" false) }}{{ end }}
 {{- if and $sink.on $sink.client }}{{ $mounts = append $mounts (dict "name" (printf "%s-client" $sink.name) "dir" (printf "/etc/licenseforge/%s/client" $sink.name) "secret" $sink.client "client" true) }}{{ end }}
 {{- end }}
+{{- $extraCA := .Values.extraCA | default dict }}
+{{- if $extraCA.secretName }}{{ $mounts = append $mounts (dict "name" "extra-ca" "dir" "/etc/licenseforge/extra-ca" "secret" $extraCA.secretName "key" (required "extraCA.key is required with extraCA.secretName" $extraCA.key)) }}{{ end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -70,6 +72,11 @@ spec:
               value: {{ printf "%dm" (int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict))) | quote }}
             - name: LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL
               value: {{ printf "%dh" (int (dig "fullIntervalHours" 168 (.Values.auditVerify | default dict))) | quote }}
+            {{- if $extraCA.secretName }}
+            # Go reads the image's bundle file and every file in these directories.
+            - name: SSL_CERT_DIR
+              value: /etc/licenseforge/extra-ca
+            {{- end }}
             {{- with .Values.trustedProxies }}
             - name: LICENSEFORGE_TRUSTED_PROXIES
               value: {{ . | quote }}
@@ -156,6 +163,8 @@ spec:
         - name: {{ .name }}
           {{- if .client }}
           secret: {secretName: {{ .secret | quote }}, items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}], defaultMode: 0440}  # group: the pod's fsGroup
+          {{- else if .key }}
+          secret: {secretName: {{ .secret | quote }}, items: [{key: {{ .key | quote }}, path: ca.crt}]}
           {{- else }}
           secret: {secretName: {{ .secret | quote }}, items: [{key: ca.crt, path: ca.crt}]}
           {{- end }}

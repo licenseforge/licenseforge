@@ -11,6 +11,14 @@
       }
     },
     "trustedProxies": {"type": "string"},
+    "extraCA": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "secretName": {"type": "string"},
+        "key": {"type": "string", "minLength": 1}
+      }
+    },
     "oidc": {
       "type": "object",
       "additionalProperties": false,
