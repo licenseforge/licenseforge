@@ -12,3 +12,6 @@ coverage.*
 .DS_Store
 node_modules/
 /web/dist/
+
+# e2e environment state: local CA, certificates, seed tokens
+/e2e/env/.state/

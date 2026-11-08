@@ -17,6 +17,14 @@ docker compose up --build   # server + PostgreSQL with the production logins, on
 ```
 `make run` runs the server directly; it needs the `LICENSEFORGE_*` variables listed in `cmd/licenseforge/main.go`.
 
+## End-to-end tests
+Journeys through the real chart, server, identity provider and Go SDK (ADR-0041). They run locally on minikube and aren't part of CI yet. A PR that changes a journey's path (catalog, issuing, activation, login, roles) runs them and says so.
+```
+minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
+e2e/env/up.sh   # deploys this checkout (see e2e/env/README.md)
+make e2e
+```
+
 ## Design changes
 Read the [ADRs](docs/adr/README.md) first. A change that contradicts an accepted ADR needs a new ADR in the same pull request.
 

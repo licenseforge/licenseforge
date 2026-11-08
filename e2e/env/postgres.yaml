@@ -1,0 +1,33 @@
+# e2e environment (ADR-0041): PostgreSQL 17 initialized with deploy/database-setup.sql
+# (dev passwords from that file). The setup ConfigMap is created by up.sh.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: db, namespace: __NS__}
+spec:
+  serviceName: db
+  replicas: 1
+  selector: {matchLabels: {app: db}}
+  template:
+    metadata: {labels: {app: db}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+          env: [{name: POSTGRES_PASSWORD, value: dev}]
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, licenseforge]}
+            periodSeconds: 3
+          volumeMounts:
+            - {name: setup, mountPath: /docker-entrypoint-initdb.d}
+            - {name: data, mountPath: /var/lib/postgresql/data}
+      volumes:
+        - {name: setup, configMap: {name: db-setup}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: db, namespace: __NS__}
+spec: {selector: {app: db}, ports: [{port: 5432}]}
