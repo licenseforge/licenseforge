@@ -264,6 +264,27 @@ describe("issue pickers", () => {
     expect(JSON.parse(await posts[0]!.text())).toMatchObject({ product_id: "prd_1", plan_id: "pln_1", customer_id: "cus_1" });
   });
 
+  it("starts the plan choice over when the product changes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) => {
+      const u = new URL(req.url);
+      if (!u.pathname.endsWith("/plans")) return json({ items: [] });
+      return json({ items: u.searchParams.get("product_id") === "prd_1" ? [plan("pln_1", "Pro")] : [{ ...plan("pln_2", "Basic"), product_id: "prd_2" }] });
+    }));
+    const two = { ...names, issuableProducts: [...names.issuableProducts, { id: "prd_2", slug: "cache", name: "Cache", archived_at: null, created_at: "" }] };
+    const { el } = await render(<IssueDialog tenant="acme" names={two} onClose={() => {}} />);
+    const pick = (name: string, v: string) => act(async () => {
+      const s = el.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(s, v);
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await pick("product_id", "prd_1");
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    await pick("plan_id", "pln_1");
+    await pick("product_id", "prd_2");
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_2"]')).not.toBeNull());
+    expect(el.querySelector<HTMLSelectElement>('select[name="plan_id"]')!.value).toBe(""); // not another product's plan
+  });
+
   it("says when the product has no active plan", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ items: [plan("pln_old", "Legacy", true)] })));
     const { el } = await render(<IssueDialog tenant="acme" names={names} onClose={() => {}} />);
@@ -272,7 +293,8 @@ describe("issue pickers", () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(product, "prd_1");
       product.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await vi.waitFor(() => expect(el.textContent).toContain("This product has no active plan."));
+    await vi.waitFor(() => expect(document.getElementById("plan_id-hint")?.textContent).toBe("This product has no active plan. Add one on the product's page."));
+    expect(el.querySelector('select[name="plan_id"]')!.getAttribute("aria-describedby")).toBe("plan_id-hint"); // read with the empty select
   });
 
   it("says when the lists behind the pickers are incomplete", async () => {

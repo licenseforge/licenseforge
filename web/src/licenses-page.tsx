@@ -382,14 +382,16 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
     );
   }
 
-  const select = (name: string, label: string, options: { id: string; name: string }[], onChange?: (v: string) => void, key?: string) => (
+  const select = (name: string, label: string, options: { id: string; name: string }[], onChange?: (v: string) => void, key?: string, hint?: string) => (
     <label key={key} className="flex flex-col gap-1 text-sm">
       {label}
-      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]} aria-describedby={fields[name] ? `${name}-error` : undefined}
+      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]}
+        aria-describedby={[hint && `${name}-hint`, fields[name] && `${name}-error`].filter(Boolean).join(" ") || undefined}
         onChange={onChange && ((e) => onChange(e.target.value))}>
         <option value="" disabled>{t("licenses.choose")}</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
+      {hint && <span id={`${name}-hint`} className="text-xs text-muted-foreground">{hint}</span>}
       {fields[name] && <span id={`${name}-error`}>{fields[name]}</span>}
     </label>
   );
@@ -410,10 +412,9 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
           </label>
         )}
         {/* keyed by product: a new product starts the plan choice over */}
-        {select("plan_id", t("licenses.col.plan"), issuablePlans, undefined, product)}
-        {product === "" && <p className="-mt-2 text-xs text-muted-foreground">{t("licenses.planFirst")}</p>}
+        {select("plan_id", t("licenses.col.plan"), issuablePlans, undefined, product,
+          product === "" ? t("licenses.planFirst") : plans.isPending ? t("product.loading") : plans.isSuccess && issuablePlans.length === 0 ? t("licenses.noPlans") : undefined)}
         {plans.isError && <p role="alert" className="-mt-2 text-sm">{errorText(plans.error)}</p>}
-        {plans.isSuccess && issuablePlans.length === 0 && <p className="-mt-2 text-sm">{t("licenses.noPlans")}</p>}
         <label className="flex flex-col gap-1 text-sm">
           {t("licenses.type")}
           <select name="type" className={input} defaultValue="paid">
