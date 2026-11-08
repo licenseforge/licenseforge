@@ -25,8 +25,8 @@ function Tile({ label, value }: { label: string; value?: number }) {
 
 /**
  * The tenant overview (ADR-0020): exact counts from GET /summary (licenses
- * by status; active customers when the server includes them) and the newest
- * licenses.
+ * by status; customers and those active this month, ADR-0016, when the
+ * server includes them) and the newest licenses.
  */
 export function Overview() {
   const { slug } = useParams({ from: "/app/t/$slug/" });

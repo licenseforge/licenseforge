@@ -80,11 +80,7 @@ func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObjec
 	out.Licenses.Active = int64(byStatus[license.StatusActive])
 	out.Licenses.Suspended = int64(byStatus[license.StatusSuspended])
 	out.Licenses.Revoked = int64(byStatus[license.StatusRevoked])
-	n, ok, err := s.Customers.CountActive(ctx)
-	if err != nil {
-		return nil, err
-	}
-	seen, monthStart, _, err := s.Customers.CountSeen(ctx) // the same gate as CountActive
+	c, ok, err := s.Customers.Counts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +89,7 @@ func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObjec
 			Active        int64     `json:"active"`
 			MonthStart    time.Time `json:"month_start"`
 			SeenThisMonth int64     `json:"seen_this_month"`
-		}{int64(n), monthStart, int64(seen)}
+		}{int64(c.Active), c.MonthStart, int64(c.SeenThisMonth)}
 	}
 	return out, nil
 }

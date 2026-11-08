@@ -13,5 +13,7 @@ export default defineConfig({
   // No inline scripts or styles, so the strict CSP holds.
   build: { assetsInlineLimit: 0, modulePreload: { polyfill: false } },
   server: { proxy: { "/auth": server, "/api": server } },
-  test: { environment: "jsdom" }, // window.location for same-origin URLs, DOM for the dialog test
+  // jsdom: window.location for same-origin URLs, DOM for the dialog tests.
+  // A zone off UTC, so code that must format in UTC is tested as such.
+  test: { environment: "jsdom", env: { TZ: "America/Los_Angeles" } },
 });

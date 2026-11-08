@@ -288,17 +288,27 @@ func TestSummary(t *testing.T) {
 	// now; another customer last seen last month doesn't count.
 	other := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/customers", `{"name":"Gone"}`, owner).body["id"].(string)
 	old := f.do(t, "POST", lic, issueBody(f.prodA, c.planP, other), owner).body["id"].(string)
+	// A machine deactivated after being seen now still counts; so does one
+	// seen exactly at the month start (on product Q: the scoped counts stay).
+	onQ := func(name string) string {
+		cus := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/customers", `{"name":"`+name+`"}`, owner).body["id"].(string)
+		return f.do(t, "POST", lic, issueBody(c.prodQ, c.planQ, cus), owner).body["id"].(string)
+	}
+	moved, edge := onQ("Moved"), onQ("Edge")
 	ctx := context.Background()
 	if err := f.db.WithTenant(ctx, f.a.ID, func(tx *ent.Tx) error {
+		monthStart := `date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`
 		for _, a := range []struct {
-			license, seen string
+			license, seen, deactivated string
 		}{
-			{onA[1], `clock_timestamp()`},
-			{onA[1], `clock_timestamp()`}, // a second machine: one customer
-			{old, `date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 second'`},
+			{onA[1], `clock_timestamp()`, `NULL`},
+			{onA[1], `clock_timestamp()`, `NULL`}, // a second machine: one customer
+			{old, monthStart + ` - interval '1 microsecond'`, `NULL`},
+			{moved, `clock_timestamp()`, `clock_timestamp()`},
+			{edge, monthStart, `NULL`},
 		} {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO activations (id, tenant_id, license_id, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, 'machine-id', 'machine', 'online', `+a.seen+`, `+a.seen+`, now(), now())`, ids.New("act"), f.a.ID, a.license, newFP()); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activations (id, tenant_id, license_id, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, deactivated_at, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, 'machine-id', 'machine', 'online', `+a.seen+`, `+a.seen+`, `+a.deactivated+`, now(), now())`, ids.New("act"), f.a.ID, a.license, newFP()); err != nil {
 				return err
 			}
 		}
@@ -312,7 +322,8 @@ func TestSummary(t *testing.T) {
 		cs := r.body["customers"].(map[string]any)
 		start, err := time.Parse(time.RFC3339, cs["month_start"].(string))
 		now := time.Now().UTC()
-		if err != nil || !start.Equal(time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)) {
+		if err != nil || start.Day() != 1 || start.Hour()+start.Minute()+start.Second()+start.Nanosecond() != 0 || start.Location() != time.UTC ||
+			start.After(now) || now.Sub(start) > 32*24*time.Hour {
 			t.Errorf("month_start = %v (%v)", cs["month_start"], err)
 		}
 	}
@@ -322,11 +333,11 @@ func TestSummary(t *testing.T) {
 		o    opt
 		want string
 	}{
-		"owner":                   {path(f.a), owner, `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
-		"viewer":                  {path(f.a), f.session(t, f.viewerA, false), `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
+		"owner":                   {path(f.a), owner, `{"customers":{"active":4,"seen_this_month":3},"licenses":{"active":5,"revoked":0,"suspended":1}}`},
+		"viewer":                  {path(f.a), f.session(t, f.viewerA, false), `{"customers":{"active":4,"seen_this_month":3},"licenses":{"active":5,"revoked":0,"suspended":1}}`},
 		"scoped to prodA":         {path(f.a), f.session(t, f.scoped, false), `{"licenses":{"active":2,"revoked":0,"suspended":1}}`},
 		"other tenant":            {path(f.b), f.session(t, f.ownerB, false), `{"customers":{"active":1,"seen_this_month":0},"licenses":{"active":1,"revoked":0,"suspended":0}}`},
-		"API token, all products": {path(f.a), bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
+		"API token, all products": {path(f.a), bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), `{"customers":{"active":4,"seen_this_month":3},"licenses":{"active":5,"revoked":0,"suspended":1}}`},
 	} {
 		r := f.do(t, "GET", tc.path, "", tc.o)
 		var got, want any

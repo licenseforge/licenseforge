@@ -243,10 +243,10 @@ func TestCustomerRefusals(t *testing.T) {
 	}
 }
 
-// CountActive counts non-archived customers of the caller's tenant, exactly,
+// Counts counts non-archived customers of the caller's tenant, exactly,
 // and only for callers who see every customer (customer:read on every
 // product); for anyone else it reports "not available", never a partial count.
-func TestCountActive(t *testing.T) {
+func TestCounts(t *testing.T) {
 	f := setup(t)
 	mgrA := as(f.a, authz.Manager)
 	var archived string
@@ -276,8 +276,9 @@ func TestCountActive(t *testing.T) {
 		"product-scoped caller":   {as(f.a, authz.Owner, ids.Product()), 0, false},
 		"sdk token (no customer)": {as(f.a, authz.SDK), 0, false},
 	} {
-		n, ok, err := f.s.CountActive(c.ctx)
-		if err != nil || n != c.n || ok != c.ok {
+		got, ok, err := f.s.Counts(c.ctx)
+		n := got.Active
+		if err != nil || n != c.n || ok != c.ok || got.SeenThisMonth != 0 {
 			t.Errorf("%s: %d, %v, %v; want %d, %v", name, n, ok, err, c.n, c.ok)
 		}
 	}
