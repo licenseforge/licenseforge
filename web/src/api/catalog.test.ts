@@ -8,6 +8,9 @@ import {
   customerPatch,
   formatRefs,
   FieldError,
+  planForm,
+  planPatch,
+  splitDuration,
   grantCells,
   grantsPatch,
   parseLimit,
@@ -187,5 +190,36 @@ describe("the feature matrix's patch", () => {
   it("starts cells from the grants", () => {
     expect(grantCells({ sso: true, max_users: -1 }, [{ key: "sso", type: "boolean" }, { key: "export", type: "boolean" }, { key: "max_users", type: "limit" }, { key: "nodes", type: "limit" }]))
       .toEqual({ sso: true, export: false, max_users: "-1", nodes: "" });
+  });
+});
+
+describe("editing a plan", () => {
+  const pro = {
+    id: "pln_1", product_id: "prd_1", slug: "pro", name: "Pro", duration_months: 12, duration_seconds: null, expiry_basis: "from_issue" as const,
+    max_activations: 3, max_rehosts: null, bind_type: "machine" as const, offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null,
+    grace_seconds: 0, archived_at: null, created_at: "",
+  };
+  it("shows durations in the largest exact unit", () => {
+    expect([splitDuration(604800), splitDuration(5400), splitDuration(90), splitDuration(7)]).toEqual([
+      { n: "7", unit: "days" }, { n: "90", unit: "minutes" }, { n: "90", unit: "seconds" }, { n: "7", unit: "seconds" },
+    ]);
+  });
+  it("sends nothing for an untouched form", () => {
+    expect(planPatch(pro, planForm(pro))).toEqual({});
+    const trial = { ...pro, duration_months: null, duration_seconds: 14 * 86400, max_offline_seconds: 3600, grace_seconds: 86400 };
+    expect(planPatch(trial, planForm(trial))).toEqual({});
+  });
+  it("sends only what changed, null for cleared optional terms", () => {
+    const f = { ...planForm(pro), name: "Pro yearly", maxActivations: "", maxRehosts: "2", lease: "1", leaseUnit: "hours" as const, maxOffline: "30", grace: "3" };
+    expect(planPatch(pro, f)).toEqual({ name: "Pro yearly", max_activations: null, max_rehosts: 2, lease_seconds: 3600, max_offline_seconds: 30 * 86400, grace_seconds: 3 * 86400 });
+  });
+  it("switches the term between months and seconds, clearing the other", () => {
+    expect(planPatch(pro, { ...planForm(pro), term: "14", termUnit: "days" })).toEqual({ duration_months: null, duration_seconds: 14 * 86400 });
+    expect(planPatch(pro, { ...planForm(pro), term: "" })).toEqual({ duration_months: null });
+  });
+  it("names a number that isn't whole", () => {
+    expect(() => planPatch(pro, { ...planForm(pro), lease: "1.5" })).toThrow("lease_seconds");
+    expect(() => planPatch(pro, { ...planForm(pro), grace: "" })).toThrow("grace_seconds");
+    expect(() => planPatch(pro, { ...planForm(pro), maxRehosts: "-1" })).toThrow("max_rehosts");
   });
 });

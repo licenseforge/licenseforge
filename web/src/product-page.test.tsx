@@ -31,7 +31,7 @@ const pro = {
   grace_seconds: 0, archived_at: null, created_at: "",
 };
 
-async function page(role: string, opts: { archived?: boolean; planPost?: () => Response | Promise<Response> } = {}) {
+async function page(role: string, opts: { archived?: boolean; planPost?: () => Response | Promise<Response>; planPatch?: () => Response } = {}) {
   const posts: Request[] = [];
   const lists: URL[] = [];
   let planArchived = false;
@@ -41,6 +41,10 @@ async function page(role: string, opts: { archived?: boolean; planPost?: () => R
       const u = new URL(req.url);
       if (u.pathname === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (u.pathname === "/api/v1/me/tenants") return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: true, product_ids: [] }] });
+      if (req.method === "PATCH" && u.pathname.endsWith("/plans/pln_1")) {
+        posts.push(req.clone());
+        return opts.planPatch?.() ?? json(pro);
+      }
       if (req.method === "POST") {
         posts.push(req.clone());
         if (u.pathname.endsWith("/plans/pln_1/archive")) {
@@ -196,4 +200,35 @@ it("refuses a term that isn't a whole number without a request", async () => {
   await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
   await vi.waitFor(() => expect(el.textContent).toContain("A whole number."));
   expect(posts).toHaveLength(0);
+});
+
+it("edits a plan's terms, sending only what changed", async () => {
+  const { el, posts } = await page("admin");
+  await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Edit Pro yearly"]')!.click());
+  const field = (name: string) => el.querySelector<HTMLInputElement>(`dialog [name="${name}"]`)!;
+  expect([field("term").value, field("lease_seconds").value, field("max_activations").value]).toEqual(["12", "7", "3"]); // 12 months, 7 days
+  const set = setter(el);
+  await act(async () => {
+    set("max_activations", "");
+    set("lease_seconds", "2");
+  });
+  await submit(el);
+  await vi.waitFor(() => expect(posts).toHaveLength(1));
+  expect(posts[0]!.method).toBe("PATCH");
+  expect(JSON.parse(await posts[0]!.text())).toEqual({ max_activations: null, lease_seconds: 2 * 86400 });
+  await vi.waitFor(() => expect(el.querySelector("dialog[open]")).toBeNull());
+});
+
+it("closes an untouched edit without a request; shows the server's term error under Term", async () => {
+  const problem = { type: "about:blank", title: "x", status: 422, code: "validation_failed", request_id: "r", errors: [{ field: "/duration_months", message: "1 to 1200" }] };
+  const { el, posts } = await page("admin", { planPatch: () => json(problem, 422) });
+  const edit = () => act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Edit Pro yearly"]')!.click());
+  await edit();
+  await submit(el);
+  await vi.waitFor(() => expect(el.querySelector("dialog[open]")).toBeNull());
+  expect(posts).toHaveLength(0);
+  await edit();
+  await act(async () => setter(el)("term", "5000"));
+  await submit(el);
+  await vi.waitFor(() => expect(document.getElementById("term-error")?.textContent).toBe("1 to 1200"));
 });

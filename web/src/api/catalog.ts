@@ -12,6 +12,7 @@ export type Feature = components["schemas"]["Feature"];
 export type FeatureCreate = components["schemas"]["FeatureCreate"];
 export type Plan = components["schemas"]["Plan"];
 export type PlanCreate = components["schemas"]["PlanCreate"];
+export type PlanPatch = components["schemas"]["PlanPatch"];
 
 const mergePatch = { "Content-Type": "application/merge-patch+json" };
 
@@ -95,6 +96,87 @@ export async function archiveFeature(tenant: string, id: string): Promise<Featur
 
 export async function createPlan(tenant: string, body: PlanCreate): Promise<Plan> {
   return unwrap(await api.POST("/tenants/{tenant}/plans", { params: { path: { tenant } }, body }));
+}
+
+/** Changes a plan's name or terms (merge patch); licenses already sold keep theirs (ADR-0013). */
+export async function updatePlan(tenant: string, id: string, patch: PlanPatch): Promise<Plan> {
+  return unwrap(await api.PATCH("/tenants/{tenant}/plans/{id}", { params: { path: { tenant, id } }, body: patch, headers: mergePatch }));
+}
+
+/** Units for a duration in seconds, largest first. */
+export const durationUnits = { days: 86400, hours: 3600, minutes: 60, seconds: 1 } as const;
+export type DurationUnit = keyof typeof durationUnits;
+
+/** A duration in seconds as the largest unit that holds it exactly (so editing loses nothing). */
+export function splitDuration(seconds: number): { n: string; unit: DurationUnit } {
+  for (const [unit, size] of Object.entries(durationUnits) as [DurationUnit, number][]) {
+    if (seconds > 0 && seconds % size === 0) return { n: String(seconds / size), unit };
+  }
+  return { n: String(seconds), unit: "seconds" };
+}
+
+/** The plan edit form's raw fields. Empty optional numbers mean null (perpetual, unlimited, no offline limit). */
+export type PlanForm = {
+  name: string;
+  term: string; termUnit: "months" | DurationUnit;
+  expiryBasis: Plan["expiry_basis"];
+  maxActivations: string; maxRehosts: string;
+  offlineAllowed: boolean;
+  lease: string; leaseUnit: DurationUnit;
+  maxOffline: string; maxOfflineUnit: DurationUnit;
+  grace: string; graceUnit: DurationUnit;
+};
+
+/** The form for a plan as it is. */
+export function planForm(p: Plan): PlanForm {
+  const term = p.duration_months != null ? { n: String(p.duration_months), unit: "months" as const } : p.duration_seconds != null ? splitDuration(p.duration_seconds) : { n: "", unit: "months" as const };
+  const lease = splitDuration(p.lease_seconds);
+  const offline = p.max_offline_seconds != null ? splitDuration(p.max_offline_seconds) : { n: "", unit: "days" as const };
+  const grace = p.grace_seconds === 0 ? { n: "0", unit: "days" as const } : splitDuration(p.grace_seconds);
+  return {
+    name: p.name, term: term.n, termUnit: term.unit, expiryBasis: p.expiry_basis,
+    maxActivations: p.max_activations == null ? "" : String(p.max_activations), maxRehosts: p.max_rehosts == null ? "" : String(p.max_rehosts),
+    offlineAllowed: p.offline_allowed, lease: lease.n, leaseUnit: lease.unit, maxOffline: offline.n, maxOfflineUnit: offline.unit,
+    grace: grace.n, graceUnit: grace.unit,
+  };
+}
+
+/**
+ * The merge patch from a plan to the edited form: only what changed, null
+ * for a cleared optional term. Throws a FieldError naming a number that
+ * isn't a whole number (the server checks the ranges and the whole result).
+ */
+export function planPatch(before: Plan, f: PlanForm): PlanPatch {
+  const whole = (field: string, raw: string, size = 1) => {
+    const s = raw.trim();
+    const n = Number(s) * size;
+    if (!/^\d{1,12}$/.test(s) || !Number.isSafeInteger(n)) throw new FieldError(field);
+    return n;
+  };
+  const optional = (field: string, raw: string, size = 1) => (raw.trim() === "" ? null : whole(field, raw, size));
+  const patch: PlanPatch = {};
+  if (f.name !== before.name) patch.name = f.name.trim();
+  let months: number | null = null;
+  let seconds: number | null = null;
+  if (f.term.trim() !== "") {
+    if (f.termUnit === "months") months = whole("term", f.term);
+    else seconds = whole("term", f.term, durationUnits[f.termUnit]);
+  }
+  if (months !== before.duration_months) patch.duration_months = months;
+  if (seconds !== before.duration_seconds) patch.duration_seconds = seconds;
+  if (f.expiryBasis !== before.expiry_basis) patch.expiry_basis = f.expiryBasis;
+  const activations = optional("max_activations", f.maxActivations);
+  if (activations !== before.max_activations) patch.max_activations = activations;
+  const rehosts = optional("max_rehosts", f.maxRehosts);
+  if (rehosts !== before.max_rehosts) patch.max_rehosts = rehosts;
+  if (f.offlineAllowed !== before.offline_allowed) patch.offline_allowed = f.offlineAllowed;
+  const lease = whole("lease_seconds", f.lease, durationUnits[f.leaseUnit]);
+  if (lease !== before.lease_seconds) patch.lease_seconds = lease;
+  const offline = optional("max_offline_seconds", f.maxOffline, durationUnits[f.maxOfflineUnit]);
+  if (offline !== before.max_offline_seconds) patch.max_offline_seconds = offline;
+  const grace = whole("grace_seconds", f.grace, durationUnits[f.graceUnit]);
+  if (grace !== before.grace_seconds) patch.grace_seconds = grace;
+  return patch;
 }
 
 /** Archives a plan, one-way: no new license from it; licenses already sold keep their terms. */
