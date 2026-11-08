@@ -42,6 +42,7 @@
 //	LICENSEFORGE_OIDC_PHISHING_RESISTANT_AMR amr values that count as phishing-resistant MFA (default hwk,sc,pop)
 //	LICENSEFORGE_OIDC_MFA_ACR                acr/acrs values that count as MFA (default none)
 //	LICENSEFORGE_OIDC_PHISHING_RESISTANT_ACR acr/acrs values that count as phishing-resistant (default none; e.g. phr,phrh on Okta)
+//	LICENSEFORGE_PLATFORM_MFA_POLICY         none (default), mfa or phishing_resistant: what platform admins' sessions need on /api/v1/platform (ADR-0038, ADR-0042)
 //	LICENSEFORGE_OIDC_STEP_UP_MFA_ACR        acr_values a step-up login to mfa asks for (comma list; default none: max_age=0 only)
 //	LICENSEFORGE_OIDC_STEP_UP_PHISHING_RESISTANT_ACR the same for phishing_resistant (e.g. phr on Okta)
 //
@@ -71,6 +72,7 @@ import (
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/auditexport"
 	"licenseforge.io/licenseforge/internal/auditverify"
+	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/catalog"
 	"licenseforge.io/licenseforge/internal/customers"
 	"licenseforge.io/licenseforge/internal/idempotency"
@@ -80,6 +82,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/platform"
 	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/retention"
 	"licenseforge.io/licenseforge/internal/secrets"
@@ -295,6 +298,13 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	platformMFA := authz.Assurance(os.Getenv("LICENSEFORGE_PLATFORM_MFA_POLICY"))
+	if platformMFA == "" {
+		platformMFA = authz.AssuranceNone
+	}
+	if !platformMFA.Valid() {
+		return fmt.Errorf("LICENSEFORGE_PLATFORM_MFA_POLICY: %q isn't none, mfa or phishing_resistant", platformMFA)
+	}
 	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -321,6 +331,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// and stored idempotent responses (which can hold one) are encrypted, and
 	// the activation API decrypts license keys and signs leases.
 	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
+		Platform: platform.Service{DB: db}, PlatformMFAPolicy: platformMFA,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Products: catalog.Products{DB: db}, Features: catalog.Features{DB: db}, Plans: catalog.Plans{DB: db}, Customers: customers.Service{DB: db}, Audit: audit.Log{DB: db}, SigningKeys: signing.Local{DB: db, Keys: keyring},
 		Activations: activations.Service{DB: db, Keys: keyring, Issuer: issue.Issuer{DB: db, Keys: signing.Local{DB: db, Keys: keyring}}},

@@ -485,6 +485,21 @@ func (e PlanPatchExpiryBasis) Valid() bool {
 	}
 }
 
+// Defines values for PlatformTenantCreatedInvitationRole.
+const (
+	PlatformTenantCreatedInvitationRoleOwner PlatformTenantCreatedInvitationRole = "owner"
+)
+
+// Valid indicates whether the value is a known member of the PlatformTenantCreatedInvitationRole enum.
+func (e PlatformTenantCreatedInvitationRole) Valid() bool {
+	switch e {
+	case PlatformTenantCreatedInvitationRoleOwner:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleAdmin   Role = "admin"
@@ -1258,6 +1273,57 @@ type PlanPatch struct {
 // PlanPatchExpiryBasis defines model for PlanPatch.ExpiryBasis.
 type PlanPatchExpiryBasis string
 
+// PlatformTenant defines model for PlatformTenant.
+type PlatformTenant struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
+	Id string `json:"id"`
+
+	// MfaPolicy The assurance a session needs in this tenant (ADR-0038): none, MFA,
+	// or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
+	// the identity provider asserts it in the ID token (amr/acr).
+	MfaPolicy MfaPolicy `json:"mfa_policy"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+}
+
+// PlatformTenantCreate defines model for PlatformTenantCreate.
+type PlatformTenantCreate struct {
+	Name string `json:"name"`
+
+	// OwnerEmail Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email.
+	OwnerEmail string `json:"owner_email"`
+
+	// Slug Lowercase letters and digits joined by single dashes, e.g. acme. It names the tenant in URLs and can't change.
+	Slug string `json:"slug"`
+}
+
+// PlatformTenantCreated defines model for PlatformTenantCreated.
+type PlatformTenantCreated struct {
+	Invitation struct {
+		Email     string    `json:"email"`
+		ExpiresAt time.Time `json:"expires_at"`
+
+		// Id Example: inv_01jcz5b2y3c4d5e6f7g8h9j0k1
+		Id   string                              `json:"id"`
+		Role PlatformTenantCreatedInvitationRole `json:"role"`
+
+		// Token For the invite link (/invite#token=…). Shown once
+		Token string `json:"token"`
+	} `json:"invitation"`
+	Tenant PlatformTenant `json:"tenant"`
+}
+
+// PlatformTenantCreatedInvitationRole defines model for PlatformTenantCreated.Invitation.Role.
+type PlatformTenantCreatedInvitationRole string
+
+// PlatformTenantPage defines model for PlatformTenantPage.
+type PlatformTenantPage struct {
+	Items      []PlatformTenant `json:"items"`
+	NextCursor *string          `json:"next_cursor,omitempty"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Stable; clients switch on it. New codes may be added.
@@ -1445,6 +1511,14 @@ type AcceptInvitationJSONBody struct {
 	Token string `json:"token"`
 }
 
+// ListPlatformTenantsParams defines parameters for ListPlatformTenants.
+type ListPlatformTenantsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque; `next_cursor` of the previous page.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // ListApiTokensParams defines parameters for ListApiTokens.
 type ListApiTokensParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1582,6 +1656,9 @@ type RefreshLeaseJSONRequestBody = ActivationRequest
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 
+// CreatePlatformTenantJSONRequestBody defines body for CreatePlatformTenant for application/json ContentType.
+type CreatePlatformTenantJSONRequestBody = PlatformTenantCreate
+
 // UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
 type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
 
@@ -1641,6 +1718,12 @@ type ServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(w http.ResponseWriter, r *http.Request)
+	// ListPlatformTenants Every tenant, newest first (platform admins, ADR-0042).
+	// (GET /platform/tenants)
+	ListPlatformTenants(w http.ResponseWriter, r *http.Request, params ListPlatformTenantsParams)
+	// CreatePlatformTenant Create a tenant and invite its first owner (platform admins, ADR-0042).
+	// (POST /platform/tenants)
+	CreatePlatformTenant(w http.ResponseWriter, r *http.Request)
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant)
@@ -1914,6 +1997,66 @@ func (siw *ServerInterfaceWrapper) ListMyTenants(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyTenants(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPlatformTenants operation middleware
+func (siw *ServerInterfaceWrapper) ListPlatformTenants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPlatformTenantsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlatformTenants(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePlatformTenant operation middleware
+func (siw *ServerInterfaceWrapper) CreatePlatformTenant(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePlatformTenant(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4062,6 +4205,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys/{kid}/promote", wrapper.PromoteSigningKey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/signing-keys/{kid}/discard", wrapper.DiscardSigningKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/platform/tenants", wrapper.ListPlatformTenants)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/platform/tenants", wrapper.CreatePlatformTenant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/deactivate", wrapper.Deactivate)
@@ -4850,6 +4995,256 @@ func (response ListMyTenants401ApplicationProblemPlusJSONResponse) VisitListMyTe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPlatformTenantsRequestObject struct {
+	Params ListPlatformTenantsParams
+}
+
+type ListPlatformTenantsResponseObject interface {
+	VisitListPlatformTenantsResponse(w http.ResponseWriter) error
+}
+
+type ListPlatformTenants200JSONResponse PlatformTenantPage
+
+func (response ListPlatformTenants200JSONResponse) VisitListPlatformTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPlatformTenants400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListPlatformTenants400ApplicationProblemPlusJSONResponse) VisitListPlatformTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPlatformTenants401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListPlatformTenants401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListPlatformTenants401ResponseHeaders
+}
+
+func (response ListPlatformTenants401ApplicationProblemPlusJSONResponse) VisitListPlatformTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPlatformTenants403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListPlatformTenants403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListPlatformTenants403ResponseHeaders
+}
+
+func (response ListPlatformTenants403ApplicationProblemPlusJSONResponse) VisitListPlatformTenantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenantRequestObject struct {
+	Body *CreatePlatformTenantJSONRequestBody
+}
+
+type CreatePlatformTenantResponseObject interface {
+	VisitCreatePlatformTenantResponse(w http.ResponseWriter) error
+}
+
+type CreatePlatformTenant201JSONResponse PlatformTenantCreated
+
+func (response CreatePlatformTenant201JSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreatePlatformTenant400ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreatePlatformTenant401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreatePlatformTenant401ResponseHeaders
+}
+
+func (response CreatePlatformTenant401ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreatePlatformTenant403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreatePlatformTenant403ResponseHeaders
+}
+
+func (response CreatePlatformTenant403ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreatePlatformTenant409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreatePlatformTenant409ResponseHeaders
+}
+
+func (response CreatePlatformTenant409ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreatePlatformTenant413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreatePlatformTenant413ResponseHeaders
+}
+
+func (response CreatePlatformTenant413ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePlatformTenant422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreatePlatformTenant422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreatePlatformTenant422ResponseHeaders
+}
+
+func (response CreatePlatformTenant422ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -11252,6 +11647,12 @@ type StrictServerInterface interface {
 	// ListMyTenants The signed-in user's tenants, with their role and product scope in each, sorted by slug.
 	// (GET /me/tenants)
 	ListMyTenants(ctx context.Context, request ListMyTenantsRequestObject) (ListMyTenantsResponseObject, error)
+	// ListPlatformTenants Every tenant, newest first (platform admins, ADR-0042).
+	// (GET /platform/tenants)
+	ListPlatformTenants(ctx context.Context, request ListPlatformTenantsRequestObject) (ListPlatformTenantsResponseObject, error)
+	// CreatePlatformTenant Create a tenant and invite its first owner (platform admins, ADR-0042).
+	// (POST /platform/tenants)
+	CreatePlatformTenant(ctx context.Context, request CreatePlatformTenantRequestObject) (CreatePlatformTenantResponseObject, error)
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
@@ -11582,6 +11983,63 @@ func (sh *strictHandler) ListMyTenants(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyTenantsResponseObject); ok {
 		if err := validResponse.VisitListMyTenantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPlatformTenants operation middleware
+func (sh *strictHandler) ListPlatformTenants(w http.ResponseWriter, r *http.Request, params ListPlatformTenantsParams) {
+	var request ListPlatformTenantsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPlatformTenants(ctx, request.(ListPlatformTenantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPlatformTenants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPlatformTenantsResponseObject); ok {
+		if err := validResponse.VisitListPlatformTenantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePlatformTenant operation middleware
+func (sh *strictHandler) CreatePlatformTenant(w http.ResponseWriter, r *http.Request) {
+	var request CreatePlatformTenantRequestObject
+
+	var body CreatePlatformTenantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePlatformTenant(ctx, request.(CreatePlatformTenantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePlatformTenant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePlatformTenantResponseObject); ok {
+		if err := validResponse.VisitCreatePlatformTenantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

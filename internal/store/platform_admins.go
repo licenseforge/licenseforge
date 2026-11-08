@@ -21,6 +21,14 @@ var ErrLastPlatformAdmin = errors.New("store: can't remove the last platform adm
 // grant the role), or isn't an enabled user.
 var ErrNotPlatformAdmin = errors.New("store: not an enabled platform admin")
 
+// LockPlatformAdminsShared takes the admin-set lock shared until tx (on the
+// platform pool) ends: a grant or removal waits for tx, so a check of the
+// caller's platform admin role made after it holds until commit.
+func LockPlatformAdminsShared(ctx context.Context, tx *ent.Tx) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, platformAdminLock)
+	return err
+}
+
 // withAdminLock runs fn on the platform pool holding the admin-set lock.
 func (d *DB) withAdminLock(ctx context.Context, fn func(*ent.Tx) error) error {
 	return inTx(ctx, d.platform, nil, func(tx *ent.Tx) error {
