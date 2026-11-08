@@ -19,6 +19,7 @@ import {
 } from "@/api/catalog";
 import { Field, FormDialog, useCaller } from "@/catalog-pages";
 import { errorText, input, Modal } from "@/components/modal";
+import { FeatureMatrix } from "@/feature-matrix";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
 
@@ -136,6 +137,13 @@ export function ProductPage() {
           </div>
         )}
       </section>
+
+      {features.data && plans.data && features.data.items.length > 0 && plans.data.items.length > 0 && (
+        <section aria-labelledby="matrix-title" className="mt-8">
+          <h2 id="matrix-title" className="text-lg font-semibold">{t("matrix.title")}</h2>
+          <FeatureMatrix tenant={slug} features={features.data.items} plans={plans.data.items} write={write} />
+        </section>
+      )}
 
       {dialog?.kind === "feature" && <FeatureDialog tenant={slug} product={id} onClose={() => setDialog(null)} />}
       {dialog?.kind === "plan" && <PlanDialog tenant={slug} product={id} onClose={() => setDialog(null)} />}
