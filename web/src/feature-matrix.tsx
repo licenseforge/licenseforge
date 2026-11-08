@@ -32,7 +32,12 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
   const rows = features.filter((f) => !f.archived_at || grantedAnywhere(f.key)).sort((a, b) => a.key.localeCompare(b.key));
   const start = plans.map((_, i) => grantCells(before(i), features));
   const cell = (i: number, key: string): Cell => edits[plans[i]!.id]?.[key] ?? start[i]![key]!;
+  // A cell the user can't change (an archived feature this plan doesn't
+  // grant) isn't sent: the server would refuse the plan's whole patch. That
+  // covers a feature archived, or archived and hidden, while editing.
+  const archived = new Set(features.filter((f) => f.archived_at).map((f) => f.key));
   const shown = new Set(rows.map((f) => f.key));
+  const sendable = (i: number, key: string) => shown.has(key) && !(archived.has(key) && !Object.hasOwn(before(i), key));
   const edit = (plan: string, key: string, v: Cell) => {
     setSaved(false);
     setEdits((e) => ({ ...e, [plan]: { ...e[plan], [key]: v } }));
@@ -45,10 +50,8 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
     const bad: Record<string, string[]> = {};
     const errs: { plan: string; error: unknown }[] = [];
     const left: Record<string, Record<string, Cell>> = {};
-    for (const p of plans) {
-      // A feature archived and hidden meanwhile isn't sent (the server would
-      // refuse the plan's whole patch).
-      const touched = Object.fromEntries(Object.entries(edits[p.id] ?? {}).filter(([k]) => shown.has(k)));
+    for (const [i, p] of plans.entries()) {
+      const touched = Object.fromEntries(Object.entries(edits[p.id] ?? {}).filter(([k]) => sendable(i, k)));
       if (Object.keys(touched).length === 0) continue;
       const r = grantsPatch(touched);
       if ("invalid" in r) {
@@ -95,7 +98,7 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
                   {f.archived_at && <span className="block text-xs">{t("customers.archived")}</span>}
                 </th>
                 {plans.map((p, i) => {
-                  const v = cell(i, f.key);
+                  const v = sendable(i, f.key) ? cell(i, f.key) : start[i]![f.key]!; // a locked cell shows what's granted
                   // An archived feature can change or go where granted, never be granted anew.
                   // Disabled while saving too: an edit made then would be lost.
                   const locked = !write || busy || (f.archived_at != null && !Object.hasOwn(before(i), f.key));

@@ -66,7 +66,15 @@ async function render(opts: { write?: boolean; patch?: (plan: string, body: unkn
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-  return { el, field, button, type, patches, grants, qc };
+  const rerender = (next: Feature[]) =>
+    act(async () =>
+      root!.render(
+        <QueryClientProvider client={qc}>
+          <FeatureMatrix tenant="acme" features={next} plans={plans} write={opts.write ?? true} />
+        </QueryClientProvider>,
+      ),
+    );
+  return { el, field, button, type, patches, grants, qc, rerender };
 }
 
 it("shows what each plan grants; an archived feature only where still granted, and not grantable anew", async () => {
@@ -163,6 +171,26 @@ it("keeps the matrix and unsaved edits when a background refetch fails", async (
   expect(el.querySelector('[role="alert"]')).toBeNull();
   expect(el.querySelector("table")).not.toBeNull();
   expect(field("SSO", "Basic").checked).toBe(true);
+});
+
+it("doesn't send a cell that became locked: its feature was archived while editing", async () => {
+  const { el, field, button, patches, rerender } = await render();
+  await act(async () => field("SSO", "Basic").click()); // Basic doesn't grant SSO; Pro does
+  await act(async () => field("MAX_USERS", "Basic").focus());
+  await rerender(features.map((f) => (f.key === "sso" ? { ...f, archived_at: "2026-11-08T00:00:00Z" } : f)));
+  expect(field("SSO", "Basic").disabled).toBe(true);
+  expect(field("SSO", "Basic").checked).toBe(false); // shows what's granted, not the dropped edit
+  await act(async () => field("LEGACY", "Pro").click());
+  await act(async () => button("Save changes")!.click());
+  await vi.waitFor(() => expect(el.textContent).toContain("Saved."));
+  expect(patches).toEqual([{ plan: "pln_pro", body: { legacy: null } }]);
+});
+
+it("names the plans whose limits aren't valid", async () => {
+  const { el, field, type, button } = await render();
+  await type(field("MAX_USERS", "Basic"), "x");
+  await act(async () => button("Save changes")!.click());
+  await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toContain("Nothing was saved for Basic."));
 });
 
 it("is read-only without catalog:write", async () => {
