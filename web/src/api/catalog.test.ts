@@ -8,6 +8,9 @@ import {
   customerPatch,
   formatRefs,
   FieldError,
+  grantCells,
+  grantsPatch,
+  parseLimit,
   parseRefs,
   planBody,
   planTerm,
@@ -166,5 +169,28 @@ describe("planTerm", () => {
     expect(planTerm({ duration_months: null, duration_seconds: 14 * 86400 })).toEqual({ kind: "days", n: 14 });
     expect(planTerm({ duration_months: null, duration_seconds: 90 })).toEqual({ kind: "seconds", n: 90 });
     expect(planTerm({ duration_months: null, duration_seconds: null })).toEqual({ kind: "perpetual" });
+  });
+});
+
+describe("the feature matrix's patch", () => {
+  const before = { sso: true, max_users: 50, export: true };
+  it("sends only changes: new grants, changed limits, removals as null", () => {
+    expect(grantsPatch(before, { sso: true, export: false, audit: true, max_users: " 050 ", nodes: "" })).toEqual({ patch: { export: null, audit: true } });
+    expect(grantsPatch(before, { max_users: "-1", sso: false })).toEqual({ patch: { max_users: -1, sso: null } });
+    expect(grantsPatch(before, { max_users: "" })).toEqual({ patch: { max_users: null } });
+    expect(grantsPatch({}, { nodes: "9007199254740991" })).toEqual({ patch: { nodes: 9007199254740991 } });
+  });
+  it("names limits that aren't valid and sends nothing", () => {
+    expect(grantsPatch(before, { max_users: "1.5", nodes: "-2", seats: "9007199254740992", sso: false })).toEqual({ invalid: ["max_users", "nodes", "seats"] });
+  });
+  it("treats __proto__ as a plain key", () => {
+    expect(grantsPatch(before, { __proto__: true } as Record<string, boolean>)).toEqual({ patch: {} });
+  });
+  it("parses limits", () => {
+    expect([parseLimit("-1"), parseLimit(" 12 "), parseLimit("-0"), parseLimit("1e3"), parseLimit("")]).toEqual([-1, 12, null, null, null]);
+  });
+  it("starts cells from the grants", () => {
+    expect(grantCells({ sso: true, max_users: -1 }, [{ key: "sso", type: "boolean" }, { key: "export", type: "boolean" }, { key: "max_users", type: "limit" }, { key: "nodes", type: "limit" }]))
+      .toEqual({ sso: true, export: false, max_users: "-1", nodes: "" });
   });
 });

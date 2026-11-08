@@ -51,6 +51,7 @@ async function page(role: string, opts: { archived?: boolean; planPost?: () => R
         return json(sso, 201);
       }
       if (u.pathname.endsWith("/products/prd_1")) return json({ ...product, archived_at: opts.archived ? "2026-11-01T00:00:00Z" : null });
+      if (/\/plans\/[^/]+\/features$/.test(u.pathname)) return json({ sso: true }); // the matrix
       lists.push(u);
       if (u.pathname.endsWith("/features")) return json({ items: [sso, users] });
       if (u.pathname.endsWith("/plans")) return json({ items: [{ ...pro, archived_at: planArchived ? "2026-11-07T00:00:00Z" : null }] });
@@ -74,6 +75,7 @@ it("lists the product's features and plans, filtered by product", async () => {
   expect(el.textContent).toContain("max_users");
   expect(el.textContent).toContain("Limit users");
   expect(el.textContent).toContain("12 months");
+  await vi.waitFor(() => expect(el.querySelector('input[aria-label="SSO in Pro yearly"]')).not.toBeNull()); // the matrix
   expect(lists.length).toBeGreaterThanOrEqual(2);
   expect(lists.every((u) => u.searchParams.get("product_id") === "prd_1")).toBe(true);
 });
