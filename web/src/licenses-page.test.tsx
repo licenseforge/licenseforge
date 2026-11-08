@@ -105,6 +105,7 @@ describe("LicenseDialog", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] }); // the machines list
         posts.push(new URL(req.url).pathname);
         const action = new URL(req.url).pathname.split("/").pop();
         return json({ ...license, status: action === "reinstate" ? "active" : action === "suspend" ? "suspended" : "revoked" });
@@ -317,5 +318,77 @@ describe("the licenses page", () => {
     expect(m.button("Issue license")).toBeDefined();
     await act(async () => m.button("Details")!.click());
     expect(m.button("Suspend")).toBeDefined();
+  });
+});
+
+describe("the license's machines (support rehost, ADR-0039)", () => {
+  const machine = (id: string, host: string | null, off: string | null = null) => ({
+    id, license_id: "lic_1", fingerprint: `${id}fingerprintabcdef`, fp_source: "machine-id", binding: "machine", mode: "online", hostname: host,
+    app_version: "2.1.0", sdk_version: null, first_seen_at: "2026-11-01T00:00:00Z", last_seen_at: "2026-11-05T00:00:00Z", deactivated_at: off, created_at: "2026-11-01T00:00:00Z",
+  });
+  function stub() {
+    const posts: string[] = [];
+    let gets = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const p = new URL(req.url).pathname;
+        if (req.method === "POST") {
+          posts.push(p);
+          if (p.endsWith("/rehosts/reset")) return json({ ...license, max_rehosts: 2, rehost_count: 0 });
+          return json(machine("act_1", "build-01", "2026-11-08T00:00:00Z"));
+        }
+        if (p.endsWith("/activations")) {
+          gets++;
+          return json({ items: [machine("act_1", "build-01"), machine("act_2", null, "2026-11-02T00:00:00Z")] });
+        }
+        return json({ items: [] });
+      }),
+    );
+    return { posts, gets: () => gets };
+  }
+  const atLimit = { ...license, max_rehosts: 2, rehost_count: 2 };
+
+  it("lists machines and moves; support may deactivate one", async () => {
+    const s = stub();
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={atLimit} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />);
+    await vi.waitFor(() => expect(el.textContent).toContain("build-01"));
+    expect(el.textContent).toContain("Seat moves used: 2 of 2");
+    expect(el.textContent).toContain("act_2fingerp"); // no hostname: the fingerprint's start
+    expect(el.textContent).toContain("Deactivated");
+    expect([...el.querySelectorAll("button")].filter((b) => b.textContent === "Deactivate")).toHaveLength(1); // the active one only
+    await act(async () => button("Deactivate")!.click());
+    expect(el.textContent).toContain("Deactivate build-01?");
+    const before = s.gets();
+    await act(async () => [...el.querySelectorAll('[role="group"] button')].find((b) => b.textContent === "Deactivate")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await vi.waitFor(() => expect(s.posts).toEqual(["/api/v1/tenants/acme/licenses/lic_1/activations/act_1/deactivate"]));
+    await vi.waitFor(() => expect(s.gets()).toBeGreaterThan(before));
+  });
+
+  it("resets the moves after a confirmation and shows the license as it is now", async () => {
+    const s = stub();
+    let changed: License | null = null;
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={atLimit} manage={false} machines names={names} onClose={() => {}} onChanged={(l) => (changed = l)} />);
+    await act(async () => button("Reset moves")!.click());
+    expect(el.textContent).toContain("This is audited.");
+    expect(s.posts).toEqual([]);
+    await act(async () => [...el.querySelectorAll('[role="group"] button')].find((b) => b.textContent === "Reset moves")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await vi.waitFor(() => expect(s.posts).toEqual(["/api/v1/tenants/acme/licenses/lic_1/rehosts/reset"]));
+    await vi.waitFor(() => expect(changed?.rehost_count).toBe(0));
+  });
+
+  it("offers no actions without activation:manage, none to reset at zero, and no reset on a revoked license", async () => {
+    stub();
+    const viewer = await render(<LicenseDialog tenant="acme" license={atLimit} manage={false} names={names} onClose={() => {}} onChanged={() => {}} />);
+    await vi.waitFor(() => expect(viewer.el.textContent).toContain("build-01"));
+    expect(viewer.button("Deactivate")).toBeUndefined();
+    expect(viewer.button("Reset moves")).toBeUndefined();
+    act(() => root?.unmount());
+    const zero = await render(<LicenseDialog tenant="acme" license={{ ...license, max_rehosts: null, rehost_count: 0 }} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect(zero.el.textContent).toContain("Seat moves used: 0 (unlimited)");
+    expect(zero.button("Reset moves")).toBeUndefined();
+    act(() => root?.unmount());
+    const revoked = await render(<LicenseDialog tenant="acme" license={{ ...atLimit, status: "revoked", revoked_at: "2026-11-08T00:00:00Z" }} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect(revoked.button("Reset moves")).toBeUndefined();
   });
 });

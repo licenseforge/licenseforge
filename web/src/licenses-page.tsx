@@ -4,9 +4,12 @@ import { type FormEvent, useState } from "react";
 import { ApiError, fieldErrors, onAuthError } from "@/api/client";
 import { allCustomers, allProducts, parseRefs, refsBody } from "@/api/catalog";
 import {
+  activationsQuery,
   actionsFor,
+  canManageActivations,
   canManageLicenses,
   changeLicense,
+  deactivateActivation,
   issueLicense,
   type License,
   type LicenseAction,
@@ -15,6 +18,7 @@ import {
   type LicenseIssued,
   type LicenseStatus,
   licensesQuery,
+  resetRehosts,
 } from "@/api/licenses";
 import { tenantsQuery } from "@/api/tenants";
 import type { Membership } from "@/api/tokens";
@@ -54,6 +58,7 @@ export function LicensesPage() {
   const { data: tenants = [] } = useQuery(tenantsQuery);
   const caller: Membership = tenants.find((tn) => tn.slug === slug) ?? { role: "viewer", scope: { all: false, products: [] } };
   const manage = canManageLicenses(caller);
+  const machines = canManageActivations(caller);
   const names = useNames(slug);
   const [filter, setFilter] = useState<LicenseFilter>({});
   const list = useInfiniteQuery(licensesQuery(slug, filter));
@@ -133,15 +138,15 @@ export function LicensesPage() {
           {t("tokens.more")}
         </Button>
       )}
-      {open && <LicenseDialog tenant={slug} license={open} manage={manage} names={names} onClose={() => setOpen(null)} onChanged={setOpen} />}
+      {open && <LicenseDialog tenant={slug} license={open} manage={manage} machines={machines} names={names} onClose={() => setOpen(null)} onChanged={setOpen} />}
       {issuing && <IssueDialog tenant={slug} names={names} onClose={() => setIssuing(false)} />}
     </>
   );
 }
 
 /** A license's entitlement snapshot and dates, with the actions its status allows. */
-export function LicenseDialog({ tenant, license: l, manage, names, onClose, onChanged }: {
-  tenant: string; license: License; manage: boolean; names: ReturnType<typeof useNames>; onClose: () => void; onChanged: (l: License) => void;
+export function LicenseDialog({ tenant, license: l, manage, machines = false, names, onClose, onChanged }: {
+  tenant: string; license: License; manage: boolean; machines?: boolean; names: ReturnType<typeof useNames>; onClose: () => void; onChanged: (l: License) => void;
 }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState<LicenseAction | null>(null);
@@ -192,6 +197,7 @@ export function LicenseDialog({ tenant, license: l, manage, names, onClose, onCh
           </tbody>
         </table>
       )}
+      <Machines tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
         <div role="group" aria-label={t(`licenses.confirm.${confirm}`)} className="mt-4 rounded-md border p-3 text-sm">
@@ -214,6 +220,75 @@ export function LicenseDialog({ tenant, license: l, manage, names, onClose, onCh
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * A license's machines (ADR-0034) and seat moves (ADR-0039). Support and up
+ * (activation:manage) may deactivate a machine, freeing its seat, and reset
+ * the move counter of a license at its limit: together, a support rehost.
+ */
+function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; license: License; manage: boolean; onChanged: (l: License) => void }) {
+  const qc = useQueryClient();
+  const list = useQuery(activationsQuery(tenant, l.id));
+  const [confirm, setConfirm] = useState<{ kind: "reset" } | { kind: "deactivate"; id: string; name: string } | null>(null);
+  const act = useMutation({
+    mutationFn: async (c: NonNullable<typeof confirm>) =>
+      c.kind === "reset" ? resetRehosts(tenant, l.id) : (await deactivateActivation(tenant, l.id, c.id), null),
+    onSuccess: async (updated) => {
+      await qc.invalidateQueries({ queryKey: activationsQuery(tenant, l.id).queryKey });
+      await qc.invalidateQueries({ queryKey: ["licenses", tenant] }); // seats and moves on the list
+      setConfirm(null);
+      if (updated) onChanged(updated);
+    },
+  });
+  const moves = l.max_rehosts === null ? t("licenses.movesUnlimited", { used: String(l.rehost_count) }) : t("licenses.moves", { used: String(l.rehost_count), max: String(l.max_rehosts) });
+  const rows = list.data?.items ?? [];
+  return (
+    <section aria-labelledby="machines-title" className="mt-4">
+      <h3 id="machines-title" className="font-semibold">{t("licenses.machines")}</h3>
+      <p className="mt-1 text-sm">
+        {moves}
+        {manage && l.rehost_count > 0 && l.status !== "revoked" && !confirm && (
+          <Button variant="ghost" className="ml-2" onClick={() => setConfirm({ kind: "reset" })}>{t("licenses.resetMoves")}</Button>
+        )}
+      </p>
+      {list.isError && <p role="alert" className="mt-1 text-sm">{errorText(list.error)}</p>}
+      {list.isSuccess && rows.length === 0 && <p className="mt-1 text-sm text-muted-foreground">{t("licenses.noMachines")}</p>}
+      {rows.length > 0 && (
+        <ul className="mt-2 divide-y rounded-md border text-sm">
+          {rows.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 p-2">
+              <span>
+                <span className="font-medium">{a.hostname ?? a.fingerprint.slice(0, 12)}</span>
+                {a.app_version && <span className="text-muted-foreground"> · {a.app_version}</span>}
+                <span className="block text-xs text-muted-foreground">
+                  {a.deactivated_at
+                    ? t("licenses.machineOff", { date: date.format(new Date(a.deactivated_at)) })
+                    : t("licenses.machineSeen", { date: date.format(new Date(a.last_seen_at)) })}
+                </span>
+              </span>
+              {manage && !a.deactivated_at && !confirm && (
+                <Button variant="ghost" onClick={() => setConfirm({ kind: "deactivate", id: a.id, name: a.hostname ?? a.fingerprint.slice(0, 12) })}>
+                  {t("licenses.deactivate")}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {list.data && !list.data.complete && <p className="mt-1 text-xs text-muted-foreground">{t("licenses.machinesIncomplete")}</p>}
+      {act.isError && <p role="alert" className="mt-2 text-sm font-medium">{errorText(act.error)}</p>}
+      {confirm && (
+        <div role="group" aria-label={t(confirm.kind === "reset" ? "licenses.confirmReset" : "licenses.confirmDeactivate", confirm.kind === "reset" ? {} : { name: confirm.name })} className="mt-2 rounded-md border p-3 text-sm">
+          <p className="font-medium">{t(confirm.kind === "reset" ? "licenses.confirmReset" : "licenses.confirmDeactivate", confirm.kind === "reset" ? {} : { name: confirm.name })}</p>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setConfirm(null)}>{t("tokens.cancel")}</Button>
+            <Button disabled={act.isPending} onClick={() => act.mutate(confirm)}>{t(confirm.kind === "reset" ? "licenses.resetMoves" : "licenses.deactivate")}</Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
