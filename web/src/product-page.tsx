@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { ApiError, fieldErrors } from "@/api/client";
+import { fieldErrors } from "@/api/client";
 import {
   archiveFeature,
   archivePlan,
@@ -9,6 +9,7 @@ import {
   createFeature,
   createPlan,
   type Feature,
+  FieldError,
   getProduct,
   type Plan,
   planBody,
@@ -237,10 +238,10 @@ function PlanDialog({ tenant, product, onClose }: { tenant: string; product: str
       onClose();
     },
   });
-  // planBody throws a plain Error naming the field it refused, before any
-  // request; the server's refusals are ApiErrors. Derived, so a new attempt
-  // clears it.
-  const local = save.error && !(save.error instanceof ApiError) ? save.error.message : null;
+  // planBody's FieldError names the field it refused, before any request;
+  // anything else (a server refusal, a network failure) is the dialog's
+  // alert. Derived, so a new attempt clears it.
+  const local = save.error instanceof FieldError ? save.error.field : null;
   const fields = { ...fieldErrors(save.error), ...(local ? { [local]: t("product.wholeNumber") } : {}) };
   const term = fields.duration_months ?? fields.duration_seconds ?? fields.term;
   return (

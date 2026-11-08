@@ -112,15 +112,23 @@ export function planTerm(p: Pick<Plan, "duration_months" | "duration_seconds">):
   return { kind: "perpetual" };
 }
 
+/** A form field refused before any request (planBody); field names it. */
+export class FieldError extends Error {
+  constructor(readonly field: string) {
+    super(field);
+    this.name = "FieldError";
+  }
+}
+
 /**
  * A plan create body from the dialog's raw fields: a blank number is left
  * out (the server's default: perpetual, unlimited); a term in days becomes
- * seconds. Throws the field name of a number that isn't a whole number.
+ * seconds. Throws a FieldError naming a number that isn't a whole number.
  */
 export function planBody(product: string, f: { slug: string; name: string; term: string; termUnit: "months" | "days"; maxActivations: string; bindType: string }): PlanCreate {
   const whole = (field: string, raw: string) => {
     const s = raw.trim();
-    if (!/^\d{1,9}$/.test(s)) throw new Error(field); // the server's ranges are far below 10^9
+    if (!/^\d{1,9}$/.test(s)) throw new FieldError(field); // the server's ranges are far below 10^9
     return Number(s);
   };
   const body: PlanCreate = { product_id: product, slug: f.slug.trim(), name: f.name.trim(), bind_type: f.bindType as PlanCreate["bind_type"] };

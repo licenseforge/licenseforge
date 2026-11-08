@@ -7,6 +7,7 @@ import {
   createCustomer,
   customerPatch,
   formatRefs,
+  FieldError,
   parseRefs,
   planBody,
   planTerm,
@@ -151,6 +152,7 @@ describe("planBody", () => {
     expect(trial).not.toHaveProperty("duration_months");
   });
   it("names the field that isn't a whole number", () => {
+    expect(() => planBody("prd_1", { ...base, term: "1.5" })).toThrow(FieldError);
     expect(() => planBody("prd_1", { ...base, term: "1.5" })).toThrow("term");
     expect(() => planBody("prd_1", { ...base, maxActivations: "-1" })).toThrow("max_activations");
     expect(() => planBody("prd_1", { ...base, maxActivations: "1e3" })).toThrow("max_activations");

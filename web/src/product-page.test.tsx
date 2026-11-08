@@ -31,7 +31,7 @@ const pro = {
   grace_seconds: 0, archived_at: null, created_at: "",
 };
 
-async function page(role: string, opts: { archived?: boolean; planPost?: () => Response } = {}) {
+async function page(role: string, opts: { archived?: boolean; planPost?: () => Response | Promise<Response> } = {}) {
   const posts: Request[] = [];
   const lists: URL[] = [];
   let planArchived = false;
@@ -141,6 +141,18 @@ it("shows the server's term error under Term, after clearing the form's own", as
   expect(el.textContent).not.toContain("A whole number.");
 });
 
+it("shows a network failure as the dialog's alert", async () => {
+  const { el, button } = await page("admin", { planPost: () => Promise.reject(new TypeError("Failed to fetch")) });
+  await act(async () => button("New plan")!.click());
+  const set = setter(el);
+  await act(async () => {
+    set("slug", "pro2");
+    set("name", "Pro 2");
+  });
+  await submit(el);
+  await vi.waitFor(() => expect(el.querySelector('dialog [role="alert"]')).not.toBeNull());
+});
+
 it("archives a plan through the plan endpoint and shows it archived", async () => {
   const { el, posts } = await page("admin");
   const row = () => [...el.querySelectorAll("tr")].find((r) => r.textContent?.includes("Pro yearly"))!;
@@ -151,8 +163,9 @@ it("archives a plan through the plan endpoint and shows it archived", async () =
   await vi.waitFor(() => expect(row().textContent).toContain("Archived"));
 });
 
-it("creates an on/off feature without a unit field", async () => {
-  const { el, button, posts } = await page("admin");
+it("creates an on/off feature without a unit field, and refreshes the features", async () => {
+  const { el, button, posts, lists } = await page("admin");
+  const featureLists = lists.filter((u) => u.pathname.endsWith("/features")).length;
   await act(async () => button("New feature")!.click());
   expect(el.querySelector('dialog [name="unit"]')).toBeNull();
   const set = setter(el);
@@ -164,6 +177,7 @@ it("creates an on/off feature without a unit field", async () => {
   await vi.waitFor(() => expect(posts).toHaveLength(1));
   expect(new URL(posts[0]!.url).pathname).toBe("/api/v1/tenants/acme/features");
   expect(JSON.parse(await posts[0]!.text())).toEqual({ product_id: "prd_1", key: "audit_log", name: "Audit log", type: "boolean" });
+  await vi.waitFor(() => expect(lists.filter((u) => u.pathname.endsWith("/features")).length).toBeGreaterThan(featureLists));
   await act(async () => button("New feature")!.click());
   await act(async () => setter(el)("type", "limit"));
   expect(el.querySelector('dialog [name="unit"]')).not.toBeNull();
