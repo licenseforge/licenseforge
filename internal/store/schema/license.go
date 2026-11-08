@@ -148,5 +148,7 @@ func (License) Indexes() []ent.Index {
 		index.Fields("tenant_id", "id").Unique(),
 		index.Fields("tenant_id", "id", "bind_type").Unique(), // activations: binding must match the license
 		index.Fields("tenant_id", "customer_id"),
+		index.Fields("tenant_id", "product_id", "status"), // summary counts and product-filtered lists
+		index.Fields("tenant_id", "created_at", "id"),     // lists, newest first (keyset cursor)
 	}
 }
