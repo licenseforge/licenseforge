@@ -35,6 +35,12 @@ const names = {
   productName: (id: string) => (id === "prd_1" ? "DB" : id),
   customerName: (id: string) => (id === "cus_1" ? "Acme" : id),
 };
+const plan = (id: string, name: string, archived = false) => ({
+  id, product_id: "prd_1", slug: id.replace("pln_", ""), name, duration_months: 12, duration_seconds: null, expiry_basis: "from_issue", max_activations: 3,
+  max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null, grace_seconds: 0,
+  archived_at: archived ? "2026-11-01T00:00:00Z" : null, created_at: "",
+});
+const plansOf = (req: Request) => (new URL(req.url).pathname.endsWith("/plans") ? json({ items: [plan("pln_1", "Pro"), plan("pln_old", "Legacy", true)] }) : null);
 const license: License = {
   id: "lic_1", product_id: "prd_1", plan_id: "pln_1", plan_slug: "pro", customer_id: "cus_1", type: "paid", status: "active",
   key_hint: "ABC123", expiry_basis: "from_issue", expires_at: null, max_activations: 3, active_activations: 0, max_rehosts: null, rehost_count: 0,
@@ -58,7 +64,7 @@ describe("IssueDialog", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (req: Request) => {
-        if (req.method !== "POST") return json({ code: "internal" }, 500); // list refetches fail
+        if (req.method !== "POST") return plansOf(req) ?? json({ code: "internal" }, 500); // other list refetches fail
         posts.push(req);
         return ++attempt === 1 ? json({ type: "about:blank", title: "x", status: 503, code: "internal", request_id: "r" }, 503) : json({ ...license, key: "LF-TOP-SECRET-KEY" }, 201);
       }),
@@ -74,8 +80,9 @@ describe("IssueDialog", () => {
     await act(async () => {
       set("product_id", "prd_1");
       set("customer_id", "cus_1");
-      set("plan_id", "pln_1");
     });
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    await act(async () => set("plan_id", "pln_1"));
     await act(async () => el.querySelector("form")!.requestSubmit()); // 503
     await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
     await act(async () => el.querySelector("form")!.requestSubmit()); // retry: 201
@@ -173,8 +180,9 @@ async function fillIssue(el: HTMLElement, plan: string) {
   await act(async () => {
     set("product_id", "prd_1");
     set("customer_id", "cus_1");
-    set("plan_id", plan);
   });
+  await vi.waitFor(() => expect(el.querySelector(`select[name="plan_id"] option[value="${plan}"]`)).not.toBeNull());
+  await act(async () => set("plan_id", plan));
   await act(async () => el.querySelector("form")!.requestSubmit());
 }
 
@@ -194,7 +202,7 @@ describe("Idempotency-Key after an error", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (req: Request) => {
-        if (req.method !== "POST") return json({ items: [] });
+        if (req.method !== "POST") return plansOf(req) ?? json({ items: [] });
         posts.push(req);
         return posts.length === 1
           ? json({ type: "about:blank", title: "x", status: 422, code: "validation_failed", request_id: "r", errors: [{ field: "/plan_id", message: "unknown plan" }] }, 422)
@@ -202,7 +210,7 @@ describe("Idempotency-Key after an error", () => {
       }),
     );
     const { el } = await render(<IssueDialog tenant="acme" names={names} onClose={() => {}} />);
-    await fillIssue(el, "pln_wrong");
+    await fillIssue(el, "pln_1");
     await vi.waitFor(() => expect(el.textContent).toContain("unknown plan"));
     await fillIssue(el, "pln_1");
     await vi.waitFor(() => expect(posts).toHaveLength(2));
@@ -221,13 +229,72 @@ describe("issue pickers", () => {
 
   it("without visible customers (a product-scoped caller), asks for a customer ID", async () => {
     const posts: Request[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (req: Request) => (req.method === "POST" ? (posts.push(req), json({ ...license, key: "LF-KEY" }, 201)) : json({ items: [] }))));
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) => (req.method === "POST" ? (posts.push(req), json({ ...license, key: "LF-KEY" }, 201)) : plansOf(req) ?? json({ items: [] }))));
     const { el } = await render(<IssueDialog tenant="acme" names={{ ...names, customers: [], issuable: [] }} onClose={() => {}} />);
     expect(el.querySelector('input[name="customer_id"]')).not.toBeNull();
     expect(el.textContent).toContain("paste the customer's ID");
     await fillIssue(el, "pln_1");
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(JSON.parse(await posts[0]!.text()).customer_id).toBe("cus_1");
+  });
+
+  it("offers the chosen product's active plans, after the product, and sends the chosen one", async () => {
+    const posts: Request[] = [];
+    const lists: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) => {
+      if (req.method === "POST") return (posts.push(req), json({ ...license, key: "LF-KEY" }, 201));
+      lists.push(new URL(req.url));
+      return plansOf(req) ?? json({ items: [] });
+    }));
+    const { el } = await render(<IssueDialog tenant="acme" names={names} onClose={() => {}} />);
+    expect(el.textContent).toContain("Choose the product first.");
+    expect(el.querySelectorAll('select[name="plan_id"] option:not([disabled])')).toHaveLength(0);
+    const product = el.querySelector<HTMLSelectElement>('select[name="product_id"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(product, "prd_1");
+      product.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    const options = [...el.querySelectorAll('select[name="plan_id"] option')].map((o) => o.textContent);
+    expect(options).toContain("Pro (1)");
+    expect(options).not.toContain("Legacy (old)"); // archived: issues nothing
+    expect(lists.find((u) => u.pathname.endsWith("/plans"))!.searchParams.get("product_id")).toBe("prd_1");
+    await fillIssue(el, "pln_1");
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(JSON.parse(await posts[0]!.text())).toMatchObject({ product_id: "prd_1", plan_id: "pln_1", customer_id: "cus_1" });
+  });
+
+  it("starts the plan choice over when the product changes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) => {
+      const u = new URL(req.url);
+      if (!u.pathname.endsWith("/plans")) return json({ items: [] });
+      return json({ items: u.searchParams.get("product_id") === "prd_1" ? [plan("pln_1", "Pro")] : [{ ...plan("pln_2", "Basic"), product_id: "prd_2" }] });
+    }));
+    const two = { ...names, issuableProducts: [...names.issuableProducts, { id: "prd_2", slug: "cache", name: "Cache", archived_at: null, created_at: "" }] };
+    const { el } = await render(<IssueDialog tenant="acme" names={two} onClose={() => {}} />);
+    const pick = (name: string, v: string) => act(async () => {
+      const s = el.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(s, v);
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await pick("product_id", "prd_1");
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    await pick("plan_id", "pln_1");
+    await pick("product_id", "prd_2");
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_2"]')).not.toBeNull());
+    expect(el.querySelector<HTMLSelectElement>('select[name="plan_id"]')!.value).toBe(""); // not another product's plan
+  });
+
+  it("says when the product has no active plan", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ items: [plan("pln_old", "Legacy", true)] })));
+    const { el } = await render(<IssueDialog tenant="acme" names={names} onClose={() => {}} />);
+    const product = el.querySelector<HTMLSelectElement>('select[name="product_id"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(product, "prd_1");
+      product.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(document.getElementById("plan_id-hint")?.textContent).toBe("This product has no active plan. Add one on the product's page."));
+    expect(el.querySelector('select[name="plan_id"]')!.getAttribute("aria-describedby")).toBe("plan_id-hint"); // read with the empty select
   });
 
   it("says when the lists behind the pickers are incomplete", async () => {

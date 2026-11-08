@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { ApiError, fieldErrors, onAuthError } from "@/api/client";
-import { allCustomers, allProducts, parseRefs, refsBody } from "@/api/catalog";
+import { allCustomers, allProducts, parseRefs, productPlansQuery, refsBody } from "@/api/catalog";
 import {
   activationsQuery,
   actionsFor,
@@ -321,6 +321,10 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   const [refsError, setRefsError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  const [product, setProduct] = useState("");
+  // The chosen product's plans that can still issue (archived ones can't, ADR-0015).
+  const plans = useQuery({ ...productPlansQuery(tenant, product), enabled: product !== "" });
+  const issuablePlans = (plans.data?.items ?? []).filter((p) => !p.archived_at).map((p) => ({ id: p.id, name: `${p.name} (${p.slug})` }));
   const fields = fieldErrors(error);
   const close = () => {
     setIssued(null);
@@ -378,13 +382,16 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
     );
   }
 
-  const select = (name: string, label: string, options: { id: string; name: string }[]) => (
-    <label className="flex flex-col gap-1 text-sm">
+  const select = (name: string, label: string, options: { id: string; name: string }[], onChange?: (v: string) => void, key?: string, hint?: string) => (
+    <label key={key} className="flex flex-col gap-1 text-sm">
       {label}
-      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]} aria-describedby={fields[name] ? `${name}-error` : undefined}>
+      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]}
+        aria-describedby={[hint && `${name}-hint`, fields[name] && `${name}-error`].filter(Boolean).join(" ") || undefined}
+        onChange={onChange && ((e) => onChange(e.target.value))}>
         <option value="" disabled>{t("licenses.choose")}</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
+      {hint && <span id={`${name}-hint`} className="text-xs text-muted-foreground">{hint}</span>}
       {fields[name] && <span id={`${name}-error`}>{fields[name]}</span>}
     </label>
   );
@@ -392,7 +399,7 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
     <Modal title={t("licenses.issue")} onClose={close}>
       {!names.complete && <p className="mb-3 text-sm">{t("licenses.listsIncomplete")}</p>}
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
-        {select("product_id", t("licenses.col.product"), names.issuableProducts)}
+        {select("product_id", t("licenses.col.product"), names.issuableProducts, setProduct)}
         {names.issuable.length > 0 ? (
           select("customer_id", t("licenses.col.customer"), names.issuable)
         ) : (
@@ -404,12 +411,10 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
             {fields.customer_id && <span id="customer_id-error">{fields.customer_id}</span>}
           </label>
         )}
-        <label className="flex flex-col gap-1 text-sm">
-          {t("licenses.planId")}
-          <input name="plan_id" required className={`${input} font-mono`} placeholder="pln_…" aria-invalid={!!fields.plan_id} aria-describedby={fields.plan_id ? "plan-help plan_id-error" : "plan-help"} />
-          <span id="plan-help" className="text-xs text-muted-foreground">{t("licenses.planHelp")}</span>
-          {fields.plan_id && <span id="plan_id-error">{fields.plan_id}</span>}
-        </label>
+        {/* keyed by product: a new product starts the plan choice over */}
+        {select("plan_id", t("licenses.col.plan"), issuablePlans, undefined, product,
+          product === "" ? t("licenses.planFirst") : plans.isPending ? t("product.loading") : plans.isSuccess && issuablePlans.length === 0 ? t("licenses.noPlans") : undefined)}
+        {plans.isError && <p role="alert" className="-mt-2 text-sm">{errorText(plans.error)}</p>}
         <label className="flex flex-col gap-1 text-sm">
           {t("licenses.type")}
           <select name="type" className={input} defaultValue="paid">
