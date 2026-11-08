@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"licenseforge.io/licenseforge/internal/store/ent/activation"
-	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"maps"
 	"net/url"
 	"os"
@@ -19,7 +17,9 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/feature"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
@@ -1080,8 +1080,9 @@ func TestArchiveRace(t *testing.T) {
 }
 
 // One-way states start unset: neither serving pool can insert a product,
-// feature, plan or customer already archived, or a license already
-// suspended or revoked (the services set those later, audited).
+// feature, plan or customer already archived, a license already suspended,
+// revoked or activated, an activation already deactivated, or an invitation
+// already accepted or revoked (the services set those later, audited).
 func TestNoInsertWithOneWayStateSet(t *testing.T) {
 	d := openDB(t)
 	kr := testKeyring(t)
@@ -1180,7 +1181,7 @@ func TestNoInsertWithOneWayStateSet(t *testing.T) {
 // activationCreate builds an active activation of l's license.
 func activationCreate(tx *ent.Tx, l licensed, now time.Time) *ent.ActivationCreate {
 	return tx.Activation.Create().SetTenantID(l.tenant.ID).SetLicenseID(l.license.ID).
-		SetFingerprint("sha256:" + hex.EncodeToString(sha256.New().Sum([]byte(ids.New("fpx")))[:32])).SetFpSource(activation.FpSourceMachineID).
+		SetFingerprint("sha256:" + hex.EncodeToString(func() []byte { h := sha256.Sum256([]byte(ids.New("fpx"))); return h[:] }())).SetFpSource(activation.FpSourceMachineID).
 		SetBinding(activation.BindingMachine).SetMode(activation.ModeOnline).SetFirstSeenAt(now).SetLastSeenAt(now)
 }
 
