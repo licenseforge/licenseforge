@@ -141,6 +141,62 @@ export function planBody(product: string, f: { slug: string; name: string; term:
   return body;
 }
 
+/** What a plan grants, by feature key: true (on/off) or a limit (-1 unlimited). */
+export type Grants = Record<string, boolean | number>;
+
+export const planFeaturesQuery = (tenant: string, plan: string) =>
+  queryOptions({
+    queryKey: ["plan-features", tenant, plan],
+    queryFn: async () => unwrap(await api.GET("/tenants/{tenant}/plans/{id}/features", { params: { path: { tenant, id: plan } } })) as Grants,
+  });
+
+/** A merge patch of a plan's grants (ADR-0015): true, a limit, or null to remove; all or nothing. */
+export async function updatePlanFeatures(tenant: string, plan: string, patch: Record<string, true | number | null>): Promise<Grants> {
+  return unwrap(
+    await api.PATCH("/tenants/{tenant}/plans/{id}/features", { params: { path: { tenant, id: plan } }, body: patch, headers: mergePatch }),
+  ) as Grants;
+}
+
+/** A matrix cell as edited: on/off for a boolean feature, the raw text of a limit ("" not granted). */
+export type Cell = boolean | string;
+
+/** A limit cell's text: -1 (unlimited) or a whole number up to 2^53-1, else null. */
+export function parseLimit(raw: string): number | null {
+  const s = raw.trim();
+  if (!/^(-1|\d{1,16})$/.test(s)) return null;
+  const n = Number(s);
+  return n <= Number.MAX_SAFE_INTEGER ? n : null;
+}
+
+/**
+ * The merge patch that sets each touched cell to what it shows: true, the
+ * limit, or null (cleared checkbox, emptied limit). Every touched cell is
+ * sent, not only those differing from the grants as loaded: those may be
+ * stale (another admin's change), and the server applies the patch as a
+ * whole, changing and auditing only what differs. Returns the keys whose
+ * limit text isn't valid instead.
+ */
+export function grantsPatch(cells: Record<string, Cell>): { patch: Record<string, true | number | null> } | { invalid: string[] } {
+  const patch: Record<string, true | number | null> = {};
+  const invalid: string[] = [];
+  for (const [key, cell] of Object.entries(cells)) {
+    if (typeof cell === "boolean") patch[key] = cell ? true : null;
+    else if (cell.trim() === "") patch[key] = null;
+    else {
+      const n = parseLimit(cell);
+      if (n === null) invalid.push(key);
+      else patch[key] = n;
+    }
+  }
+  return invalid.length > 0 ? { invalid } : { patch };
+}
+
+/** The cells a plan's grants start from: checkboxes and limit texts for every feature. */
+export function grantCells(grants: Grants, features: Pick<Feature, "key" | "type">[]): Record<string, Cell> {
+  const has = (k: string) => Object.hasOwn(grants, k);
+  return Object.fromEntries(features.map((f) => [f.key, f.type === "limit" ? (has(f.key) ? String(grants[f.key]) : "") : has(f.key)]));
+}
+
 export async function createCustomer(tenant: string, body: CustomerCreate): Promise<Customer> {
   return unwrap(await api.POST("/tenants/{tenant}/customers", { params: { path: { tenant } }, body }));
 }
