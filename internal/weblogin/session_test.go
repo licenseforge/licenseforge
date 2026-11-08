@@ -46,7 +46,7 @@ func TestSessionAndLogout(t *testing.T) {
 	}
 	resp, body := do("GET", "/auth/session", nil)
 	token, _ := body["csrf_token"].(string)
-	if resp.StatusCode != http.StatusOK || token == "" || resp.Header.Get("Cache-Control") != "no-store" ||
+	if resp.StatusCode != http.StatusOK || token == "" || body["platform_admin"] != false || resp.Header.Get("Cache-Control") != "no-store" ||
 		resp.Header.Get("Content-Type") != "application/json" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("session: %d %v", resp.StatusCode, body)
 	}

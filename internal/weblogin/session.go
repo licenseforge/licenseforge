@@ -108,15 +108,22 @@ func (h *Handler) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
-// session tells the dashboard who is signed in and its CSRF token.
+// session tells the dashboard who is signed in, its CSRF token, and whether
+// the user is a platform admin (ADR-0042: the platform screens are shown
+// only then). That flag is a hint: if it can't be read it is false, logged.
 func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	c, _ := r.Cookie(SessionCookie) // present: RequireSession passed
 	u := User(r.Context())
+	admin, err := h.id.IsPlatformAdmin(r.Context(), u.ID)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "platform admin lookup", "err", err)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff") // holds the CSRF token
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"user":       map[string]any{"id": u.ID, "email": u.Email, "name": u.Name},
-		"csrf_token": CSRFToken(c.Value),
+		"user":           map[string]any{"id": u.ID, "email": u.Email, "name": u.Name},
+		"csrf_token":     CSRFToken(c.Value),
+		"platform_admin": admin,
 	})
 }
 

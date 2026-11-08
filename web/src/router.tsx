@@ -14,6 +14,7 @@ import { inviteWaiting } from "@/invite";
 import { MembersPage } from "@/members-page";
 import { TokensPage } from "@/tokens-page";
 import { SecurityPage } from "@/security-page";
+import { PlatformPage } from "@/platform-page";
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Outlet,
@@ -40,6 +41,7 @@ const indexRoute = createRoute({
     if (inviteWaiting()) throw redirect({ to: "/invite" }); // back from signing in to accept
     const [first] = await context.queryClient.ensureQueryData(tenantsQuery);
     if (first) throw redirect({ to: "/t/$slug", params: { slug: first.slug } });
+    if (context.session.platform_admin) throw redirect({ to: "/platform" }); // a new install's admin onboards the first tenant
   },
   component: NoTenants,
 });
@@ -55,11 +57,13 @@ const productsRoute = createRoute({ getParentRoute: () => tenantRoute, path: "pr
 const productRoute = createRoute({ getParentRoute: () => tenantRoute, path: "products/$id", component: ProductPage });
 const customersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "customers", component: CustomersPage });
 const licensesRoute = createRoute({ getParentRoute: () => tenantRoute, path: "licenses", component: LicensesPage });
+// Platform admins only (ADR-0042); for anyone else the API answers 403.
+const platformRoute = createRoute({ getParentRoute: () => appRoute, path: "platform", component: PlatformPage });
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
-  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, productRoute, customersRoute, licensesRoute, tokensRoute, membersRoute, auditRoute, securityRoute])]),
+  appRoute.addChildren([indexRoute, platformRoute, tenantRoute.addChildren([overviewRoute, productsRoute, productRoute, customersRoute, licensesRoute, tokensRoute, membersRoute, auditRoute, securityRoute])]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {

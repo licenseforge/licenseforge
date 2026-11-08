@@ -68,7 +68,7 @@ DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
 URL, or without a port.
 
 ## The first tenant
-A platform admin creates tenants with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
+A platform admin creates tenants on the dashboard's **Tenants** screen (`/platform`; a platform admin without tenants lands there), or with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
 
 ```sh
 kubectl -n licenseforge exec deploy/licenseforge -- /licenseforge tenant create \

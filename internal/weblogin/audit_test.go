@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -108,6 +109,17 @@ func TestLoginBootstrapsAndRecords(t *testing.T) {
 		es[1].Action != "user.login" || es[1].Outcome != auditevent.OutcomeSuccess || *es[1].ActorID != u.ID ||
 		es[1].SourceIP == nil || *es[1].SourceIP != "127.0.0.1" || es[1].UserAgent == nil {
 		t.Fatalf("platform chain: %+v", es)
+	}
+	// The dashboard is told to show the platform screens (ADR-0042).
+	resp, err := f.client.Get(f.app.URL + "/auth/session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sess map[string]any
+	err = json.NewDecoder(resp.Body).Decode(&sess)
+	_ = resp.Body.Close()
+	if err != nil || sess["platform_admin"] != true {
+		t.Errorf("session of the bootstrapped admin: %v %v", sess, err)
 	}
 	// The next login is recorded, not granted again.
 	head = es[1].Seq

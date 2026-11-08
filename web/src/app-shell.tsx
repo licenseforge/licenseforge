@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getRouteApi, Outlet, useNavigate, useParams } from "@tanstack/react-router";
+import { getRouteApi, Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { LogOut, Monitor, Moon, Sun, User } from "lucide-react";
 import { useState } from "react";
 import { logout } from "@/api/session";
@@ -30,6 +30,7 @@ export function AppShell() {
       <header className="flex items-center gap-4 border-b px-4 py-2">
         <span className="font-semibold">{t("app.name")}</span>
         <TenantSwitcher />
+        <PlatformLink />
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggle />
           <UserMenu />
@@ -64,6 +65,16 @@ function TenantSwitcher() {
         ))}
       </select>
     </label>
+  );
+}
+
+function PlatformLink() {
+  const { session } = app.useRouteContext();
+  if (!session.platform_admin) return null;
+  return (
+    <Link to="/platform" className="text-sm underline-offset-4 hover:underline [&.active]:font-medium">
+      {t("nav.platform")}
+    </Link>
   );
 }
 

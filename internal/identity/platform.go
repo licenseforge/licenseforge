@@ -7,7 +7,21 @@ import (
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 )
+
+// IsPlatformAdmin reports whether userID is a platform admin, read on the
+// identity login. It only tells the dashboard to show the platform screens
+// (ADR-0042); the platform routes check for themselves on every request.
+func (s Service) IsPlatformAdmin(ctx context.Context, userID string) (bool, error) {
+	var ok bool
+	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		var err error
+		ok, err = tx.PlatformAdmin.Query().Where(platformadmin.UserID(userID)).Exist(ctx)
+		return err
+	})
+	return ok, err
+}
 
 // Source is where a login request came from, for its audit entries: the
 // connection's IP (or one set by a trusted proxy) and the user agent.

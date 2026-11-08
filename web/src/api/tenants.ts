@@ -50,9 +50,11 @@ export const tenantsQuery = queryOptions({ queryKey: ["tenants"], queryFn: listT
  * The app's query and mutation error handler: a 401 goes to sign-in; a 403
  * mfa_required means the tenant's policy changed under this session
  * (ADR-0038), so the tenants are fetched again and the layout explains and
- * offers the step-up instead of every screen failing.
+ * offers the step-up instead of every screen failing. The platform screen's
+ * refusals are the platform policy's, not a tenant's: it explains them itself.
  */
-export const queryErrorHandler = (qc: () => QueryClient) => (e: unknown) => {
+export const queryErrorHandler = (qc: () => QueryClient) => (e: unknown, q?: unknown) => {
   onAuthError(e);
-  if (isMfaRequired(e)) void qc().invalidateQueries({ queryKey: tenantsQuery.queryKey });
+  const key = (q as { queryKey?: readonly unknown[] } | undefined)?.queryKey; // set for a query, not a mutation
+  if (isMfaRequired(e) && key?.[0] !== "platform-tenants") void qc().invalidateQueries({ queryKey: tenantsQuery.queryKey });
 };
