@@ -1,0 +1,22 @@
+{
+  "realm": "licenseforge",
+  "enabled": true,
+  "sslRequired": "external",
+  "clients": [{
+    "clientId": "licenseforge",
+    "enabled": true,
+    "publicClient": false,
+    "secret": "dev-client-secret",
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "redirectUris": ["https://__LF__/auth/callback"],
+    "webOrigins": ["https://__LF__"],
+    "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://__LF__/*"}
+  }],
+  "users": [
+    {"username": "admin", "email": "admin@licenseforge.local", "emailVerified": true, "firstName": "Ada", "lastName": "Admin", "enabled": true,
+     "credentials": [{"type": "password", "value": "licenseforge", "temporary": false}]},
+    {"username": "viewer", "email": "viewer@licenseforge.local", "emailVerified": true, "firstName": "Vic", "lastName": "Viewer", "enabled": true,
+     "credentials": [{"type": "password", "value": "licenseforge", "temporary": false}]}
+  ]
+}

@@ -1,0 +1,201 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"testing"
+
+	"licenseforge.io/licenseforge/sdk/go/fingerprint"
+	"licenseforge.io/licenseforge/sdk/go/licensefile"
+	"licenseforge.io/licenseforge/sdk/go/online"
+)
+
+type tenant struct {
+	ID   string `json:"tenant_id"`
+	Slug string `json:"slug"`
+	Role string `json:"role"`
+}
+
+// owner signs in as the seeded tenant's owner, accepting the seed invitation
+// on the first run (until tenants can be created through the product).
+func owner(t *testing.T, e env) (*browser, tenant) {
+	t.Helper()
+	b := login(t, e, "admin", "licenseforge")
+	find := func() *tenant {
+		var page struct{ Items []tenant }
+		b.do("GET", "/api/v1/me/tenants", nil, 200, &page)
+		for _, tn := range page.Items {
+			if tn.Slug == e.Tenant {
+				return &tn
+			}
+		}
+		return nil
+	}
+	tn := find()
+	if tn == nil {
+		token, err := os.ReadFile(e.InviteTokenFile)
+		if err != nil {
+			t.Fatalf("not a member of %q and no seed invitation: %v", e.Tenant, err)
+		}
+		b.do("POST", "/api/v1/invitations/accept", map[string]string{"token": strings.TrimSpace(string(token))}, 200, nil)
+		if tn = find(); tn == nil {
+			t.Fatalf("accepted the seed invitation, still not a member of %q", e.Tenant)
+		}
+	}
+	if tn.Role != "owner" {
+		t.Fatalf("role in %q is %s, want owner", e.Tenant, tn.Role)
+	}
+	return b, *tn
+}
+
+// trustedKeys is what a vendor embeds in a build: the tenant's public
+// signing keys, from the signing keys API; one is created on a fresh tenant.
+func trustedKeys(t *testing.T, b *browser, tenant string) licensefile.KeySet {
+	t.Helper()
+	type key struct {
+		KID, Alg, Status string
+		PublicKey        string `json:"public_key"`
+	}
+	var page struct{ Items []key }
+	b.do("GET", "/api/v1/tenants/"+tenant+"/signing-keys", nil, 200, &page)
+	if !slices.ContainsFunc(page.Items, func(k key) bool { return k.Status == "active" }) {
+		b.do("POST", "/api/v1/tenants/"+tenant+"/signing-keys", map[string]any{}, 201, nil)
+		b.do("GET", "/api/v1/tenants/"+tenant+"/signing-keys", nil, 200, &page)
+	}
+	var ks licensefile.KeySet
+	for _, k := range page.Items {
+		raw, err := base64.RawURLEncoding.DecodeString(k.PublicKey)
+		if err != nil {
+			t.Fatalf("key %s: %v", k.KID, err)
+		}
+		ks = append(ks, licensefile.PublicKey{KID: k.KID, Alg: k.Alg, Key: raw})
+	}
+	return ks
+}
+
+// The vendor's journey and its customer's app: a catalog, a license, a
+// machine that activates and checks entitlements offline from a verified
+// lease, the seat limit, a refresh, then revocation ending the license.
+func TestLicenseJourney(t *testing.T) {
+	e := loadEnv(t)
+	ctx := context.Background()
+	b, tn := owner(t, e)
+	api := "/api/v1/tenants/" + tn.Slug
+	run := strings.ToLower(rand.Text()[:8]) // this run's names: runs never depend on each other
+	keys := trustedKeys(t, b, tn.Slug)
+
+	// Catalog: a product, an on/off feature and a limit, a machine-bound plan
+	// with one seat that grants both.
+	var product struct{ ID, Slug string }
+	b.do("POST", api+"/products", map[string]string{"slug": "e2e-" + run, "name": "E2E " + run}, 201, &product)
+	for _, f := range []map[string]string{{"key": "sso", "name": "SSO", "type": "boolean"}, {"key": "seats", "name": "Seats", "type": "limit"}} {
+		f["product_id"] = product.ID
+		b.do("POST", api+"/features", f, 201, nil)
+	}
+	var plan struct{ ID string }
+	b.do("POST", api+"/plans", map[string]any{"product_id": product.ID, "slug": "pro", "name": "Pro", "duration_months": 12, "max_activations": 1}, 201, &plan)
+	b.do("PATCH", api+"/plans/"+plan.ID+"/features", map[string]any{"sso": true, "seats": 25}, 200, nil)
+	var customer struct{ ID string }
+	b.do("POST", api+"/customers", map[string]string{"name": "Customer " + run}, 201, &customer)
+
+	// Issue: the key is shown once.
+	var lic struct {
+		ID  string
+		Key string
+	}
+	b.do("POST", api+"/licenses", map[string]string{"product_id": product.ID, "plan_id": plan.ID, "customer_id": customer.ID, "type": "paid"}, 201, &lic)
+	if lic.Key == "" {
+		t.Fatal("issued without a key")
+	}
+
+	// The customer's app: the SDK as a vendor configures it.
+	app := func(machine string) *online.Client {
+		t.Helper()
+		fp, err := fingerprint.Compute(ctx, tn.ID, product.Slug, fingerprint.Options{Override: func() (string, error) { return machine, nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := online.New(online.Config{
+			BaseURL: e.BaseURL, TenantID: tn.ID, Product: product.Slug, LicenseKey: lic.Key, Keys: keys,
+			Fingerprint: fp, Hostname: machine, AppVersion: "1.0.0", HTTPClient: e.httpClient(t, nil, false),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	first := app("e2e-machine-1-" + run)
+	if _, err := first.Activate(ctx); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	claims, status, err := first.Current()
+	if err != nil || status != licensefile.StatusValid {
+		t.Fatalf("lease: %v, %v", status, err)
+	}
+	if claims.LicenseID != lic.ID || claims.Tenant != tn.ID || claims.Product != product.Slug || claims.Plan != "pro" {
+		t.Errorf("claims %+v", claims)
+	}
+	if !claims.Entitlements.HasFeature("sso") || claims.Entitlements.Limit("seats") != 25 || claims.Entitlements.HasFeature("nope") {
+		t.Errorf("entitlements %+v", claims.Entitlements)
+	}
+
+	// One seat: a second machine is refused.
+	if _, err := app("e2e-machine-2-" + run).Activate(ctx); !errors.Is(err, online.ErrActivationLimit) {
+		t.Errorf("second machine: %v, want the activation limit", err)
+	}
+	if _, err := first.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	// The dashboard sees the machine; revoking ends the license at the next refresh.
+	var acts struct{ Items []struct{ Hostname string } }
+	b.do("GET", api+"/licenses/"+lic.ID+"/activations", nil, 200, &acts)
+	if len(acts.Items) != 1 || acts.Items[0].Hostname != "e2e-machine-1-"+run {
+		t.Errorf("activations %+v", acts.Items)
+	}
+	b.do("POST", api+"/licenses/"+lic.ID+"/revoke", nil, 200, nil)
+	if _, err := first.Refresh(ctx); !errors.Is(err, online.ErrRevoked) {
+		t.Errorf("refresh after revoke: %v, want revoked", err)
+	}
+
+	// Every step is on the tenant's audit chain.
+	type entry struct{ Action string }
+	var audit struct{ Items []entry }
+	b.do("GET", api+"/audit-events?limit=100", nil, 200, &audit)
+	for _, want := range []string{"license.issue", "activation.create", "license.revoke"} {
+		if !slices.ContainsFunc(audit.Items, func(a entry) bool { return a.Action == want }) {
+			t.Errorf("no %s in the audit log", want)
+		}
+	}
+}
+
+// The invite flow, and roles enforced by the server: the owner invites the
+// viewer, who accepts, can read the catalog, but can't change it.
+func TestInvitedViewerCannotWrite(t *testing.T) {
+	e := loadEnv(t)
+	own, tn := owner(t, e)
+	viewer := login(t, e, "viewer", "licenseforge")
+	var page struct{ Items []tenant }
+	viewer.do("GET", "/api/v1/me/tenants", nil, 200, &page)
+	if !slices.ContainsFunc(page.Items, func(x tenant) bool { return x.Slug == tn.Slug }) {
+		var inv struct{ Token string }
+		own.do("POST", "/api/v1/tenants/"+tn.Slug+"/invitations", map[string]any{"email": "viewer@licenseforge.local", "role": "viewer", "all_products": true}, 201, &inv)
+		viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": inv.Token}, 200, nil)
+	}
+	api := "/api/v1/tenants/" + tn.Slug
+	viewer.do("GET", api+"/products", nil, 200, nil)
+	if err := viewer.try("POST", api+"/products", map[string]string{"slug": "nope", "name": "Nope"}, http.StatusForbidden, nil); err != nil {
+		t.Error(err)
+	}
+	if err := viewer.try("POST", api+"/signing-keys", map[string]any{}, http.StatusForbidden, nil); err != nil {
+		t.Error(err)
+	}
+}

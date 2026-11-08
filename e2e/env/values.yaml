@@ -1,0 +1,14 @@
+# Chart values for the e2e environment (ADR-0041). Local only, not for production.
+replicaCount: 1
+podDisruptionBudget: {enabled: false}
+secrets: {server: lf-server, migrate: lf-migrate}
+trustedProxies: "10.244.0.0/16"   # minikube's pod network: the ingress controller
+oidc:
+  enabled: true
+  issuer: "https://__KC__/realms/licenseforge"
+  clientID: licenseforge
+  redirectURL: "https://__LF__/auth/callback"
+  clientSecret: {secretName: lf-oidc, key: client-secret}
+  egress: {port: 443, to: []}
+extraEnv:
+  - {name: LICENSEFORGE_BOOTSTRAP_ADMIN, value: admin@licenseforge.local}

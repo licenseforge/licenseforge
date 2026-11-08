@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance
+.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance e2e
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 # The dashboard (web/, needs Node) is embedded only with TAGS=webui:
@@ -23,6 +23,11 @@ test-fips:
 
 vet:
 	for m in $(MODULES); do (cd $$m && go vet ./...) || exit 1; done
+	go vet -tags e2e ./e2e/   # the journeys compile with the API they drive (not run: make e2e)
+
+# End-to-end journeys (ADR-0041) against the environment e2e/env/up.sh deploys on minikube.
+e2e:
+	cd e2e && go test -tags e2e -count=1 -v ./...
 
 # The SDK has OS-specific code (fingerprints); vet it for every supported OS.
 vet-cross:

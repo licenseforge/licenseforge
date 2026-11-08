@@ -1,0 +1,12 @@
+# HTTPS for the dashboard and Keycloak, signed by the local CA (up.sh).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: local, namespace: __NS__}
+spec:
+  ingressClassName: nginx
+  tls: [{hosts: ["__LF__", "__KC__"], secretName: local-tls}]
+  rules:
+    - host: __LF__
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: licenseforge, port: {number: 80}}}}]}
+    - host: __KC__
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: keycloak, port: {number: 8080}}}}]}
