@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
-- Offline activation formats (ADR-0043): the `lfreq1` activation request and the `lfrcpt1` deactivation receipt are specified (license format spec, "Offline activation") with 35 conformance vectors in `spec/vectors/offline.json`; the Go SDK reads and writes them (`licensefile.ParseRequest`, `EncodeRequest`, `ParseReceipt`, `EncodeReceipt`, `FileSHA256`). Nothing issues or accepts them yet.
+- Offline activation formats (ADR-0043): the `lfreq1` activation request and the `lfrcpt1` deactivation receipt are specified (license format spec, "Offline activation") with 39 conformance vectors in `spec/vectors/offline.json`; the Go SDK reads and writes them (`licensefile.ParseRequest`, `EncodeRequest`, `ParseReceipt`, `EncodeReceipt`, `FileSHA256`). Nothing issues or accepts them yet.
 - Audit entries from API actions record where they came from (AU-3): the client's address (the connection, or `X-Forwarded-For` from a trusted proxy) and user agent, and the request's `X-Request-Id` as `request_id` in the hashed details, so an entry leads to the request in the server logs. Before, only logins recorded the source. No schema or hash format change. ADR-0027 amended.
 - Platform tenant onboarding API (ADR-0042). Until now, tenants could only be created in SQL.
   - `POST /api/v1/platform/tenants` with `{slug, name, owner_email}` creates a tenant **and an owner invitation** (every product, open 7 days) in one transaction on the platform pool. The invitation token is in the response only.

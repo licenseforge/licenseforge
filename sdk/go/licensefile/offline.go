@@ -32,6 +32,7 @@ const (
 type Request struct {
 	Tenant, Product, Key string
 	Binding              Binding // machine or cluster, with its fingerprint
+	FPSource             string  // where the fingerprint came from: machine-id, kubernetes, env or override
 	Nonce                []byte  // 16 random bytes
 	Created              time.Time
 	Hostname, AppVersion string // optional
@@ -55,8 +56,8 @@ var (
 // applies, so an SDK can't write a request the server refuses.
 func EncodeRequest(r Request) (string, error) {
 	m := map[string]any{"v": 1, "tenant": r.Tenant, "product": r.Product, "key": r.Key,
-		"bind":  map[string]string{"type": string(r.Binding.Type), "fp": r.Binding.Fingerprint},
-		"nonce": b64.EncodeToString(r.Nonce), "created": r.Created.UTC().Format(timeLayout)}
+		"bind":      map[string]string{"type": string(r.Binding.Type), "fp": r.Binding.Fingerprint},
+		"fp_source": r.FPSource, "nonce": b64.EncodeToString(r.Nonce), "created": r.Created.UTC().Format(timeLayout)}
 	for k, v := range map[string]string{"hostname": r.Hostname, "app_version": r.AppVersion, "sdk_version": r.SDKVersion} {
 		if v != "" {
 			m[k] = v
@@ -68,7 +69,7 @@ func EncodeRequest(r Request) (string, error) {
 // ParseRequest reads an lfreq1 token. Errors wrap ErrMalformed, or
 // ErrUnsupportedVersion for a well-formed request with v other than 1.
 func ParseRequest(s string) (*Request, error) {
-	m, err := decodeOffline(RequestVersion, s, []string{"v", "tenant", "product", "key", "bind", "nonce", "created", "hostname", "app_version", "sdk_version"})
+	m, err := decodeOffline(RequestVersion, s, []string{"v", "tenant", "product", "key", "bind", "fp_source", "nonce", "created", "hostname", "app_version", "sdk_version"})
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +91,15 @@ func ParseRequest(s string) (*Request, error) {
 		return nil, err
 	}
 	r.Binding = b
+	if r.FPSource, err = reqString(m, "fp_source"); err != nil {
+		return nil, err
+	}
+	if !slices.Contains([]string{"machine-id", "kubernetes", "env", "override"}, r.FPSource) {
+		return nil, malformed("fp_source must be machine-id, kubernetes, env or override")
+	}
+	if (r.FPSource == "kubernetes") != (b.Type == BindCluster) {
+		return nil, malformed("a cluster binding comes from kubernetes, and only it")
+	}
 	if r.Nonce, r.Created, err = nonceAndCreated(m); err != nil {
 		return nil, err
 	}

@@ -153,6 +153,7 @@ lfrcpt1.<base64url(payload_json)>    deactivation receipt
 | `tenant`, `product` | non-empty strings, ≤ 256 bytes, no NUL |
 | `key` | the license key, 1–128 printable ASCII characters (`0x21`–`0x7E`) |
 | `bind` | object with exactly `type` (`machine` or `cluster`) and `fp` (`sha256:` + 64 lowercase hex digits, derived as in Fingerprints) |
+| `fp_source` | where the fingerprint came from: `machine-id`, `kubernetes`, `env` or `override`; `kubernetes` exactly when `bind.type` is `cluster` |
 | `nonce` | 16 random bytes, base64url |
 | `created` | the machine's clock, timestamp format; informational only, never trusted |
 | `hostname` | optional, 1–255 bytes, no control characters |

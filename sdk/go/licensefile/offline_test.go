@@ -31,7 +31,7 @@ const (
 	vFP    = "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"
 	vNonce = "AAECAwQFBgcICQoLDA0ODw" // bytes 0..15
 	vHash  = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-	vReq   = `{"v":1,"tenant":"tnt_acme","product":"acme-db","key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","bind":{"type":"machine","fp":"` + vFP + `"},"nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
+	vReq   = `{"v":1,"tenant":"tnt_acme","product":"acme-db","key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","bind":{"type":"machine","fp":"` + vFP + `"},"fp_source":"machine-id","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
 	vRcpt  = `{"v":1,"tenant":"tnt_acme","license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa","fp":"` + vFP + `","file_sha256":"` + vHash + `","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
 )
 
@@ -57,7 +57,7 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 	}
 	okReq := req("request", "", "", "ok")
 	okReq.Want = map[string]any{"tenant": "tnt_acme", "product": "acme-db", "key": "LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
-		"bind_type": "machine", "fp": vFP, "nonce": vNonce, "created": "2026-11-08T10:00:00Z"}
+		"bind_type": "machine", "fp": vFP, "fp_source": "machine-id", "nonce": vNonce, "created": "2026-11-08T10:00:00Z"}
 	optional := req("request_optional_fields", `"created"`, `"hostname":"build-01","app_version":"4.2.0","sdk_version":"go/0.1.0","created"`, "ok")
 	optional.Want = map[string]any{"hostname": "build-01", "app_version": "4.2.0", "sdk_version": "go/0.1.0"}
 	okRcpt := rcpt("receipt", "", "", "ok")
@@ -74,7 +74,11 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 		},
 		Cases: []offlineCase{
 			okReq, optional, wrapped, okRcpt,
-			req("cluster_binding", `"type":"machine"`, `"type":"cluster"`, "ok"),
+			req("cluster_binding", `"type":"machine","fp":"`+vFP+`"},"fp_source":"machine-id"`, `"type":"cluster","fp":"`+vFP+`"},"fp_source":"kubernetes"`, "ok"),
+			req("cluster_from_machine_id", `"type":"machine"`, `"type":"cluster"`, "malformed"),
+			req("machine_from_kubernetes", `"fp_source":"machine-id"`, `"fp_source":"kubernetes"`, "malformed"),
+			req("fp_source_unknown", `"fp_source":"machine-id"`, `"fp_source":"bios"`, "malformed"),
+			req("fp_source_missing", `"fp_source":"machine-id",`, ``, "malformed"),
 			req("unsupported_version", `"v":1`, `"v":2`, "unsupported_version"),
 			req("v_missing", `"v":1,`, ``, "malformed"),
 			req("v_not_integer", `"v":1`, `"v":1.0`, "malformed"),
@@ -141,7 +145,7 @@ func TestOfflineVectors(t *testing.T) {
 			var r *Request
 			if r, err = ParseRequest(c.Input); err == nil {
 				fields = map[string]any{"tenant": r.Tenant, "product": r.Product, "key": r.Key, "bind_type": string(r.Binding.Type),
-					"fp": r.Binding.Fingerprint, "nonce": b64.EncodeToString(r.Nonce), "created": r.Created.Format(timeLayout),
+					"fp": r.Binding.Fingerprint, "fp_source": r.FPSource, "nonce": b64.EncodeToString(r.Nonce), "created": r.Created.Format(timeLayout),
 					"hostname": r.Hostname, "app_version": r.AppVersion, "sdk_version": r.SDKVersion}
 			}
 		} else {
@@ -180,7 +184,7 @@ func TestOfflineVectors(t *testing.T) {
 func TestOfflineRoundTrip(t *testing.T) {
 	created := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
 	nonce := bytes.Repeat([]byte{7}, 16)
-	r := Request{Tenant: "tnt_a", Product: "p", Key: "LF-KEY", Binding: Binding{Type: BindCluster, Fingerprint: vFP},
+	r := Request{Tenant: "tnt_a", Product: "p", Key: "LF-KEY", Binding: Binding{Type: BindCluster, Fingerprint: vFP}, FPSource: "kubernetes",
 		Nonce: nonce, Created: created, Hostname: "h", AppVersion: "1", SDKVersion: "go/1"}
 	s, err := EncodeRequest(r)
 	if err != nil {
@@ -203,8 +207,9 @@ func TestOfflineRoundTrip(t *testing.T) {
 	}
 	for name, bad := range map[string]Request{
 		"no binding":  {Tenant: "t", Product: "p", Key: "k", Nonce: nonce, Created: created},
-		"short nonce": {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce[:8], Created: created},
-		"no tenant":   {Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce, Created: created},
+		"short nonce": {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce[:8], Created: created},
+		"no tenant":   {Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created},
+		"no source":   {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce, Created: created},
 	} {
 		if _, err := EncodeRequest(bad); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: encoded (%v)", name, err)
