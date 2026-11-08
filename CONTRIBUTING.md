@@ -10,11 +10,13 @@ The general rules (Code of Conduct, DCO sign-off, pull request process, security
 ## Common tasks
 ```
 make dev-db   # throwaway PostgreSQL 17 for tests; prints the variables to export
-make test     # go test -race ./...
+make test     # go test -race ./...; fails if the dev-db variables aren't exported
 make lint     # go vet + golangci-lint
 make build    # bin/licenseforge
 docker compose up --build   # server + PostgreSQL with the production logins, on 127.0.0.1:8080
 ```
+Without `LICENSEFORGE_TEST_DATABASE_URL`, a plain `go test` skips the database tests (and still prints `ok`); `make test` and CI fail instead, so a green run means they ran.
+
 `make run` runs the server directly; it needs the `LICENSEFORGE_*` variables listed in `cmd/licenseforge/main.go`.
 
 ## End-to-end tests

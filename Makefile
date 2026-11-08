@@ -13,13 +13,14 @@ build:
 web:
 	cd web && npm ci && npm run build
 
+# Database tests fail rather than skip without LICENSEFORGE_TEST_DATABASE_URL (make dev-db).
 test:
-	for m in $(MODULES); do (cd $$m && go test -race ./...) || exit 1; done
+	for m in $(MODULES); do (cd $$m && LICENSEFORGE_REQUIRE_TEST_DB=1 go test -race ./...) || exit 1; done
 
 # FIPS 140-3 mode with the latest CMVP-certified Go Cryptographic Module (ADR-0024).
 # fips140=only makes non-approved algorithms fail, so tests catch accidental use (testing only).
 test-fips:
-	for m in $(MODULES); do (cd $$m && GOFIPS140=certified GODEBUG=fips140=only go test -count=1 ./...) || exit 1; done
+	for m in $(MODULES); do (cd $$m && LICENSEFORGE_REQUIRE_TEST_DB=1 GOFIPS140=certified GODEBUG=fips140=only go test -count=1 ./...) || exit 1; done
 
 vet:
 	for m in $(MODULES); do (cd $$m && go vet ./...) || exit 1; done

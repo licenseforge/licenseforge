@@ -75,12 +75,9 @@ func AdminExec(admin *sql.DB, stmts ...string) error {
 func Main(m *testing.M, env *Env, migrate func(ctx context.Context, ownerURL string) error) int {
 	env.AdminURL = os.Getenv("LICENSEFORGE_TEST_DATABASE_URL")
 	if env.AdminURL == "" {
-		if os.Getenv("CI") != "" {
-			fmt.Fprintln(os.Stderr, "LICENSEFORGE_TEST_DATABASE_URL must be set in CI: tenant isolation tests are release blockers (ADR-0009)")
-			return 1
-		}
-		fmt.Fprintln(os.Stderr, "skipping database tests: LICENSEFORGE_TEST_DATABASE_URL not set (run `make dev-db`)")
-		return 0
+		code, msg := withoutDatabase(os.Getenv)
+		fmt.Fprintln(os.Stderr, msg)
+		return code
 	}
 	admin, err := sql.Open("pgx", env.AdminURL)
 	if err != nil {
@@ -171,4 +168,15 @@ func WaitForLockWaiter(t testing.TB, e Env) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("nothing waited on a lock")
+}
+
+// withoutDatabase decides what a test binary does when
+// LICENSEFORGE_TEST_DATABASE_URL is unset: fail in CI and under `make test`
+// (LICENSEFORGE_REQUIRE_TEST_DB=1), where skipping would print "ok" for tests
+// that never ran; skip otherwise, for a quick `go test` of one package.
+func withoutDatabase(getenv func(string) string) (code int, msg string) {
+	if getenv("CI") != "" || getenv("LICENSEFORGE_REQUIRE_TEST_DB") != "" {
+		return 1, "LICENSEFORGE_TEST_DATABASE_URL must be set (run `make dev-db`): tenant isolation tests are release blockers (ADR-0009)"
+	}
+	return 0, "skipping database tests: LICENSEFORGE_TEST_DATABASE_URL not set (run `make dev-db`)"
 }
