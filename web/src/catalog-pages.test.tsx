@@ -192,3 +192,24 @@ it("archiving a product asks first, is one-way, and needs catalog:write", async 
   expect([...manager.rowButtons("DB")].map((b) => b.textContent)).not.toContain("Archive");
   act(() => manager.root.unmount());
 });
+
+it("names each field by its label alone; help and errors are its description", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } })));
+  const el = document.createElement("div");
+  document.body.append(el);
+  const root = createRoot(el);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <CustomerDialog tenant="acme" customer={null} onClose={() => {}} />
+      </QueryClientProvider>,
+    ),
+  );
+  for (const [name, label] of [["name", "Name"], ["refs", "External references"]] as const) {
+    const f = el.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`)!;
+    expect(f.labels?.[0]?.textContent).toBe(label); // not label + help text, as it was
+  }
+  const refs = el.querySelector("textarea")!;
+  expect(document.getElementById(refs.getAttribute("aria-describedby")!)?.textContent).toContain("key=value");
+  act(() => root.unmount());
+});

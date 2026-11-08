@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Dashboard forms: help and error text sat inside the field's `<label>`, so a screen reader announced "Slug Lowercase words joined by dashes…" as the field's name, and the help a second time through `aria-describedby`. Help and errors now sit next to the label: a field's name is its label alone, and its help and errors are its description. This applies to the shared `Field` and the other inline fields (customer references, issue pickers, customer ID, binding, term start). Found by the browser smoke test.
 ### Added
 - End-to-end tests (ADR-0041), run locally with `make e2e`, not in CI yet.
   - `e2e/env/up.sh` deploys a real environment on minikube: PostgreSQL 17 set up by `deploy/database-setup.sql`, Keycloak as the OIDC provider, and LicenseForge from its Helm chart, either built from the checkout or a published release (`--release VERSION`). It's served over HTTPS on nip.io names signed by a local CA, in its own namespace so a demo install next to it is untouched. Wildcard DNS isn't required: resolvers with DNS-rebinding protection drop such answers.

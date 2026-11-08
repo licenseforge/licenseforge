@@ -383,17 +383,19 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   }
 
   const select = (name: string, label: string, options: { id: string; name: string }[], onChange?: (v: string) => void, key?: string, hint?: string) => (
-    <label key={key} className="flex flex-col gap-1 text-sm">
-      {label}
-      <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]}
-        aria-describedby={[hint && `${name}-hint`, fields[name] && `${name}-error`].filter(Boolean).join(" ") || undefined}
-        onChange={onChange && ((e) => onChange(e.target.value))}>
-        <option value="" disabled>{t("licenses.choose")}</option>
-        {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-      </select>
+    <div key={key} className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-1">
+        {label}
+        <select name={name} required className={input} defaultValue="" aria-invalid={!!fields[name]}
+          aria-describedby={[hint && `${name}-hint`, fields[name] && `${name}-error`].filter(Boolean).join(" ") || undefined}
+          onChange={onChange && ((e) => onChange(e.target.value))}>
+          <option value="" disabled>{t("licenses.choose")}</option>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </label>
       {hint && <span id={`${name}-hint`} className="text-xs text-muted-foreground">{hint}</span>}
       {fields[name] && <span id={`${name}-error`}>{fields[name]}</span>}
-    </label>
+    </div>
   );
   return (
     <Modal title={t("licenses.issue")} onClose={close}>
@@ -404,12 +406,14 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
           select("customer_id", t("licenses.col.customer"), names.issuable)
         ) : (
           // A product-scoped caller can't list customers (they're tenant-wide): it issues by customer ID.
-          <label className="flex flex-col gap-1 text-sm">
-            {t("licenses.customerId")}
-            <input name="customer_id" required className={`${input} font-mono`} placeholder="cus_…" aria-invalid={!!fields.customer_id} aria-describedby={fields.customer_id ? "customer-help customer_id-error" : "customer-help"} />
+          <div className="flex flex-col gap-1 text-sm">
+            <label className="flex flex-col gap-1">
+              {t("licenses.customerId")}
+              <input name="customer_id" required className={`${input} font-mono`} placeholder="cus_…" aria-invalid={!!fields.customer_id} aria-describedby={fields.customer_id ? "customer-help customer_id-error" : "customer-help"} />
+            </label>
             <span id="customer-help" className="text-xs text-muted-foreground">{t("licenses.customerHelp")}</span>
             {fields.customer_id && <span id="customer_id-error">{fields.customer_id}</span>}
-          </label>
+          </div>
         )}
         {/* keyed by product: a new product starts the plan choice over */}
         {select("plan_id", t("licenses.col.plan"), issuablePlans, undefined, product,
@@ -421,11 +425,13 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
             {types.map((ty) => <option key={ty} value={ty}>{t(`licenses.type.${ty}`)}</option>)}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t("customers.col.refs")}
-          <textarea name="refs" rows={2} placeholder="order=1234" className={`${input} h-auto py-1 font-mono`} aria-invalid={!!(refsError || fields.external_refs)} aria-describedby={refsError || fields.external_refs ? "refs-error" : undefined} />
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("customers.col.refs")}
+            <textarea name="refs" rows={2} placeholder="order=1234" className={`${input} h-auto py-1 font-mono`} aria-invalid={!!(refsError || fields.external_refs)} aria-describedby={refsError || fields.external_refs ? "refs-error" : undefined} />
+          </label>
           {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
-        </label>
+        </div>
         {error != null && <p role="alert" className="text-sm font-medium">{errorText(error)}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={close}>{t("tokens.cancel")}</Button>

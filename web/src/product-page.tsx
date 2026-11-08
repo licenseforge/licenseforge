@@ -283,15 +283,17 @@ function PlanDialog({ tenant, product, onClose }: { tenant: string; product: str
         </label>
       </div>
       <Field label={t("product.col.activations")} name="max_activations" inputMode="numeric" error={fields.max_activations} help={t("product.activationsHelp")} />
-      <label className="flex flex-col gap-1 text-sm">
-        {t("product.col.binding")}
-        <select name="bind_type" className={input} defaultValue="machine" aria-invalid={!!fields.bind_type} aria-describedby={fields.bind_type ? "bind_type-error" : undefined}>
-          <option value="machine">{t("product.bind.machine")}</option>
-          <option value="cluster">{t("product.bind.cluster")}</option>
-          <option value="none">{t("product.bind.none")}</option>
-        </select>
+      <div className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-1">
+          {t("product.col.binding")}
+          <select name="bind_type" className={input} defaultValue="machine" aria-invalid={!!fields.bind_type} aria-describedby={fields.bind_type ? "bind_type-error" : undefined}>
+            <option value="machine">{t("product.bind.machine")}</option>
+            <option value="cluster">{t("product.bind.cluster")}</option>
+            <option value="none">{t("product.bind.none")}</option>
+          </select>
+        </label>
         {fields.bind_type && <span id="bind_type-error">{fields.bind_type}</span>}
-      </label>
+      </div>
       <p className="text-xs text-muted-foreground">{t("product.planDefaults")}</p>
     </FormDialog>
   );
@@ -348,15 +350,17 @@ function PlanEditDialog({ tenant, product, plan, onClose }: { tenant: string; pr
       <Field label={t("tokens.col.name")} name="name" required maxLength={200} value={f.name} onChange={(e) => set({ name: e.target.value })} error={fields.name} />
       <DurationField label={t("product.col.term")} name="term" value={f.term} unit={f.termUnit} units={["months", ...secondUnits]} error={term} help={t("product.termHelp")}
         onChange={(term, termUnit) => set({ term, termUnit: termUnit as PlanForm["termUnit"] })} />
-      <label className="flex flex-col gap-1 text-sm">
-        {t("product.expiryBasis")}
-        <select name="expiry_basis" className={input} value={f.expiryBasis} aria-invalid={!!fields.expiry_basis} aria-describedby={fields.expiry_basis ? "expiry_basis-error" : undefined}
-          onChange={(e) => set({ expiryBasis: e.target.value as PlanForm["expiryBasis"] })}>
-          <option value="from_issue">{t("product.expiry.from_issue")}</option>
-          <option value="from_first_activation">{t("product.expiry.from_first_activation")}</option>
-        </select>
+      <div className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-1">
+          {t("product.expiryBasis")}
+          <select name="expiry_basis" className={input} value={f.expiryBasis} aria-invalid={!!fields.expiry_basis} aria-describedby={fields.expiry_basis ? "expiry_basis-error" : undefined}
+            onChange={(e) => set({ expiryBasis: e.target.value as PlanForm["expiryBasis"] })}>
+            <option value="from_issue">{t("product.expiry.from_issue")}</option>
+            <option value="from_first_activation">{t("product.expiry.from_first_activation")}</option>
+          </select>
+        </label>
         {fields.expiry_basis && <span id="expiry_basis-error">{fields.expiry_basis}</span>}
-      </label>
+      </div>
       <Field label={t("product.col.activations")} name="max_activations" inputMode="numeric" value={f.maxActivations} onChange={(e) => set({ maxActivations: e.target.value })} error={fields.max_activations} help={t("product.activationsHelp")} />
       <Field label={t("product.maxRehosts")} name="max_rehosts" inputMode="numeric" value={f.maxRehosts} onChange={(e) => set({ maxRehosts: e.target.value })} error={fields.max_rehosts} help={t("product.rehostsHelp")} />
       <DurationField label={t("product.lease")} name="lease_seconds" value={f.lease} unit={f.leaseUnit} units={secondUnits} error={fields.lease_seconds} help={t("product.leaseHelp")}

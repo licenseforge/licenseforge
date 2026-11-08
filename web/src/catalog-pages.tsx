@@ -75,12 +75,14 @@ export function FormDialog({ title, submit, onClose, onSubmit, error, busy, chil
 export function Field({ label, name, error, help, ...rest }: { label: string; name: string; error?: string; help?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   const describedBy = [help && `${name}-help`, error && `${name}-error`].filter(Boolean).join(" ") || undefined;
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      {label}
-      <input name={name} className={input} aria-invalid={!!error} aria-describedby={describedBy} {...rest} />
+    <div className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-1">
+        {label}
+        <input name={name} className={input} aria-invalid={!!error} aria-describedby={describedBy} {...rest} />
+      </label>
       {help && <span id={`${name}-help`} className="text-xs text-muted-foreground">{help}</span>}
       {error && <span id={`${name}-error`}>{error}</span>}
-    </label>
+    </div>
   );
 }
 
@@ -295,20 +297,22 @@ export function CustomerDialog({ tenant, customer, onClose }: { tenant: string; 
       <Field label={t("tokens.col.name")} name="name" required maxLength={200} defaultValue={customer?.name} error={fields.name} />
       <Field label={t("invitations.col.email")} name="email" type="email" maxLength={320} defaultValue={customer?.email ?? ""} error={fields.email} />
       {customer && customer.email && <p className="text-xs text-muted-foreground">{t("customers.emailClear")}</p>}
-      <label className="flex flex-col gap-1 text-sm">
-        {t("customers.col.refs")}
-        <textarea
-          name="refs"
-          rows={3}
-          placeholder="stripe=cus_123"
-          defaultValue={customer ? formatRefs(customer.external_refs) : ""}
-          className={`${input} h-auto py-1 font-mono`}
-          aria-invalid={!!(refsError || fields.external_refs)}
-          aria-describedby={refsError || fields.external_refs ? "refs-help refs-error" : "refs-help"}
-        />
+      <div className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-1">
+          {t("customers.col.refs")}
+          <textarea
+            name="refs"
+            rows={3}
+            placeholder="stripe=cus_123"
+            defaultValue={customer ? formatRefs(customer.external_refs) : ""}
+            className={`${input} h-auto py-1 font-mono`}
+            aria-invalid={!!(refsError || fields.external_refs)}
+            aria-describedby={refsError || fields.external_refs ? "refs-help refs-error" : "refs-help"}
+          />
+        </label>
         <span id="refs-help" className="text-xs text-muted-foreground">{t("customers.refsHelp")}</span>
         {(refsError || fields.external_refs) && <span id="refs-error">{refsError ?? fields.external_refs}</span>}
-      </label>
+      </div>
     </FormDialog>
   );
 }
