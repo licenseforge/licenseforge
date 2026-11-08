@@ -40,6 +40,7 @@ import (
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -1049,5 +1050,32 @@ func TestMyTenantsEdges(t *testing.T) {
 	identity.MaxMemberships = 1
 	if items := list(); len(items) != 1 || items[0].(map[string]any)["tenant_id"] != first.ID {
 		t.Errorf("capped at 1: %v, want only %s", items, first.Slug)
+	}
+}
+
+// An action through the API records where it came from (AU-3): the client's
+// address and user agent, and the response's request ID in the hashed
+// details, so an audit entry leads to the request in the server logs.
+func TestAuditRecordsTheRequest(t *testing.T) {
+	f := setup(t)
+	r := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/customers", `{"name":"Contoso"}`,
+		f.session(t, f.ownerA, true), header("User-Agent", "audit-test/1"))
+	if r.code != 201 {
+		t.Fatalf("create: %d %s", r.code, r.raw)
+	}
+	var e *ent.AuditEvent
+	if err := f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+		var err error
+		e, err = tx.AuditEvent.Query().Where(auditevent.Action("customer.create")).Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.SourceIP == nil || *e.SourceIP != "192.0.2.1" || e.UserAgent == nil || *e.UserAgent != "audit-test/1" {
+		t.Errorf("source %v, user agent %v", e.SourceIP, e.UserAgent)
+	}
+	var d map[string]any
+	if err := json.Unmarshal([]byte(e.Details), &d); err != nil || d["request_id"] != r.h.Get("X-Request-Id") {
+		t.Errorf("details %s, want request_id %s", e.Details, r.h.Get("X-Request-Id"))
 	}
 }

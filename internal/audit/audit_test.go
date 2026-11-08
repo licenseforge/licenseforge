@@ -551,3 +551,49 @@ func TestRefused(t *testing.T) {
 		}
 	}
 }
+
+// The request an action came from (WithRequest) fills the entry's source IP
+// and user agent when the event doesn't name them, and its ID goes into the
+// hashed details as request_id; the event's own values win, and the caller's
+// details map isn't changed.
+func TestRecordTakesTheRequest(t *testing.T) {
+	ctx := WithRequest(context.Background(), Request{ID: "REQ1", SourceIP: "::ffff:192.0.2.7", UserAgent: "curl/8.0"})
+	d := openDB(t)
+	tn := newTenant(t, d)
+	details := map[string]any{"k": "v"}
+	var r, own, given *ent.AuditEvent
+	if err := d.WithTenant(ctx, tn, func(tx *ent.Tx) error {
+		var err error
+		e := Event{ActorType: auditevent.ActorTypeUser, ActorID: "usr_1", Action: "license.issue", Outcome: auditevent.OutcomeSuccess, Details: details}
+		if r, err = Record(ctx, tx, tn, e); err != nil {
+			return err
+		}
+		e.SourceIP, e.UserAgent = "10.0.0.9", "sdk/1"
+		if own, err = Record(ctx, tx, tn, e); err != nil {
+			return err
+		}
+		e.Details = map[string]any{"request_id": "given"}
+		given, err = Record(ctx, tx, tn, e)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r.SourceIP == nil || *r.SourceIP != "192.0.2.7" || r.UserAgent == nil || *r.UserAgent != "curl/8.0" {
+		t.Errorf("from the request: source %v, user agent %v", r.SourceIP, r.UserAgent)
+	}
+	if string(r.Details) != `{"k":"v","request_id":"REQ1"}` {
+		t.Errorf("details %s", r.Details)
+	}
+	if *own.SourceIP != "10.0.0.9" || *own.UserAgent != "sdk/1" {
+		t.Errorf("the event's own values: source %v, user agent %v", *own.SourceIP, *own.UserAgent)
+	}
+	if string(given.Details) != `{"request_id":"given"}` {
+		t.Errorf("an event's own request_id: %s", given.Details)
+	}
+	if len(details) != 1 {
+		t.Errorf("the caller's details changed: %v", details)
+	}
+	if err := verify(d, tn); err != nil { // request_id is part of the hashed details
+		t.Error(err)
+	}
+}

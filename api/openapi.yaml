@@ -1406,7 +1406,7 @@ components:
         outcome: { type: string, enum: [success, failure, denied] }
         source_ip: { type: string, nullable: true }
         user_agent: { type: string, nullable: true }
-        details: { type: object, additionalProperties: true }
+        details: { type: object, additionalProperties: true, description: "The action's details. Entries from an API request also carry request_id, that response's X-Request-Id." }
         prev_hash: { type: string, description: Hex; the previous entry's hash (zeros for seq 1). }
         hash:
           type: string
