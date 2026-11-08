@@ -6,6 +6,7 @@ import { AppShell } from "@/app-shell";
 import { Overview } from "@/overview-page";
 import { ErrorPage, LoginPage, NoTenants, NotFound, TenantLayout } from "@/pages";
 import { CustomersPage, ProductsPage } from "@/catalog-pages";
+import { ProductPage } from "@/product-page";
 import { AuditPage } from "@/audit-page";
 import { InvitePage } from "@/invite-page";
 import { LicensesPage } from "@/licenses-page";
@@ -49,13 +50,14 @@ const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "sett
 const membersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/members", component: MembersPage });
 const auditRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/audit", component: AuditPage });
 const productsRoute = createRoute({ getParentRoute: () => tenantRoute, path: "products", component: ProductsPage });
+const productRoute = createRoute({ getParentRoute: () => tenantRoute, path: "products/$id", component: ProductPage });
 const customersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "customers", component: CustomersPage });
 const licensesRoute = createRoute({ getParentRoute: () => tenantRoute, path: "licenses", component: LicensesPage });
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
-  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, customersRoute, licensesRoute, tokensRoute, membersRoute, auditRoute])]),
+  appRoute.addChildren([indexRoute, tenantRoute.addChildren([overviewRoute, productsRoute, productRoute, customersRoute, licensesRoute, tokensRoute, membersRoute, auditRoute])]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {

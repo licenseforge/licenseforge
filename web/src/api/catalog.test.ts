@@ -7,7 +7,10 @@ import {
   createCustomer,
   customerPatch,
   formatRefs,
+  FieldError,
   parseRefs,
+  planBody,
+  planTerm,
   refsBody,
   renameProduct,
   updateCustomer,
@@ -134,5 +137,34 @@ describe("who sees which actions", () => {
     expect(canWriteCustomers({ role: "support", scope: all })).toBe(false);
     expect(canWriteCustomers({ role: "owner", scope: scoped })).toBe(false);
     expect(canWriteCustomers({ role: "sdk", scope: all })).toBe(false);
+  });
+});
+
+describe("planBody", () => {
+  const base = { slug: " pro ", name: " Pro ", term: "", termUnit: "months" as const, maxActivations: "", bindType: "machine" };
+  it("leaves blank numbers out: perpetual, unlimited", () => {
+    expect(planBody("prd_1", base)).toEqual({ product_id: "prd_1", slug: "pro", name: "Pro", bind_type: "machine" });
+  });
+  it("sends months as months and days as seconds", () => {
+    expect(planBody("prd_1", { ...base, term: "12", maxActivations: " 3 " })).toMatchObject({ duration_months: 12, max_activations: 3 });
+    const trial = planBody("prd_1", { ...base, term: "14", termUnit: "days" });
+    expect(trial.duration_seconds).toBe(14 * 86400);
+    expect(trial).not.toHaveProperty("duration_months");
+  });
+  it("names the field that isn't a whole number", () => {
+    expect(() => planBody("prd_1", { ...base, term: "1.5" })).toThrow(FieldError);
+    expect(() => planBody("prd_1", { ...base, term: "1.5" })).toThrow("term");
+    expect(() => planBody("prd_1", { ...base, maxActivations: "-1" })).toThrow("max_activations");
+    expect(() => planBody("prd_1", { ...base, maxActivations: "1e3" })).toThrow("max_activations");
+    expect(() => planBody("prd_1", { ...base, term: "1234567890", termUnit: "days" })).toThrow("term"); // would overflow or turn into 1e+21
+  });
+});
+
+describe("planTerm", () => {
+  it("prefers months, shows whole days, else seconds, else perpetual", () => {
+    expect(planTerm({ duration_months: 12, duration_seconds: null })).toEqual({ kind: "months", n: 12 });
+    expect(planTerm({ duration_months: null, duration_seconds: 14 * 86400 })).toEqual({ kind: "days", n: 14 });
+    expect(planTerm({ duration_months: null, duration_seconds: 90 })).toEqual({ kind: "seconds", n: 90 });
+    expect(planTerm({ duration_months: null, duration_seconds: null })).toEqual({ kind: "perpetual" });
   });
 });
