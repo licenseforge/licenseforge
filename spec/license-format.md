@@ -131,3 +131,44 @@ Steps run in this order; the first failing step decides the error class.
 9. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
 
 That's the whole SDK core. Any language with Ed25519 (libsodium covers C/C++) can implement it in ~100 lines.
+
+## Offline activation
+An air-gapped machine activates by file exchange ([ADR-0043 Offline activation and deactivation receipts](../docs/adr/0043-offline-activation-and-deactivation-receipts.md)): the app writes an **activation request**, someone carries it to the vendor's LicenseForge, and an ordinary `lf1` license file bound to that machine comes back. To return the seat, the app deletes the file and writes a **deactivation receipt**. Both artifacts are unsigned (the machine has no key the vendor trusts): the request is authorised by the license key it carries, the receipt by naming the exact file the server issued.
+
+### Envelope
+```
+lfreq1.<base64url(payload_json)>     activation request
+lfrcpt1.<base64url(payload_json)>    deactivation receipt
+```
+- `base64url`, whitespace (SP, HT, CR, LF ignored anywhere) and one leading UTF-8 BOM: as for `lf1`. No armor.
+- At most **4,096 bytes** of raw input; larger → `malformed` before any parsing.
+- The payload follows the claim encoding rules' well-formedness check (UTF-8, one object, no duplicate keys, depth, surrogates), then `v`: missing or not an integer → `malformed`; any integer other than `1` → `unsupported_version`.
+- **Unknown fields → `malformed`** (both sides are LicenseForge's; a new field comes with a new `v`). Every field below has the stated type; `null` or a wrong type → `malformed`.
+- Error classes: `malformed`, `unsupported_version`.
+
+### Request (`lfreq1`)
+| Field | Rule |
+|---|---|
+| `v` | `1` |
+| `tenant`, `product` | non-empty strings, ≤ 256 bytes, no NUL |
+| `key` | the license key, 1–128 printable ASCII characters (`0x21`–`0x7E`) |
+| `bind` | object with exactly `type` (`machine` or `cluster`) and `fp` (`sha256:` + 64 lowercase hex digits, derived as in Fingerprints) |
+| `nonce` | 16 random bytes, base64url |
+| `created` | the machine's clock, timestamp format; informational only, never trusted |
+| `hostname` | optional, 1–255 bytes, no control characters |
+| `app_version`, `sdk_version` | optional, 1–128 bytes, no control characters |
+
+The request is as sensitive as the license key it carries: carry it like the key, and servers store only its SHA-256.
+
+### Receipt (`lfrcpt1`)
+| Field | Rule |
+|---|---|
+| `v` | `1` |
+| `tenant` | as in the request |
+| `license_id` | non-empty string, ≤ 128 bytes, no NUL (the `lid` of the deleted file) |
+| `fp` | the machine's fingerprint, as in the request |
+| `file_sha256` | 64 lowercase hex digits: SHA-256 of the exact bytes of the license file as installed |
+| `nonce`, `created` | as in the request |
+
+### Conformance vectors
+`spec/vectors/offline.json`: request and receipt inputs with the expected class and, for valid ones, the decoded fields. Every SDK and the server must pass all of them.
