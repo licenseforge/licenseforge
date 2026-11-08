@@ -9,14 +9,14 @@
 # Needs minikube started with the ingress addon:
 #   minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
 set -euo pipefail
-umask 077   # .state holds the CA key, the master key and the seed token
+umask 077   # .state holds the CA key, the master key and the test tenant's invite token
 ENV_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$ENV_DIR/../.." && pwd)
 STATE=$ENV_DIR/.state
 MODE=local VERSION=""
 case "${1:-}" in
   ""|--local) ;;
-  --release) MODE=release VERSION=${2:?--release needs a version, e.g. 0.1.0-alpha.1} ;;
+  --release) MODE=release VERSION=${2:?--release needs a version with 'tenant create' (after 0.1.0-alpha.1)} ;;
   *) echo "usage: $0 [--local | --release VERSION]" >&2; exit 2 ;;
 esac
 # Only ever the minikube cluster: every kubectl and helm call below goes to
@@ -128,16 +128,18 @@ kubectl -n $NS rollout status deployment/licenseforge --timeout=300s >/dev/null
 #    admin@licenseforge.local, whose link token goes to .state/invite-token.
 #    Journeys accept it on their first login. Created when the database has
 #    no tenant acme; a tenant without its token can't be repaired.
-SEEDED=$(kubectl -n $NS exec db-0 -- psql -tAq -U postgres -d licenseforge -c "SELECT count(*) FROM tenants WHERE slug = 'acme'")
-if [ "$SEEDED" = 1 ] && [ ! -f "$STATE/invite-token" ]; then
+HAVE_ACME=$(kubectl -n $NS exec db-0 -- psql -tAq -U postgres -d licenseforge -c "SELECT count(*) FROM tenants WHERE slug = 'acme'")
+if [ "$HAVE_ACME" = 1 ] && [ ! -f "$STATE/invite-token" ]; then
   echo "tenant acme exists but .state/invite-token is gone: start over with 'kubectl delete ns $NS' and 'rm -r $STATE'" >&2; exit 1
 fi
-if [ "$SEEDED" = 0 ]; then
+if [ "$HAVE_ACME" = 0 ]; then
+  # 0.1.0-alpha.1 has no tenant create: --release needs a later version.
   OUT=$(kubectl -n $NS exec deploy/licenseforge -- /licenseforge tenant create \
-    --slug acme --name Acme --owner-email admin@licenseforge.local)
+    --slug acme --name Acme --owner-email admin@licenseforge.local) ||
+    { echo "licenseforge tenant create failed (a release before it existed?)" >&2; exit 1; }
   TOKEN=$(printf '%s\n' "$OUT" | sed -n 's|^  /invite#token=\([A-Za-z0-9]*\)$|\1|p')
   [ -n "$TOKEN" ] || { echo "tenant create printed no invite token" >&2; exit 1; }
-  printf '%s' "$TOKEN" > "$STATE/invite-token"
+  printf '%s' "$TOKEN" > "$STATE/invite-token.new" && mv "$STATE/invite-token.new" "$STATE/invite-token" # never a partial token
 fi
 
 for _ in $(seq 30); do "${CURL[@]}" "https://$LF/readyz" >/dev/null && break; sleep 2; done

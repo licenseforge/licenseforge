@@ -270,9 +270,15 @@ func TestPlatformAdminOnboardsTenant(t *testing.T) {
 	}
 	admin.refused("POST", "/api/v1/platform/tenants", map[string]string{"slug": slug, "name": "Again", "owner_email": "viewer@licenseforge.local"}, http.StatusConflict, "conflict")
 
-	viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": created.Invitation.Token}, 200, nil)
-	if !slices.ContainsFunc(memberships(viewer), func(x tenant) bool { return x.Slug == slug && x.Role == "owner" }) {
-		t.Fatal("accepted, but doesn't own the tenant")
+	// The accept's answer, not viewer's tenant list: that list is capped and
+	// grows by one tenant per run.
+	var joined struct {
+		TenantID string `json:"tenant_id"`
+		Role     string
+	}
+	viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": created.Invitation.Token}, 200, &joined)
+	if joined.TenantID != created.Tenant.ID || joined.Role != "owner" {
+		t.Fatalf("accepted: %+v", joined)
 	}
 	viewer.do("POST", "/api/v1/tenants/"+slug+"/products", map[string]string{"slug": "first", "name": "First product"}, 201, nil)
 }

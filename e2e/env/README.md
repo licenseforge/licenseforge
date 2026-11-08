@@ -29,7 +29,8 @@ Tear down with `kubectl delete ns licenseforge-e2e` and `rm -r e2e/env/.state`. 
 
 Keycloak in dev mode keeps no data. After a restart it imports the realm again, with the same user IDs, so sign-ins and memberships carry over.
 
+The test tenant `acme` is created by `up.sh` with `licenseforge tenant create` (ADR-0042), and is shared by runs. `TestPlatformAdminOnboardsTenant` creates a new tenant through the platform API on each run, owned by `viewer`. `--release` needs a version that has `tenant create` (any after 0.1.0-alpha.1).
+
 ## Known gaps
 
 - The chart can't trust an extra CA yet, so `up.sh` patches the Deployment so the server trusts the local CA for Keycloak.
-- The test tenant `acme` is created by `up.sh` with `licenseforge tenant create` (ADR-0042), and is shared by runs. `TestPlatformAdminOnboardsTenant` creates a new tenant through the platform API on each run.
