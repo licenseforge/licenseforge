@@ -983,8 +983,11 @@ func TestMyTenantsEdges(t *testing.T) {
 		if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
 			inv, err := tx.Invitation.Create().SetTenantID(tenant).SetEmail(email).SetRole(invitation.RoleViewer).SetScopeAll(true).
 				SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
-				SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx)
+				Save(ctx) // opened, then accepted: an invitation starts open (insert_open)
 			if err != nil {
+				return err
+			}
+			if inv, err = inv.Update().SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx); err != nil {
 				return err
 			}
 			return tx.Membership.Create().SetTenantID(tenant).SetUserID(u).SetInvitationID(inv.ID).
@@ -1027,8 +1030,11 @@ func TestMyTenantsEdges(t *testing.T) {
 		}
 		inv, err := tx.Invitation.Create().SetTenantID(f.a.ID).SetEmail(*wu.Email).SetRole(invitation.RoleViewer).SetScopeAll(false).
 			SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
-			SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx)
+			Save(ctx) // opened, then accepted (insert_open)
 		if err != nil {
+			return err
+		}
+		if inv, err = inv.Update().SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx); err != nil {
 			return err
 		}
 		m, err := tx.Membership.Create().SetTenantID(f.a.ID).SetUserID(w).SetInvitationID(inv.ID).
