@@ -17,7 +17,8 @@ Needs minikube, kubectl, helm, openssl, python3 and curl. kubectl's current cont
 minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
 e2e/env/up.sh                          # the checkout's chart and image (rebuilds the image)
 e2e/env/up.sh --release 0.1.0-alpha.1  # or a published release
-make e2e                               # the journeys
+make e2e                               # the API journeys
+make e2e-browser                       # the dashboard smoke test (Playwright)
 ```
 
 `up.sh` can be re-run, for example after changing code. The CA, the master key and the seed are kept in `e2e/env/.state/` (gitignored). Import `.state/ca.crt` in your browser to open the dashboard without certificate warnings.

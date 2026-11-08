@@ -22,7 +22,8 @@ Journeys through the real chart, server, identity provider and Go SDK (ADR-0041)
 ```
 minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
 e2e/env/up.sh   # deploys this checkout (see e2e/env/README.md)
-make e2e
+make e2e         # API journeys (Go)
+make e2e-browser # dashboard smoke test (Playwright; first time: cd web && npx playwright install chromium)
 ```
 
 ## Design changes

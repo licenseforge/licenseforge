@@ -15,3 +15,5 @@ node_modules/
 
 # e2e environment state: local CA, certificates, seed tokens
 /e2e/env/.state/
+/web/test-results/
+/web/playwright-report/
