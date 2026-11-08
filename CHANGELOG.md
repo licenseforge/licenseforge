@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- Platform tenant onboarding API (ADR-0042). Until now, tenants could only be created in SQL.
+  - `POST /api/v1/platform/tenants` with `{slug, name, owner_email}` creates a tenant **and an owner invitation** (every product, open 7 days) in one transaction on the platform pool. The invitation token is in the response only.
+  - The platform admin doesn't join the tenant: the first owner signs in with the invited, verified email and accepts, like any invitation.
+  - `GET /api/v1/platform/tenants` lists the tenants, newest first and cursor-paged, never the reserved platform tenant.
+  - Callers must be platform admins with an enabled account, checked on every request. Other signed-in users get `403 forbidden`, and API tokens get 401 (tokens are tenant-scoped). CSRF is checked as on other session writes.
+  - The admin role is rechecked inside the creating transaction under the admin-set lock, taken shared, so removing the admin or disabling the user waits for it.
+  - A taken slug (including `platform`) is 409; invalid values are 422 with the field.
+  - Audited: `tenant.create` on the platform chain, and `invitation.create` as the new tenant's first entry (never the email). Refusals go on the platform chain.
+- `LICENSEFORGE_PLATFORM_MFA_POLICY` (ADR-0038): `none` (default), `mfa` or `phishing_resistant`. It applies to every platform request, and a session short of it gets `403 mfa_required` with a step-up that returns to `/platform/`. Platform admins are privileged accounts (IA-2(1)): the Secure Configuration Guide says to set it in production. An invalid value stops the server at start.
 ### Fixed
 - Dashboard forms: help and error text sat inside the field's `<label>`, so a screen reader announced "Slug Lowercase words joined by dashes…" as the field's name, and the help a second time through `aria-describedby`. Help and errors now sit next to the label: a field's name is its label alone, and its help and errors are its description. This applies to the shared `Field`, the other inline fields (customer references, issue pickers, customer ID, binding, term start), and the invitation and API token dialogs (email, role, name, expiry), whose errors sat inside the label too. Found by the browser smoke test.
 ### Added

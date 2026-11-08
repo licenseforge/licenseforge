@@ -37,6 +37,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
+	"licenseforge.io/licenseforge/internal/platform"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
@@ -72,6 +73,11 @@ type Config struct {
 	Idempotency idempotency.Store
 	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
 	Tenants tenants.Service
+	// Platform is what platform admins do outside tenants (ADR-0042), and
+	// PlatformMFAPolicy the assurance their sessions need there (ADR-0038;
+	// empty: none).
+	Platform          platform.Service
+	PlatformMFAPolicy authz.Assurance
 	// Invitations: list, create, revoke, and accept (a user route).
 	Invitations invitations.Service
 	Identity    identity.Service
@@ -215,6 +221,9 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 	default:
 		return authz.Principal{}, internal(err)
 	}
+	if strings.HasPrefix(r.URL.EscapedPath(), Prefix+"/platform/") {
+		return s.platformSession(r, u.ID, sess.Assurance)
+	}
 	ref, ok := tenantRef(r)
 	if !ok {
 		if userRoutes[r.URL.EscapedPath()] {
@@ -244,6 +253,25 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		return authz.Principal{}, mfaRequired(t, sess.Assurance)
 	}
 	return authz.Principal{Kind: authz.User, ID: u.ID, TenantID: t.ID, Role: g.Role, Scope: g.Scope, Assurance: sess.Assurance}, nil
+}
+
+// platformSession admits a platform admin, enabled, whose session meets the
+// platform MFA policy (ADR-0038, ADR-0042), as a principal with no tenant:
+// authz denies it every tenant permission; the platform handlers act for it.
+// Checked on every request, so a removed admin or a raised policy applies at
+// once. Anyone else signed in gets 403: the paths are public, nothing to hide.
+func (s *server) platformSession(r *http.Request, userID string, assurance authz.Assurance) (authz.Principal, *problem) {
+	ok, err := s.Platform.IsAdmin(r.Context(), userID)
+	if err != nil {
+		return authz.Principal{}, internal(err)
+	}
+	if !ok {
+		return authz.Principal{}, &problem{status: http.StatusForbidden, code: "forbidden", detail: "Only platform admins can use the platform API."}
+	}
+	if policy := s.PlatformMFAPolicy; policy != "" && !assurance.Meets(policy) {
+		return authz.Principal{}, platformMFARequired(policy, assurance)
+	}
+	return authz.Principal{Kind: authz.User, ID: userID, Assurance: assurance}, nil
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
@@ -284,19 +312,20 @@ func clean(s string) string {
 // queryParams are each operation's query parameters; others answer 400.
 // TestRoutesMatchSpec keeps it equal to the spec.
 var queryParams = map[string][]string{
-	"ListApiTokens":   {"limit", "cursor"},
-	"ListMembers":     {"limit", "cursor"},
-	"ListInvitations": {"limit", "cursor"},
-	"ListLicenses":    {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
-	"ListProducts":    {"limit", "cursor", "archived"},
-	"ListFeatures":    {"limit", "cursor", "product_id"},
-	"ListPlans":       {"limit", "cursor", "product_id"},
-	"ListCustomers":   {"limit", "cursor"},
-	"ListAuditEvents": {"limit", "cursor", "after_seq"},
-	"ListActivations": {"limit", "cursor"},
-	"ListSigningKeys": {"limit", "cursor"},
-	"RemoveMember":    {"revoke_tokens", "revoke_invitations"},
-	"UpdateMember":    {"revoke_tokens", "revoke_invitations"},
+	"ListApiTokens":       {"limit", "cursor"},
+	"ListPlatformTenants": {"limit", "cursor"},
+	"ListMembers":         {"limit", "cursor"},
+	"ListInvitations":     {"limit", "cursor"},
+	"ListLicenses":        {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
+	"ListProducts":        {"limit", "cursor", "archived"},
+	"ListFeatures":        {"limit", "cursor", "product_id"},
+	"ListPlans":           {"limit", "cursor", "product_id"},
+	"ListCustomers":       {"limit", "cursor"},
+	"ListAuditEvents":     {"limit", "cursor", "after_seq"},
+	"ListActivations":     {"limit", "cursor"},
+	"ListSigningKeys":     {"limit", "cursor"},
+	"RemoveMember":        {"revoke_tokens", "revoke_invitations"},
+	"UpdateMember":        {"revoke_tokens", "revoke_invitations"},
 }
 
 // strictInput refuses unknown query parameters and decodes the body again
@@ -478,6 +507,8 @@ func mapErr(err error) *problem {
 	var invalidCustomer *customers.InvalidError
 	switch {
 	case errors.As(err, &p):
+	case platformProblem(err) != nil:
+		p = platformProblem(err)
 	case errors.Is(err, signing.ErrPendingExists):
 		p = &problem{status: http.StatusConflict, code: "pending_key_exists", detail: "The tenant already has a pending key; promote or discard it first."}
 	case errors.Is(err, signing.ErrNotPending):

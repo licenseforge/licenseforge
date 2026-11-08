@@ -739,7 +739,7 @@
               {
                 "uuid": "d716037b-ca0f-5bd5-8ee7-8578153f7a11",
                 "control-id": "ia-2.1",
-                "description": "Every dashboard session records, at login, the verified ID token's amr, acr (and Entra's acrs) and auth_time, and a computed assurance level: none, mfa or phishing_resistant (configurable value sets; missing or unknown claims mean none). Each tenant has an MFA policy (none, mfa, phishing_resistant) that only owners change from a session, audited; raising it needs a session that already meets the new level (ADR-0038).",
+                "description": "Every dashboard session records, at login, the verified ID token's amr, acr (and Entra's acrs) and auth_time, and a computed assurance level: none, mfa or phishing_resistant (configurable value sets; missing or unknown claims mean none). Each tenant has an MFA policy (none, mfa, phishing_resistant) that only owners change from a session, audited; raising it needs a session that already meets the new level (ADR-0038). Platform admins are held to LICENSEFORGE_PLATFORM_MFA_POLICY on every platform request (ADR-0042).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -747,7 +747,7 @@
                     "value": "partial"
                   }
                 ],
-                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Step-up login asks the IdP for a fresh authentication (max_age=0, requested, not verified) and configured acr_values, and judges the result by the returned claims. Not yet: the platform-admin policy (ADR-0038).",
+                "remarks": "Enforced on every tenant request (403 mfa_required, audited once per session and tenant, counted in licenseforge_mfa_refusals_total). Step-up login asks the IdP for a fresh authentication (max_age=0, requested, not verified) and configured acr_values, and judges the result by the returned claims. Platform admins (privileged: they create tenants, ADR-0042) are held to LICENSEFORGE_PLATFORM_MFA_POLICY on every platform request.",
                 "links": [
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/identity/assurance.go",

@@ -580,6 +580,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every tenant, newest first (platform admins, ADR-0042).
+         * @description Dashboard sessions of platform admins whose account isn't disabled
+         *     (other users get 403 forbidden; API tokens are tenant-scoped and get
+         *     401), meeting LICENSEFORGE_PLATFORM_MFA_POLICY (else 403
+         *     mfa_required, ADR-0038). The reserved platform tenant isn't listed.
+         */
+        get: operations["listPlatformTenants"];
+        put?: never;
+        /**
+         * Create a tenant and invite its first owner (platform admins, ADR-0042).
+         * @description Creates the tenant and an owner invitation (every product, open 7
+         *     days) for owner_email, in one transaction. The invitation's token,
+         *     for the invite link (/invite#token=…), is in this response only.
+         *     The platform admin doesn't join the tenant: the owner signs in with
+         *     the invited, verified email and accepts. Audited: tenant.create on
+         *     the platform chain, invitation.create on the new tenant's. Same
+         *     callers as listing; a taken slug (the platform tenant's included) is
+         *     409.
+         */
+        post: operations["createPlatformTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/activation/tenants/{tenant}/activate": {
         parameters: {
             query?: never;
@@ -1596,6 +1630,40 @@ export interface components {
             /** @description Absent on the last page. */
             next_cursor?: string;
         };
+        PlatformTenant: {
+            /** @example tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            slug: string;
+            name: string;
+            mfa_policy: components["schemas"]["MfaPolicy"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformTenantPage: {
+            items: components["schemas"]["PlatformTenant"][];
+            next_cursor?: string;
+        };
+        PlatformTenantCreate: {
+            /** @description Lowercase letters and digits joined by single dashes, e.g. acme. It names the tenant in URLs and can't change. */
+            slug: string;
+            name: string;
+            /** @description Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email. */
+            owner_email: string;
+        };
+        PlatformTenantCreated: {
+            tenant: components["schemas"]["PlatformTenant"];
+            invitation: {
+                /** @example inv_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+                id: string;
+                email: string;
+                /** @enum {string} */
+                role: "owner";
+                /** Format: date-time */
+                expires_at: string;
+                /** @description For the invite link (/invite#token=…). Shown once */
+                token: string;
+            };
+        };
         /**
          * @description The assurance a session needs in this tenant (ADR-0038): none, MFA,
          *     or phishing-resistant MFA (passkeys or security keys, PIV/CAC), as
@@ -2527,6 +2595,63 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
+        };
+    };
+    listPlatformTenants: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of tenants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenantPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    createPlatformTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformTenantCreate"];
+            };
+        };
+        responses: {
+            /** @description The tenant and the owner's invitation. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenantCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     activate: {

@@ -35,6 +35,7 @@ import (
 	"licenseforge.io/licenseforge/internal/invitations"
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
+	"licenseforge.io/licenseforge/internal/platform"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
@@ -79,7 +80,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions,
+	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions, Platform: platform.Service{DB: d},
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
 		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Plans: catalog.Plans{DB: d}, Customers: customers.Service{DB: d}, Audit: audit.Log{DB: d}, SigningKeys: signing.Local{DB: d, Keys: kr}, Activations: activations.Service{DB: d, Keys: kr},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)

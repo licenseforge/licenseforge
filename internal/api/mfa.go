@@ -28,6 +28,16 @@ func mfaRequired(t identity.TenantRef, current authz.Assurance) *problem {
 	}}
 }
 
+// platformMFARequired is mfaRequired for the platform API: the step-up
+// comes back to the dashboard's platform screen.
+func platformMFARequired(policy, current authz.Assurance) *problem {
+	q := url.Values{"assurance": {string(policy)}, "return": {"/platform/"}}
+	return &problem{status: 403, code: "mfa_required", detail: "The platform API requires a stronger sign-in: sign in again with that method.", extra: map[string]string{
+		"required_assurance": string(policy), "session_assurance": string(current),
+		"step_up_url": "/auth/login?" + q.Encode(),
+	}}
+}
+
 // mfaAudited remembers the (session, tenant) pairs whose refusal is on the
 // audit chain, so a polling dashboard writes one entry, not one a request
 // (ADR-0038). ponytail: per replica and capped; the database check behind
