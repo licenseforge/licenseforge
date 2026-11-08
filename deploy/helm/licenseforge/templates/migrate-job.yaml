@@ -35,7 +35,10 @@ spec:
           env:
             - name: LICENSEFORGE_OWNER_DATABASE_URL
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.migrate | quote }}, key: owner-database-url}}
+            {{- include "licenseforge.extraCAEnv" (list . 12) }}
+          {{- include "licenseforge.extraCAMounts" (list . 10) }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- include "licenseforge.extraCAVolumes" (list . 6) }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -21,7 +21,6 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_OIDC_CLIENT_ID` | with the issuer | – | Also the required audience of ID tokens |
 | `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: pass it with `secretKeyRef`, never as a literal |
 | `LICENSEFORGE_OIDC_REDIRECT_URL` | with the issuer | – | `https://<public host>/auth/callback`. Its origin is the only trusted origin for unsafe requests (CSRF) |
-| `SSL_CERT_DIR` | no | the image's bundle only | Go's standard variable: directories of extra CA certificates trusted for every outgoing TLS connection, on top of the image's bundle (`SSL_CERT_FILE` would replace that bundle; don't use it). For an OIDC provider behind a private CA; the Helm value `extraCA.secretName` mounts a Secret and sets it. Verification is never turned off |
 | `LICENSEFORGE_SESSION_IDLE_TIMEOUT` | no | `1h` | Dashboard session idle timeout (AC-12): at least `5m`, at most the max age. Out of bounds stops the server |
 | `LICENSEFORGE_SESSION_MAX_AGE` | no | `12h` | Dashboard session lifetime after login (AC-12, IA-11): `1h` to `24h` (the database cap) |
 | `LICENSEFORGE_LOGIN_BANNER` | no | unset = no banner | System use notification shown on `/login` before sign-in (AC-8): plain text, at most 4 KB, newlines and tabs allowed, no other control, format or separator characters. Users must agree before login starts |
@@ -110,6 +109,7 @@ The server speaks plain HTTP on 8080 and has no TLS settings. The chart creates 
 - IPv6 clients are counted per /64. A client holding a larger block gets one bucket per /64 in it (a /48 is 65,536 buckets), so the per-address limit doesn't bound an attacker with a large IPv6 allocation; the address table's bound (fail open past it) and the ingress do.
 - The server's per-address limit is per replica and fails open for new addresses once 100,000 are tracked in a minute (`licenseforge_rate_limit_untracked_requests_total`); `licenseforge_rate_limited_requests_total` counts 429s by surface. Keep volumetric and connection limits at the ingress. Request bodies are limited to 1 MB; the server cuts requests that take over 30 s to send and responses over 60 s.
 - If the proxy rewrites `Host`, keep the browser-facing origin equal to `LICENSEFORGE_OIDC_REDIRECT_URL`'s.
+- **A private CA** (an OIDC provider or a database with a certificate from an internal or enterprise CA): set the Helm value `extraCA.secretName` to a Secret with the CA's PEM. The server, the migration Job and the audit-prune CronJob trust it in addition to the image's bundle, through Go's standard `SSL_CERT_DIR` (don't use `SSL_CERT_FILE`, which replaces the bundle). It applies to every outgoing TLS connection, including database URLs with `sslmode=verify-full` and no `sslrootcert`; a SIEM sink with its own `caSecret` trusts only that. The roots are read at start: after changing the Secret, restart the pods (`kubectl rollout restart`). The FIPS image also needs the CA's key to be RSA 2048+ or ECDSA P-256/384/521. Verification is never turned off.
 
 ## Secrets and the keyring
 

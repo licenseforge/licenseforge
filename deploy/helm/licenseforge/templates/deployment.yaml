@@ -13,7 +13,7 @@
 {{- if and $sink.on $sink.client }}{{ $mounts = append $mounts (dict "name" (printf "%s-client" $sink.name) "dir" (printf "/etc/licenseforge/%s/client" $sink.name) "secret" $sink.client "client" true) }}{{ end }}
 {{- end }}
 {{- $extraCA := .Values.extraCA | default dict }}
-{{- if $extraCA.secretName }}{{ $mounts = append $mounts (dict "name" "extra-ca" "dir" "/etc/licenseforge/extra-ca" "secret" $extraCA.secretName "key" (required "extraCA.key is required with extraCA.secretName" $extraCA.key)) }}{{ end }}
+{{- if $extraCA.secretName }}{{ $mounts = append $mounts (dict "name" "extra-ca" "dir" "/etc/licenseforge/extra-ca" "secret" $extraCA.secretName "key" $extraCA.key) }}{{ end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment

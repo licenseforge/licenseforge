@@ -43,7 +43,10 @@ spec:
                 - name: LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
                   value: {{ . | int | toString | quote }}
                 {{- end }}
+                {{- include "licenseforge.extraCAEnv" (list . 16) }}
+              {{- include "licenseforge.extraCAMounts" (list . 14) }}
               resources: {{- toYaml .Values.resources | nindent 16 }}
+          {{- include "licenseforge.extraCAVolumes" (list . 10) }}
           {{- with .Values.nodeSelector }}
           nodeSelector: {{- toYaml . | nindent 12 }}
           {{- end }}

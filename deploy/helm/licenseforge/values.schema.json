@@ -17,7 +17,9 @@
       "properties": {
         "secretName": {"type": "string"},
         "key": {"type": "string", "minLength": 1}
-      }
+      },
+      "if": {"required": ["secretName"], "properties": {"secretName": {"minLength": 1}}},
+      "then": {"required": ["key"]}
     },
     "oidc": {
       "type": "object",
