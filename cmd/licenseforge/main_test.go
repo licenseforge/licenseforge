@@ -440,6 +440,11 @@ func TestServeRateLimits(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// The limiter's window is the wall-clock minute: start well inside one, so
+	// the three requests (milliseconds) can't straddle a reset.
+	if now := time.Now(); now.Sub(now.Truncate(time.Minute)) > 58*time.Second {
+		time.Sleep(now.Truncate(time.Minute).Add(time.Minute + 50*time.Millisecond).Sub(now))
+	}
 	var codes []int
 	for range 3 {
 		resp, _ := get(addr, "/api/v1/tenants/acme/api-tokens")

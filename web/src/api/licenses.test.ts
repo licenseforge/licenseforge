@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setCsrfToken } from "./client";
-import { actionsFor, canManageLicenses, changeLicense, issueLicense, licensesQuery } from "./licenses";
+import { actionsFor, canManageActivations, canManageLicenses, changeLicense, issueLicense, licensesQuery } from "./licenses";
 
 function serve(status: number, body: unknown) {
   const f = vi.fn<(req: Request) => Promise<Response>>(async () =>
@@ -63,5 +63,12 @@ describe("actions and roles", () => {
     expect(canManageLicenses({ role: "manager", scope: { all: false, products: ["prd_1"] } })).toBe(true);
     expect(canManageLicenses({ role: "support", scope: all })).toBe(false);
     expect(canManageLicenses({ role: "sdk", scope: all })).toBe(false);
+  });
+  it("support and up manage machines and seat moves (activation:manage)", () => {
+    const all = { all: true, products: [] };
+    expect(canManageActivations({ role: "support", scope: { all: false, products: ["prd_1"] } })).toBe(true);
+    expect(canManageActivations({ role: "owner", scope: all })).toBe(true);
+    expect(canManageActivations({ role: "viewer", scope: all })).toBe(false);
+    expect(canManageActivations({ role: "sdk", scope: all })).toBe(false);
   });
 });

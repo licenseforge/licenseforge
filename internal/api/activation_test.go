@@ -371,6 +371,8 @@ func TestIdempotentActivateOneConnection(t *testing.T) {
 func TestKeyLimiterBounded(t *testing.T) {
 	l := newKeyLimiter(5)
 	l.maxKeys = 2
+	at := time.Date(2026, 11, 8, 12, 0, 30, 0, time.UTC)
+	l.now = func() time.Time { return at } // a minute boundary mid-test would reset the counts
 	w := httptest.NewRecorder()
 	for _, k := range []string{"a", "b"} {
 		if ok, _, _ := l.take(w, k); !ok {
