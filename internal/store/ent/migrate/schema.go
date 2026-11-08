@@ -603,6 +603,16 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[29]},
 			},
+			{
+				Name:    "license_tenant_id_product_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[31], LicensesColumns[5]},
+			},
+			{
+				Name:    "license_tenant_id_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{LicensesColumns[1], LicensesColumns[2], LicensesColumns[0]},
+			},
 		},
 	}
 	// MembershipsColumns holds the columns for the "memberships" table.
