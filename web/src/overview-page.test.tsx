@@ -34,7 +34,7 @@ async function open(scopeAll: boolean, summaryCustomers = scopeAll) {
       if (u.pathname === "/api/v1/me/tenants")
         return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role: "manager", all_products: scopeAll, product_ids: scopeAll ? [] : ["prd_1"] }] });
       if (u.pathname.endsWith("/summary"))
-        return json({ licenses: { active: 3, suspended: 1, revoked: 0 }, ...(summaryCustomers ? { customers: { active: 1 } } : {}) });
+        return json({ licenses: { active: 3, suspended: 1, revoked: 0 }, ...(summaryCustomers ? { customers: { active: 1, seen_this_month: 7, month_start: "2026-11-01T00:00:00Z" } } : {}) });
       if (u.pathname.endsWith("/licenses")) return json({ items: [license(1, "active"), license(2, "suspended")] }); // the newest
       if (u.pathname.endsWith("/customers/cus_1")) return json({ id: "cus_1", name: "Globex", email: null, external_refs: {}, archived_at: null, created_at: "" });
       if (u.pathname.endsWith("/products/prd_1")) return json({ id: "prd_1", slug: "db", name: "DB Server", created_at: "" });
@@ -57,9 +57,9 @@ async function open(scopeAll: boolean, summaryCustomers = scopeAll) {
   return { el, tile, asked };
 }
 
-it("shows licenses by status, active customers and the newest licenses with names", async () => {
+it("shows licenses by status, customers, those active this month and the newest licenses with names", async () => {
   const { el, tile, asked } = await open(true);
-  await vi.waitFor(() => expect([tile("Active"), tile("Suspended"), tile("Revoked"), tile("Active customers")]).toEqual(["3", "1", "0", "1"]));
+  await vi.waitFor(() => expect([tile("Active"), tile("Suspended"), tile("Revoked"), tile("Customers"), tile("Active in November 2026")]).toEqual(["3", "1", "0", "1", "7"]));
   await vi.waitFor(() => expect(el.textContent).toContain("DB Server · Globex"));
   expect(el.textContent).toContain("…HINT01");
   // Names by ID for the recent rows only: one lookup per distinct ID, no lists.
@@ -71,7 +71,8 @@ it("shows licenses by status, active customers and the newest licenses with name
 it("a product-scoped caller gets no customers tile and doesn't ask for customers", async () => {
   const { el, tile, asked } = await open(false);
   await vi.waitFor(() => expect(tile("Active")).toBe("3"));
-  expect(tile("Active customers")).toBeUndefined();
+  expect(tile("Customers")).toBeUndefined();
+  expect(tile("Active in November 2026")).toBeUndefined();
   expect(el.textContent).toContain("Counts cover the products your role can see.");
   expect(asked.some((p) => p.includes("/customers"))).toBe(false); // the summary omitted customers: no lookups either
 });
@@ -87,6 +88,7 @@ it("looks customers up only when the summary includes them, whatever the caller'
   const { el, tile, asked } = await open(true, false); // every product, but the server left customers out
   await vi.waitFor(() => expect(tile("Active")).toBe("3"));
   await vi.waitFor(() => expect(el.textContent).toContain("DB Server"));
-  expect(tile("Active customers")).toBeUndefined();
+  expect(tile("Customers")).toBeUndefined();
+  expect(tile("Active in November 2026")).toBeUndefined();
   expect(asked.some((p) => p.includes("/customers"))).toBe(false);
 });

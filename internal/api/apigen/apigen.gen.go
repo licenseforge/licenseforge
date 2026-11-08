@@ -1354,6 +1354,12 @@ type Summary struct {
 	Customers *struct {
 		// Active Customers that aren't archived.
 		Active int64 `json:"active"`
+
+		// MonthStart The start of the current calendar month in UTC, by the server's database clock.
+		MonthStart time.Time `json:"month_start"`
+
+		// SeenThisMonth Customers with at least one activation seen (activated or refreshed) since month_start, archived customers and deactivated machines included: the active-customer measure (ADR-0016, ADR-0040). Site licenses and offline files aren't seen, and a plan whose lease is longer than about two months may not refresh within a month (undercount).
+		SeenThisMonth int64 `json:"seen_this_month"`
 	} `json:"customers,omitempty"`
 
 	// Licenses Licenses by status, in the caller's product scope.
