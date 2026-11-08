@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -59,6 +60,46 @@ type Event struct {
 }
 
 var zeroHash = make([]byte, sha256.Size)
+
+// Request is the HTTP request an action came from (AU-3: where, and a handle
+// to correlate with server logs). The API puts it in the request's context
+// (WithRequest); Record fills an entry's source IP and user agent from it
+// when the event doesn't name them, and adds its ID to the hashed details as
+// request_id. SourceIP must come from a trusted source only, as for Event.
+type Request struct {
+	ID, SourceIP, UserAgent string
+}
+
+type requestKey struct{}
+
+// WithRequest returns ctx carrying req for the entries recorded under it.
+func WithRequest(ctx context.Context, req Request) context.Context {
+	return context.WithValue(ctx, requestKey{}, req)
+}
+
+// fromRequest fills e from the request in ctx: source IP and user agent when
+// unset, and request_id in a copy of the details unless the event has one.
+func fromRequest(ctx context.Context, e Event) Event {
+	req, ok := ctx.Value(requestKey{}).(Request)
+	if !ok {
+		return e
+	}
+	if e.SourceIP == "" {
+		e.SourceIP = req.SourceIP
+	}
+	if e.UserAgent == "" {
+		e.UserAgent = req.UserAgent
+	}
+	if _, has := e.Details["request_id"]; req.ID != "" && !has {
+		details := maps.Clone(e.Details)
+		if details == nil {
+			details = map[string]any{}
+		}
+		details["request_id"] = req.ID
+		e.Details = details
+	}
+	return e
+}
 
 // maxUserAgent matches the column; longer values are truncated.
 const maxUserAgent = 512
@@ -103,6 +144,7 @@ func Lock(ctx context.Context, tx *ent.Tx, tenantID string) error {
 }
 
 func write(ctx context.Context, tx *ent.Tx, tenantID string, e Event) (*ent.AuditEvent, error) {
+	e = fromRequest(ctx, e)
 	details := []byte("{}")
 	if len(e.Details) > 0 {
 		var err error

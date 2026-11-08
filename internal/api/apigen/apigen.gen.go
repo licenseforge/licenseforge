@@ -716,10 +716,12 @@ type ApiTokenPage struct {
 // AuditEvent One audit entry, the fields the SIEM export carries (ADR-0036).
 type AuditEvent struct {
 	// Action Example: license.issue
-	Action    string                 `json:"action"`
-	ActorId   *string                `json:"actor_id"`
-	ActorType AuditEventActorType    `json:"actor_type"`
-	Details   map[string]interface{} `json:"details"`
+	Action    string              `json:"action"`
+	ActorId   *string             `json:"actor_id"`
+	ActorType AuditEventActorType `json:"actor_type"`
+
+	// Details The action's details. Entries from an API request also carry request_id, that response's X-Request-Id.
+	Details map[string]interface{} `json:"details"`
 
 	// Hash Hex SHA-256 (ADR-0027) over 15 values in this order, each written
 	// as its length in bytes (4 bytes, big-endian unsigned) followed by

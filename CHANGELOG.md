@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- Audit entries from API actions record where they came from (AU-3): the client's address (the connection, or `X-Forwarded-For` from a trusted proxy) and user agent, and the request's `X-Request-Id` as `request_id` in the hashed details, so an entry leads to the request in the server logs. Before, only logins recorded the source. No schema or hash format change. ADR-0027 amended.
 - Platform tenant onboarding API (ADR-0042). Until now, tenants could only be created in SQL.
   - `POST /api/v1/platform/tenants` with `{slug, name, owner_email}` creates a tenant **and an owner invitation** (every product, open 7 days) in one transaction on the platform pool. The invitation token is in the response only.
   - The platform admin doesn't join the tenant: the first owner signs in with the invited, verified email and accepts, like any invitation.
@@ -20,6 +21,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Two indexes on `licenses`, built concurrently: `(tenant_id, product_id, status)` for the summary counts and product-filtered lists, `(tenant_id, created_at, id)` for newest-first lists, whose cursor is now a row comparison so the index seeks to it. Migrations `20261108204112_licenses_product_status_index.sql` and `20261108204113_licenses_created_index.sql`.
 - `make test` and `make test-fips` fail when `LICENSEFORGE_TEST_DATABASE_URL` isn't set, as CI already did, instead of skipping the database tests and printing `ok` (`LICENSEFORGE_REQUIRE_TEST_DB=1`).
 ### Fixed
+- The serving logins can no longer insert a license already activated, an activation already deactivated, or an invitation already accepted or revoked: restrictive `FOR INSERT` policies `insert_unactivated` (licenses), `insert_active` (activations) and `insert_open` (invitations; the platform login, which onboards tenants, has full INSERT there). Migration `20261108170000_insert_initial_state_security.sql`.
 - Dashboard forms: help and error text sat inside the field's `<label>`, so a screen reader announced "Slug Lowercase words joined by dashes…" as the field's name, and the help a second time through `aria-describedby`. Help and errors now sit next to the label: a field's name is its label alone, and its help and errors are its description. This applies to the shared `Field`, the other inline fields (customer references, issue pickers, customer ID, binding, term start), and the invitation and API token dialogs (email, role, name, expiry), whose errors sat inside the label too. Found by the browser smoke test.
 ### Added
 - Dashboard smoke test in the browser (ADR-0041), run locally with `make e2e-browser` against the e2e environment. Playwright drives Chromium through a vendor's first license: sign in through Keycloak's form, create a product with an on/off feature and a plan, include the feature in the matrix, create a customer, issue the license from the pickers, and get the key shown once. No DNS needed: Chromium maps the nip.io names to the IP they carry. New dev dependency: `@playwright/test` 1.64.1.

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"reflect"
 	"slices"
@@ -36,10 +37,12 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/platform"
+	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ids"
@@ -983,8 +986,11 @@ func TestMyTenantsEdges(t *testing.T) {
 		if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
 			inv, err := tx.Invitation.Create().SetTenantID(tenant).SetEmail(email).SetRole(invitation.RoleViewer).SetScopeAll(true).
 				SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
-				SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx)
+				Save(ctx) // opened, then accepted: an invitation starts open (insert_open)
 			if err != nil {
+				return err
+			}
+			if inv, err = inv.Update().SetAcceptedAt(time.Now()).SetAcceptedBy(u).Save(ctx); err != nil {
 				return err
 			}
 			return tx.Membership.Create().SetTenantID(tenant).SetUserID(u).SetInvitationID(inv.ID).
@@ -1027,8 +1033,11 @@ func TestMyTenantsEdges(t *testing.T) {
 		}
 		inv, err := tx.Invitation.Create().SetTenantID(f.a.ID).SetEmail(*wu.Email).SetRole(invitation.RoleViewer).SetScopeAll(false).
 			SetTokenHash(store.InvitationTokenHash(rand.Text())).SetExpiresAt(time.Now().Add(time.Hour)).
-			SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx)
+			Save(ctx) // opened, then accepted (insert_open)
 		if err != nil {
+			return err
+		}
+		if inv, err = inv.Update().SetAcceptedAt(time.Now()).SetAcceptedBy(w).Save(ctx); err != nil {
 			return err
 		}
 		m, err := tx.Membership.Create().SetTenantID(f.a.ID).SetUserID(w).SetInvitationID(inv.ID).
@@ -1049,5 +1058,80 @@ func TestMyTenantsEdges(t *testing.T) {
 	identity.MaxMemberships = 1
 	if items := list(); len(items) != 1 || items[0].(map[string]any)["tenant_id"] != first.ID {
 		t.Errorf("capped at 1: %v, want only %s", items, first.Slug)
+	}
+}
+
+// An action through the API records where it came from (AU-3): the client's
+// address and user agent, and the response's request ID in the hashed
+// details, so an audit entry leads to the request in the server logs.
+func TestAuditRecordsTheRequest(t *testing.T) {
+	f := setup(t)
+	r := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/customers", `{"name":"Contoso"}`,
+		f.session(t, f.ownerA, true), header("User-Agent", "audit-test/1"))
+	if r.code != 201 {
+		t.Fatalf("create: %d %s", r.code, r.raw)
+	}
+	var e *ent.AuditEvent
+	if err := f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+		var err error
+		e, err = tx.AuditEvent.Query().Where(auditevent.Action("customer.create")).Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.SourceIP == nil || *e.SourceIP != "192.0.2.1" || e.UserAgent == nil || *e.UserAgent != "audit-test/1" {
+		t.Errorf("source %v, user agent %v", e.SourceIP, e.UserAgent)
+	}
+	var d map[string]any
+	if err := json.Unmarshal([]byte(e.Details), &d); err != nil || d["request_id"] != r.h.Get("X-Request-Id") {
+		t.Errorf("details %s, want request_id %s", e.Details, r.h.Get("X-Request-Id"))
+	}
+}
+
+// Behind the rate limiter (production wiring), the recorded source is its
+// client address: X-Forwarded-For counts only from a trusted proxy, and
+// X-Real-IP and Forwarded never do, so a client can't write its own source
+// into the audit chain.
+func TestAuditSourceBehindTheLimiter(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	lastSource := func() string {
+		var e *ent.AuditEvent
+		if err := f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+			var err error
+			e, err = tx.AuditEvent.Query().Where(auditevent.Action("customer.create")).Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if e.SourceIP == nil {
+			return ""
+		}
+		return *e.SourceIP
+	}
+	httptestPeer := netip.MustParsePrefix("192.0.2.0/24") // httptest's RemoteAddr is 192.0.2.1
+	for name, c := range map[string]struct {
+		trusted []netip.Prefix
+		headers map[string]string
+		want    string
+	}{
+		"trusted proxy's hop":     {[]netip.Prefix{httptestPeer}, map[string]string{"X-Forwarded-For": "203.0.113.9"}, "203.0.113.9"},
+		"untrusted peer's header": {nil, map[string]string{"X-Forwarded-For": "203.0.113.9"}, "192.0.2.1"},
+		"other headers ignored":   {[]netip.Prefix{httptestPeer}, map[string]string{"X-Real-IP": "203.0.113.7", "Forwarded": "for=203.0.113.8"}, "192.0.2.1"},
+	} {
+		h := ratelimit.New(ratelimit.Config{Trusted: c.trusted}).Wrap(f.srv)
+		r := httptest.NewRequest("POST", Prefix+"/tenants/"+f.a.Slug+"/customers", strings.NewReader(`{"name":"Contoso"}`))
+		owner(r)
+		for k, v := range c.headers {
+			r.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != 201 {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+		if got := lastSource(); got != c.want {
+			t.Errorf("%s: source %q, want %q", name, got, c.want)
+		}
 	}
 }
