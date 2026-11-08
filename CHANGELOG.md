@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ## [0.1.0-alpha.1] - 2026-11-08
-First alpha: online licensing, the data model, the admin dashboard core and the compliance baseline (v0.1 on the Roadmap). Not for production use yet; the license format and API can still change before 0.1.0. Verify artifacts as in [docs/verifying-releases.md](docs/verifying-releases.md).
+First alpha: online licensing, the data model, the admin dashboard core and the compliance baseline (v0.1 on the Roadmap). Not for production use yet; the license format and API can still change while 0.x and the spec is a draft. Verify artifacts as in [docs/verifying-releases.md](docs/verifying-releases.md).
 
 ### Fixed
 - Customer archive is one-way and at the database clock, as for products, features and plans: a restrictive UPDATE policy (`archive_once` on `customers`) refuses un-archiving or re-dating an archived customer from the serving logins, including an update or upsert racing a concurrent archive; renaming an archived customer still works. Migration `20261107090000_snapshot_match_security.sql`.
@@ -143,3 +143,6 @@ First alpha: online licensing, the data model, the admin dashboard core and the 
 
 ### Changed
 - PostgreSQL 17 or newer is required (ADR-0028); `store.Open` and `store.Migrate` refuse older versions.
+
+[Unreleased]: https://github.com/licenseforge/licenseforge/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/licenseforge/licenseforge/releases/tag/v0.1.0-alpha.1
