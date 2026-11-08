@@ -11,7 +11,9 @@ function e2eEnv(): Record<string, string> {
   } catch {
     throw new Error(`no e2e environment: run e2e/env/up.sh first (read ${path})`);
   }
-  return Object.fromEntries(text.split("\n").filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+  return Object.fromEntries(
+    text.split(/\r?\n/).filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+  );
 }
 const env = { ...e2eEnv(), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("E2E_"))) } as Record<string, string>;
 // The nip.io names carry the minikube IP: map them there, so no DNS is
@@ -29,6 +31,8 @@ export default defineConfig({
     // browser profile is throwaway and only talks to that environment.
     ignoreHTTPSErrors: true,
     launchOptions: ip ? { args: [`--host-resolver-rules=MAP *.nip.io ${ip}`] } : {},
+    // A failed run's trace holds the session cookie, the invite token and the
+    // license key: test-results/ is gitignored; never upload it from CI.
     trace: "retain-on-failure",
   },
   metadata: { inviteTokenFile: env.E2E_INVITE_TOKEN_FILE, tenant: env.E2E_TENANT },

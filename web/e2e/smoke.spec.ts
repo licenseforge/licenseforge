@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 // through Keycloak, build a catalog, issue, and get the key shown once.
 test("a vendor issues their first license from the dashboard", async ({ page }, info) => {
   const { inviteTokenFile, tenant } = info.config.metadata as { inviteTokenFile: string; tenant: string };
-  const run = Math.random().toString(36).slice(2, 8);
+  const run = crypto.randomUUID().slice(0, 8);
 
   // Sign in through the identity provider's form.
   await page.goto("/");
@@ -18,31 +18,33 @@ test("a vendor issues their first license from the dashboard", async ({ page }, 
   // Owner of the seeded tenant: accept its invitation on a fresh environment.
   // From the page, as the dashboard does (Playwright's own request client
   // wouldn't use the browser's host mapping).
-  const tenants = (await page.evaluate(() => fetch("/api/v1/me/tenants").then((r) => r.json()))) as { items: { slug: string }[] };
-  if (!tenants.items.some((t) => t.slug === tenant)) {
+  type Tenants = { items: { slug: string; role: string }[] };
+  const tenants = () => page.evaluate(() => fetch("/api/v1/me/tenants").then((r) => r.json())) as Promise<Tenants>;
+  if (!(await tenants()).items.some((t) => t.slug === tenant)) {
     await page.goto(`/invite#token=${readFileSync(inviteTokenFile, "utf8").trim()}`);
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await page.waitForURL(new RegExp(`/t/${tenant}`));
   }
+  expect((await tenants()).items.find((t) => t.slug === tenant)?.role).toBe("owner");
 
   // A product, with an on/off feature and a plan.
   await page.goto(`/t/${tenant}/products`);
   await page.getByRole("button", { name: "New product" }).click();
-  await page.getByLabel("Slug").fill(`ui-${run}`);
-  await page.getByLabel("Name").fill(`UI ${run}`);
+  await page.getByLabel(/^Slug/).fill(`ui-${run}`);
+  await page.getByLabel("Name", { exact: true }).fill(`UI ${run}`);
   await page.getByRole("button", { name: "Create product" }).click();
   await page.getByRole("link", { name: `UI ${run}` }).click();
   await expect(page.getByRole("heading", { name: `UI ${run}` })).toBeVisible();
 
   await page.getByRole("button", { name: "New feature" }).click();
-  await page.getByLabel("Key").fill("sso");
-  await page.getByLabel("Name").fill("SSO");
+  await page.getByLabel(/^Key/).fill("sso");
+  await page.getByLabel("Name", { exact: true }).fill("SSO");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("cell", { name: "sso", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "New plan" }).click();
-  await page.getByLabel("Slug").fill("pro");
-  await page.getByLabel("Name").fill("Pro");
+  await page.getByLabel(/^Slug/).fill("pro");
+  await page.getByLabel("Name", { exact: true }).fill("Pro");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("cell", { name: "pro", exact: true })).toBeVisible();
 
@@ -50,11 +52,13 @@ test("a vendor issues their first license from the dashboard", async ({ page }, 
   await page.getByRole("checkbox", { name: "SSO in Pro" }).check();
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
+  await page.reload(); // saved on the server, not just shown
+  await expect(page.getByRole("checkbox", { name: "SSO in Pro" })).toBeChecked();
 
   // A customer, then the license, picked from lists.
   await page.goto(`/t/${tenant}/customers`);
   await page.getByRole("button", { name: "New customer" }).click();
-  await page.getByLabel("Name").fill(`Customer ${run}`);
+  await page.getByLabel("Name", { exact: true }).fill(`Customer ${run}`);
   await page.getByRole("button", { name: "Create customer" }).click();
   await expect(page.getByRole("cell", { name: `Customer ${run}` })).toBeVisible();
 
