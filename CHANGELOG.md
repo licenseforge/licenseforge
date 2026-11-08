@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Dashboard forms: help and error text sat inside the field's `<label>`, so a screen reader announced "Slug Lowercase words joined by dashes…" as the field's name, and the help a second time through `aria-describedby`. Help and errors now sit next to the label: a field's name is its label alone, and its help and errors are its description. This applies to the shared `Field`, the other inline fields (customer references, issue pickers, customer ID, binding, term start), and the invitation and API token dialogs (email, role, name, expiry), whose errors sat inside the label too. Found by the browser smoke test.
 ### Added
 - Dashboard smoke test in the browser (ADR-0041), run locally with `make e2e-browser` against the e2e environment. Playwright drives Chromium through a vendor's first license: sign in through Keycloak's form, create a product with an on/off feature and a plan, include the feature in the matrix, create a customer, issue the license from the pickers, and get the key shown once. No DNS needed: Chromium maps the nip.io names to the IP they carry. New dev dependency: `@playwright/test` 1.64.1.
 - End-to-end tests (ADR-0041), run locally with `make e2e`, not in CI yet.

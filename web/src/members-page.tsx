@@ -379,20 +379,24 @@ export function InviteDialog({ tenant, roles, onClose }: { tenant: string; roles
   return (
     <Modal title={t("invitations.new")} onClose={close}>
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
-        <label className="flex flex-col gap-1 text-sm">
-          {t("invitations.col.email")}
-          <input name="email" type="email" required maxLength={320} className={input} aria-invalid={!!fields.email} aria-describedby="email-error" />
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("invitations.col.email")}
+            <input name="email" type="email" required maxLength={320} className={input} aria-invalid={!!fields.email} aria-describedby="email-error" />
+          </label>
           {fieldError("email")}
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t("tokens.field.role")}
-          <select name="role" className={input} defaultValue={roles.at(-1)} aria-invalid={!!fields.role} aria-describedby="role-error">
-            {roles.map((r) => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
+        </div>
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1">
+            {t("tokens.field.role")}
+            <select name="role" className={input} defaultValue={roles.at(-1)} aria-invalid={!!fields.role} aria-describedby="role-error">
+              {roles.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </label>
           {fieldError("role")}
-        </label>
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="size-4" checked={all} onChange={(e) => setAll(e.target.checked)} />
           {t("tokens.field.allProducts")}
