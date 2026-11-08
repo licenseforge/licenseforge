@@ -173,18 +173,13 @@ describe("planTerm", () => {
 });
 
 describe("the feature matrix's patch", () => {
-  const before = { sso: true, max_users: 50, export: true };
-  it("sends only changes: new grants, changed limits, removals as null", () => {
-    expect(grantsPatch(before, { sso: true, export: false, audit: true, max_users: " 050 ", nodes: "" })).toEqual({ patch: { export: null, audit: true } });
-    expect(grantsPatch(before, { max_users: "-1", sso: false })).toEqual({ patch: { max_users: -1, sso: null } });
-    expect(grantsPatch(before, { max_users: "" })).toEqual({ patch: { max_users: null } });
-    expect(grantsPatch({}, { nodes: "9007199254740991" })).toEqual({ patch: { nodes: 9007199254740991 } });
+  it("sets every touched cell to what it shows: true, the limit, or null", () => {
+    expect(grantsPatch({ sso: true, export: false, max_users: " 050 ", nodes: "" })).toEqual({ patch: { sso: true, export: null, max_users: 50, nodes: null } });
+    expect(grantsPatch({ max_users: "-1" })).toEqual({ patch: { max_users: -1 } });
+    expect(grantsPatch({ nodes: "9007199254740991" })).toEqual({ patch: { nodes: 9007199254740991 } });
   });
   it("names limits that aren't valid and sends nothing", () => {
-    expect(grantsPatch(before, { max_users: "1.5", nodes: "-2", seats: "9007199254740992", sso: false })).toEqual({ invalid: ["max_users", "nodes", "seats"] });
-  });
-  it("treats __proto__ as a plain key", () => {
-    expect(grantsPatch(before, { __proto__: true } as Record<string, boolean>)).toEqual({ patch: {} });
+    expect(grantsPatch({ max_users: "1.5", nodes: "-2", seats: "9007199254740992", sso: false })).toEqual({ invalid: ["max_users", "nodes", "seats"] });
   });
   it("parses limits", () => {
     expect([parseLimit("-1"), parseLimit(" 12 "), parseLimit("-0"), parseLimit("1e3"), parseLimit("")]).toEqual([-1, 12, null, null, null]);

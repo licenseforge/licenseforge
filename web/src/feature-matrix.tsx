@@ -22,13 +22,17 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
   const [failed, setFailed] = useState<{ plan: string; error: unknown }[]>([]);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const failedLoad = grants.find((g) => g.isError);
+  // Only a first load that failed: a failed background refetch keeps the
+  // data (and the unsaved edits) on screen.
+  const failedLoad = grants.find((g) => g.isError && !g.data);
   if (failedLoad) return <p role="alert">{errorText(failedLoad.error)}</p>;
   if (!grants.every((g) => g.data)) return <p role="status" className="text-muted-foreground">{t("product.loading")}</p>;
   const before = (i: number) => grants[i]!.data!;
   const grantedAnywhere = (key: string) => plans.some((_, i) => Object.hasOwn(before(i), key));
   const rows = features.filter((f) => !f.archived_at || grantedAnywhere(f.key)).sort((a, b) => a.key.localeCompare(b.key));
-  const cell = (i: number, key: string): Cell => edits[plans[i]!.id]?.[key] ?? grantCells(before(i), features)[key]!;
+  const start = plans.map((_, i) => grantCells(before(i), features));
+  const cell = (i: number, key: string): Cell => edits[plans[i]!.id]?.[key] ?? start[i]![key]!;
+  const shown = new Set(rows.map((f) => f.key));
   const edit = (plan: string, key: string, v: Cell) => {
     setSaved(false);
     setEdits((e) => ({ ...e, [plan]: { ...e[plan], [key]: v } }));
@@ -41,16 +45,17 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
     const bad: Record<string, string[]> = {};
     const errs: { plan: string; error: unknown }[] = [];
     const left: Record<string, Record<string, Cell>> = {};
-    for (const [i, p] of plans.entries()) {
-      const touched = edits[p.id];
-      if (!touched) continue;
-      const r = grantsPatch(before(i), touched);
+    for (const p of plans) {
+      // A feature archived and hidden meanwhile isn't sent (the server would
+      // refuse the plan's whole patch).
+      const touched = Object.fromEntries(Object.entries(edits[p.id] ?? {}).filter(([k]) => shown.has(k)));
+      if (Object.keys(touched).length === 0) continue;
+      const r = grantsPatch(touched);
       if ("invalid" in r) {
         bad[p.id] = r.invalid;
         left[p.id] = touched;
         continue;
       }
-      if (Object.keys(r.patch).length === 0) continue;
       try {
         await updatePlanFeatures(tenant, p.id, r.patch);
       } catch (error) {
@@ -92,7 +97,8 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
                 {plans.map((p, i) => {
                   const v = cell(i, f.key);
                   // An archived feature can change or go where granted, never be granted anew.
-                  const locked = !write || (f.archived_at != null && !Object.hasOwn(before(i), f.key));
+                  // Disabled while saving too: an edit made then would be lost.
+                  const locked = !write || busy || (f.archived_at != null && !Object.hasOwn(before(i), f.key));
                   const label = t("matrix.cell", { feature: f.name, plan: p.name });
                   const bad = invalid[p.id]?.includes(f.key) ?? false;
                   return (
@@ -121,7 +127,9 @@ export function FeatureMatrix({ tenant, features, plans, write }: { tenant: stri
         </table>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">{t("matrix.help")}</p>
-      {Object.keys(invalid).length > 0 && <p role="alert" className="mt-2 text-sm font-medium">{t("matrix.invalid")}</p>}
+      {Object.keys(invalid).length > 0 && (
+        <p role="alert" className="mt-2 text-sm font-medium">{t("matrix.invalid", { plans: Object.keys(invalid).map(name).join(", ") })}</p>
+      )}
       {failed.map((f) => (
         <p key={f.plan} role="alert" className="mt-2 text-sm font-medium">
           {t("matrix.failed", { plan: name(f.plan), error: errorText(f.error) })}

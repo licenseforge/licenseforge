@@ -135,7 +135,7 @@ const en = {
   "matrix.save": "Save changes",
   "matrix.discard": "Discard changes",
   "matrix.saved": "Saved.",
-  "matrix.invalid": "Some limits aren't valid: enter a whole number, or -1 for unlimited. Nothing was saved for those plans.",
+  "matrix.invalid": "Some limits aren't valid: enter a whole number, or -1 for unlimited. Nothing was saved for {plans}.",
   "matrix.failed": "{plan}: not saved. {error}",
   "product.loading": "Loading…",
   "product.archived": "This product is archived: its features and plans can't change.",

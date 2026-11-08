@@ -169,27 +169,24 @@ export function parseLimit(raw: string): number | null {
 }
 
 /**
- * The merge patch from a plan's grants to the edited cells: only what
- * changed. A cleared checkbox or emptied limit is null (remove); untouched
- * keys are left out. Returns the keys whose limit text isn't valid instead.
+ * The merge patch that sets each touched cell to what it shows: true, the
+ * limit, or null (cleared checkbox, emptied limit). Every touched cell is
+ * sent, not only those differing from the grants as loaded: those may be
+ * stale (another admin's change), and the server applies the patch as a
+ * whole, changing and auditing only what differs. Returns the keys whose
+ * limit text isn't valid instead.
  */
-export function grantsPatch(before: Grants, cells: Record<string, Cell>): { patch: Record<string, true | number | null> } | { invalid: string[] } {
+export function grantsPatch(cells: Record<string, Cell>): { patch: Record<string, true | number | null> } | { invalid: string[] } {
   const patch: Record<string, true | number | null> = {};
   const invalid: string[] = [];
   for (const [key, cell] of Object.entries(cells)) {
-    const had = Object.hasOwn(before, key) ? before[key] : undefined;
-    if (typeof cell === "boolean") {
-      if (cell && had === undefined) patch[key] = true;
-      if (!cell && had !== undefined) patch[key] = null;
-      continue;
+    if (typeof cell === "boolean") patch[key] = cell ? true : null;
+    else if (cell.trim() === "") patch[key] = null;
+    else {
+      const n = parseLimit(cell);
+      if (n === null) invalid.push(key);
+      else patch[key] = n;
     }
-    if (cell.trim() === "") {
-      if (had !== undefined) patch[key] = null;
-      continue;
-    }
-    const n = parseLimit(cell);
-    if (n === null) invalid.push(key);
-    else if (n !== had) patch[key] = n;
   }
   return invalid.length > 0 ? { invalid } : { patch };
 }

@@ -26,7 +26,7 @@ const plan = (id: string, name: string): Plan => ({
 const features = [feature("sso", "boolean"), feature("max_users", "limit"), feature("legacy", "boolean", true), feature("gone", "boolean", true)];
 const plans = [plan("pln_basic", "Basic"), plan("pln_pro", "Pro")];
 
-async function render(opts: { write?: boolean; patch?: (plan: string, body: unknown) => Response } = {}) {
+async function render(opts: { write?: boolean; patch?: (plan: string, body: unknown) => Response | undefined | Promise<Response | undefined>; failGets?: () => boolean } = {}) {
   const grants: Record<string, Record<string, unknown>> = { pln_basic: { max_users: 5 }, pln_pro: { sso: true, max_users: -1, legacy: true } };
   const patches: { plan: string; body: unknown }[] = [];
   vi.stubGlobal(
@@ -36,22 +36,24 @@ async function render(opts: { write?: boolean; patch?: (plan: string, body: unkn
       if (req.method === "PATCH") {
         const body = await req.json();
         patches.push({ plan: id, body });
-        const r = opts.patch?.(id, body);
+        const r = await opts.patch?.(id, body);
         if (r) return r;
         const g = { ...grants[id] };
         for (const [k, v] of Object.entries(body as Record<string, unknown>)) if (v === null) delete g[k]; else g[k] = v;
         grants[id] = g;
         return json(g);
       }
+      if (opts.failGets?.()) return json({ type: "about:blank", title: "x", status: 503, code: "internal", request_id: "r" }, 503);
       return json(grants[id]);
     }),
   );
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const el = document.createElement("div");
   document.body.append(el);
   root = createRoot(el);
   await act(async () =>
     root!.render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={qc}>
         <FeatureMatrix tenant="acme" features={features} plans={plans} write={opts.write ?? true} />
       </QueryClientProvider>,
     ),
@@ -64,7 +66,7 @@ async function render(opts: { write?: boolean; patch?: (plan: string, body: unkn
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-  return { el, field, button, type, patches };
+  return { el, field, button, type, patches, grants, qc };
 }
 
 it("shows what each plan grants; an archived feature only where still granted, and not grantable anew", async () => {
@@ -78,7 +80,7 @@ it("shows what each plan grants; an archived feature only where still granted, a
   expect(el.textContent).not.toContain("GONE"); // archived and granted nowhere
 });
 
-it("saves one merge patch per changed plan, with only the changes", async () => {
+it("saves one merge patch per changed plan, with only the touched cells", async () => {
   const { el, field, button, type, patches } = await render();
   expect(button("Save changes")!.disabled).toBe(true);
   await act(async () => field("SSO", "Basic").click());
@@ -89,7 +91,7 @@ it("saves one merge patch per changed plan, with only the changes", async () => 
   await vi.waitFor(() => expect(el.textContent).toContain("Saved."));
   expect(patches).toEqual([
     { plan: "pln_basic", body: { sso: true, max_users: 10 } },
-    { plan: "pln_pro", body: { legacy: null } },
+    { plan: "pln_pro", body: { legacy: null } }, // the same -1 typed again isn't a change event: untouched
   ]);
   await vi.waitFor(() => expect(field("SSO", "Basic").checked).toBe(true));
   expect(button("Save changes")!.disabled).toBe(true);
@@ -123,6 +125,44 @@ it("names a plan the server refused and keeps its edits", async () => {
   await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toContain("Basic: not saved."));
   expect(field("SSO", "Basic").checked).toBe(true);
   expect(button("Save changes")!.disabled).toBe(false);
+});
+
+it("clears a grant another admin added after the page loaded", async () => {
+  const { el, field, button, patches, grants } = await render();
+  grants.pln_basic!.sso = true; // on the server now; the page loaded Basic without SSO
+  await act(async () => field("SSO", "Basic").click());
+  await act(async () => field("SSO", "Basic").click()); // shown unchecked again: the user wants it off
+  await act(async () => button("Save changes")!.click());
+  await vi.waitFor(() => expect(el.textContent).toContain("Saved."));
+  expect(patches).toEqual([{ plan: "pln_basic", body: { sso: null } }]);
+  expect(grants.pln_basic).not.toHaveProperty("sso");
+});
+
+it("locks the cells while saving, so no edit is lost", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const { el, field, button, patches } = await render({ patch: async () => { await held; return undefined; } });
+  await act(async () => field("SSO", "Basic").click());
+  await act(async () => button("Save changes")!.click());
+  await vi.waitFor(() => expect(patches).toHaveLength(1));
+  expect(field("SSO", "Pro").disabled).toBe(true);
+  expect(field("MAX_USERS", "Basic").disabled).toBe(true);
+  await act(async () => release());
+  await vi.waitFor(() => expect(el.textContent).toContain("Saved."));
+  expect(field("SSO", "Pro").disabled).toBe(false);
+});
+
+it("keeps the matrix and unsaved edits when a background refetch fails", async () => {
+  let fail = false;
+  const { el, field, qc } = await render({ failGets: () => fail });
+  await act(async () => field("SSO", "Basic").click());
+  fail = true;
+  await act(async () => qc.invalidateQueries());
+  await vi.waitFor(() => expect(qc.getQueryState(["plan-features", "acme", "pln_basic"])?.status).toBe("error"));
+  await act(async () => new Promise((r) => setTimeout(r, 20))); // let the matrix render the error state
+  expect(el.querySelector('[role="alert"]')).toBeNull();
+  expect(el.querySelector("table")).not.toBeNull();
+  expect(field("SSO", "Basic").checked).toBe(true);
 });
 
 it("is read-only without catalog:write", async () => {
