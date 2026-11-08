@@ -21,15 +21,16 @@ make e2e                               # the API journeys
 make e2e-browser                       # the dashboard smoke test (Playwright)
 ```
 
-`up.sh` can be re-run, for example after changing code. The CA, the master key and the seed are kept in `e2e/env/.state/` (gitignored). Import `.state/ca.crt` in your browser to open the dashboard without certificate warnings.
+`up.sh` can be re-run, for example after changing code. The CA, the master key and the test tenant's invite token are kept in `e2e/env/.state/` (gitignored). Import `.state/ca.crt` in your browser to open the dashboard without certificate warnings.
 
-Tear down with `kubectl delete ns licenseforge-e2e` and `rm -r e2e/env/.state`. Always remove both together, or neither: the seed and the master key in `.state` belong to that namespace's database.
+Tear down with `kubectl delete ns licenseforge-e2e` and `rm -r e2e/env/.state`. Always remove both together, or neither: the invite token and the master key in `.state` belong to that namespace's database.
 
 `up.sh` adds the two hostnames to CoreDNS's `hosts` block (cluster-wide, in `kube-system`), because some resolvers drop nip.io answers that point at private addresses. Remove those two lines with `kubectl -n kube-system edit configmap coredns`, or `minikube delete` drops everything.
 
 Keycloak in dev mode keeps no data. After a restart it imports the realm again, with the same user IDs, so sign-ins and memberships carry over.
 
+The test tenant `acme` is created by `up.sh` with `licenseforge tenant create` (ADR-0042), and is shared by runs. `TestPlatformAdminOnboardsTenant` creates a new tenant through the platform API on each run, owned by `viewer`. `--release` needs a version that has `tenant create` (any after 0.1.0-alpha.1).
+
 ## Known gaps
 
 - The chart can't trust an extra CA yet, so `up.sh` patches the Deployment so the server trusts the local CA for Keycloak.
-- The tenant is seeded in the database, because there's no platform-admin route to create tenants yet.

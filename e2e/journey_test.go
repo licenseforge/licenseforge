@@ -24,8 +24,8 @@ type tenant struct {
 	Role string `json:"role"`
 }
 
-// owner signs in as the seeded tenant's owner, accepting the seed invitation
-// on the first run (until tenants can be created through the product).
+// owner signs in as the test tenant's owner, accepting the invitation up.sh
+// made with licenseforge tenant create on the first run.
 func owner(t *testing.T, e env) (*browser, tenant) {
 	t.Helper()
 	b := login(t, e, "admin", "licenseforge")
@@ -43,11 +43,11 @@ func owner(t *testing.T, e env) (*browser, tenant) {
 	if tn == nil {
 		token, err := os.ReadFile(e.InviteTokenFile)
 		if err != nil {
-			t.Fatalf("not a member of %q and no seed invitation: %v", e.Tenant, err)
+			t.Fatalf("not a member of %q and no invitation from up.sh: %v", e.Tenant, err)
 		}
 		b.do("POST", "/api/v1/invitations/accept", map[string]string{"token": strings.TrimSpace(string(token))}, 200, nil)
 		if tn = find(); tn == nil {
-			t.Fatalf("accepted the seed invitation, still not a member of %q", e.Tenant)
+			t.Fatalf("accepted the invitation from up.sh, still not a member of %q", e.Tenant)
 		}
 	}
 	if tn.Role != "owner" {
@@ -238,4 +238,47 @@ func memberships(b *browser) []tenant {
 	var page struct{ Items []tenant }
 	b.do("GET", "/api/v1/me/tenants", nil, 200, &page)
 	return page.Items
+}
+
+// Tenant onboarding (ADR-0042): the platform admin (admin, the bootstrap
+// admin) creates a tenant with an owner invitation for viewer, without
+// joining it; viewer accepts and owns it. viewer, not a platform admin,
+// is refused the platform API. Each run makes a new tenant.
+func TestPlatformAdminOnboardsTenant(t *testing.T) {
+	e := loadEnv(t)
+	admin, _ := owner(t, e) // signed in at least once: the bootstrap grant
+	viewer := login(t, e, "viewer", "licenseforge")
+	viewer.refused("GET", "/api/v1/platform/tenants", nil, http.StatusForbidden, "forbidden")
+	viewer.refused("POST", "/api/v1/platform/tenants", map[string]string{"slug": "nope-" + strings.ToLower(rand.Text()[:8]), "name": "Nope", "owner_email": "viewer@licenseforge.local"}, http.StatusForbidden, "forbidden")
+
+	slug := "onboard-" + strings.ToLower(rand.Text()[:10])
+	var created struct {
+		Tenant     struct{ ID, Slug string }
+		Invitation struct{ Email, Role, Token string }
+	}
+	admin.do("POST", "/api/v1/platform/tenants", map[string]string{"slug": slug, "name": "Onboarded " + slug, "owner_email": "viewer@licenseforge.local"}, 201, &created)
+	if created.Tenant.Slug != slug || created.Invitation.Role != "owner" || created.Invitation.Token == "" {
+		t.Fatalf("created %+v", created)
+	}
+	var page struct{ Items []struct{ Slug string } }
+	admin.do("GET", "/api/v1/platform/tenants?limit=200", nil, 200, &page)
+	if !slices.ContainsFunc(page.Items, func(x struct{ Slug string }) bool { return x.Slug == slug }) {
+		t.Errorf("%s isn't in the platform list", slug)
+	}
+	if slices.ContainsFunc(memberships(admin), func(x tenant) bool { return x.Slug == slug }) {
+		t.Error("the platform admin joined the tenant")
+	}
+	admin.refused("POST", "/api/v1/platform/tenants", map[string]string{"slug": slug, "name": "Again", "owner_email": "viewer@licenseforge.local"}, http.StatusConflict, "conflict")
+
+	// The accept's answer, not viewer's tenant list: that list is capped and
+	// grows by one tenant per run.
+	var joined struct {
+		TenantID string `json:"tenant_id"`
+		Role     string
+	}
+	viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": created.Invitation.Token}, 200, &joined)
+	if joined.TenantID != created.Tenant.ID || joined.Role != "owner" {
+		t.Fatalf("accepted: %+v", joined)
+	}
+	viewer.do("POST", "/api/v1/tenants/"+slug+"/products", map[string]string{"slug": "first", "name": "First product"}, 201, nil)
 }
