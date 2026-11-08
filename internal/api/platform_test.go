@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
@@ -168,4 +170,129 @@ func (f *fixture) platformRefusals(t *testing.T, action, userID string) []*ent.A
 		t.Fatal(err)
 	}
 	return es
+}
+
+// holdPlatformChain holds the platform chain's audit lock until release is
+// closed; the returned channel gets the holder's result.
+func (f *fixture) holdPlatformChain(t *testing.T, release chan struct{}) chan error {
+	t.Helper()
+	locked, held := make(chan struct{}), make(chan error, 1)
+	go func() {
+		held <- f.db.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+			if err := audit.Lock(context.Background(), tx, audit.PlatformTenant); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	return held
+}
+
+// A gate refusal already on the platform chain is found without the chain
+// lock, so a repeat never queues behind the platform's audited writes.
+func TestPlatformRefusalRepeatSkipsChainLock(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	user, sid := f.newUser(t, "rep."+strings.ToLower(ids.New("x")[2:10])+"@example.com"), ids.New("ses")
+	if err := f.srv.Platform.RecordSessionRefusal(ctx, "session.platform_denied", user, sid, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	held := f.holdPlatformChain(t, release)
+	done := make(chan error, 1)
+	go func() {
+		done <- f.srv.Platform.RecordSessionRefusal(ctx, "session.platform_denied", user, sid, map[string]any{})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the repeated refusal waited for the chain lock")
+		close(release)
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+		release = nil
+	}
+	if release != nil {
+		close(release)
+	}
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Refusals racing on several replicas record one entry: the check is
+// repeated under the chain lock.
+func TestPlatformRefusalRaceRecordsOnce(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	user, sid := f.newUser(t, "race."+strings.ToLower(ids.New("x")[2:10])+"@example.com"), ids.New("ses")
+	release := make(chan struct{})
+	held := f.holdPlatformChain(t, release)
+	const n = 4
+	var wg sync.WaitGroup
+	for range n { // all past the unlocked check, then queued on the lock
+		wg.Go(func() {
+			if err := f.srv.Platform.RecordSessionRefusal(ctx, "session.platform_denied", user, sid, map[string]any{}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for deadline := time.Now().Add(5 * time.Second); waitingAdvisory(t, f, audit.PlatformTenant) < n; {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d refusals waiting for the chain lock", waitingAdvisory(t, f, audit.PlatformTenant))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	wg.Wait()
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.platformRefusals(t, "session.platform_denied", user)); got != 1 {
+		t.Errorf("%d entries", got)
+	}
+}
+
+// Both gate refusal lookups on the platform chain are served by a partial
+// index, not a scan of the chain.
+func TestPlatformRefusalLookupUsesIndex(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for action, index := range map[string]string{
+		"session.platform_denied": "auditevent_platform_denied",
+		"session.mfa_required":    "auditevent_tenant_id_object_id",
+	} {
+		var plan strings.Builder
+		if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+			if _, err := tx.ExecContext(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+				return err
+			}
+			rows, err := tx.QueryContext(ctx, `EXPLAIN SELECT id FROM audit_events WHERE tenant_id = $1 AND action = $2
+				AND object_type = $3 AND object_id = $4 LIMIT 1`, audit.PlatformTenant, action, "session", "ses_x")
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return err
+				}
+				plan.WriteString(line + "\n")
+			}
+			return rows.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(plan.String(), index) {
+			t.Errorf("%s plan:\n%s", action, plan.String())
+		}
+	}
 }

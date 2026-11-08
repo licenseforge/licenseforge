@@ -193,8 +193,8 @@ func TestCreateTenantRefusals(t *testing.T) {
 		}
 		// The CLI's refusal keeps its via, so it isn't a bare system entry.
 		cli, err := tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action("tenant.create"),
-			auditevent.ActorTypeEQ(auditevent.ActorTypeSystem), auditevent.OutcomeEQ(auditevent.OutcomeFailure)).All(ctx)
-		if err == nil && (len(cli) == 0 || cli[len(cli)-1].Details != `{"via":"cli"}`) {
+			auditevent.ActorTypeEQ(auditevent.ActorTypeSystem), auditevent.OutcomeEQ(auditevent.OutcomeFailure)).Order(ent.Desc(auditevent.FieldSeq)).First(ctx)
+		if err == nil && cli.Details != `{"via":"cli"}` {
 			t.Errorf("cli refusals %+v", cli)
 		}
 		return err
