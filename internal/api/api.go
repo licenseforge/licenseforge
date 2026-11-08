@@ -17,7 +17,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"reflect"
 	"runtime/debug"
@@ -632,13 +631,13 @@ func (p *problem) body(requestID string) []byte {
 
 // sourceIP is the client address for audit entries (AU-3): the rate
 // limiter's (the connection, or X-Forwarded-For from a trusted proxy), else
-// the connection's own.
+// the connection's own (no proxy trusted: zone stripped, IPv4 unmapped).
 func sourceIP(r *http.Request) string {
 	if a, ok := ratelimit.Addr(r.Context()); ok {
 		return a.String()
 	}
-	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
-		return ap.Addr().String()
+	if a, ok := ratelimit.ClientAddr(r, nil); ok {
+		return a.String()
 	}
 	return ""
 }

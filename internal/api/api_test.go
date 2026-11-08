@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"reflect"
 	"slices"
@@ -36,6 +37,7 @@ import (
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/platform"
+	"licenseforge.io/licenseforge/internal/ratelimit"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
@@ -1077,5 +1079,53 @@ func TestAuditRecordsTheRequest(t *testing.T) {
 	var d map[string]any
 	if err := json.Unmarshal([]byte(e.Details), &d); err != nil || d["request_id"] != r.h.Get("X-Request-Id") {
 		t.Errorf("details %s, want request_id %s", e.Details, r.h.Get("X-Request-Id"))
+	}
+}
+
+// Behind the rate limiter (production wiring), the recorded source is its
+// client address: X-Forwarded-For counts only from a trusted proxy, and
+// X-Real-IP and Forwarded never do, so a client can't write its own source
+// into the audit chain.
+func TestAuditSourceBehindTheLimiter(t *testing.T) {
+	f := setup(t)
+	owner := f.session(t, f.ownerA, true)
+	lastSource := func() string {
+		var e *ent.AuditEvent
+		if err := f.db.WithTenant(context.Background(), f.a.ID, func(tx *ent.Tx) error {
+			var err error
+			e, err = tx.AuditEvent.Query().Where(auditevent.Action("customer.create")).Order(ent.Desc(auditevent.FieldSeq)).First(context.Background())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if e.SourceIP == nil {
+			return ""
+		}
+		return *e.SourceIP
+	}
+	httptestPeer := netip.MustParsePrefix("192.0.2.0/24") // httptest's RemoteAddr is 192.0.2.1
+	for name, c := range map[string]struct {
+		trusted []netip.Prefix
+		headers map[string]string
+		want    string
+	}{
+		"trusted proxy's hop":     {[]netip.Prefix{httptestPeer}, map[string]string{"X-Forwarded-For": "203.0.113.9"}, "203.0.113.9"},
+		"untrusted peer's header": {nil, map[string]string{"X-Forwarded-For": "203.0.113.9"}, "192.0.2.1"},
+		"other headers ignored":   {[]netip.Prefix{httptestPeer}, map[string]string{"X-Real-IP": "203.0.113.7", "Forwarded": "for=203.0.113.8"}, "192.0.2.1"},
+	} {
+		h := ratelimit.New(ratelimit.Config{Trusted: c.trusted}).Wrap(f.srv)
+		r := httptest.NewRequest("POST", Prefix+"/tenants/"+f.a.Slug+"/customers", strings.NewReader(`{"name":"Contoso"}`))
+		owner(r)
+		for k, v := range c.headers {
+			r.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != 201 {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+		if got := lastSource(); got != c.want {
+			t.Errorf("%s: source %q, want %q", name, got, c.want)
+		}
 	}
 }
