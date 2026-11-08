@@ -232,6 +232,14 @@ var (
 					Where: "action = 'session.mfa_required'",
 				},
 			},
+			{
+				Name:    "auditevent_platform_denied",
+				Unique:  false,
+				Columns: []*schema.Column{AuditEventsColumns[14], AuditEventsColumns[7]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "action = 'session.platform_denied'",
+				},
+			},
 		},
 	}
 	// AuditExportCursorsColumns holds the columns for the "audit_export_cursors" table.

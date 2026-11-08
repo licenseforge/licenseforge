@@ -79,5 +79,8 @@ func (AuditEvent) Indexes() []ent.Index {
 		// The MFA refusal audited once per session and tenant (ADR-0038):
 		// found without scanning the chain.
 		index.Fields("tenant_id", "object_id").Annotations(entsql.IndexWhere("action = 'session.mfa_required'")),
+		// A platform route refused to a non-admin, audited once per session
+		// on the platform chain (ADR-0042): found without scanning it.
+		index.Fields("tenant_id", "object_id").Annotations(entsql.IndexWhere("action = 'session.platform_denied'")).StorageKey("auditevent_platform_denied"),
 	}
 }

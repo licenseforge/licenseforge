@@ -7,8 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/store/ent"
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
@@ -104,9 +109,16 @@ func TestPlatformTenants(t *testing.T) {
 	}
 	f.do(t, "POST", p, `{"slug":"x","name":"X","owner_email":"a@b.example","extra":1}`, as).problem(t, 400, "invalid_request")
 	f.do(t, "POST", p, `{"slug":"csrf-x","name":"X","owner_email":"a@b.example"}`, f.session(t, admin, false)).problem(t, 403, "csrf_failed")
-	// Not a platform admin: a tenant owner gets 403 on both routes; a token 401.
-	for _, m := range []string{"GET", "POST"} {
-		f.do(t, m, p, `{"slug":"denied-x","name":"X","owner_email":"a@b.example"}`, f.session(t, f.ownerA, true)).problem(t, 403, "forbidden")
+	// Not a platform admin: a tenant owner gets 403 on both routes, audited
+	// once per session on the platform chain; a token 401.
+	plain := f.newUser(t, "plain."+strings.ToLower(ids.New("x")[2:10])+"@example.com")
+	ps := f.session(t, plain, true)
+	for _, m := range []string{"GET", "POST", "GET"} {
+		f.do(t, m, p, `{"slug":"denied-x","name":"X","owner_email":"a@b.example"}`, ps).problem(t, 403, "forbidden")
+	}
+	f.do(t, "GET", p, "", f.session(t, plain, false)).problem(t, 403, "forbidden")
+	if es := f.platformRefusals(t, "session.platform_denied", plain); len(es) != 2 || es[0].Outcome != auditevent.OutcomeDenied || *es[0].ObjectType != "session" {
+		t.Errorf("denied audit: %d entries %+v", len(es), es)
 	}
 	f.do(t, "GET", p, "", bearer(f.token(t, f.a.ID, f.ownerA, authz.Owner).Token)).problem(t, 401, "unauthenticated")
 	f.do(t, "GET", p, "").problem(t, 401, "unauthenticated")
@@ -118,7 +130,18 @@ func TestPlatformMFAPolicy(t *testing.T) {
 	admin := f.platformAdmin(t)
 	f.srv.PlatformMFAPolicy = authz.AssurancePhishingResistant
 	p := Prefix + "/platform/tenants"
-	got := f.do(t, "GET", p, "", f.sessionAt(t, admin, false, authz.AssuranceMFA)).problem(t, 403, "mfa_required")
+	before := testutil.ToFloat64(metrics.MFARefusals.WithLabelValues("phishing_resistant"))
+	weak := f.sessionAt(t, admin, false, authz.AssuranceMFA)
+	f.do(t, "GET", p, "", weak).problem(t, 403, "mfa_required")
+	got := f.do(t, "GET", p, "", weak).problem(t, 403, "mfa_required")
+	// Counted every time, audited once for the session on the platform chain.
+	if n := testutil.ToFloat64(metrics.MFARefusals.WithLabelValues("phishing_resistant")) - before; n != 2 {
+		t.Errorf("counted %v refusals", n)
+	}
+	if es := f.platformRefusals(t, "session.mfa_required", admin); len(es) != 1 || es[0].Outcome != auditevent.OutcomeDenied ||
+		!strings.Contains(es[0].Details, `"required":"phishing_resistant"`) || !strings.Contains(es[0].Details, `"session_assurance":"mfa"`) {
+		t.Errorf("mfa audit: %+v", es)
+	}
 	u, err := url.Parse(fmt.Sprint(got["step_up_url"]))
 	if err != nil || u.Path != "/auth/login" || u.Query().Get("assurance") != "phishing_resistant" || u.Query().Get("return") != "/platform/" ||
 		got["required_assurance"] != "phishing_resistant" || got["session_assurance"] != "mfa" {
@@ -131,4 +154,18 @@ func TestPlatformMFAPolicy(t *testing.T) {
 	if r := f.do(t, "GET", p, "", f.session(t, admin, false)); r.code != 200 {
 		t.Errorf("policy none: %d %s", r.code, r.raw)
 	}
+}
+
+// platformRefusals returns the platform chain's action entries for userID.
+func (f *fixture) platformRefusals(t *testing.T, action, userID string) []*ent.AuditEvent {
+	t.Helper()
+	var es []*ent.AuditEvent
+	if err := f.db.WithPlatform(context.Background(), func(tx *ent.Tx) error {
+		var err error
+		es, err = tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action(action), auditevent.ActorID(userID)).All(context.Background())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return es
 }

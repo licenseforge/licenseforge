@@ -166,6 +166,8 @@ func TestCreateTenantRefusals(t *testing.T) {
 		"disabled admin":  {Actor{UserID: f.gone}, "x-" + storetest.Suffix(), "X", "a@b.example", ErrNotAdmin, ""},
 		"bad slug":        {Actor{UserID: f.admin}, "Bad Slug", "X", "a@b.example", ErrInvalid, "/slug"},
 		"blank name":      {Actor{UserID: f.admin}, "x-" + storetest.Suffix(), "  ", "a@b.example", ErrInvalid, "/name"},
+		"control in name": {Actor{UserID: f.admin}, "x-" + storetest.Suffix(), "Evil\nCorp", "a@b.example", ErrInvalid, "/name"},
+		"cli, bad slug":   {Actor{}, "Bad Slug", "X", "a@b.example", ErrInvalid, "/slug"},
 		"bad email":       {Actor{UserID: f.admin}, "x-" + storetest.Suffix(), "X", "not an email", ErrInvalid, "/owner_email"},
 		"slug taken":      {Actor{UserID: f.admin}, taken, "X", "a@b.example", ErrConflict, "/slug"},
 		"platform's slug": {Actor{UserID: f.admin}, "platform", "X", "a@b.example", ErrConflict, "/slug"},
@@ -185,6 +187,15 @@ func TestCreateTenantRefusals(t *testing.T) {
 		e, err := tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action("tenant.create"), auditevent.ActorID(f.other)).Only(ctx)
 		if err == nil && e.Outcome != auditevent.OutcomeDenied {
 			t.Errorf("refusal %+v", e)
+		}
+		if err != nil {
+			return err
+		}
+		// The CLI's refusal keeps its via, so it isn't a bare system entry.
+		cli, err := tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action("tenant.create"),
+			auditevent.ActorTypeEQ(auditevent.ActorTypeSystem), auditevent.OutcomeEQ(auditevent.OutcomeFailure)).All(ctx)
+		if err == nil && (len(cli) == 0 || cli[len(cli)-1].Details != `{"via":"cli"}`) {
+			t.Errorf("cli refusals %+v", cli)
 		}
 		return err
 	}); err != nil {
@@ -285,5 +296,71 @@ func TestRemovalWaitsForRecheck(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the removal never finished")
+	}
+}
+
+// Disabling a platform admin's account waits for a transaction that
+// rechecked the admin, as CreateTenant does.
+func TestDisableWaitsForRecheck(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	extra := ""
+	if err := f.db.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		u, err := tx.User.Create().SetIssuer("https://idp.example").SetSubject(ids.New("sub")).SetEmail("extra2@example.com").SetEmailVerified(true).Save(ctx)
+		if err == nil {
+			extra = u.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.GrantPlatformAdmin(ctx, extra, f.admin, func(*ent.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		if ok, err := isAdmin(ctx, tx, extra, true); err != nil || !ok {
+			return fmt.Errorf("recheck: %v %v", ok, err)
+		}
+		go func() {
+			done <- f.db.WithPlatform(ctx, func(tx *ent.Tx) error { return tx.User.UpdateOneID(extra).SetDisabledAt(time.Now()).Exec(ctx) })
+		}()
+		select {
+		case err := <-done:
+			return fmt.Errorf("the disable didn't wait: %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("disable after commit: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the disable never finished")
+	}
+}
+
+// A session's gate refusal is recorded once, whichever replica sees it.
+func TestRecordSessionRefusal(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	sid := ids.New("ses")
+	for range 3 {
+		if err := f.s.RecordSessionRefusal(ctx, ActionDenied, f.other, sid, map[string]any{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		n, err := tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.ObjectID(sid)).Count(ctx)
+		if err == nil && n != 1 {
+			t.Errorf("%d entries for one session", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

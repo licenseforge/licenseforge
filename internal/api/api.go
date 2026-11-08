@@ -222,7 +222,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 		return authz.Principal{}, internal(err)
 	}
 	if strings.HasPrefix(r.URL.EscapedPath(), Prefix+"/platform/") {
-		return s.platformSession(r, u.ID, sess.Assurance)
+		return s.platformSession(r, u.ID, sess)
 	}
 	ref, ok := tenantRef(r)
 	if !ok {
@@ -260,18 +260,39 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) (authz.Principa
 // authz denies it every tenant permission; the platform handlers act for it.
 // Checked on every request, so a removed admin or a raised policy applies at
 // once. Anyone else signed in gets 403: the paths are public, nothing to hide.
-func (s *server) platformSession(r *http.Request, userID string, assurance authz.Assurance) (authz.Principal, *problem) {
-	ok, err := s.Platform.IsAdmin(r.Context(), userID)
+// Refusals are audited once per session on the platform chain (ADR-0042);
+// MFA refusals are counted on every one, as for tenants (ADR-0038).
+func (s *server) platformSession(r *http.Request, userID string, sess identity.SessionInfo) (authz.Principal, *problem) {
+	ctx := r.Context()
+	ok, err := s.Platform.IsAdmin(ctx, userID)
 	if err != nil {
 		return authz.Principal{}, internal(err)
 	}
 	if !ok {
+		s.platformRefused(ctx, platform.ActionDenied, userID, sess, map[string]any{})
 		return authz.Principal{}, &problem{status: http.StatusForbidden, code: "forbidden", detail: "Only platform admins can use the platform API."}
 	}
-	if policy := s.PlatformMFAPolicy; policy != "" && !assurance.Meets(policy) {
-		return authz.Principal{}, platformMFARequired(policy, assurance)
+	if policy := s.PlatformMFAPolicy; policy != "" && !sess.Assurance.Meets(policy) {
+		metrics.MFARefusals.WithLabelValues(string(policy)).Inc()
+		s.platformRefused(ctx, platform.ActionMFARequired, userID, sess, map[string]any{"required": string(policy), "session_assurance": string(sess.Assurance)})
+		return authz.Principal{}, platformMFARequired(policy, sess.Assurance)
 	}
-	return authz.Principal{Kind: authz.User, ID: userID, Assurance: assurance}, nil
+	return authz.Principal{Kind: authz.User, ID: userID, Assurance: sess.Assurance}, nil
+}
+
+// platformRefused audits a platform gate refusal once per session (the
+// replica's memory first, then the database). Failing to record never
+// changes the answer, the request is refused either way; it is logged.
+func (s *server) platformRefused(ctx context.Context, action, userID string, sess identity.SessionInfo, details map[string]any) {
+	key := sess.ID + "|platform|" + action
+	if s.mfaSeen.has(key) {
+		return
+	}
+	if err := s.Platform.RecordSessionRefusal(ctx, action, userID, sess.ID, details); err != nil {
+		s.Log.ErrorContext(ctx, "audit platform refusal", "action", action, "err", err)
+		return
+	}
+	s.mfaSeen.add(key)
 }
 
 // userRoutes are session-only paths outside a tenant, acting for the
