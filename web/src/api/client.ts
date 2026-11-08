@@ -85,6 +85,14 @@ export function fieldErrors(e: unknown): Record<string, string> {
   return out;
 }
 
+/**
+ * The app's query retry rule: up to 3 retries for network failures and 5xx;
+ * none for a client error (a 401, a 403 such as mfa_required, a 404), which
+ * a retry can't fix and would only delay the explanation and repeat the
+ * refusal on the server.
+ */
+export const queryRetry = (failures: number, e: unknown) => !(e instanceof ApiError && e.status < 500) && failures < 3;
+
 /** A session that ended mid-use (expiry, logout elsewhere) goes to sign in. */
 export function onAuthError(e: unknown) {
   if (e instanceof ApiError && e.status === 401) window.location.assign("/login");

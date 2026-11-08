@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { problemMessage } from "@/i18n";
-import { ApiError, api, fieldErrors, setCsrfToken } from "./client";
+import { ApiError, api, fieldErrors, queryRetry, setCsrfToken } from "./client";
 import { assignableTokenRoles, canManageTokens, createToken, revokeToken, tokensQuery } from "./tokens";
 import { QueryClient } from "@tanstack/react-query";
 
@@ -102,5 +102,18 @@ describe("assignableTokenRoles", () => {
       expect(assignableTokenRoles(m)).toEqual([]);
       expect(canManageTokens(m)).toBe(false);
     }
+  });
+});
+
+describe("queryRetry", () => {
+  const problem = (status: number, code: string) => new ApiError(status, "x", { type: "about:blank", title: "x", status, code, request_id: "r" });
+  it("never retries a client error: a retry can't fix it and would delay the MFA explanation", () => {
+    for (const e of [problem(401, "unauthenticated"), problem(403, "mfa_required"), problem(404, "not_found"), problem(422, "validation_failed")]) {
+      expect(queryRetry(0, e)).toBe(false);
+    }
+  });
+  it("retries network failures and 5xx up to three times", () => {
+    expect([0, 1, 2, 3].map((n) => queryRetry(n, new TypeError("Failed to fetch")))).toEqual([true, true, true, false]);
+    expect(queryRetry(0, problem(503, "internal"))).toBe(true);
   });
 });
