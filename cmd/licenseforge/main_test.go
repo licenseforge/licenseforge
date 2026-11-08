@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"io"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -499,4 +503,57 @@ func TestServeVerifiesAudit(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Error("no audit.checkpoint written after start")
+}
+
+// `licenseforge tenant create` makes a tenant and its first owner's
+// invitation on the platform login (ADR-0042); the printed token is the one
+// the owner accepts with.
+func TestTenantCreate(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", env.PlatformURL)
+	slug := "cli-" + strings.ToLower(ids.New("x")[2:10])
+	var out bytes.Buffer
+	if err := tenantCreate(ctx, []string{"--slug", slug, "--name", "Via CLI", "--owner-email", "cli.owner@example.com"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^tenant (\S+) \((tnt_\S+)\) created\ninvite for cli\.owner@example\.com, valid until \S+, shown once:\n  /invite#token=(\S+)$`).FindStringSubmatch(out.String())
+	if m == nil || m[1] != slug {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	d, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL, Platform: env.PlatformURL, Identity: env.IdentityURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	var uid string
+	if err := d.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		u, err := tx.User.Create().SetIssuer("https://idp.example").SetSubject(ids.New("sub")).SetEmail("cli.owner@example.com").SetEmailVerified(true).Save(ctx)
+		if err == nil {
+			uid = u.ID
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := d.AcceptInvitation(ctx, m[3], uid, func(*ent.Tx, *ent.Membership) error { return nil })
+	if err != nil || mem.TenantID != m[2] || mem.Role != membership.RoleOwner {
+		t.Fatalf("accept: %+v, %v", mem, err)
+	}
+	// Refused: a taken slug, a missing flag, a stray argument, no platform login.
+	if err := tenantCreate(ctx, []string{"--slug", slug, "--name", "Again", "--owner-email", "a@b.example"}, io.Discard); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Errorf("taken slug: %v", err)
+	}
+	for _, args := range [][]string{{"--slug", "x-1", "--name", "X"}, {"--slug", "x-2", "--name", "X", "--owner-email", "a@b.example", "extra"}} {
+		if err := tenantCreate(ctx, args, io.Discard); err == nil {
+			t.Errorf("%v: no error", args)
+		}
+	}
+	// Not the platform login: the owner login could write, so only the role
+	// check refuses it.
+	for name, dsn := range map[string]string{"tenant": env.TenantURL, "owner": env.OwnerURL} {
+		t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", dsn)
+		if err := tenantCreate(ctx, []string{"--slug", "x-3-" + name, "--name", "X", "--owner-email", "a@b.example"}, io.Discard); err == nil {
+			t.Errorf("ran on the %s login", name)
+		}
+	}
 }

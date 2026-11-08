@@ -55,6 +55,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -101,7 +102,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -117,6 +118,9 @@ func main() {
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
 	cmd := strings.Join(flag.Args(), " ")
+	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && args[1] == "create" {
+		cmd = "tenant create" // with its own flags
+	}
 	var err error
 	switch cmd {
 	case "":
@@ -132,6 +136,11 @@ func main() {
 		err = migrate(ctx, log)
 	case "audit prune":
 		err = prune(ctx, log)
+	case "tenant create":
+		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0) // the usage was printed
+		}
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -168,6 +177,39 @@ func prune(ctx context.Context, log *slog.Logger) error {
 		log.Info("audit retention cut", "chain", c.TenantID, "through_seq", c.Through, "deleted", c.Deleted)
 	}
 	log.Info("audit retention done", "cuts", len(cuts), "deleted", deleted, "platform_days", platformDays)
+	return err
+}
+
+// tenantCreate creates a tenant and its first owner's invitation on the
+// platform login (ADR-0042), for installs without a dashboard admin yet or
+// without a browser. The system is the actor (via: cli). The invite path is
+// printed once: prefix it with the dashboard's public URL.
+func tenantCreate(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("tenant create", flag.ContinueOnError)
+	slug := fs.String("slug", "", "the tenant's slug: lowercase letters and digits joined by dashes (required)")
+	name := fs.String("name", "", "the tenant's name (required)")
+	owner := fs.String("owner-email", "", "the first owner's email: they sign in with it, verified, and accept (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *slug == "" || *name == "" || *owner == "" || fs.NArg() > 0 {
+		return errors.New("tenant create: --slug, --name and --owner-email are required, and nothing else")
+	}
+	dsn, err := mustEnv("LICENSEFORGE_PLATFORM_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	db, err := store.OpenPlatform(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	c, err := platform.Service{DB: db}.CreateTenant(ctx, platform.Actor{}, *slug, *name, *owner)
+	if err != nil {
+		return fmt.Errorf("tenant create: %w", err)
+	}
+	_, err = fmt.Fprintf(out, "tenant %s (%s) created\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
+		c.Tenant.Slug, c.Tenant.ID, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
 	return err
 }
 
