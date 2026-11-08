@@ -63,6 +63,17 @@ oidc:
     port: 443
     to: []
 
+# Extra CA certificates trusted for outgoing TLS, in addition to the image's
+# bundle, by the server, the migration Job and the audit-prune CronJob: e.g.
+# an OIDC provider or a database (sslmode=verify-full) with a certificate
+# from an internal or enterprise CA. secretName: a Secret with the PEM file
+# (several certificates may be concatenated) under key. Empty: the image's
+# bundle only. A SIEM sink's own caSecret replaces it for that sink. Read at
+# start: restart the pods after changing the Secret.
+extraCA:
+  secretName: ""
+  key: ca.crt
+
 # Audit export to a SIEM (ADR-0036): RFC 5424 syslog over TLS (RFC 5425),
 # certificate verification always on, TLS 1.2+. Every entry of every audit
 # chain is sent at least once, with its seq and hashes, so the SIEM can check

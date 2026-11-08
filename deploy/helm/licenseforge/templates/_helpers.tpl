@@ -68,3 +68,22 @@ capabilities:
 {{- define "licenseforge.otlp" -}}
 {{- toYaml (dig "export" "otlp" dict (.Values.audit | default dict)) -}}
 {{- end -}}
+
+{{/* extraCA for the Jobs that connect to the database (sslmode=verify-full
+     with a private CA); the Deployment mounts it with its other Secrets.
+     Each takes (list . indent). */}}
+{{- define "licenseforge.extraCAEnv" -}}
+{{- $root := index . 0 }}{{- with ($root.Values.extraCA | default dict).secretName }}
+{{ printf "- name: SSL_CERT_DIR\n  value: /etc/licenseforge/extra-ca" | indent (index $ 1) }}
+{{- end }}
+{{- end -}}
+{{- define "licenseforge.extraCAMounts" -}}
+{{- $root := index . 0 }}{{- with ($root.Values.extraCA | default dict).secretName }}
+{{ printf "volumeMounts:\n  - {name: extra-ca, mountPath: /etc/licenseforge/extra-ca, readOnly: true}" | indent (index $ 1) }}
+{{- end }}
+{{- end -}}
+{{- define "licenseforge.extraCAVolumes" -}}
+{{- $root := index . 0 }}{{- $ca := $root.Values.extraCA | default dict }}{{- with $ca.secretName }}
+{{ printf "volumes:\n  - name: extra-ca\n    secret: {secretName: %s, items: [{key: %s, path: ca.crt}]}" (quote .) (quote $ca.key) | indent (index $ 1) }}
+{{- end }}
+{{- end -}}

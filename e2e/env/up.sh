@@ -112,13 +112,6 @@ else
   IMAGE=(--set image.repository=licenseforge --set image.tag=e2e --set image.pullPolicy=Never)
 fi
 helm upgrade --install licenseforge "${CHART[@]}" -n $NS -f <(render values.yaml) "${IMAGE[@]}" >/dev/null
-# ponytail: the chart can't trust an extra CA yet, so the server trusts the
-# local CA through this patch (SSL_CERT_FILE replaces the system roots; the
-# only TLS peer here is Keycloak). Upgrade path: a chart value for an OIDC CA.
-kubectl -n $NS patch deployment licenseforge --type strategic -p '{"spec":{"template":{"spec":{
-  "volumes":[{"name":"local-ca","secret":{"secretName":"local-ca"}}],
-  "containers":[{"name":"server","env":[{"name":"SSL_CERT_FILE","value":"/etc/local-ca/ca.crt"}],
-    "volumeMounts":[{"name":"local-ca","mountPath":"/etc/local-ca","readOnly":true}]}]}}}}' >/dev/null
 # A local image keeps its tag: restart, so the pod runs the image just built.
 if [ $MODE = local ]; then kubectl -n $NS rollout restart deployment/licenseforge >/dev/null; fi
 kubectl -n $NS rollout status deployment/licenseforge --timeout=300s >/dev/null
