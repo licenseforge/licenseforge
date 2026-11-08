@@ -65,6 +65,7 @@ func loadEnv(t *testing.T) env {
 func (e env) httpClient(t *testing.T, jar http.CookieJar, followRedirects bool) *http.Client {
 	t.Helper()
 	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil // a proxy would have to resolve nip.io itself
 	// Dial the address a nip.io name carries, without DNS: resolvers with
 	// DNS-rebinding protection drop such answers. TLS still checks the name.
 	dial := tr.DialContext
@@ -149,6 +150,17 @@ func (b *browser) do(method, path string, body any, want int, out any) {
 	b.t.Helper()
 	if err := b.try(method, path, body, want, out); err != nil {
 		b.t.Fatal(err)
+	}
+}
+
+// refused sends a request that must be refused with status and problem code.
+func (b *browser) refused(method, path string, body any, status int, code string) {
+	b.t.Helper()
+	var p struct{ Code string }
+	if err := b.try(method, path, body, status, &p); err != nil {
+		b.t.Error(err)
+	} else if p.Code != code {
+		b.t.Errorf("%s %s: refused with %q, want %q", method, path, p.Code, code)
 	}
 }
 

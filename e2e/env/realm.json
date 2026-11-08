@@ -14,9 +14,9 @@
     "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://__LF__/*"}
   }],
   "users": [
-    {"username": "admin", "email": "admin@licenseforge.local", "emailVerified": true, "firstName": "Ada", "lastName": "Admin", "enabled": true,
+    {"id": "6f1d0a4e-2c55-4b3e-9a51-0e2f6c1b7a01", "username": "admin", "email": "admin@licenseforge.local", "emailVerified": true, "firstName": "Ada", "lastName": "Admin", "enabled": true,
      "credentials": [{"type": "password", "value": "licenseforge", "temporary": false}]},
-    {"username": "viewer", "email": "viewer@licenseforge.local", "emailVerified": true, "firstName": "Vic", "lastName": "Viewer", "enabled": true,
+    {"id": "6f1d0a4e-2c55-4b3e-9a51-0e2f6c1b7a02", "username": "viewer", "email": "viewer@licenseforge.local", "emailVerified": true, "firstName": "Vic", "lastName": "Viewer", "enabled": true,
      "credentials": [{"type": "password", "value": "licenseforge", "temporary": false}]}
   ]
 }

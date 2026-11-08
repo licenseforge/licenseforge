@@ -35,6 +35,7 @@ vet-cross:
 
 lint: vet
 	for m in $(MODULES); do (cd $$m && golangci-lint run) || exit 1; done
+	golangci-lint run --build-tags e2e ./e2e/
 	for os in windows darwin; do (cd sdk/go && GOOS=$$os golangci-lint run ./...) || exit 1; done
 
 fmt:

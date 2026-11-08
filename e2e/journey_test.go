@@ -147,32 +147,57 @@ func TestLicenseJourney(t *testing.T) {
 		t.Errorf("entitlements %+v", claims.Entitlements)
 	}
 
-	// One seat: a second machine is refused.
-	if _, err := app("e2e-machine-2-" + run).Activate(ctx); !errors.Is(err, online.ErrActivationLimit) {
+	// One seat: a second machine is refused until the first frees it.
+	second := app("e2e-machine-2-" + run)
+	if _, err := second.Activate(ctx); !errors.Is(err, online.ErrActivationLimit) {
 		t.Errorf("second machine: %v, want the activation limit", err)
 	}
 	if _, err := first.Refresh(ctx); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
+	if err := first.Deactivate(ctx); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if _, err := second.Activate(ctx); err != nil {
+		t.Fatalf("second machine after the first freed its seat: %v", err)
+	}
 
-	// The dashboard sees the machine; revoking ends the license at the next refresh.
-	var acts struct{ Items []struct{ Hostname string } }
+	// The dashboard sees both machines, one deactivated; revoking ends the
+	// license at the next refresh.
+	type activation struct {
+		ID, Hostname  string
+		DeactivatedAt *string `json:"deactivated_at"`
+	}
+	var acts struct{ Items []activation }
 	b.do("GET", api+"/licenses/"+lic.ID+"/activations", nil, 200, &acts)
-	if len(acts.Items) != 1 || acts.Items[0].Hostname != "e2e-machine-1-"+run {
+	active := slices.IndexFunc(acts.Items, func(a activation) bool { return a.DeactivatedAt == nil })
+	if len(acts.Items) != 2 || active < 0 || acts.Items[active].Hostname != "e2e-machine-2-"+run {
 		t.Errorf("activations %+v", acts.Items)
 	}
 	b.do("POST", api+"/licenses/"+lic.ID+"/revoke", nil, 200, nil)
-	if _, err := first.Refresh(ctx); !errors.Is(err, online.ErrRevoked) {
+	if _, err := second.Refresh(ctx); !errors.Is(err, online.ErrRevoked) {
 		t.Errorf("refresh after revoke: %v, want revoked", err)
 	}
 
-	// Every step is on the tenant's audit chain.
-	type entry struct{ Action string }
+	// Every step of this run is on the tenant's audit chain: entries for this
+	// license and its activations, not an earlier run's.
+	type entry struct {
+		Action   string
+		ObjectID *string `json:"object_id"`
+	}
 	var audit struct{ Items []entry }
 	b.do("GET", api+"/audit-events?limit=100", nil, 200, &audit)
-	for _, want := range []string{"license.issue", "activation.create", "license.revoke"} {
-		if !slices.ContainsFunc(audit.Items, func(a entry) bool { return a.Action == want }) {
-			t.Errorf("no %s in the audit log", want)
+	ours := func(action, object string) bool {
+		return slices.ContainsFunc(audit.Items, func(a entry) bool { return a.Action == action && a.ObjectID != nil && *a.ObjectID == object })
+	}
+	for _, a := range acts.Items {
+		if !ours("activation.create", a.ID) {
+			t.Errorf("no activation.create for %s", a.ID)
+		}
+	}
+	for _, action := range []string{"license.issue", "license.revoke"} {
+		if !ours(action, lic.ID) {
+			t.Errorf("no %s for %s", action, lic.ID)
 		}
 	}
 }
@@ -183,19 +208,34 @@ func TestInvitedViewerCannotWrite(t *testing.T) {
 	e := loadEnv(t)
 	own, tn := owner(t, e)
 	viewer := login(t, e, "viewer", "licenseforge")
-	var page struct{ Items []tenant }
-	viewer.do("GET", "/api/v1/me/tenants", nil, 200, &page)
-	if !slices.ContainsFunc(page.Items, func(x tenant) bool { return x.Slug == tn.Slug }) {
-		var inv struct{ Token string }
-		own.do("POST", "/api/v1/tenants/"+tn.Slug+"/invitations", map[string]any{"email": "viewer@licenseforge.local", "role": "viewer", "all_products": true}, 201, &inv)
-		viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": inv.Token}, 200, nil)
-	}
 	api := "/api/v1/tenants/" + tn.Slug
+	type member struct{ ID, Email string }
+	removeViewer := func() {
+		var members struct{ Items []member }
+		own.do("GET", api+"/members", nil, 200, &members)
+		for _, m := range members.Items {
+			if m.Email == "viewer@licenseforge.local" {
+				own.do("DELETE", api+"/members/"+m.ID, nil, 204, nil)
+			}
+		}
+	}
+	// Removed after the test too, so every run goes through the invite.
+	removeViewer()
+	t.Cleanup(removeViewer)
+	var inv struct{ Token string }
+	own.do("POST", api+"/invitations", map[string]any{"email": "viewer@licenseforge.local", "role": "viewer", "all_products": true}, 201, &inv)
+	viewer.do("POST", "/api/v1/invitations/accept", map[string]string{"token": inv.Token}, 200, nil)
+	if !slices.ContainsFunc(memberships(viewer), func(x tenant) bool { return x.Slug == tn.Slug && x.Role == "viewer" }) {
+		t.Fatal("accepted, but not a viewer of the tenant")
+	}
 	viewer.do("GET", api+"/products", nil, 200, nil)
-	if err := viewer.try("POST", api+"/products", map[string]string{"slug": "nope", "name": "Nope"}, http.StatusForbidden, nil); err != nil {
-		t.Error(err)
-	}
-	if err := viewer.try("POST", api+"/signing-keys", map[string]any{}, http.StatusForbidden, nil); err != nil {
-		t.Error(err)
-	}
+	// Refused by the role, not by anything else (a CSRF refusal is 403 too).
+	viewer.refused("POST", api+"/products", map[string]string{"slug": "nope", "name": "Nope"}, http.StatusForbidden, "forbidden")
+	viewer.refused("POST", api+"/signing-keys", map[string]any{}, http.StatusForbidden, "forbidden")
+}
+
+func memberships(b *browser) []tenant {
+	var page struct{ Items []tenant }
+	b.do("GET", "/api/v1/me/tenants", nil, 200, &page)
+	return page.Items
 }

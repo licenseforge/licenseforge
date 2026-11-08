@@ -1,5 +1,7 @@
 # e2e environment (ADR-0041): Keycloak in dev mode as the OIDC provider (ADR-0003), behind
-# the ingress at https://__KC__. The realm ConfigMap is created by up.sh.
+# the ingress at https://__KC__. The realm ConfigMap is created by up.sh. Dev mode
+# keeps no data: each restart imports the realm again, and its users' fixed IDs
+# keep their subjects, so LicenseForge still knows them.
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: keycloak, namespace: __NS__}

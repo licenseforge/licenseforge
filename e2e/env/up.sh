@@ -9,6 +9,7 @@
 # Needs minikube started with the ingress addon:
 #   minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
 set -euo pipefail
+umask 077   # .state holds the CA key, the master key and the seed token
 ENV_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$ENV_DIR/../.." && pwd)
 STATE=$ENV_DIR/.state
@@ -18,9 +19,14 @@ case "${1:-}" in
   --release) MODE=release VERSION=${2:?--release needs a version, e.g. 0.1.0-alpha.1} ;;
   *) echo "usage: $0 [--local | --release VERSION]" >&2; exit 2 ;;
 esac
+# Only ever the minikube cluster: every kubectl and helm call below goes to
+# the current context, so refuse anything else.
+PROFILE=${MINIKUBE_PROFILE:-minikube}
+CTX=$(kubectl config current-context 2>/dev/null || true)
+[ "$CTX" = "$PROFILE" ] || { echo "kubectl's context is '$CTX', not the minikube profile '$PROFILE': run 'kubectl config use-context $PROFILE'" >&2; exit 1; }
 # Its own namespace and hostnames, so a demo install next to it is untouched.
 NS=licenseforge-e2e
-IP=$(minikube ip)
+IP=$(minikube -p "$PROFILE" ip)
 LF=lf-e2e.$IP.nip.io KC=kc-e2e.$IP.nip.io
 render() { sed "s/__NS__/$NS/g; s/__LF__/$LF/g; s/__KC__/$KC/g" "$ENV_DIR/$1"; }
 mkdir -p "$STATE"
@@ -30,9 +36,10 @@ mkdir -p "$STATE"
 # journeys dial the IP the name carries.
 CURL=(curl -sf --cacert "$STATE/ca.crt" --resolve "$LF:443:$IP" --resolve "$KC:443:$IP")
 COREFILE=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}')
-if ! grep -q " $KC\b" <<<"$COREFILE"; then
-  NEW=$(sed "s/^\( *\)hosts {/&\n\1   $IP $LF\n\1   $IP $KC/" <<<"$COREFILE")
-  [ "$NEW" != "$COREFILE" ] || { echo "CoreDNS has no hosts block to add $LF and $KC to" >&2; exit 1; }
+if ! grep -qF " $KC" <<<"$COREFILE"; then
+  # Drop entries for an earlier minikube IP, then add this one's.
+  NEW=$(grep -vE ' (lf|kc)-e2e\.[0-9.]+\.nip\.io$' <<<"$COREFILE" | sed "s/^\( *\)hosts {/&\n\1   $IP $LF\n\1   $IP $KC/")
+  grep -qF " $KC" <<<"$NEW" || { echo "CoreDNS has no hosts block to add $LF and $KC to" >&2; exit 1; }
   kubectl -n kube-system create configmap coredns --from-literal=Corefile="$NEW" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl -n kube-system rollout restart deployment/coredns >/dev/null
   kubectl -n kube-system rollout status deployment/coredns --timeout=120s >/dev/null
@@ -66,7 +73,15 @@ render ingress.yaml | kubectl apply -f - >/dev/null
 #    master key (kept, so license keys stay decryptable across runs), the
 #    OIDC client secret.
 DB="db.$NS.svc.cluster.local:5432/licenseforge?sslmode=disable"
-[ -f "$STATE/master-key" ] || head -c 32 /dev/urandom | base64 -w0 > "$STATE/master-key"
+if [ ! -f "$STATE/master-key" ]; then
+  # .state gone but the namespace kept: reuse the cluster's key, or its
+  # encrypted data (license keys, signing keys) would be unreadable.
+  if live=$(kubectl -n $NS get secret lf-server -o jsonpath='{.data.master-keys}' 2>/dev/null) && [ -n "$live" ]; then
+    base64 -d <<<"$live" | sed 's/^e2e=//' > "$STATE/master-key"
+  else
+    head -c 32 /dev/urandom | base64 -w0 > "$STATE/master-key"
+  fi
+fi
 apply create secret generic lf-server \
   --from-literal=database-url="postgres://licenseforge_api:change-me-api@$DB" \
   --from-literal=platform-database-url="postgres://licenseforge_admin:change-me-admin@$DB" \
@@ -105,14 +120,19 @@ kubectl -n $NS patch deployment licenseforge --type strategic -p '{"spec":{"temp
   "containers":[{"name":"server","env":[{"name":"SSL_CERT_FILE","value":"/etc/local-ca/ca.crt"}],
     "volumeMounts":[{"name":"local-ca","mountPath":"/etc/local-ca","readOnly":true}]}]}}}}' >/dev/null
 # A local image keeps its tag: restart, so the pod runs the image just built.
-[ $MODE = local ] && kubectl -n $NS rollout restart deployment/licenseforge >/dev/null
+if [ $MODE = local ]; then kubectl -n $NS rollout restart deployment/licenseforge >/dev/null; fi
 kubectl -n $NS rollout status deployment/licenseforge --timeout=300s >/dev/null
 
 # 5. The test tenant, until tenants can be created through the product
 #    (ADR-0041): tenant "acme" and an owner invitation for
 #    admin@licenseforge.local, whose link token goes to .state/invite-token.
-#    Journeys accept it on their first login. Once only.
-if [ ! -f "$STATE/invite-token" ]; then
+#    Journeys accept it on their first login. Seeded when the database has no
+#    tenant acme; a seed without its token (or the reverse) can't be repaired.
+SEEDED=$(kubectl -n $NS exec db-0 -- psql -tAq -U postgres -d licenseforge -c "SELECT count(*) FROM tenants WHERE slug = 'acme'")
+if [ "$SEEDED" = 1 ] && [ ! -f "$STATE/invite-token" ]; then
+  echo "tenant acme exists but .state/invite-token is gone: start over with 'kubectl delete ns $NS' and 'rm -r $STATE'" >&2; exit 1
+fi
+if [ "$SEEDED" = 0 ]; then
   python3 - "$STATE/invite-token" > "$STATE/seed.sql" <<'PY'
 import base64, hashlib, secrets, sys
 b32 = lambda n: base64.b32encode(secrets.token_bytes(n)).decode().rstrip("=")

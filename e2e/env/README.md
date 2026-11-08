@@ -11,6 +11,7 @@ What `up.sh` deploys, in namespace `licenseforge-e2e`:
 - Tenant `acme`, with an owner invitation for `admin@licenseforge.local` that the journeys accept on their first login. This stays until tenants can be created through the product.
 
 ## Use
+Needs minikube, kubectl, helm, openssl, python3 and curl. kubectl's current context must be the minikube profile (`minikube`, or `MINIKUBE_PROFILE`); `up.sh` refuses any other cluster.
 
 ```sh
 minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
@@ -21,7 +22,11 @@ make e2e                               # the journeys
 
 `up.sh` can be re-run, for example after changing code. The CA, the master key and the seed are kept in `e2e/env/.state/` (gitignored). Import `.state/ca.crt` in your browser to open the dashboard without certificate warnings.
 
-Tear down with `kubectl delete ns licenseforge-e2e` and `rm -r e2e/env/.state`.
+Tear down with `kubectl delete ns licenseforge-e2e` and `rm -r e2e/env/.state`. Always remove both together, or neither: the seed and the master key in `.state` belong to that namespace's database.
+
+`up.sh` adds the two hostnames to CoreDNS's `hosts` block (cluster-wide, in `kube-system`), because some resolvers drop nip.io answers that point at private addresses. Remove those two lines with `kubectl -n kube-system edit configmap coredns`, or `minikube delete` drops everything.
+
+Keycloak in dev mode keeps no data. After a restart it imports the realm again, with the same user IDs, so sign-ins and memberships carry over.
 
 ## Known gaps
 
