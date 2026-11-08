@@ -3,6 +3,10 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.1.0-alpha.1] - 2026-11-08
+First alpha: online licensing, the data model, the admin dashboard core and the compliance baseline (v0.1 on the Roadmap). Not for production use yet; the license format and API can still change before 0.1.0. Verify artifacts as in [docs/verifying-releases.md](docs/verifying-releases.md).
+
 ### Fixed
 - Customer archive is one-way and at the database clock, as for products, features and plans: a restrictive UPDATE policy (`archive_once` on `customers`) refuses un-archiving or re-dating an archived customer from the serving logins, including an update or upsert racing a concurrent archive; renaming an archived customer still works. Migration `20261107090000_snapshot_match_security.sql`.
 - Policies that compare a row with its previous version (`use_moves_forward` on `api_tokens`, `forward_to_entry` on `audit_export_cursors`) now also match that version in USING. Before, an UPDATE that waited for a concurrent commit was rechecked against the newer row while the policy's subquery still read the older snapshot, so it could move `last_used_at` or an export cursor back past what had just been committed. Such an update now changes nothing and an upsert is refused. Token revoke and member removal (locking the member's tokens) look again, in new statements, until a plain read shows no active token left out (at most five times, then an error rather than a removal that keeps a token active); customer changes look again once when a lock waited for a concurrent archive. `TestLagAndFailureMetrics` no longer depends on timing.
