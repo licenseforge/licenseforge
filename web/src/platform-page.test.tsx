@@ -143,3 +143,38 @@ it.each([true, false])("routes a user without tenants by the session's platform 
   }
   act(() => root.unmount());
 });
+
+it("can't be closed while the create is in flight: its answer is the only copy of the invite link", async () => {
+  let answer: (r: Response) => void = () => {};
+  const { el, root } = await render(async (req) =>
+    req.method === "POST" ? new Promise<Response>((r) => (answer = r)) : json({ items: [tenant] }),
+  );
+  await vi.waitFor(() => expect(el.textContent).toContain("Acme Corp"));
+  await act(async () => button(el, "New tenant").click());
+  await act(async () => el.querySelector("form")!.requestSubmit());
+  expect(button(el, "Cancel").disabled).toBe(true);
+  await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true }))); // Esc
+  expect(el.querySelector("dialog")).not.toBeNull();
+  await act(async () =>
+    answer(json({ tenant: { ...tenant, id: "tnt_3", slug: "late", name: "Late" }, invitation: { id: "inv_3", email: "o@late.example", role: "owner", expires_at: "2026-11-15T00:00:00Z", token: TOKEN } }, 201)),
+  );
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toContain(TOKEN));
+  expect(document.activeElement).toBe(el.querySelector("input[readonly]"));
+  act(() => root.unmount());
+});
+
+it("labels MFA policies and explains a platform MFA refusal on create", async () => {
+  const { el, root } = await render(async (req) =>
+    req.method === "POST"
+      ? json({ code: "mfa_required", title: "MFA required", status: 403, required_assurance: "mfa", session_assurance: "none" }, 403)
+      : json({ items: [{ ...tenant, mfa_policy: "phishing_resistant" }] }),
+  );
+  await vi.waitFor(() => expect(el.textContent).toContain("Phishing-resistant"));
+  expect(el.textContent).not.toContain("phishing_resistant");
+  await act(async () => button(el, "New tenant").click());
+  await act(async () => el.querySelector("form")!.requestSubmit());
+  await vi.waitFor(() => expect(el.textContent).toContain("The platform screens need a stronger sign-in"));
+  expect(el.textContent).not.toContain("This tenant");
+  expect(new URL(el.querySelector("dialog a")!.getAttribute("href")!, "https://x").searchParams.get("return")).toBe("/platform/");
+  act(() => root.unmount());
+});

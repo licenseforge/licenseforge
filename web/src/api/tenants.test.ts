@@ -69,4 +69,8 @@ it("refetches the tenants on an MFA refusal, not on other errors", () => {
   expect(spy).not.toHaveBeenCalled();
   handle(new ApiError(403, "x", { type: "about:blank", title: "x", status: 403, code: "mfa_required", request_id: "r" }));
   expect(spy).toHaveBeenCalledWith({ queryKey: ["tenants"] });
+  // The platform screen's refusal is the platform policy's, not a tenant's.
+  spy.mockClear();
+  handle(new ApiError(403, "x", { type: "about:blank", title: "x", status: 403, code: "mfa_required", request_id: "r" }), { queryKey: ["platform-tenants"] });
+  expect(spy).not.toHaveBeenCalled();
 });
