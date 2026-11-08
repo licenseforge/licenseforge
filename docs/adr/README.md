@@ -43,3 +43,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0037](0037-user-routes.md) | User routes | accepted |
 | [ADR-0038](0038-per-tenant-mfa-policy.md) | Per-tenant MFA policy | accepted |
 | [ADR-0039](0039-support-rehost.md) | Support rehost | accepted |
+| [ADR-0040](0040-active-customer-measure.md) | Active customer measure | accepted |

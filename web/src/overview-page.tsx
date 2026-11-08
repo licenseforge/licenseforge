@@ -10,6 +10,7 @@ import { expiryText } from "@/licenses-page";
 
 const statuses: LicenseStatus[] = ["active", "suspended", "revoked"];
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const month = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
 
 function Tile({ label, value }: { label: string; value?: number }) {
   return (
@@ -24,8 +25,8 @@ function Tile({ label, value }: { label: string; value?: number }) {
 
 /**
  * The tenant overview (ADR-0020): exact counts from GET /summary (licenses
- * by status; active customers when the server includes them) and the newest
- * licenses.
+ * by status; customers and those active this month, ADR-0016, when the
+ * server includes them) and the newest licenses.
  */
 export function Overview() {
   const { slug } = useParams({ from: "/app/t/$slug/" });
@@ -59,6 +60,8 @@ export function Overview() {
       {customers && (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <Tile label={t("overview.customers")} value={customers.active} />
+          {/* ADR-0016's measure: customers with a machine seen this month (UTC) */}
+          <Tile label={t("overview.seenThisMonth", { month: month.format(new Date(customers.month_start)) })} value={customers.seen_this_month} />
         </div>
       )}
       <div className="mt-8 flex items-center justify-between">

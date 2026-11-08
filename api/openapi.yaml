@@ -1446,10 +1446,15 @@ components:
             revoked: { type: integer, format: int64 }
         customers:
           type: object
-          required: [active]
+          required: [active, seen_this_month, month_start]
           description: Present only for callers with customer:read on every product.
           properties:
             active: { type: integer, format: int64, description: Customers that aren't archived. }
+            seen_this_month:
+              type: integer
+              format: int64
+              description: "Customers with at least one activation seen (activated or refreshed) since month_start, archived customers and deactivated machines included: the active-customer measure (ADR-0016, ADR-0040). Site licenses and offline files aren't seen, and a plan whose lease is longer than about two months may not refresh within a month (undercount)."
+            month_start: { type: string, format: date-time, description: "The start of the current calendar month in UTC, by the server's database clock." }
     LicenseStatus:
       type: string
       enum: [active, suspended, revoked]
