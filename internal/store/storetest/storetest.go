@@ -176,7 +176,7 @@ func WaitForLockWaiter(t testing.TB, e Env) {
 // that never ran; skip otherwise, for a quick `go test` of one package.
 func withoutDatabase(getenv func(string) string) (code int, msg string) {
 	if getenv("CI") != "" || getenv("LICENSEFORGE_REQUIRE_TEST_DB") != "" {
-		return 1, "LICENSEFORGE_TEST_DATABASE_URL must be set (run `make dev-db`): tenant isolation tests are release blockers (ADR-0009)"
+		return 1, "LICENSEFORGE_TEST_DATABASE_URL must be set (run `make dev-db` and export the variables it prints): tenant isolation tests are release blockers (ADR-0009)"
 	}
-	return 0, "skipping database tests: LICENSEFORGE_TEST_DATABASE_URL not set (run `make dev-db`)"
+	return 0, "skipping database tests: LICENSEFORGE_TEST_DATABASE_URL not set (run `make dev-db` and export the variables it prints)"
 }
