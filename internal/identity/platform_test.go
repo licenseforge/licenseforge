@@ -212,8 +212,11 @@ func TestMembershipsSkipsHiddenTenant(t *testing.T) {
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		inv, err := tx.Invitation.Create().SetTenantID(audit.PlatformTenant).SetEmail("h@example.com").SetRole(invitation.RoleOwner).
 			SetScopeAll(true).SetTokenHash(store.InvitationTokenHash(sub())).SetExpiresAt(time.Now().Add(time.Hour)).
-			SetAcceptedAt(time.Now()).SetAcceptedBy(u.ID).Save(ctx)
+			Save(ctx) // opened, then accepted: an invitation starts open (insert_open)
 		if err != nil {
+			return err
+		}
+		if inv, err = inv.Update().SetAcceptedAt(time.Now()).SetAcceptedBy(u.ID).Save(ctx); err != nil {
 			return err
 		}
 		return tx.Membership.Create().SetTenantID(audit.PlatformTenant).SetUserID(u.ID).SetInvitationID(inv.ID).

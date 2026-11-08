@@ -307,8 +307,12 @@ func TestSummary(t *testing.T) {
 			{moved, `clock_timestamp()`, `clock_timestamp()`},
 			{edge, monthStart, `NULL`},
 		} {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO activations (id, tenant_id, license_id, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, deactivated_at, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, 'machine-id', 'machine', 'online', `+a.seen+`, `+a.seen+`, `+a.deactivated+`, now(), now())`, ids.New("act"), f.a.ID, a.license, newFP()); err != nil {
+			id := ids.New("act") // inserted active, then deactivated (insert_active)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activations (id, tenant_id, license_id, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, 'machine-id', 'machine', 'online', `+a.seen+`, `+a.seen+`, now(), now())`, id, f.a.ID, a.license, newFP()); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE activations SET deactivated_at = `+a.deactivated+` WHERE id = $1`, id); err != nil {
 				return err
 			}
 		}

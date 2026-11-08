@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"licenseforge.io/licenseforge/internal/store/ent/activation"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"maps"
 	"net/url"
 	"os"
@@ -411,8 +415,10 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
 			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM plans.archived_at))))) (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND ((NOT (plans.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((plans.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (plans.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
 		},
+		"activations": {"insert_active (restrictive)": `INSERT licenseforge_app,licenseforge_platform (deactivated_at IS NULL)`},
 		"licenses": {
 			"insert_active (restrictive)":       `INSERT licenseforge_app,licenseforge_platform ((suspended_at IS NULL) AND (revoked_at IS NULL))`,
+			"insert_unactivated (restrictive)":  `INSERT licenseforge_app,licenseforge_platform (first_activated_at IS NULL)`,
 			"license_transitions (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (revoked_at IS NULL) (((revoked_at IS NULL) OR ((revoked_at >= (clock_timestamp() - '00:05:00'::interval)) AND (revoked_at <= (clock_timestamp() + '00:05:00'::interval)))) AND ((suspended_at IS NULL) OR ((suspended_at >= (clock_timestamp() - '00:05:00'::interval)) AND (suspended_at <= (clock_timestamp() + '00:05:00'::interval))) OR (EXISTS ( SELECT 1 FROM licenses o WHERE (((o.id)::text = (licenses.id)::text) AND (o.suspended_at = licenses.suspended_at))))))`,
 		},
 		"customers": { // ADR-0015: as for products
@@ -423,6 +429,7 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
 			"identity_read":                   `SELECT licenseforge_identity true`,
 			"revoke_only (restrictive)":       `UPDATE licenseforge_app ((revoked_at IS NULL) AND (accepted_at IS NULL)) (revoked_at IS NOT NULL)`,
+			"insert_open (restrictive)":       `INSERT licenseforge_app,licenseforge_platform ((accepted_at IS NULL) AND (accepted_by IS NULL) AND (revoked_at IS NULL))`,
 			"inviter_is_member (restrictive)": `INSERT licenseforge_app (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.tenant_id)::text = (invitations.tenant_id)::text) AND ((m.user_id)::text = (invitations.invited_by)::text))))`,
 		},
 		"api_tokens": {
@@ -1116,7 +1123,12 @@ func TestNoInsertWithOneWayStateSet(t *testing.T) {
 		"active customer": func(tx *ent.Tx) error {
 			return tx.Customer.Create().SetTenantID(tn).SetName("X").Exec(ctx)
 		},
-		"active license": func(tx *ent.Tx) error { return licenseCreate(tx, l, kr).Exec(ctx) },
+		"activated license": func(tx *ent.Tx) error {
+			return licenseCreate(tx, l, kr).SetFirstActivatedAt(time.Now().Add(time.Minute)).Exec(ctx)
+		},
+		"deactivated activation": func(tx *ent.Tx) error { return activationCreate(tx, l, now).SetDeactivatedAt(now).Exec(ctx) },
+		"active license":         func(tx *ent.Tx) error { return licenseCreate(tx, l, kr).Exec(ctx) },
+		"active activation":      func(tx *ent.Tx) error { return activationCreate(tx, l, now).Exec(ctx) },
 	} {
 		for _, platform := range []bool{false, true} {
 			var err error
@@ -1134,6 +1146,42 @@ func TestNoInsertWithOneWayStateSet(t *testing.T) {
 			}
 		}
 	}
+	// Invitations: the platform pool inserts them (tenant onboarding) with
+	// full INSERT, so the policy is what keeps them open; the tenant pool's
+	// column grant leaves the outcome columns out altogether.
+	invite := func(tx *ent.Tx) *ent.InvitationCreate {
+		return tx.Invitation.Create().SetTenantID(tn).SetEmail(slug() + "@example.com").SetRole(invitation.RoleViewer).
+			SetScopeAll(true).SetTokenHash(InvitationTokenHash(slug())).SetExpiresAt(now.Add(time.Hour))
+	}
+	var user *ent.User
+	if err := d.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		var err error
+		user, err = tx.User.Create().SetIssuer("https://idp.example").SetSubject(slug()).SetEmail(slug() + "@example.com").Save(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]func(tx *ent.Tx) error{
+		"accepted invitation": func(tx *ent.Tx) error { return invite(tx).SetAcceptedAt(now).SetAcceptedBy(user.ID).Exec(ctx) },
+		"revoked invitation":  func(tx *ent.Tx) error { return invite(tx).SetRevokedAt(now).Exec(ctx) },
+	} {
+		if err := d.WithPlatform(ctx, c); err == nil || !strings.Contains(err.Error(), "row-level security") {
+			t.Errorf("%s, platform: want an RLS refusal, got %v", name, err)
+		}
+		if err := d.WithTenant(ctx, tn, c); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("%s, tenant pool: want a privilege refusal, got %v", name, err)
+		}
+	}
+	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error { return invite(tx).Exec(ctx) }); err != nil {
+		t.Errorf("open invitation, platform: %v", err)
+	}
+}
+
+// activationCreate builds an active activation of l's license.
+func activationCreate(tx *ent.Tx, l licensed, now time.Time) *ent.ActivationCreate {
+	return tx.Activation.Create().SetTenantID(l.tenant.ID).SetLicenseID(l.license.ID).
+		SetFingerprint("sha256:" + hex.EncodeToString(sha256.New().Sum([]byte(ids.New("fpx")))[:32])).SetFpSource(activation.FpSourceMachineID).
+		SetBinding(activation.BindingMachine).SetMode(activation.ModeOnline).SetFirstSeenAt(now).SetLastSeenAt(now)
 }
 
 // Revocation is final and license transitions use the database clock
