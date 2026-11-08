@@ -168,7 +168,7 @@ The request is as sensitive as the license key it carries: carry it like the key
 | `tenant` | as in the request |
 | `license_id` | non-empty string, ≤ 128 bytes, no NUL (the `lid` of the deleted file) |
 | `fp` | the machine's fingerprint, as in the request |
-| `file_sha256` | 64 lowercase hex digits: SHA-256 of the exact bytes of the license file as installed |
+| `file_sha256` | 64 lowercase hex digits: SHA-256 of the deleted license file's **token**, `lf1.<kid>.<payload>.<signature>` with armor, BOM and whitespace removed (as the verifier reads it), so line endings or a trailing newline added in transit don't change it |
 | `nonce`, `created` | as in the request |
 
 ### Conformance vectors

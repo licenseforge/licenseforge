@@ -194,15 +194,29 @@ func TestOfflineRoundTrip(t *testing.T) {
 		!got.Created.Equal(created) || got.Hostname != "h" || got.SDKVersion != "go/1" {
 		t.Errorf("request round trip: %+v, %v", got, err)
 	}
-	rc := Receipt{Tenant: "tnt_a", LicenseID: "lic_x", Fingerprint: vFP, FileSHA256: FileSHA256([]byte("test")), Nonce: nonce, Created: created}
-	if rc.FileSHA256 != vHash {
-		t.Fatalf("FileSHA256(test) = %s", rc.FileSHA256)
+	// The hash is the token's, whatever armor and line endings carry it.
+	token := "lf1.k1.cGF5bG9hZA.c2ln"
+	h, err := FileSHA256(token)
+	if err != nil {
+		t.Fatal(err)
 	}
+	for _, carried := range []string{
+		"-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n-----END LICENSEFORGE LICENSE-----\n",
+		"\uFEFF-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token[:9] + "\r\n" + token[9:] + "\r\n-----END LICENSEFORGE LICENSE-----\r\n\r\n",
+	} {
+		if got, err := FileSHA256(carried); err != nil || got != h {
+			t.Errorf("FileSHA256(%q) = %s, %v; want the token's %s", carried, got, err, h)
+		}
+	}
+	if _, err := FileSHA256("not a license"); !errors.Is(err, ErrMalformed) {
+		t.Errorf("FileSHA256 of a non-license: %v", err)
+	}
+	rc := Receipt{Tenant: "tnt_a", LicenseID: "lic_x", Fingerprint: vFP, FileSHA256: h, Nonce: nonce, Created: created}
 	s, err = EncodeReceipt(rc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ParseReceipt(s); err != nil || got.LicenseID != rc.LicenseID || got.FileSHA256 != rc.FileSHA256 || got.Fingerprint != vFP || !bytes.Equal(got.Nonce, nonce) {
+	if got, err := ParseReceipt(s); err != nil || got.LicenseID != rc.LicenseID || got.FileSHA256 != h || got.Fingerprint != vFP || !bytes.Equal(got.Nonce, nonce) {
 		t.Errorf("receipt round trip: %+v, %v", got, err)
 	}
 	for name, bad := range map[string]Request{

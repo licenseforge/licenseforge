@@ -39,8 +39,8 @@ type Request struct {
 	SDKVersion           string // optional
 }
 
-// Receipt returns an offline seat: the SDK deleted the file whose SHA-256
-// is FileSHA256 (lowercase hex) on the machine with Fingerprint.
+// Receipt returns an offline seat: the SDK deleted the license file whose
+// FileSHA256 is FileSHA256 on the machine with Fingerprint.
 type Receipt struct {
 	Tenant, LicenseID, Fingerprint, FileSHA256 string
 	Nonce                                      []byte
@@ -158,11 +158,24 @@ func ParseReceipt(s string) (*Receipt, error) {
 	return r, nil
 }
 
-// FileSHA256 is the receipt's file_sha256 of a license file as installed:
-// SHA-256 of its exact bytes, lowercase hex.
-func FileSHA256(file []byte) string {
-	h := sha256.Sum256(file)
-	return hex.EncodeToString(h[:])
+// FileSHA256 is the receipt's file_sha256 of a license file: SHA-256 of its
+// token (lf1.<kid>.<payload>.<signature>, armor, BOM and whitespace removed,
+// as Verify reads it), lowercase hex. Line endings or a trailing newline an
+// editor or a transfer adds don't change it. A file that isn't an lf1 token
+// has none.
+func FileSHA256(file string) (string, error) {
+	if len(file) > MaxSize {
+		return "", fmt.Errorf("%w: too large", ErrMalformed)
+	}
+	token, err := unarmor(file)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(token, Version+".") {
+		return "", ErrMalformed
+	}
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:]), nil
 }
 
 // decodeOffline checks the envelope (size, BOM and whitespace as for lf1,
