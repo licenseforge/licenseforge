@@ -67,6 +67,16 @@ DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
 443. Rendering fails if OIDC is on without the issuer, client ID or redirect
 URL, or without a port.
 
+## The first tenant
+A platform admin creates tenants with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
+
+```sh
+kubectl -n licenseforge exec deploy/licenseforge -- /licenseforge tenant create \
+  --slug acme --name "Acme" --owner-email owner@acme.example
+```
+
+It prints the invite path once (`/invite#token=…`). Send `https://<host>` plus that path to the owner, who signs in with that email (verified by your IdP) and accepts. The platform admin or operator never becomes a member of the tenant.
+
 ## Notes
 
 - **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
