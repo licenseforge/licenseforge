@@ -76,6 +76,7 @@ it("lets an owner raise the policy and says API tokens keep working", async () =
   const before = tenantGets();
   await save(el);
   await vi.waitFor(() => expect(el.textContent).toContain("3 active API tokens keep working"));
+  expect([...el.querySelectorAll('[role="status"] a')].map((a) => new URL((a as HTMLAnchorElement).href).pathname)).toEqual(["/t/acme/settings/api-tokens"]);
   expect(patches).toEqual([{ mfa_policy: "mfa" }]);
   expect(tenantGets()).toBeGreaterThan(before);
 });
@@ -88,6 +89,21 @@ it("offers the step-up to the chosen level when the owner's sign-in doesn't meet
   await vi.waitFor(() => expect(el.textContent).toContain("you'd lock yourself out"));
   const link = [...el.querySelectorAll('[role="alert"] a')][0] as HTMLAnchorElement;
   expect(new URL(link.href).searchParams.get("assurance")).toBe("phishing_resistant");
+  expect(new URL(link.href).searchParams.get("return")).toBe("/t/acme/settings/security/"); // back here to save
+});
+
+it("doesn't mention tokens when lowering the policy, and says 1 token in the singular", async () => {
+  const lower = await open("/t/acme/settings/security", { role: "owner", mfa_policy: "mfa", accessible: true }, "Sign-in requirement");
+  await act(async () => radio(lower.el, "none").click());
+  await save(lower.el);
+  await vi.waitFor(() => expect(lower.el.textContent).toContain("Saved."));
+  expect(lower.el.querySelector('[role="status"]')!.textContent).toBe("Saved.");
+  act(() => root?.unmount());
+  const one = () => json({ id: "tnt_1", slug: "acme", name: "Acme", mfa_policy: "mfa", active_api_tokens: 1 });
+  const raise = await open("/t/acme/settings/security", { role: "owner", mfa_policy: "none", accessible: true }, "Sign-in requirement", one);
+  await act(async () => radio(raise.el, "mfa").click());
+  await save(raise.el);
+  await vi.waitFor(() => expect(raise.el.textContent).toContain("1 active API token keeps working"));
 });
 
 it("is read-only for other roles", async () => {

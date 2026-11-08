@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { ApiError } from "@/api/client";
 import { type MfaPolicy, setMfaPolicy, stepUpHref, tenantsQuery } from "@/api/tenants";
@@ -61,12 +61,22 @@ export function SecurityPage() {
         </fieldset>
         {!owner && <p className="mt-3 text-sm text-muted-foreground">{t("security.ownersOnly")}</p>}
         {save.isSuccess && (
-          <p role="status" className="mt-3 text-sm">{t("security.saved", { tokens: String(save.data.active_api_tokens) })}</p>
+          <p role="status" className="mt-3 text-sm">
+            {t("security.saved")}
+            {/* API tokens carry no sign-in, so a stricter policy doesn't apply to them (ADR-0038). */}
+            {save.variables !== "none" && save.data.active_api_tokens > 0 && (
+              <>
+                {" "}
+                {t(save.data.active_api_tokens === 1 ? "security.tokensOne" : "security.tokensMany", { n: String(save.data.active_api_tokens) })}{" "}
+                <Link to="/t/$slug/settings/api-tokens" params={{ slug }} className="underline">{t("security.reviewTokens")}</Link>
+              </>
+            )}
+          </p>
         )}
         {unmet && unmet !== "none" ? (
           <div role="alert" className="mt-3 text-sm">
             <p className="font-medium">{t("security.unmet")}</p>
-            <a href={stepUpHref(unmet, slug)} className="mt-2 inline-block underline">{t("mfa.stepUp")}</a>
+            <a href={stepUpHref(unmet, slug, "settings/security/")} className="mt-2 inline-block underline">{t("mfa.stepUp")}</a>
           </div>
         ) : (
           save.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(save.error)}</p>

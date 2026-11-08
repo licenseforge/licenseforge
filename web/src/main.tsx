@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { queryRetry } from "@/api/client";
 import { queryErrorHandler } from "@/api/tenants";
 import { createAppRouter } from "@/router";
 import { applyTheme, storedTheme } from "@/theme";
@@ -11,6 +12,7 @@ applyTheme(storedTheme());
 
 const onError = queryErrorHandler(() => queryClient);
 const queryClient: QueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: queryRetry } },
   queryCache: new QueryCache({ onError }),
   mutationCache: new MutationCache({ onError }),
 });

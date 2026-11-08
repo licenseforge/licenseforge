@@ -31,8 +31,8 @@ export async function listTenants(): Promise<Tenant[]> {
  * step-up): the server asks the identity provider for a fresh
  * authentication at that level and comes back to the tenant.
  */
-export const stepUpHref = (level: Exclude<MfaPolicy, "none">, slug: string) =>
-  `/auth/login?${new URLSearchParams({ assurance: level, return: `/t/${slug}/` })}`;
+export const stepUpHref = (level: Exclude<MfaPolicy, "none">, slug: string, page = "") =>
+  `/auth/login?${new URLSearchParams({ assurance: level, return: `/t/${slug}/${page}` })}`;
 
 /** Sets the tenant's MFA policy (owners, from a session; raising it needs a session that meets it). */
 export async function setMfaPolicy(tenant: string, policy: MfaPolicy) {
