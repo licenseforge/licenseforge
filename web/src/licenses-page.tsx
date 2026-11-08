@@ -197,7 +197,8 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
           </tbody>
         </table>
       )}
-      <Machines tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
+      {/* keyed by status: a status change (e.g. revoked meanwhile) drops an open confirmation and its error */}
+      <Machines key={l.status} tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
         <div role="group" aria-label={t(`licenses.confirm.${confirm}`)} className="mt-4 rounded-md border p-3 text-sm">
@@ -237,11 +238,15 @@ function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; l
       c.kind === "reset" ? resetRehosts(tenant, l.id) : (await deactivateActivation(tenant, l.id, c.id), null),
     onSuccess: async (updated) => {
       await qc.invalidateQueries({ queryKey: activationsQuery(tenant, l.id).queryKey });
-      await qc.invalidateQueries({ queryKey: ["licenses", tenant] }); // seats and moves on the list
+      await qc.invalidateQueries({ queryKey: ["licenses", tenant] }); // the licenses the list holds
       setConfirm(null);
       if (updated) onChanged(updated);
     },
   });
+  const ask = (c: typeof confirm) => {
+    act.reset(); // an earlier failure's alert belongs to that action
+    setConfirm(c);
+  };
   const moves = l.max_rehosts === null ? t("licenses.movesUnlimited", { used: String(l.rehost_count) }) : t("licenses.moves", { used: String(l.rehost_count), max: String(l.max_rehosts) });
   const rows = list.data?.items ?? [];
   return (
@@ -250,7 +255,7 @@ function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; l
       <p className="mt-1 text-sm">
         {moves}
         {manage && l.rehost_count > 0 && l.status !== "revoked" && !confirm && (
-          <Button variant="ghost" className="ml-2" onClick={() => setConfirm({ kind: "reset" })}>{t("licenses.resetMoves")}</Button>
+          <Button variant="ghost" className="ml-2" onClick={() => ask({ kind: "reset" })}>{t("licenses.resetMoves")}</Button>
         )}
       </p>
       {list.isError && <p role="alert" className="mt-1 text-sm">{errorText(list.error)}</p>}
@@ -269,7 +274,11 @@ function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; l
                 </span>
               </span>
               {manage && !a.deactivated_at && !confirm && (
-                <Button variant="ghost" onClick={() => setConfirm({ kind: "deactivate", id: a.id, name: a.hostname ?? a.fingerprint.slice(0, 12) })}>
+                <Button
+                  variant="ghost"
+                  aria-label={t("licenses.deactivateNamed", { name: a.hostname ?? a.fingerprint.slice(0, 12) })}
+                  onClick={() => ask({ kind: "deactivate", id: a.id, name: a.hostname ?? a.fingerprint.slice(0, 12) })}
+                >
                   {t("licenses.deactivate")}
                 </Button>
               )}
@@ -283,7 +292,7 @@ function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; l
         <div role="group" aria-label={t(confirm.kind === "reset" ? "licenses.confirmReset" : "licenses.confirmDeactivate", confirm.kind === "reset" ? {} : { name: confirm.name })} className="mt-2 rounded-md border p-3 text-sm">
           <p className="font-medium">{t(confirm.kind === "reset" ? "licenses.confirmReset" : "licenses.confirmDeactivate", confirm.kind === "reset" ? {} : { name: confirm.name })}</p>
           <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setConfirm(null)}>{t("tokens.cancel")}</Button>
+            <Button variant="ghost" onClick={() => ask(null)}>{t("tokens.cancel")}</Button>
             <Button disabled={act.isPending} onClick={() => act.mutate(confirm)}>{t(confirm.kind === "reset" ? "licenses.resetMoves" : "licenses.deactivate")}</Button>
           </div>
         </div>

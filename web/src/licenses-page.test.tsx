@@ -257,6 +257,10 @@ describe("the licenses page", () => {
         }
         if (u.pathname.endsWith("/products")) return json({ items: opts.products ?? names.products });
         if (u.pathname.endsWith("/customers")) return json({ items: opts.customers ?? [acme], ...(opts.endlessCustomers ? { next_cursor: "more" } : {}) });
+        if (u.pathname.endsWith("/activations")) {
+          return json({ items: [{ id: "act_1", license_id: "lic_1", fingerprint: "f".repeat(64), fp_source: "machine-id", binding: "machine", mode: "online", hostname: "build-01",
+            app_version: null, sdk_version: null, first_seen_at: "2026-11-01T00:00:00Z", last_seen_at: "2026-11-05T00:00:00Z", deactivated_at: null, created_at: "2026-11-01T00:00:00Z" }] });
+        }
         return json({ items: [] });
       }),
     );
@@ -266,6 +270,18 @@ describe("the licenses page", () => {
     await vi.waitFor(() => expect(r.el.textContent).toContain("…ABC123"));
     return { ...r, lists };
   }
+
+  it("gives support callers the machine actions in the license details; viewers none", async () => {
+    for (const [role, offered] of [["support", true], ["viewer", false]] as const) {
+      const { el } = await page(role);
+      await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Details")!.click());
+      await vi.waitFor(() => expect(el.textContent).toContain("build-01"));
+      expect(el.querySelector('button[aria-label="Deactivate build-01"]') !== null).toBe(offered);
+      act(() => root?.unmount());
+      root = undefined;
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("resetting a filter to Any sends no filter", async () => {
     const { el, lists } = await page("manager");
@@ -375,6 +391,46 @@ describe("the license's machines (support rehost, ADR-0039)", () => {
     await act(async () => [...el.querySelectorAll('[role="group"] button')].find((b) => b.textContent === "Reset moves")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     await vi.waitFor(() => expect(s.posts).toEqual(["/api/v1/tenants/acme/licenses/lic_1/rehosts/reset"]));
     await vi.waitFor(() => expect(changed?.rehost_count).toBe(0));
+  });
+
+  it("lets support deactivate a machine of a suspended or revoked license", async () => {
+    for (const status of ["suspended", "revoked"] as const) {
+      stub();
+      const r = await render(<LicenseDialog tenant="acme" license={{ ...atLimit, status }} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />);
+      await vi.waitFor(() => expect(r.el.querySelector('button[aria-label="Deactivate build-01"]')).not.toBeNull());
+      act(() => root?.unmount());
+      root = undefined;
+    }
+  });
+
+  it("clears a failed action's alert when the next confirmation opens", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) =>
+        req.method === "POST"
+          ? json({ type: "about:blank", title: "x", status: 409, code: "invalid_state", request_id: "r" }, 409)
+          : json({ items: [machine("act_1", "build-01")] }),
+      ),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={atLimit} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />);
+    await vi.waitFor(() => expect(el.textContent).toContain("build-01"));
+    await act(async () => button("Reset moves")!.click());
+    await act(async () => [...el.querySelectorAll('[role="group"] button')].find((b) => b.textContent === "Reset moves")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const alert = () => el.querySelector('section [role="alert"]');
+    await vi.waitFor(() => expect(alert()).not.toBeNull());
+    await act(async () => [...el.querySelectorAll('[role="group"] button')].find((b) => b.textContent === "Cancel")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(alert()).toBeNull();
+  });
+
+  it("drops an open machine confirmation when the license's status changes", async () => {
+    stub();
+    const qc = new QueryClient();
+    const dialog = (l: License) => <LicenseDialog tenant="acme" license={l} manage={false} machines names={names} onClose={() => {}} onChanged={() => {}} />;
+    const { el, button } = await render(dialog(atLimit), qc);
+    await act(async () => button("Reset moves")!.click());
+    expect(el.textContent).toContain("This is audited.");
+    await act(async () => root!.render(<QueryClientProvider client={qc}>{dialog({ ...atLimit, status: "revoked", revoked_at: "2026-11-08T00:00:00Z" })}</QueryClientProvider>));
+    expect(el.textContent).not.toContain("This is audited.");
   });
 
   it("offers no actions without activation:manage, none to reset at zero, and no reset on a revoked license", async () => {

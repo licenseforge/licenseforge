@@ -215,6 +215,7 @@ const en = {
   "licenses.machineSeen": "Last seen {date}",
   "licenses.machineOff": "Deactivated {date}",
   "licenses.deactivate": "Deactivate",
+  "licenses.deactivateNamed": "Deactivate {name}",
   "licenses.confirmDeactivate": "Deactivate {name}? Its seat is freed; the app on that machine stops being licensed at its next refresh.",
   "licenses.moves": "Seat moves used: {used} of {max}",
   "licenses.movesUnlimited": "Seat moves used: {used} (unlimited)",
