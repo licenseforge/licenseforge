@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance e2e
+.PHONY: web build test test-fips vet vet-cross lint fmt run generate dev-db dev-db-stop migrate-check compliance e2e e2e-browser
 # Go modules in this repo: the server (root) and the SDK.
 MODULES := . sdk/go
 # The dashboard (web/, needs Node) is embedded only with TAGS=webui:
@@ -28,6 +28,11 @@ vet:
 # End-to-end journeys (ADR-0041) against the environment e2e/env/up.sh deploys on minikube.
 e2e:
 	cd e2e && go test -tags e2e -count=1 -v ./...
+
+# The browser smoke tests (Playwright, ADR-0041) against the same environment.
+# First time: cd web && npx playwright install chromium
+e2e-browser:
+	cd web && npm run e2e
 
 # The SDK has OS-specific code (fingerprints); vet it for every supported OS.
 vet-cross:
