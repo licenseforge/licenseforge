@@ -123,31 +123,21 @@ kubectl -n $NS patch deployment licenseforge --type strategic -p '{"spec":{"temp
 if [ $MODE = local ]; then kubectl -n $NS rollout restart deployment/licenseforge >/dev/null; fi
 kubectl -n $NS rollout status deployment/licenseforge --timeout=300s >/dev/null
 
-# 5. The test tenant, until tenants can be created through the product
-#    (ADR-0041): tenant "acme" and an owner invitation for
+# 5. The test tenant: "acme", created with the product's own command
+#    (licenseforge tenant create, ADR-0042) with an owner invitation for
 #    admin@licenseforge.local, whose link token goes to .state/invite-token.
-#    Journeys accept it on their first login. Seeded when the database has no
-#    tenant acme; a seed without its token (or the reverse) can't be repaired.
+#    Journeys accept it on their first login. Created when the database has
+#    no tenant acme; a tenant without its token can't be repaired.
 SEEDED=$(kubectl -n $NS exec db-0 -- psql -tAq -U postgres -d licenseforge -c "SELECT count(*) FROM tenants WHERE slug = 'acme'")
 if [ "$SEEDED" = 1 ] && [ ! -f "$STATE/invite-token" ]; then
   echo "tenant acme exists but .state/invite-token is gone: start over with 'kubectl delete ns $NS' and 'rm -r $STATE'" >&2; exit 1
 fi
 if [ "$SEEDED" = 0 ]; then
-  python3 - "$STATE/invite-token" > "$STATE/seed.sql" <<'PY'
-import base64, hashlib, secrets, sys
-b32 = lambda n: base64.b32encode(secrets.token_bytes(n)).decode().rstrip("=")
-rid = lambda p: p + "_" + b32(20).lower()[:26]
-token = b32(20)[:26]                  # like Go's rand.Text
-open(sys.argv[1] + ".new", "w").write(token)
-tnt, inv = rid("tnt"), rid("inv")
-print(f"""BEGIN;
-INSERT INTO tenants (id, created_at, updated_at, slug, name) VALUES ('{tnt}', now(), now(), 'acme', 'Acme');
-INSERT INTO invitations (id, created_at, updated_at, email, role, scope_all, token_hash, expires_at, tenant_id)
-  VALUES ('{inv}', now(), now(), 'admin@licenseforge.local', 'owner', true, decode('{hashlib.sha256(token.encode()).hexdigest()}', 'hex'), now() + interval '30 days', '{tnt}');
-COMMIT;""")
-PY
-  kubectl -n $NS exec -i db-0 -- psql -q -v ON_ERROR_STOP=1 -U postgres -d licenseforge < "$STATE/seed.sql"
-  mv "$STATE/invite-token.new" "$STATE/invite-token"
+  OUT=$(kubectl -n $NS exec deploy/licenseforge -- /licenseforge tenant create \
+    --slug acme --name Acme --owner-email admin@licenseforge.local)
+  TOKEN=$(printf '%s\n' "$OUT" | sed -n 's|^  /invite#token=\([A-Za-z0-9]*\)$|\1|p')
+  [ -n "$TOKEN" ] || { echo "tenant create printed no invite token" >&2; exit 1; }
+  printf '%s' "$TOKEN" > "$STATE/invite-token"
 fi
 
 for _ in $(seq 30); do "${CURL[@]}" "https://$LF/readyz" >/dev/null && break; sleep 2; done

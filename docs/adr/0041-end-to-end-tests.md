@@ -10,8 +10,8 @@ Go tests run the services against a real PostgreSQL, and the dashboard's tests r
 - **Two layers of tests:**
   1. **API journeys in Go** (`e2e/`, build tag `e2e`, `make e2e`). They log in through Keycloak like a browser, then drive the management API and the Go SDK as a vendor's app does: catalog, signing key, issue, activate, verify the lease offline, refresh, revoke, refused refresh. They import only the module's own packages and the standard library.
   2. **Browser smoke tests** with Playwright, added separately: one or two journeys through the real dashboard. Playwright is a new development dependency.
-- **Isolation:** each run creates its own uniquely named products, plans, customers and licenses in the seeded tenant and never depends on earlier runs, so the environment can be reused between runs.
-- **The tenant is seeded** by `up.sh` until tenants can be created through the product (platform-admin routes, on the Roadmap). Journeys then switch to creating their own tenant, and the seed goes.
+- **Isolation:** each run creates its own uniquely named products, plans, customers and licenses in the shared test tenant and never depends on earlier runs, so the environment can be reused between runs.
+- **The test tenant is created through the product:** `up.sh` runs `licenseforge tenant create` ([ADR-0042 Platform tenant onboarding](0042-platform-tenant-onboarding.md)) once per environment, and runs share that tenant. A journey creates a new tenant through the platform API on every run, so onboarding itself is tested. Giving every journey its own tenant would also mean a signing key and its setup per run, for no extra coverage. (Amended 2026-11-08: the original text had journeys switch to their own tenants once platform routes existed.)
 - **Local only for now.** `make e2e` needs a running environment and isn't part of `make test` or of CI. A nightly CI job on kind with the same script is the intended next step once the suite is stable.
 
 ## Consequences
