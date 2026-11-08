@@ -3,7 +3,7 @@ import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { canReadAudit } from "@/api/audit";
 import { authConfigQuery, loginHref } from "@/api/session";
-import { tenantsQuery } from "@/api/tenants";
+import { stepUpHref, tenantsQuery } from "@/api/tenants";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
 
@@ -65,6 +65,23 @@ export function TenantLayout() {
   const { data: tenants } = useQuery(tenantsQuery);
   const caller = tenants?.find((tn) => tn.slug === slug);
   const link = "rounded-md px-2 py-1 text-sm hover:bg-accent [&.active]:font-semibold [&.active]:underline";
+  // The session doesn't meet the tenant's MFA policy (ADR-0038): every
+  // tenant route would answer 403, so say why and offer the step-up.
+  if (caller && !caller.accessible && caller.mfaPolicy !== "none") {
+    const strong = caller.mfaPolicy === "phishing_resistant";
+    return (
+      <section aria-labelledby="mfa-title" className="mx-auto max-w-xl">
+        <h1 id="mfa-title" className="text-2xl font-semibold">{t("mfa.title", { name: caller.name })}</h1>
+        <p className="mt-2">{t(strong ? "mfa.bodyPhishingResistant" : "mfa.body")}</p>
+        <p className="mt-6">
+          {/* A real link: the server's /auth/login needs a full page navigation. */}
+          <a href={stepUpHref(caller.mfaPolicy, slug)} className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">
+            {t("mfa.stepUp")}
+          </a>
+        </p>
+      </section>
+    );
+  }
   return (
     <>
       <nav aria-label={t("app.name")} className="mb-6 flex gap-2">
@@ -86,6 +103,11 @@ export function TenantLayout() {
         <Link to="/t/$slug/settings/api-tokens" params={{ slug }} className={link}>
           {t("nav.tokens")}
         </Link>
+        {caller?.role === "owner" && (
+          <Link to="/t/$slug/settings/security" params={{ slug }} className={link}>
+            {t("nav.security")}
+          </Link>
+        )}
         {canReadAudit(caller) && (
           <Link to="/t/$slug/settings/audit" params={{ slug }} className={link}>
             {t("nav.audit")}

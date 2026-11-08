@@ -2,16 +2,17 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { onAuthError } from "@/api/client";
+import { queryErrorHandler } from "@/api/tenants";
 import { createAppRouter } from "@/router";
 import { applyTheme, storedTheme } from "@/theme";
 import "./index.css";
 
 applyTheme(storedTheme());
 
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: onAuthError }),
-  mutationCache: new MutationCache({ onError: onAuthError }),
+const onError = queryErrorHandler(() => queryClient);
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError }),
+  mutationCache: new MutationCache({ onError }),
 });
 const router = createAppRouter(queryClient);
 
