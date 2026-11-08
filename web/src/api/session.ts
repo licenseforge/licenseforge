@@ -5,7 +5,8 @@ import { ApiError, request, setCsrfToken } from "./client";
 // Served by the Go BFF (internal/weblogin), not the public API, so these
 // types are written by hand rather than generated.
 export type User = { id: string; email: string; name: string };
-export type Session = { user: User; csrf_token: string };
+/** platform_admin: show the platform screens (ADR-0042); the server checks on every request. */
+export type Session = { user: User; csrf_token: string; platform_admin?: boolean };
 
 /** The signed-in session, or null when there is none (401). */
 export async function getSession(): Promise<Session | null> {
