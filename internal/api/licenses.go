@@ -84,10 +84,16 @@ func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObjec
 	if err != nil {
 		return nil, err
 	}
+	seen, monthStart, _, err := s.Customers.CountSeen(ctx) // the same gate as CountActive
+	if err != nil {
+		return nil, err
+	}
 	if ok {
 		out.Customers = &struct {
-			Active int64 `json:"active"`
-		}{int64(n)}
+			Active        int64     `json:"active"`
+			MonthStart    time.Time `json:"month_start"`
+			SeenThisMonth int64     `json:"seen_this_month"`
+		}{int64(n), monthStart, int64(seen)}
 	}
 	return out, nil
 }

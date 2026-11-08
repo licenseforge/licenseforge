@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -283,21 +284,56 @@ func TestSummary(t *testing.T) {
 	if r := f.do(t, "POST", Prefix+"/tenants/"+f.b.Slug+"/licenses", issueBody(c.bProduct, c.bPlan, c.bCustomer), f.session(t, f.ownerB, true)); r.code != 201 {
 		t.Fatalf("issue in b: %d %s", r.code, r.raw)
 	}
+	// Seen this month (ADR-0016): the customer with an activation refreshed
+	// now; another customer last seen last month doesn't count.
+	other := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/customers", `{"name":"Gone"}`, owner).body["id"].(string)
+	old := f.do(t, "POST", lic, issueBody(f.prodA, c.planP, other), owner).body["id"].(string)
+	ctx := context.Background()
+	if err := f.db.WithTenant(ctx, f.a.ID, func(tx *ent.Tx) error {
+		for _, a := range []struct {
+			license, seen string
+		}{
+			{onA[1], `clock_timestamp()`},
+			{onA[1], `clock_timestamp()`}, // a second machine: one customer
+			{old, `date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 second'`},
+		} {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activations (id, tenant_id, license_id, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, 'machine-id', 'machine', 'online', `+a.seen+`, `+a.seen+`, now(), now())`, ids.New("act"), f.a.ID, a.license, newFP()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.do(t, "GET", Prefix+"/tenants/"+f.a.Slug+"/summary", "", owner); r.code != 200 {
+		t.Fatalf("summary: %s", r.raw)
+	} else {
+		cs := r.body["customers"].(map[string]any)
+		start, err := time.Parse(time.RFC3339, cs["month_start"].(string))
+		now := time.Now().UTC()
+		if err != nil || !start.Equal(time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)) {
+			t.Errorf("month_start = %v (%v)", cs["month_start"], err)
+		}
+	}
 	path := func(tn *ent.Tenant) string { return Prefix + "/tenants/" + tn.Slug + "/summary" }
 	for name, tc := range map[string]struct {
 		path string
 		o    opt
 		want string
 	}{
-		"owner":                   {path(f.a), owner, `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
-		"viewer":                  {path(f.a), f.session(t, f.viewerA, false), `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
-		"scoped to prodA":         {path(f.a), f.session(t, f.scoped, false), `{"licenses":{"active":1,"revoked":0,"suspended":1}}`},
-		"other tenant":            {path(f.b), f.session(t, f.ownerB, false), `{"customers":{"active":1},"licenses":{"active":1,"revoked":0,"suspended":0}}`},
-		"API token, all products": {path(f.a), bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), `{"customers":{"active":1},"licenses":{"active":2,"revoked":0,"suspended":1}}`},
+		"owner":                   {path(f.a), owner, `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
+		"viewer":                  {path(f.a), f.session(t, f.viewerA, false), `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
+		"scoped to prodA":         {path(f.a), f.session(t, f.scoped, false), `{"licenses":{"active":2,"revoked":0,"suspended":1}}`},
+		"other tenant":            {path(f.b), f.session(t, f.ownerB, false), `{"customers":{"active":1,"seen_this_month":0},"licenses":{"active":1,"revoked":0,"suspended":0}}`},
+		"API token, all products": {path(f.a), bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), `{"customers":{"active":2,"seen_this_month":1},"licenses":{"active":3,"revoked":0,"suspended":1}}`},
 	} {
 		r := f.do(t, "GET", tc.path, "", tc.o)
 		var got, want any
 		_ = json.Unmarshal([]byte(r.raw), &got)
+		if cs, ok := got.(map[string]any)["customers"].(map[string]any); ok {
+			delete(cs, "month_start") // checked above
+		}
 		_ = json.Unmarshal([]byte(tc.want), &want)
 		if r.code != 200 || !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: %d %s, want %s", name, r.code, r.raw, tc.want)

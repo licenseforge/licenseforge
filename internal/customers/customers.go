@@ -120,6 +120,46 @@ func (s Service) CountActive(ctx context.Context) (n int, ok bool, err error) {
 	return n, true, nil
 }
 
+// CountSeen returns how many of the tenant's customers were active this
+// month, ADR-0016's billing measure: customers with at least one activation
+// seen (activated or refreshed, archived customers and deactivated machines
+// included) since monthStart, the start of the current calendar month in UTC
+// by the database clock. Site licenses (no activations) and offline files
+// aren't seen. Gated as CountActive (customers are tenant-wide).
+// ponytail: scans the tenant's activations; an index on
+// activations(tenant_id, last_seen_at) when tenants grow.
+func (s Service) CountSeen(ctx context.Context) (n int, monthStart time.Time, ok bool, err error) {
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	all, _, err := authz.Products(ctx, authz.CustomerRead)
+	if errors.Is(err, authz.ErrDenied) || err == nil && !all {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			WITH m AS (SELECT date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS start)
+			SELECT (SELECT count(DISTINCT l.customer_id) FROM activations a JOIN licenses l ON l.id = a.license_id
+				WHERE a.last_seen_at >= m.start), m.start FROM m`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		if !rows.Next() {
+			return errors.Join(errors.New("customers: no count"), rows.Err())
+		}
+		return errors.Join(rows.Scan(&n, &monthStart), rows.Err())
+	})
+	if err != nil {
+		return 0, time.Time{}, false, err
+	}
+	return n, monthStart.UTC(), true, nil
+}
+
 // Get returns a customer; missing, malformed and hidden are ErrNotFound.
 func (s Service) Get(ctx context.Context, id string) (*ent.Customer, error) {
 	tenantID, err := authz.TenantID(ctx)

@@ -1201,6 +1201,16 @@ export interface components {
                  * @description Customers that aren't archived.
                  */
                 active: number;
+                /**
+                 * Format: int64
+                 * @description Customers with at least one activation seen (activated or refreshed) since month_start, archived ones included: the active-customer measure of ADR-0016. Site licenses and offline files aren't seen.
+                 */
+                seen_this_month: number;
+                /**
+                 * Format: date-time
+                 * @description The start of the current calendar month in UTC, by the server's database clock.
+                 */
+                month_start: string;
             };
         };
         /** @enum {string} */
