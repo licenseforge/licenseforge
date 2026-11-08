@@ -156,8 +156,8 @@ lfrcpt1.<base64url(payload_json)>    deactivation receipt
 | `fp_source` | where the fingerprint came from: `machine-id`, `kubernetes`, `env` or `override`; `kubernetes` exactly when `bind.type` is `cluster` |
 | `nonce` | 16 random bytes, base64url |
 | `created` | the machine's clock, timestamp format; informational only, never trusted |
-| `hostname` | optional, 1–255 bytes, no control characters |
-| `app_version`, `sdk_version` | optional, 1–128 bytes, no control characters |
+| `hostname` | optional, 1–253 characters from `A-Z a-z 0-9 . _ -` |
+| `app_version`, `sdk_version` | optional, 1–64 printable ASCII characters (`0x20`–`0x7E`) |
 
 The request is as sensitive as the license key it carries: carry it like the key, and servers store only its SHA-256.
 

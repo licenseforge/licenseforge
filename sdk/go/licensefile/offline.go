@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // Offline activation artifacts (ADR-0043, spec "Offline activation"): an
@@ -50,6 +49,10 @@ type Receipt struct {
 var (
 	fpRE  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	hexRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// The online activation's metadata rules, so a request carries nothing
+	// the server would refuse there.
+	hostnameRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,253}$`)
+	versionRE  = regexp.MustCompile(`^[ -~]{1,64}$`)
 )
 
 // EncodeRequest returns r as an lfreq1 token, after the checks ParseRequest
@@ -106,14 +109,14 @@ func ParseRequest(s string) (*Request, error) {
 	for _, f := range []struct {
 		key string
 		dst *string
-		max int
-	}{{"hostname", &r.Hostname, 255}, {"app_version", &r.AppVersion, 128}, {"sdk_version", &r.SDKVersion, 128}} {
+		re  *regexp.Regexp
+	}{{"hostname", &r.Hostname, hostnameRE}, {"app_version", &r.AppVersion, versionRE}, {"sdk_version", &r.SDKVersion, versionRE}} {
 		v, ok, err := optString(m, f.key)
 		if err != nil {
 			return nil, err
 		}
-		if ok && (v == "" || len(v) > f.max || strings.ContainsFunc(v, unicode.IsControl)) {
-			return nil, malformed("%s must be 1 to %d bytes without control characters", f.key, f.max)
+		if ok && !f.re.MatchString(v) {
+			return nil, malformed("%s %q", f.key, v)
 		}
 		*f.dst = v
 	}
