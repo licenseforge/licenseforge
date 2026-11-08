@@ -86,6 +86,17 @@ func Open(ctx context.Context, l Logins) (*DB, error) {
 	}, nil
 }
 
+// OpenPlatform connects the platform login alone, checked as Open checks it:
+// for operator commands such as `licenseforge tenant create` (ADR-0042),
+// which need platform work only. Only WithPlatform works on the result.
+func OpenPlatform(ctx context.Context, dsn string) (*DB, error) {
+	db, err := openChecked(ctx, dsn, PlatformRole)
+	if err != nil {
+		return nil, fmt.Errorf("platform pool: %w", err)
+	}
+	return &DB{platform: ent.NewClient(ent.Driver(entsql.OpenDB("postgres", db))), platformDB: db}, nil
+}
+
 // Retention is the audit retention job's connection (ADR-0036), separate
 // from DB: serving processes never hold it.
 type Retention struct {
@@ -130,7 +141,13 @@ func (d *DB) Stats() map[string]sql.DBStats {
 
 // Close closes every pool.
 func (d *DB) Close() error {
-	return errors.Join(d.tenantDB.Close(), d.platformDB.Close(), d.identityDB.Close())
+	var errs []error
+	for _, db := range []*sql.DB{d.tenantDB, d.platformDB, d.identityDB} {
+		if db != nil { // OpenPlatform opens one pool
+			errs = append(errs, db.Close())
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // openPool opens a serving pool on which no session state survives between
