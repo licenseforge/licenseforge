@@ -138,6 +138,9 @@ func main() {
 		err = prune(ctx, log)
 	case "tenant create":
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0) // the usage was printed
+		}
 	default:
 		flag.Usage()
 		os.Exit(2)

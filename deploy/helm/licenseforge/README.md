@@ -77,6 +77,8 @@ kubectl -n licenseforge exec deploy/licenseforge -- /licenseforge tenant create 
 
 It prints the invite path once (`/invite#token=…`). Send `https://<host>` plus that path to the owner, who signs in with that email (verified by your IdP) and accepts. The platform admin or operator never becomes a member of the tenant.
 
+Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal, and a Job would keep it in the pod logs. The audit entry names the system with `via: cli` (every exec runs as the same container user), so who ran it is in your Kubernetes API audit log of the `exec`.
+
 ## Notes
 
 - **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.

@@ -548,8 +548,12 @@ func TestTenantCreate(t *testing.T) {
 			t.Errorf("%v: no error", args)
 		}
 	}
-	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", env.TenantURL) // the tenant login isn't the platform role
-	if err := tenantCreate(ctx, []string{"--slug", "x-3", "--name", "X", "--owner-email", "a@b.example"}, io.Discard); err == nil {
-		t.Error("ran on the tenant login")
+	// Not the platform login: the owner login could write, so only the role
+	// check refuses it.
+	for name, dsn := range map[string]string{"tenant": env.TenantURL, "owner": env.OwnerURL} {
+		t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", dsn)
+		if err := tenantCreate(ctx, []string{"--slug", "x-3-" + name, "--name", "X", "--owner-email", "a@b.example"}, io.Discard); err == nil {
+			t.Errorf("ran on the %s login", name)
+		}
 	}
 }
