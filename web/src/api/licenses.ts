@@ -1,5 +1,6 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api, unwrap } from "./client";
+import { everyPage } from "./members";
 import type { components } from "./schema";
 import type { Membership } from "./tokens";
 
@@ -48,7 +49,33 @@ export async function changeLicense(tenant: string, id: string, action: LicenseA
 export const actionsFor = (s: LicenseStatus): LicenseAction[] =>
   s === "active" ? ["suspend", "revoke"] : s === "suspended" ? ["reinstate", "revoke"] : [];
 
+export type Activation = components["schemas"]["Activation"];
+
+/** A license's machines, deactivated ones included, newest first (bounded paging). */
+export const activationsQuery = (tenant: string, license: string) =>
+  queryOptions({
+    queryKey: ["activations", tenant, license],
+    queryFn: () =>
+      everyPage(async (cursor) =>
+        unwrap(await api.GET("/tenants/{tenant}/licenses/{id}/activations", { params: { path: { tenant, id: license }, query: { cursor, limit: 200 } } })),
+      ),
+  });
+
+/** Frees a machine's seat, as the SDK's deactivate does (ADR-0034); not a seat move. */
+export async function deactivateActivation(tenant: string, license: string, activation: string): Promise<Activation> {
+  return unwrap(
+    await api.POST("/tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate", { params: { path: { tenant, id: license, activation_id: activation } } }),
+  );
+}
+
+/** Support rehost (ADR-0039): the license's seat moves count from zero again. */
+export async function resetRehosts(tenant: string, license: string): Promise<License> {
+  return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/rehosts/reset", { params: { path: { tenant, id: license } } }));
+}
+
 const rank = ["owner", "admin", "manager", "support", "viewer"];
+/** activation:manage: support and up, on a product in their scope (deactivate machines, reset moves). */
+export const canManageActivations = (m: Membership) => m.role !== "sdk" && rank.indexOf(m.role) <= rank.indexOf("support");
 /**
  * license:issue and license:write: managers and up, on a product in their
  * scope (a scoped manager sees and picks only its products).
