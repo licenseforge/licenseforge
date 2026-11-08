@@ -9,6 +9,7 @@ package licenses
 
 import (
 	"context"
+	"entgo.io/ent/dialect/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -647,7 +648,11 @@ func (s Service) List(ctx context.Context, p authz.Principal, f Filter, limit in
 			q.Where(license.CreatedAtLT(*f.CreatedBefore))
 		}
 		if afterID != "" {
-			q.Where(license.Or(license.CreatedAtLT(afterAt), license.And(license.CreatedAt(afterAt), license.IDLT(afterID))))
+			// A row comparison, so the (tenant_id, created_at, id) index seeks
+			// to the cursor instead of filtering every newer row.
+			q.Where(func(s *sql.Selector) {
+				s.Where(sql.CompositeLT([]string{s.C(license.FieldCreatedAt), s.C(license.FieldID)}, afterAt, afterID))
+			})
 		}
 		var err error
 		out, err = q.All(ctx)

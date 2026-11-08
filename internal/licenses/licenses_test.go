@@ -812,6 +812,35 @@ func TestListAndGet(t *testing.T) {
 	if err != nil || !slices.Equal(ids(p2), []string{made[0].ID}) {
 		t.Fatalf("page 2 = %v, %v", ids(p2), err)
 	}
+	// Ties on created_at page by ID: give two licenses the same time (the
+	// migrator, exempt), then walk them one per page.
+	owner, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if _, err := owner.ExecContext(ctx, `UPDATE licenses SET created_at = (SELECT created_at FROM licenses WHERE id = $1) WHERE id = $2`, made[2].ID, made[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	var walked []string
+	at, after := time.Time{}, ""
+	for range 4 {
+		pg, err := f.s.List(ctx, mgr, Filter{}, 1, at, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pg) == 0 {
+			break
+		}
+		walked = append(walked, pg[0].ID)
+		at, after = pg[0].CreatedAt, pg[0].ID
+	}
+	if want := []string{max(made[2].ID, made[1].ID), min(made[2].ID, made[1].ID), made[0].ID}; !slices.Equal(walked, want) {
+		t.Errorf("one per page with a tie = %v, want %v", walked, want)
+	}
+	if _, err := owner.ExecContext(ctx, `UPDATE licenses SET created_at = $1 WHERE id = $2`, made[1].CreatedAt, made[1].ID); err != nil {
+		t.Fatal(err) // back as it was, for the cases below
+	}
 	now := time.Now()
 	for name, c := range map[string]struct {
 		p    authz.Principal
