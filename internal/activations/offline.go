@@ -60,7 +60,7 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 		return err
 	})
 	if err != nil {
-		outcome, ok := refusalOutcome(err)
+		outcome, ok := refusalOutcome(err, offlineRefusals)
 		if !ok { // an outage: a 500, whatever it wraps
 			return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable
 		}
@@ -97,7 +97,7 @@ func (s Service) OfflineTx(ctx context.Context, tx *ent.Tx, p authz.Principal, r
 	if err == nil {
 		return out, nil
 	}
-	outcome, ok := refusalOutcome(err)
+	outcome, ok := refusalOutcome(err, offlineRefusals)
 	if !ok { // an outage: never stored as a refusal (it would commit with any seat writes)
 		return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable: a 500
 	}
@@ -164,20 +164,6 @@ func offlineRefusal(ev audit.Event, err error) audit.Event {
 		ev.Details["reason"] = ErrInvalid.Error()
 	}
 	return ev
-}
-
-// refusalOutcome classifies err like audit.Refused: denied, a failure
-// among offlineRefusals, or not a refusal (an outage: unrecorded).
-func refusalOutcome(err error) (auditevent.Outcome, bool) {
-	if errors.Is(err, authz.ErrDenied) {
-		return auditevent.OutcomeDenied, true
-	}
-	for _, f := range offlineRefusals {
-		if errors.Is(err, f) {
-			return auditevent.OutcomeFailure, true
-		}
-	}
-	return "", false
 }
 
 // resolve parses the request and finds its license, locked as authenticate
