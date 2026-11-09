@@ -55,6 +55,9 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	if tenant == "" || token == "" {
 		return errors.New("offline: LICENSEFORGE_TENANT and LICENSEFORGE_TOKEN are required")
 	}
+	if strings.ContainsAny(tenant, "/%?#\\") || tenant == "." || tenant == ".." { // one path segment: a slug or tnt_ ID
+		return fmt.Errorf("offline: LICENSEFORGE_TENANT %q is not a tenant slug or ID", tenant)
+	}
 	text, err := readArg(*file, in)
 	if err != nil {
 		return fmt.Errorf("offline %s: %w", op, err)

@@ -89,9 +89,11 @@ func TestOfflineCommand(t *testing.T) {
 		}
 	}
 	env["LICENSEFORGE_URL"] = good
-	env["LICENSEFORGE_TENANT"] = ""
-	if _, err := run("x", "activate", "--request", "-"); err == nil {
-		t.Error("no tenant: no error")
+	for _, bad := range []string{"", "../x", "a/b", "..", "a%2fb"} {
+		env["LICENSEFORGE_TENANT"] = bad
+		if _, err := run("x", "activate", "--request", "-"); err == nil {
+			t.Errorf("tenant %q: no error", bad)
+		}
 	}
 	env["LICENSEFORGE_TENANT"] = "acme"
 	// offlineMain: errors and usage on stderr, stdout only the file.
