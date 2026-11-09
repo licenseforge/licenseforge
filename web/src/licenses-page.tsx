@@ -318,7 +318,9 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
   const [error, setError] = useState<unknown>(null);
   const [file, setFile] = useState<{ url: string; expires: string | null } | null>(null);
   const [returned, setReturned] = useState<string | null>(null);
-  const key = useRef(crypto.randomUUID());
+  // The key belongs to one text: a retry of the same text reuses it, any
+  // other text gets a new one (the server would answer key_reused).
+  const key = useRef({ text: "", key: crypto.randomUUID() });
   useEffect(() => () => { if (file) URL.revokeObjectURL(file.url); }, [file]);
   const open = (k: typeof kind) => {
     setKind(k);
@@ -326,12 +328,18 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
     setError(null);
     setReturned(null);
     setFile(null);
-    key.current = crypto.randomUUID();
+    key.current = { text: "", key: crypto.randomUUID() };
   };
   async function upload(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (f) setText((await f.text()).trim());
     e.target.value = "";
+    if (!f) return;
+    if (f.size > 8192) {
+      setError(new Error(t("offline.tooLarge")));
+      return;
+    }
+    setError(null);
+    setText((await f.text()).trim());
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -339,20 +347,23 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
     setError(null);
     try {
       if (kind === "activate") {
-        const r = await createOfflineActivation(tenant, text.trim(), key.current);
+        const body = text.trim();
+        if (key.current.text !== body) key.current = { text: body, key: crypto.randomUUID() };
+        const r = await createOfflineActivation(tenant, body, key.current.key);
         setFile({ url: URL.createObjectURL(new Blob([r.license_file], { type: "application/octet-stream" })), expires: r.expires_at });
       } else {
         const a = await returnOfflineSeat(tenant, text.trim());
-        setReturned(a.hostname ?? a.fingerprint.slice(0, 12));
+        const name = a.hostname ?? a.fingerprint.slice(0, 12);
+        setReturned(a.license_id === l.id ? t("offline.returned", { name }) : t("offline.returnedOther", { name, license: a.license_id }));
       }
       setText("");
-      key.current = crypto.randomUUID(); // the next request is a new one
-      await qc.invalidateQueries({ queryKey: activationsQuery(tenant, l.id).queryKey });
+      key.current = { text: "", key: crypto.randomUUID() }; // the next request is a new one
+      await qc.invalidateQueries({ queryKey: ["activations", tenant] }); // the request may be another license's
       await qc.invalidateQueries({ queryKey: ["licenses", tenant] });
     } catch (err) {
       onAuthError(err);
       setError(err);
-      if (!keepIdempotencyKey(err)) key.current = crypto.randomUUID();
+      if (!keepIdempotencyKey(err)) key.current = { text: "", key: crypto.randomUUID() };
     } finally {
       setBusy(false);
     }
@@ -363,32 +374,35 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
       <h3 id="offline-title" className="font-semibold">{t("offline.title")}</h3>
       <p className="mt-1 text-xs text-muted-foreground">{t("offline.intro")}</p>
       <div className="mt-2 flex gap-2">
-        <Button variant={kind === "activate" ? "default" : "ghost"} aria-pressed={kind === "activate"} onClick={() => open("activate")}>{t("offline.activate")}</Button>
-        <Button variant={kind === "return" ? "default" : "ghost"} aria-pressed={kind === "return"} onClick={() => open("return")}>{t("offline.return")}</Button>
+        <Button variant={kind === "activate" ? "default" : "ghost"} aria-pressed={kind === "activate"} disabled={busy} onClick={() => open("activate")}>{t("offline.activate")}</Button>
+        <Button variant={kind === "return" ? "default" : "ghost"} aria-pressed={kind === "return"} disabled={busy} onClick={() => open("return")}>{t("offline.return")}</Button>
       </div>
       {kind && (
         <form onSubmit={submit} className="mt-2 space-y-2 text-sm">
           <label className="block">
             <span className="font-medium">{t(`offline.${field}`)}</span>
-            <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} autoComplete="off" />
-            <span className="mt-1 block text-xs text-muted-foreground">{t(`offline.${field}Hint`)}</span>
+            <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => setText(e.target.value)}
+              spellCheck={false} autoComplete="off" aria-describedby="offline-hint" aria-invalid={error !== null} />
+            <span id="offline-hint" className="mt-1 block text-xs text-muted-foreground">{t(`offline.${field}Hint`)}</span>
           </label>
           <label className="block text-xs">
-            {t("offline.upload")} <input type="file" accept=".txt,.req,.rcpt,text/plain" onChange={upload} />
+            {t("offline.upload")} <input type="file" onChange={upload} />
           </label>
-          {error !== null && <p role="alert" className="font-medium">{errorText(error)}</p>}
+          {error !== null && <p role="alert" className="font-medium">{error instanceof ApiError ? errorText(error) : (error as Error).message}</p>}
           <div className="flex justify-end">
             <Button type="submit" disabled={busy || text.trim() === ""}>{t(kind === "activate" ? "offline.submitActivate" : "offline.submitReturn")}</Button>
           </div>
         </form>
       )}
-      {file && (
-        <p role="status" className="mt-2 text-sm">
-          {file.expires ? t("offline.fileReady", { date: date.format(new Date(file.expires)) }) : t("offline.filePerpetual")}{" "}
-          <a className="underline" href={file.url} download="license.lic">{t("offline.download")}</a>
-        </p>
-      )}
-      {returned && <p role="status" className="mt-2 text-sm">{t("offline.returned", { name: returned })}</p>}
+      <div role="status" className="mt-2 text-sm">
+        {file && (
+          <p>
+            {file.expires ? t("offline.fileReady", { date: date.format(new Date(file.expires)) }) : t("offline.filePerpetual")}{" "}
+            <a className="underline" href={file.url} download="license.lic">{t("offline.download")}</a>
+          </p>
+        )}
+        {returned && <p>{returned}</p>}
+      </div>
     </section>
   );
 }

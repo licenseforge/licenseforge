@@ -243,6 +243,79 @@ describe("offline (ADR-0043)", () => {
     expect(posts).toEqual([{ path: "/api/v1/tenants/acme/deactivation-receipts", body: { receipt: "lfrcpt1.b" } }]);
   });
 
+  it("ties the key to the text, renews it after a success and a mode switch, and says the file's term", async () => {
+    const keys: (string | null)[] = [];
+    let status = 503;
+    let expires: string | null = "2027-01-01T00:00:00Z";
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:lic"), revokeObjectURL: revoke }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        keys.push(req.headers.get("Idempotency-Key"));
+        return status === 201
+          ? json({ license_file: file, activation_id: "act_1", kid: "k1", file_sha256: "0".repeat(64), expires_at: expires }, 201)
+          : json({ type: "about:blank", title: "x", status, code: "internal", request_id: "r" }, status);
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    const submit = async (n: number) => {
+      await act(async () => el.querySelector("form")!.requestSubmit());
+      await vi.waitFor(() => expect(keys).toHaveLength(n));
+    };
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.A"));
+    await submit(1); // 503: kept for A
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(2); // another text: a new key
+    expect(keys[1]).not.toBe(keys[0]);
+    await act(async () => button("Return a seat")!.click());
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(3); // after a mode switch: a new key
+    expect(keys[2]).not.toBe(keys[1]);
+    status = 201;
+    await submit(4); // the same text again: the same key
+    expect(keys[3]).toBe(keys[2]);
+    await vi.waitFor(() => expect(el.textContent).toContain("valid until"));
+    expires = null;
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(5); // after a success: a new key, even for the same text
+    expect(keys[4]).not.toBe(keys[3]);
+    await vi.waitFor(() => expect(el.textContent).toContain("with no expiry"));
+    expect(revoke).toHaveBeenCalledWith("blob:lic"); // the first file's URL, once replaced
+  });
+
+  it("says why a request was refused", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) =>
+      req.method === "GET" ? json({ items: [] }) : json({ type: "about:blank", title: "x", status: 409, code: "offline_not_allowed", request_id: "r" }, 409)));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("This license's plan doesn't allow offline use."));
+  });
+
+  it("reads an uploaded file, refuses one too large, and names another license's returned seat", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) =>
+      req.method === "GET" ? json({ items: [] }) : json({ id: "act_9", license_id: "lic_other", fingerprint: "sha256:" + "b".repeat(64), fp_source: "machine-id",
+        binding: "machine", mode: "offline", hostname: null, app_version: null, sdk_version: null, first_seen_at: "", last_seen_at: "", deactivated_at: "2026-11-09T12:00:00Z", created_at: "" })));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Return a seat")!.click());
+    const pick = async (f: File) => {
+      const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, "files", { value: [f], configurable: true });
+      await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    };
+    await pick(new File(["x".repeat(9000)], "big.log"));
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("That file is too large to be a request or receipt."));
+    await pick(new File([" lfrcpt1.c\n"], "r.txt"));
+    await vi.waitFor(() => expect(el.querySelector<HTMLTextAreaElement>('textarea[name="receipt"]')!.value).toBe("lfrcpt1.c"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.textContent).toContain("returned, on another license (lic_other)"));
+  });
+
   it("isn't offered without license:write", async () => {
     const { button } = await render(<LicenseDialog tenant="acme" license={license} manage={false} names={names} onClose={() => {}} onChanged={() => {}} />);
     expect([button("Offline activation"), button("Return a seat")]).toEqual([undefined, undefined]);
