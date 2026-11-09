@@ -12,7 +12,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.7
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/oapi-codegen/runtime v1.7.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/oauth2 v0.38.0
 )
 
 require github.com/kylelemons/godebug v1.1.0 // indirect
