@@ -1655,7 +1655,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The Go SDK isn't published yet (no sdk/go/v* tag; the licenseforge.io import path doesn't resolve), and how SDK releases are signed is open: ADR-0021 says cosign, a Go module relies on the checksum database."
+                "remarks": "The Go SDK isn't published yet (no sdk/go/v* tag; the licenseforge.io import path doesn't resolve). When it is, the Go checksum database protects it, like other Go modules (ADR-0021, amended): no cosign signature."
               }
             ]
           }

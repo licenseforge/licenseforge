@@ -41,7 +41,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 - Encryption in transit (TLS) and at rest (DB/disk + envelope-encrypted secrets).
 
 **Supply chain** (CRA, SLSA, enterprise procurement)
-- Signed images, Helm chart and SDK releases (cosign/Sigstore), SBOM per release, SLSA provenance from CI.
+- Signed images and Helm chart (cosign/Sigstore), SBOM per release, SLSA provenance from CI. SDK releases follow their ecosystem's integrity mechanism: the Go SDK is a Go module, protected by the Go checksum database (sum.golang.org) like other Go modules, not cosign (amended 2026-11-09, owner's decision; Java and TypeScript decide with their SDKs). The Go SDK's first release is postponed.
 - `SECURITY.md` with coordinated disclosure, security advisories via GitHub, a documented supported-versions and patch policy.
 - Dependency scanning and OpenSSF Scorecard in CI; DCO enforced ([ADR-0002 Open source licensing model](0002-open-source-licensing-model.md)).
 
