@@ -47,6 +47,9 @@ What LicenseForge stores, where, and how it is protected. It covers the GDPR rec
 | `audit_events.actor_id`, `object_id`, `source_ip`, `user_agent` | Who acted, on what (`object_id` can be a user ID), from where | Personal | Append-only (INSERT and SELECT only), hash-chained, RLS per tenant | Kept; the per-tenant retention job (AU-11) is **planned**. Erasure requests are refused for audit entries and met by retention (ADR-0027) |
 | `audit_events.action`, `object_type`, `outcome`, `details` | What happened | Low; `details` has no secrets, PHI or emails | As above | As above |
 | `products`, `features`, `plans`, `plan_features` | Catalog | Business | RLS; archived, never deleted | With the tenant |
+| `webhook_endpoints.url_ciphertext` | The receiver's URL, often with a token in its path or query (Slack, Zapier) | Secret | Encrypted (ADR-0025, ADR-0044); reads and audit entries show only `url_display` (scheme, host, port) | Deleted with the endpoint; tenant purge (planned) |
+| `webhook_endpoints.secret_ciphertext`, `previous_secret_ciphertext` | Signing secrets (`whsec_…`) | Secret | Encrypted, bound to tenant and row; shown once; the previous one kept 24 hours after a rotation | As above |
+| `webhook_cursors`, `webhook_deliveries` | Delivery position, retry state, and each attempt's outcome category and status code (never an address or a response body) | Low | RLS; per-login column grants (the tenant pool never sees the lease holder, a pod name) | Records kept 7 days; deleted with the endpoint |
 
 ## Outside the database
 

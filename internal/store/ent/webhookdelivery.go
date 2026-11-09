@@ -27,13 +27,13 @@ type WebhookDelivery struct {
 	// the audit entry: webhook-id
 	EventID string `json:"event_id,omitempty"`
 	// EventType holds the value of the "event_type" field.
-	EventType string `json:"event_type,omitempty"`
+	EventType webhookdelivery.EventType `json:"event_type,omitempty"`
 	// Attempt holds the value of the "attempt" field.
 	Attempt int `json:"attempt,omitempty"`
 	// Outcome holds the value of the "outcome" field.
 	Outcome webhookdelivery.Outcome `json:"outcome,omitempty"`
 	// Category holds the value of the "category" field.
-	Category string `json:"category,omitempty"`
+	Category webhookdelivery.Category `json:"category,omitempty"`
 	// StatusCode holds the value of the "status_code" field.
 	StatusCode *int `json:"status_code,omitempty"`
 	// DurationMs holds the value of the "duration_ms" field.
@@ -126,7 +126,7 @@ func (_m *WebhookDelivery) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field event_type", values[i])
 			} else if value.Valid {
-				_m.EventType = value.String
+				_m.EventType = webhookdelivery.EventType(value.String)
 			}
 		case webhookdelivery.FieldAttempt:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -144,7 +144,7 @@ func (_m *WebhookDelivery) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field category", values[i])
 			} else if value.Valid {
-				_m.Category = value.String
+				_m.Category = webhookdelivery.Category(value.String)
 			}
 		case webhookdelivery.FieldStatusCode:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -219,7 +219,7 @@ func (_m *WebhookDelivery) String() string {
 	builder.WriteString(_m.EventID)
 	builder.WriteString(", ")
 	builder.WriteString("event_type=")
-	builder.WriteString(_m.EventType)
+	builder.WriteString(fmt.Sprintf("%v", _m.EventType))
 	builder.WriteString(", ")
 	builder.WriteString("attempt=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Attempt))
@@ -228,7 +228,7 @@ func (_m *WebhookDelivery) String() string {
 	builder.WriteString(fmt.Sprintf("%v", _m.Outcome))
 	builder.WriteString(", ")
 	builder.WriteString("category=")
-	builder.WriteString(_m.Category)
+	builder.WriteString(fmt.Sprintf("%v", _m.Category))
 	builder.WriteString(", ")
 	if v := _m.StatusCode; v != nil {
 		builder.WriteString("status_code=")

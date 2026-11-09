@@ -46,7 +46,7 @@ func (_c *WebhookDeliveryCreate) SetEventID(v string) *WebhookDeliveryCreate {
 }
 
 // SetEventType sets the "event_type" field.
-func (_c *WebhookDeliveryCreate) SetEventType(v string) *WebhookDeliveryCreate {
+func (_c *WebhookDeliveryCreate) SetEventType(v webhookdelivery.EventType) *WebhookDeliveryCreate {
 	_c.mutation.SetEventType(v)
 	return _c
 }
@@ -64,7 +64,7 @@ func (_c *WebhookDeliveryCreate) SetOutcome(v webhookdelivery.Outcome) *WebhookD
 }
 
 // SetCategory sets the "category" field.
-func (_c *WebhookDeliveryCreate) SetCategory(v string) *WebhookDeliveryCreate {
+func (_c *WebhookDeliveryCreate) SetCategory(v webhookdelivery.Category) *WebhookDeliveryCreate {
 	_c.mutation.SetCategory(v)
 	return _c
 }
@@ -300,7 +300,7 @@ func (_c *WebhookDeliveryCreate) createSpec() (*WebhookDelivery, *sqlgraph.Creat
 		_node.EventID = value
 	}
 	if value, ok := _c.mutation.EventType(); ok {
-		_spec.SetField(webhookdelivery.FieldEventType, field.TypeString, value)
+		_spec.SetField(webhookdelivery.FieldEventType, field.TypeEnum, value)
 		_node.EventType = value
 	}
 	if value, ok := _c.mutation.Attempt(); ok {
@@ -312,7 +312,7 @@ func (_c *WebhookDeliveryCreate) createSpec() (*WebhookDelivery, *sqlgraph.Creat
 		_node.Outcome = value
 	}
 	if value, ok := _c.mutation.Category(); ok {
-		_spec.SetField(webhookdelivery.FieldCategory, field.TypeString, value)
+		_spec.SetField(webhookdelivery.FieldCategory, field.TypeEnum, value)
 		_node.Category = value
 	}
 	if value, ok := _c.mutation.StatusCode(); ok {

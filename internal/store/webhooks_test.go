@@ -2,97 +2,49 @@ package store
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
-// Exactly ADR-0044's grants: the tenant pool manages endpoints and recovers
+// Exactly ADR-0044's grants, pinned in full (no TRUNCATE, no grant
+// options, no extra columns): the tenant pool manages endpoints and recovers
 // cursors but never touches the lease; the dispatcher (platform pool) leases
 // and disables but can't create or delete cursors; nobody else gets anything.
 func TestWebhookPrivileges(t *testing.T) {
 	owner := sqlOpen(t, env.OwnerURL)
-	for _, c := range []struct {
-		role, table, column, priv string
-		want                      bool
-	}{
-		{AppRole, "webhook_endpoints", "", "SELECT", true},
-		{AppRole, "webhook_endpoints", "", "INSERT", true},
-		{AppRole, "webhook_endpoints", "", "DELETE", true},
-		{AppRole, "webhook_endpoints", "url_ciphertext", "UPDATE", true},
-		{AppRole, "webhook_endpoints", "enabled", "UPDATE", true},
-		{AppRole, "webhook_endpoints", "tenant_id", "UPDATE", false},
-		{AppRole, "webhook_endpoints", "id", "UPDATE", false},
-		{AppRole, "webhook_endpoints", "created_at", "UPDATE", false},
-		{PlatformRole, "webhook_endpoints", "", "SELECT", true},
-		{PlatformRole, "webhook_endpoints", "", "INSERT", false},
-		{PlatformRole, "webhook_endpoints", "", "DELETE", false},
-		{PlatformRole, "webhook_endpoints", "enabled", "UPDATE", true},
-		{PlatformRole, "webhook_endpoints", "disabled_reason", "UPDATE", true},
-		{PlatformRole, "webhook_endpoints", "url_ciphertext", "UPDATE", false},
-		{PlatformRole, "webhook_endpoints", "secret_ciphertext", "UPDATE", false},
-		{PlatformRole, "webhook_endpoints", "events", "UPDATE", false},
-
-		{AppRole, "webhook_cursors", "seq", "SELECT", true},
-		{AppRole, "webhook_cursors", "claimed_until", "SELECT", true},
-		{AppRole, "webhook_cursors", "claimed_by", "SELECT", false},
-		{AppRole, "webhook_cursors", "seq", "INSERT", true},
-		{AppRole, "webhook_cursors", "claimed_by", "INSERT", false},
-		{AppRole, "webhook_cursors", "attempts", "INSERT", false},
-		{AppRole, "webhook_cursors", "", "DELETE", true},
-		{AppRole, "webhook_cursors", "seq", "UPDATE", true},
-		{AppRole, "webhook_cursors", "attempts", "UPDATE", true},
-		{AppRole, "webhook_cursors", "next_attempt_at", "UPDATE", true},
-		{AppRole, "webhook_cursors", "claimed_by", "UPDATE", false},
-		{AppRole, "webhook_cursors", "claimed_until", "UPDATE", false},
-		{AppRole, "webhook_cursors", "endpoint_id", "UPDATE", false},
-		{PlatformRole, "webhook_cursors", "", "SELECT", true},
-		{PlatformRole, "webhook_cursors", "", "INSERT", false},
-		{PlatformRole, "webhook_cursors", "", "DELETE", false},
-		{PlatformRole, "webhook_cursors", "seq", "UPDATE", true},
-		{PlatformRole, "webhook_cursors", "claimed_by", "UPDATE", true},
-		{PlatformRole, "webhook_cursors", "claimed_until", "UPDATE", true},
-		{PlatformRole, "webhook_cursors", "attempts", "UPDATE", true},
-		{PlatformRole, "webhook_cursors", "endpoint_id", "UPDATE", false},
-		{PlatformRole, "webhook_cursors", "tenant_id", "UPDATE", false},
-
-		{AppRole, "webhook_deliveries", "", "SELECT", true},
-		{AppRole, "webhook_deliveries", "", "DELETE", true},
-		{AppRole, "webhook_deliveries", "", "INSERT", false},
-		{PlatformRole, "webhook_deliveries", "", "SELECT", true},
-		{PlatformRole, "webhook_deliveries", "", "INSERT", true},
-		{PlatformRole, "webhook_deliveries", "", "DELETE", true},
-	} {
-		var got bool
-		q, args := `SELECT has_table_privilege($1, $2, $3)`, []any{c.role, c.table, c.priv}
-		if c.column != "" {
-			q, args = `SELECT has_column_privilege($1, $2, $3, $4)`, []any{c.role, c.table, c.column, c.priv}
+	grants := func(role string, table []string, cols map[string][]string) []string {
+		var out []string
+		for _, p := range table {
+			out = append(out, role+" "+p+"  grantable=false")
 		}
-		if err := owner.QueryRow(q, args...).Scan(&got); err != nil {
-			t.Fatal(err)
-		}
-		if got != c.want {
-			t.Errorf("%s %s %s.%s = %v, want %v", c.role, c.priv, c.table, c.column, got, c.want)
-		}
-	}
-	for _, role := range []string{IdentityRole, RetentionRole} {
-		for _, table := range []string{"webhook_endpoints", "webhook_cursors", "webhook_deliveries"} {
-			var any bool
-			if err := owner.QueryRow(`SELECT has_table_privilege($1, $2, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-				OR has_any_column_privilege($1, $2, 'SELECT,INSERT,UPDATE,REFERENCES')`, role, table).Scan(&any); err != nil {
-				t.Fatal(err)
-			}
-			if any {
-				t.Errorf("%s has privileges on %s", role, table)
+		for p, cs := range cols {
+			for _, c := range cs {
+				out = append(out, role+" "+p+" "+c+" grantable=false")
 			}
 		}
+		return out
 	}
-	// No UPDATE on delivery records for anyone serving.
-	for _, role := range []string{AppRole, PlatformRole} {
-		var upd bool
-		if err := owner.QueryRow(`SELECT has_table_privilege($1, 'webhook_deliveries', 'UPDATE') OR has_any_column_privilege($1, 'webhook_deliveries', 'UPDATE')`, role).Scan(&upd); err != nil || upd {
-			t.Errorf("%s can update delivery records: %v %v", role, upd, err)
+	want := map[string][]string{
+		"webhook_endpoints": append(
+			grants(AppRole, []string{"SELECT", "INSERT", "DELETE"}, map[string][]string{"UPDATE": {"url_ciphertext", "url_display", "events",
+				"secret_ciphertext", "previous_secret_ciphertext", "previous_secret_until", "enabled", "disabled_reason", "updated_at"}}),
+			grants(PlatformRole, []string{"SELECT"}, map[string][]string{"UPDATE": {"enabled", "disabled_reason", "updated_at"}})...),
+		"webhook_cursors": append(
+			grants(AppRole, []string{"DELETE"}, map[string][]string{
+				"SELECT": {"id", "tenant_id", "endpoint_id", "seq", "claimed_until", "attempts", "next_attempt_at"},
+				"INSERT": {"id", "tenant_id", "endpoint_id", "seq"},
+				"UPDATE": {"seq", "attempts", "next_attempt_at"}}),
+			grants(PlatformRole, []string{"SELECT"}, map[string][]string{"UPDATE": {"seq", "claimed_by", "claimed_until", "attempts", "next_attempt_at"}})...),
+		"webhook_deliveries": append(grants(AppRole, []string{"SELECT", "DELETE"}, nil),
+			grants(PlatformRole, []string{"SELECT", "INSERT", "DELETE"}, nil)...),
+	}
+	for table, w := range want {
+		slices.Sort(w)
+		if got := tableACL(t, owner, table); !slices.Equal(got, w) {
+			t.Errorf("privileges on %s:\n got %q\nwant %q", table, got, w)
 		}
 	}
 }
@@ -201,7 +153,9 @@ func TestWebhookCursorPolicies(t *testing.T) {
 	}
 	// Deleting an endpoint takes its cursor and records along, in one transaction.
 	if err := f.d.WithTenant(ctx, a, func(tx *ent.Tx) error {
-		for _, q := range []string{`DELETE FROM webhook_deliveries WHERE endpoint_id = $1`, `DELETE FROM webhook_cursors WHERE endpoint_id = $1`, `DELETE FROM webhook_endpoints WHERE id = $1`} {
+		// The cursor first: it waits for a dispatcher holding it, whose pinned
+		// write then matches nothing and records nothing.
+		for _, q := range []string{`DELETE FROM webhook_cursors WHERE endpoint_id = $1`, `DELETE FROM webhook_deliveries WHERE endpoint_id = $1`, `DELETE FROM webhook_endpoints WHERE id = $1`} {
 			if _, err := tx.ExecContext(ctx, q, ep); err != nil {
 				return err
 			}
@@ -209,5 +163,90 @@ func TestWebhookCursorPolicies(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Errorf("delete an endpoint: %v", err)
+	}
+}
+
+// An update that waited for a concurrent advance doesn't move the cursor
+// back (snapshot-matching USING), from either pool: e.g. a tenant's "skip to
+// now" racing the dispatcher.
+func TestWebhookCursorForwardUnderConcurrentCommits(t *testing.T) {
+	f := newRetentionFixture(t) // entries 1..7
+	for _, c := range []struct {
+		name, url, tenant string
+	}{{"platform", env.PlatformURL, ""}, {"tenant", env.TenantURL, f.tenant}} {
+		ep, cur := ids.WebhookEndpoint(), ids.WebhookCursor()
+		if _, err := f.owner.Exec(`INSERT INTO webhook_endpoints (id, tenant_id, created_at, updated_at, url_ciphertext, url_display, events, secret_ciphertext)
+			VALUES ($1, $2, now(), now(), '\x01', 'https://example.com:443', '["license.issued"]', '\x01')`, ep, f.tenant); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.owner.Exec(`INSERT INTO webhook_cursors (id, tenant_id, endpoint_id, seq) VALUES ($1, $2, $3, 3)`, cur, f.tenant, ep); err != nil {
+			t.Fatal(err)
+		}
+		n, err := raced(t, c.url, c.tenant, `UPDATE webhook_cursors SET seq = 7 WHERE id = $1`, `UPDATE webhook_cursors SET seq = 5, attempts = 0 WHERE id = $1`, cur)
+		var seq int
+		if err := f.owner.QueryRow(`SELECT seq FROM webhook_cursors WHERE id = $1`, cur).Scan(&seq); err != nil {
+			t.Fatal(err)
+		}
+		if seq != 7 {
+			t.Errorf("%s: cursor moved back past a concurrent advance: %d rows, %v, seq %d", c.name, n, err, seq)
+		}
+	}
+}
+
+// The CHECKs keep endpoint and delivery rows to ADR-0044's vocabulary: known
+// events only, a disabled reason exactly when disabled, delivery categories
+// that are fixed words (never an address), success only on a 2xx.
+func TestWebhookChecks(t *testing.T) {
+	f := newRetentionFixture(t)
+	ep := ids.WebhookEndpoint()
+	insertEndpoint := func(id, events string, enabled bool, reason any) error {
+		_, err := f.owner.Exec(`INSERT INTO webhook_endpoints (id, tenant_id, created_at, updated_at, url_ciphertext, url_display, events, secret_ciphertext, enabled, disabled_reason)
+			VALUES ($1, $2, now(), now(), '\x01', 'https://example.com:443', $3, '\x01', $4, $5)`, id, f.tenant, events, enabled, reason)
+		return err
+	}
+	if err := insertEndpoint(ep, `["license.issued", "activation.created"]`, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		events  string
+		enabled bool
+		reason  any
+	}{
+		"no events":               {`[]`, true, nil},
+		"unknown event":           {`["license.issued", "bogus"]`, true, nil},
+		"not a string":            {`["license.issued", 5]`, true, nil},
+		"not an array":            {`{"license.issued": true}`, true, nil},
+		"disabled without reason": {`["license.issued"]`, false, nil},
+		"blank reason":            {`["license.issued"]`, false, " "},
+		"enabled with a reason":   {`["license.issued"]`, true, "gone"},
+	} {
+		if err := insertEndpoint(ids.WebhookEndpoint(), c.events, c.enabled, c.reason); err == nil {
+			t.Errorf("endpoint accepted: %s", name)
+		}
+	}
+	record := func(eventType, outcome, category string, status any) error {
+		_, err := f.owner.Exec(`INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, status_code, duration_ms, attempted_at)
+			VALUES ($1, $2, $3, 1, $4, $5, 1, $6, $7, $8, 10, now())`, ids.WebhookDelivery(), f.tenant, ep, ids.AuditEvent(), eventType, outcome, category, status)
+		return err
+	}
+	if err := record("license.issued", "success", "http", 204); err != nil {
+		t.Errorf("a 204: %v", err)
+	}
+	if err := record("license.issued", "failure", "timeout", nil); err != nil {
+		t.Errorf("a timeout: %v", err)
+	}
+	for name, c := range map[string]struct {
+		event, outcome, category string
+		status                   any
+	}{
+		"address as category": {"license.issued", "failure", "dial tcp 10.0.0.5:443", nil},
+		"unknown event":       {"license.bogus", "failure", "timeout", nil},
+		"http without status": {"license.issued", "failure", "http", nil},
+		"status without http": {"license.issued", "failure", "timeout", 500},
+		"success on a 500":    {"license.issued", "success", "http", 500},
+	} {
+		if err := record(c.event, c.outcome, c.category, c.status); err == nil {
+			t.Errorf("record accepted: %s", name)
+		}
 	}
 }

@@ -39,19 +39,21 @@ ALTER TABLE "webhook_cursors" FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "webhook_cursors" TO licenseforge_app
   USING ("tenant_id" = app_tenant_id()) WITH CHECK ("tenant_id" = app_tenant_id());
 CREATE POLICY platform_all ON "webhook_cursors" TO licenseforge_platform USING (true) WITH CHECK (true);
--- A new cursor starts at or below its chain's end (entries or the anchor):
--- it can't skip events that don't exist yet. Not replaying history is the
--- application's rule (a lower bound would race concurrent commits).
+-- A new cursor starts at or below its chain's last entry (an anchor always
+-- has a later entry): it can't skip events that don't exist yet. Not
+-- replaying history is the application's rule (a lower bound would race
+-- concurrent commits).
 CREATE POLICY start_at_end ON "webhook_cursors" AS RESTRICTIVE FOR INSERT TO licenseforge_app
-  WITH CHECK ("seq" <= GREATEST(
-    COALESCE((SELECT max(e."seq") FROM "audit_events" e WHERE e."tenant_id" = "webhook_cursors"."tenant_id"), 0),
-    COALESCE((SELECT max(a."seq") FROM "audit_anchors" a WHERE a."tenant_id" = "webhook_cursors"."tenant_id"), 0)));
+  WITH CHECK ("seq" <= COALESCE((SELECT max(e."seq") FROM "audit_events" e WHERE e."tenant_id" = "webhook_cursors"."tenant_id"), 0));
 -- seq only moves forward, to an entry of its chain that exists or to the
 -- chain's anchor (entries after the cursor were pruned). An update that
--- keeps seq (lease, retry state) is always allowed. The subquery reads the
--- row as it was before this update.
+-- keeps seq (lease, retry state) is always allowed. The subqueries read the
+-- row as the statement's snapshot saw it; USING admits only a row whose seq
+-- is still that one, so an update that waited for a concurrent advance
+-- changes nothing instead of moving the cursor back (as audit export's
+-- cursors, 20261107090000_snapshot_match_security).
 CREATE POLICY forward_to_entry ON "webhook_cursors" AS RESTRICTIVE FOR UPDATE TO licenseforge_app, licenseforge_platform
-  USING (true)
+  USING (EXISTS (SELECT 1 FROM "webhook_cursors" o WHERE o."id" = "webhook_cursors"."id" AND o."seq" = "webhook_cursors"."seq"))
   WITH CHECK (EXISTS (SELECT 1 FROM "webhook_cursors" o WHERE o."id" = "webhook_cursors"."id"
     AND (o."seq" = "webhook_cursors"."seq" OR (o."seq" < "webhook_cursors"."seq" AND (
       EXISTS (SELECT 1 FROM "audit_events" e WHERE e."tenant_id" = "webhook_cursors"."tenant_id" AND e."seq" = "webhook_cursors"."seq")

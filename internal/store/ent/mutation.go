@@ -24426,11 +24426,11 @@ type WebhookDeliveryMutation struct {
 	seq            *int64
 	addseq         *int64
 	event_id       *string
-	event_type     *string
+	event_type     *webhookdelivery.EventType
 	attempt        *int
 	addattempt     *int
 	outcome        *webhookdelivery.Outcome
-	category       *string
+	category       *webhookdelivery.Category
 	status_code    *int
 	addstatus_code *int
 	duration_ms    *int
@@ -24713,12 +24713,12 @@ func (m *WebhookDeliveryMutation) ResetEventID() {
 }
 
 // SetEventType sets the "event_type" field.
-func (m *WebhookDeliveryMutation) SetEventType(s string) {
-	m.event_type = &s
+func (m *WebhookDeliveryMutation) SetEventType(wt webhookdelivery.EventType) {
+	m.event_type = &wt
 }
 
 // EventType returns the value of the "event_type" field in the mutation.
-func (m *WebhookDeliveryMutation) EventType() (r string, exists bool) {
+func (m *WebhookDeliveryMutation) EventType() (r webhookdelivery.EventType, exists bool) {
 	v := m.event_type
 	if v == nil {
 		return
@@ -24729,7 +24729,7 @@ func (m *WebhookDeliveryMutation) EventType() (r string, exists bool) {
 // OldEventType returns the old "event_type" field's value of the WebhookDelivery entity.
 // If the WebhookDelivery object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *WebhookDeliveryMutation) OldEventType(ctx context.Context) (v string, err error) {
+func (m *WebhookDeliveryMutation) OldEventType(ctx context.Context) (v webhookdelivery.EventType, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldEventType is only allowed on UpdateOne operations")
 	}
@@ -24841,12 +24841,12 @@ func (m *WebhookDeliveryMutation) ResetOutcome() {
 }
 
 // SetCategory sets the "category" field.
-func (m *WebhookDeliveryMutation) SetCategory(s string) {
-	m.category = &s
+func (m *WebhookDeliveryMutation) SetCategory(w webhookdelivery.Category) {
+	m.category = &w
 }
 
 // Category returns the value of the "category" field in the mutation.
-func (m *WebhookDeliveryMutation) Category() (r string, exists bool) {
+func (m *WebhookDeliveryMutation) Category() (r webhookdelivery.Category, exists bool) {
 	v := m.category
 	if v == nil {
 		return
@@ -24857,7 +24857,7 @@ func (m *WebhookDeliveryMutation) Category() (r string, exists bool) {
 // OldCategory returns the old "category" field's value of the WebhookDelivery entity.
 // If the WebhookDelivery object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *WebhookDeliveryMutation) OldCategory(ctx context.Context) (v string, err error) {
+func (m *WebhookDeliveryMutation) OldCategory(ctx context.Context) (v webhookdelivery.Category, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldCategory is only allowed on UpdateOne operations")
 	}
@@ -25232,7 +25232,7 @@ func (m *WebhookDeliveryMutation) SetField(name string, value ent.Value) error {
 		m.SetEventID(v)
 		return nil
 	case webhookdelivery.FieldEventType:
-		v, ok := value.(string)
+		v, ok := value.(webhookdelivery.EventType)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
@@ -25253,7 +25253,7 @@ func (m *WebhookDeliveryMutation) SetField(name string, value ent.Value) error {
 		m.SetOutcome(v)
 		return nil
 	case webhookdelivery.FieldCategory:
-		v, ok := value.(string)
+		v, ok := value.(webhookdelivery.Category)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}

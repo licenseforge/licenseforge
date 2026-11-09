@@ -1,4 +1,4 @@
-h1:hwG236/z7eUX9mXot3ajIHaeasupMHAV7gfDLMA/nY0=
+h1:1PL+kY9ADVyQzcXEMFH+Ug3d1tCdWdsF0xqSwbj04+E=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -45,5 +45,5 @@ h1:hwG236/z7eUX9mXot3ajIHaeasupMHAV7gfDLMA/nY0=
 20261108204113_licenses_created_index.sql h1:vlJhMkrUqD93r6LStINQEOqIJeMVt+P9olKnzn2j10k=
 20261108213720_offline_activation.sql h1:MP7ePZhwNg2FMf9AwjYPqcIh6LoBf/nujg0Hlr6EOfQ=
 20261108213721_offline_activation_security.sql h1:rxUwN+tPlnI4x3HNFJf9CmHCD0hPC+9p8E1UC2/n6Yk=
-20261109204600_webhooks.sql h1:H22pfzj76f2e6TAs8maCuEWIhWCRq9sWoCZDhFXaS2I=
-20261109204601_webhooks_security.sql h1:88otK9H/E4Hc4Be2hQA/MTrGYzvpVijuHTGvqY1eIOE=
+20261109205924_webhooks.sql h1:YHi5ScjqWwUBJvaS9SL7jUVajXOhpnfK/j/kqtbui1M=
+20261109205925_webhooks_security.sql h1:Pvnxukku5Hs5OvYOQcEZy17VVHTeGKu4KbTZBtzgLvM=

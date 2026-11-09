@@ -85,12 +85,8 @@ var (
 	SeqValidator func(int64) error
 	// EventIDValidator is a validator for the "event_id" field. It is called by the builders before save.
 	EventIDValidator func(string) error
-	// EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
-	EventTypeValidator func(string) error
 	// AttemptValidator is a validator for the "attempt" field. It is called by the builders before save.
 	AttemptValidator func(int) error
-	// CategoryValidator is a validator for the "category" field. It is called by the builders before save.
-	CategoryValidator func(string) error
 	// DurationMsValidator is a validator for the "duration_ms" field. It is called by the builders before save.
 	DurationMsValidator func(int) error
 	// DefaultAttemptedAt holds the default value on creation for the "attempted_at" field.
@@ -100,6 +96,33 @@ var (
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
 	IDValidator func(string) error
 )
+
+// EventType defines the type for the "event_type" enum field.
+type EventType string
+
+// EventType values.
+const (
+	EventTypeLicenseIssued         EventType = "license.issued"
+	EventTypeLicenseRevoked        EventType = "license.revoked"
+	EventTypeLicenseSuspended      EventType = "license.suspended"
+	EventTypeLicenseReinstated     EventType = "license.reinstated"
+	EventTypeActivationCreated     EventType = "activation.created"
+	EventTypeActivationDeactivated EventType = "activation.deactivated"
+)
+
+func (et EventType) String() string {
+	return string(et)
+}
+
+// EventTypeValidator is a validator for the "event_type" field enum values. It is called by the builders before save.
+func EventTypeValidator(et EventType) error {
+	switch et {
+	case EventTypeLicenseIssued, EventTypeLicenseRevoked, EventTypeLicenseSuspended, EventTypeLicenseReinstated, EventTypeActivationCreated, EventTypeActivationDeactivated:
+		return nil
+	default:
+		return fmt.Errorf("webhookdelivery: invalid enum value for event_type field: %q", et)
+	}
+}
 
 // Outcome defines the type for the "outcome" enum field.
 type Outcome string
@@ -121,6 +144,32 @@ func OutcomeValidator(o Outcome) error {
 		return nil
 	default:
 		return fmt.Errorf("webhookdelivery: invalid enum value for outcome field: %q", o)
+	}
+}
+
+// Category defines the type for the "category" enum field.
+type Category string
+
+// Category values.
+const (
+	CategoryHTTP       Category = "http"
+	CategoryTimeout    Category = "timeout"
+	CategoryConnection Category = "connection"
+	CategoryTLS        Category = "tls"
+	CategoryRedirect   Category = "redirect"
+)
+
+func (c Category) String() string {
+	return string(c)
+}
+
+// CategoryValidator is a validator for the "category" field enum values. It is called by the builders before save.
+func CategoryValidator(c Category) error {
+	switch c {
+	case CategoryHTTP, CategoryTimeout, CategoryConnection, CategoryTLS, CategoryRedirect:
+		return nil
+	default:
+		return fmt.Errorf("webhookdelivery: invalid enum value for category field: %q", c)
 	}
 }
 

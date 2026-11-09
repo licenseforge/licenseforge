@@ -1911,46 +1911,10 @@ func init() {
 			return nil
 		}
 	}()
-	// webhookdeliveryDescEventType is the schema descriptor for event_type field.
-	webhookdeliveryDescEventType := webhookdeliveryFields[5].Descriptor()
-	// webhookdelivery.EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
-	webhookdelivery.EventTypeValidator = func() func(string) error {
-		validators := webhookdeliveryDescEventType.Validators
-		fns := [...]func(string) error{
-			validators[0].(func(string) error),
-			validators[1].(func(string) error),
-		}
-		return func(event_type string) error {
-			for _, fn := range fns {
-				if err := fn(event_type); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}()
 	// webhookdeliveryDescAttempt is the schema descriptor for attempt field.
 	webhookdeliveryDescAttempt := webhookdeliveryFields[6].Descriptor()
 	// webhookdelivery.AttemptValidator is a validator for the "attempt" field. It is called by the builders before save.
 	webhookdelivery.AttemptValidator = webhookdeliveryDescAttempt.Validators[0].(func(int) error)
-	// webhookdeliveryDescCategory is the schema descriptor for category field.
-	webhookdeliveryDescCategory := webhookdeliveryFields[8].Descriptor()
-	// webhookdelivery.CategoryValidator is a validator for the "category" field. It is called by the builders before save.
-	webhookdelivery.CategoryValidator = func() func(string) error {
-		validators := webhookdeliveryDescCategory.Validators
-		fns := [...]func(string) error{
-			validators[0].(func(string) error),
-			validators[1].(func(string) error),
-		}
-		return func(category string) error {
-			for _, fn := range fns {
-				if err := fn(category); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}()
 	// webhookdeliveryDescDurationMs is the schema descriptor for duration_ms field.
 	webhookdeliveryDescDurationMs := webhookdeliveryFields[10].Descriptor()
 	// webhookdelivery.DurationMsValidator is a validator for the "duration_ms" field. It is called by the builders before save.

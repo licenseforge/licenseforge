@@ -1046,11 +1046,6 @@ var (
 				Unique:  true,
 				Columns: []*schema.Column{WebhookCursorsColumns[7], WebhookCursorsColumns[1]},
 			},
-			{
-				Name:    "webhookcursor_endpoint_id",
-				Unique:  true,
-				Columns: []*schema.Column{WebhookCursorsColumns[1]},
-			},
 		},
 	}
 	// WebhookDeliveriesColumns holds the columns for the "webhook_deliveries" table.
@@ -1059,10 +1054,10 @@ var (
 		{Name: "endpoint_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 		{Name: "seq", Type: field.TypeInt64},
 		{Name: "event_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
-		{Name: "event_type", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "event_type", Type: field.TypeEnum, Enums: []string{"license.issued", "license.revoked", "license.suspended", "license.reinstated", "activation.created", "activation.deactivated"}},
 		{Name: "attempt", Type: field.TypeInt},
 		{Name: "outcome", Type: field.TypeEnum, Enums: []string{"success", "failure"}},
-		{Name: "category", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "category", Type: field.TypeEnum, Enums: []string{"http", "timeout", "connection", "tls", "redirect"}},
 		{Name: "status_code", Type: field.TypeInt, Nullable: true},
 		{Name: "duration_ms", Type: field.TypeInt},
 		{Name: "attempted_at", Type: field.TypeTime},
@@ -1417,16 +1412,22 @@ func init() {
 	WebhookDeliveriesTable.Annotation = &entsql.Annotation{}
 	WebhookDeliveriesTable.Annotation.Checks = map[string]string{
 		"webhook_deliveries_attempt":   "(attempt >= 1) AND (attempt <= 8)",
+		"webhook_deliveries_category":  "(category)::text = ANY (ARRAY['http'::text, 'timeout'::text, 'connection'::text, 'tls'::text, 'redirect'::text])",
 		"webhook_deliveries_duration":  "duration_ms >= 0",
+		"webhook_deliveries_event":     "(event_type)::text = ANY (ARRAY['license.issued'::text, 'license.revoked'::text, 'license.suspended'::text, 'license.reinstated'::text, 'activation.created'::text, 'activation.deactivated'::text])",
+		"webhook_deliveries_event_id":  "(event_id)::text ~ '^aud_[a-z2-7]{26}$'::text",
+		"webhook_deliveries_http":      "((category)::text = 'http'::text) = (status_code IS NOT NULL)",
 		"webhook_deliveries_id_format": "(id)::text ~ '^whd_[a-z2-7]{26}$'::text",
 		"webhook_deliveries_outcome":   "(outcome)::text = ANY (ARRAY['success'::text, 'failure'::text])",
+		"webhook_deliveries_seq":       "seq > 0",
 		"webhook_deliveries_status":    "(status_code IS NULL) OR ((status_code >= 100) AND (status_code <= 599))",
+		"webhook_deliveries_success":   "((outcome)::text <> 'success'::text) OR ((status_code >= 200) AND (status_code <= 299))",
 	}
 	WebhookEndpointsTable.ForeignKeys[0].RefTable = TenantsTable
 	WebhookEndpointsTable.Annotation = &entsql.Annotation{}
 	WebhookEndpointsTable.Annotation.Checks = map[string]string{
-		"webhook_endpoints_disabled":  "enabled OR (disabled_reason IS NOT NULL)",
-		"webhook_endpoints_events":    "(jsonb_typeof(events) = 'array'::text) AND (jsonb_array_length(events) > 0)",
+		"webhook_endpoints_disabled":  "(enabled = (disabled_reason IS NULL)) AND ((disabled_reason IS NULL) OR (btrim((disabled_reason)::text) <> ''::text))",
+		"webhook_endpoints_events":    "(jsonb_typeof(events) = 'array'::text) AND (jsonb_array_length(events) > 0) AND (events <@ '[\"license.issued\", \"license.revoked\", \"license.suspended\", \"license.reinstated\", \"activation.created\", \"activation.deactivated\"]'::jsonb)",
 		"webhook_endpoints_id_format": "(id)::text ~ '^whe_[a-z2-7]{26}$'::text",
 		"webhook_endpoints_previous":  "(previous_secret_ciphertext IS NULL) = (previous_secret_until IS NULL)",
 	}

@@ -85,19 +85,9 @@ func EventID(v string) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldEQ(FieldEventID, v))
 }
 
-// EventType applies equality check predicate on the "event_type" field. It's identical to EventTypeEQ.
-func EventType(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldEQ(FieldEventType, v))
-}
-
 // Attempt applies equality check predicate on the "attempt" field. It's identical to AttemptEQ.
 func Attempt(v int) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldEQ(FieldAttempt, v))
-}
-
-// Category applies equality check predicate on the "category" field. It's identical to CategoryEQ.
-func Category(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldEQ(FieldCategory, v))
 }
 
 // StatusCode applies equality check predicate on the "status_code" field. It's identical to StatusCodeEQ.
@@ -351,68 +341,23 @@ func EventIDContainsFold(v string) predicate.WebhookDelivery {
 }
 
 // EventTypeEQ applies the EQ predicate on the "event_type" field.
-func EventTypeEQ(v string) predicate.WebhookDelivery {
+func EventTypeEQ(v EventType) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldEQ(FieldEventType, v))
 }
 
 // EventTypeNEQ applies the NEQ predicate on the "event_type" field.
-func EventTypeNEQ(v string) predicate.WebhookDelivery {
+func EventTypeNEQ(v EventType) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldNEQ(FieldEventType, v))
 }
 
 // EventTypeIn applies the In predicate on the "event_type" field.
-func EventTypeIn(vs ...string) predicate.WebhookDelivery {
+func EventTypeIn(vs ...EventType) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldIn(FieldEventType, vs...))
 }
 
 // EventTypeNotIn applies the NotIn predicate on the "event_type" field.
-func EventTypeNotIn(vs ...string) predicate.WebhookDelivery {
+func EventTypeNotIn(vs ...EventType) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldNotIn(FieldEventType, vs...))
-}
-
-// EventTypeGT applies the GT predicate on the "event_type" field.
-func EventTypeGT(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldGT(FieldEventType, v))
-}
-
-// EventTypeGTE applies the GTE predicate on the "event_type" field.
-func EventTypeGTE(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldGTE(FieldEventType, v))
-}
-
-// EventTypeLT applies the LT predicate on the "event_type" field.
-func EventTypeLT(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldLT(FieldEventType, v))
-}
-
-// EventTypeLTE applies the LTE predicate on the "event_type" field.
-func EventTypeLTE(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldLTE(FieldEventType, v))
-}
-
-// EventTypeContains applies the Contains predicate on the "event_type" field.
-func EventTypeContains(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldContains(FieldEventType, v))
-}
-
-// EventTypeHasPrefix applies the HasPrefix predicate on the "event_type" field.
-func EventTypeHasPrefix(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldHasPrefix(FieldEventType, v))
-}
-
-// EventTypeHasSuffix applies the HasSuffix predicate on the "event_type" field.
-func EventTypeHasSuffix(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldHasSuffix(FieldEventType, v))
-}
-
-// EventTypeEqualFold applies the EqualFold predicate on the "event_type" field.
-func EventTypeEqualFold(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldEqualFold(FieldEventType, v))
-}
-
-// EventTypeContainsFold applies the ContainsFold predicate on the "event_type" field.
-func EventTypeContainsFold(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldContainsFold(FieldEventType, v))
 }
 
 // AttemptEQ applies the EQ predicate on the "attempt" field.
@@ -476,68 +421,23 @@ func OutcomeNotIn(vs ...Outcome) predicate.WebhookDelivery {
 }
 
 // CategoryEQ applies the EQ predicate on the "category" field.
-func CategoryEQ(v string) predicate.WebhookDelivery {
+func CategoryEQ(v Category) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldEQ(FieldCategory, v))
 }
 
 // CategoryNEQ applies the NEQ predicate on the "category" field.
-func CategoryNEQ(v string) predicate.WebhookDelivery {
+func CategoryNEQ(v Category) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldNEQ(FieldCategory, v))
 }
 
 // CategoryIn applies the In predicate on the "category" field.
-func CategoryIn(vs ...string) predicate.WebhookDelivery {
+func CategoryIn(vs ...Category) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldIn(FieldCategory, vs...))
 }
 
 // CategoryNotIn applies the NotIn predicate on the "category" field.
-func CategoryNotIn(vs ...string) predicate.WebhookDelivery {
+func CategoryNotIn(vs ...Category) predicate.WebhookDelivery {
 	return predicate.WebhookDelivery(sql.FieldNotIn(FieldCategory, vs...))
-}
-
-// CategoryGT applies the GT predicate on the "category" field.
-func CategoryGT(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldGT(FieldCategory, v))
-}
-
-// CategoryGTE applies the GTE predicate on the "category" field.
-func CategoryGTE(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldGTE(FieldCategory, v))
-}
-
-// CategoryLT applies the LT predicate on the "category" field.
-func CategoryLT(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldLT(FieldCategory, v))
-}
-
-// CategoryLTE applies the LTE predicate on the "category" field.
-func CategoryLTE(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldLTE(FieldCategory, v))
-}
-
-// CategoryContains applies the Contains predicate on the "category" field.
-func CategoryContains(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldContains(FieldCategory, v))
-}
-
-// CategoryHasPrefix applies the HasPrefix predicate on the "category" field.
-func CategoryHasPrefix(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldHasPrefix(FieldCategory, v))
-}
-
-// CategoryHasSuffix applies the HasSuffix predicate on the "category" field.
-func CategoryHasSuffix(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldHasSuffix(FieldCategory, v))
-}
-
-// CategoryEqualFold applies the EqualFold predicate on the "category" field.
-func CategoryEqualFold(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldEqualFold(FieldCategory, v))
-}
-
-// CategoryContainsFold applies the ContainsFold predicate on the "category" field.
-func CategoryContainsFold(v string) predicate.WebhookDelivery {
-	return predicate.WebhookDelivery(sql.FieldContainsFold(FieldCategory, v))
 }
 
 // StatusCodeEQ applies the EQ predicate on the "status_code" field.
