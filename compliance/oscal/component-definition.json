@@ -678,21 +678,29 @@
               {
                 "uuid": "5239a180-3516-5d95-a141-14bb3e0c2403",
                 "control-id": "cm-8",
-                "description": "An SBOM for every release.",
+                "description": "Every release publishes SPDX SBOMs: one for the server binaries (a release asset) and one for each image, standard and -fips. Each is attested to the release artifact in GitHub's attestation store (Sigstore), so gh attestation verify ties it to that exact build. go.mod and go.sum pin the Go dependencies, package-lock.json the dashboard's.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "implemented"
                   }
                 ],
                 "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/release.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
+                    "rel": "reference"
+                  },
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/go.mod",
                     "rel": "reference"
                   }
                 ],
-                "remarks": "No release pipeline yet (Roadmap v0.1: signed releases + SBOM + SLSA provenance). go.mod and go.sum list the Go dependencies."
+                "remarks": "The chart has provenance but no SBOM of its own: it holds templates, and the images it deploys carry theirs."
               },
               {
                 "uuid": "21b9d3a2-153b-5d0a-a776-87f258ac0efd",
@@ -1340,7 +1348,7 @@
                     "text": "TestFIPSModeWhenRequested"
                   }
                 ],
-                "remarks": "The default build and image are not FIPS (GOFIPS140=off). No -fips image is published yet (no release pipeline; Roadmap v0.1: FIPS build, -fips images); build one with docker build --build-arg GOFIPS140=certified."
+                "remarks": "The default build and image are not FIPS (GOFIPS140=off). Every release also publishes signed -fips images (ghcr.io/licenseforge/licenseforge:<version>-fips, linux/amd64 and linux/arm64) built with GOFIPS140=certified."
               },
               {
                 "uuid": "28e4b998-cefd-58b2-b44c-7ac221413101",
@@ -1440,7 +1448,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "No release pipeline in main yet, so fixes can't ship as releases (Roadmap v0.1: signed releases). Only the latest minor release gets fixes until 1.0."
+                "remarks": "Fixes ship as signed releases (release.yml). Only the latest minor release gets fixes until 1.0."
               },
               {
                 "uuid": "3b223228-e2dc-5635-a8ba-8fcb516abfc3",
@@ -1594,15 +1602,25 @@
               {
                 "uuid": "189020f1-6f8e-5f9c-a590-a2feef62a61d",
                 "control-id": "sr-4",
-                "description": "SLSA provenance and SBOM generated in CI for every release.",
+                "description": "SLSA build provenance for every release artifact (images, chart, binaries), attested in GitHub's attestation store with Sigstore. One job builds everything with a read-only token; the publish jobs build nothing, they push, sign and attest what it made, so the attested digest is the built one.",
                 "props": [
                   {
                     "name": "implementation-status",
                     "ns": "https://licenseforge.io/ns/oscal",
-                    "value": "planned"
+                    "value": "implemented"
                   }
                 ],
-                "remarks": "No release pipeline yet (Roadmap v0.1: signed releases + SBOM + SLSA provenance)."
+                "remarks": "Provenance is from GitHub-hosted runners (SLSA Build L2-style); no hermetic or reproducible builds yet.",
+                "links": [
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/release.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
+                    "rel": "reference"
+                  }
+                ]
               },
               {
                 "uuid": "6e02511f-677f-518f-a809-94d3e788d566",
