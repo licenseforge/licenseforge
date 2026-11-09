@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
@@ -311,31 +312,25 @@ func TestReturnRacesAFree(t *testing.T) {
 }
 
 // A burst of requests for one machine can't push iat (and exp) ahead of
-// the clock: each file is newer than the last, at most a second ahead;
-// beyond that, ErrTooSoon.
+// the clock: each file is newer than the last and at most a second ahead
+// of the database clock; the burst waits instead.
 func TestOfflineBurstStaysOnTheClock(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	is := f.issue(t, "offline")
 	machine := fp()
 	var last time.Time
-	soon := 0
-	for i := range 12 {
+	for i := range 4 {
 		got, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, func(r *licensefile.Request) { r.Nonce[0] = byte(i) }))
-		if errors.Is(err, ErrTooSoon) {
-			soon++
-			continue
-		}
 		if err != nil {
 			t.Fatal(err)
 		}
+		var now time.Time
+		f.tx(t, f.a, func(tx *ent.Tx) (err error) { now, err = licenses.DBNow(ctx, tx); return })
 		iat := got.Claims.IssuedAt
-		if !iat.After(last) || iat.After(time.Now().Add(time.Second)) {
-			t.Fatalf("file %d: iat %v after %v, now %v", i, iat, last, time.Now())
+		if !iat.After(last) || iat.After(now.Add(time.Second)) {
+			t.Fatalf("file %d: iat %v after %v, database clock %v", i, iat, last, now)
 		}
 		last = iat
-	}
-	if soon == 0 {
-		t.Error("12 requests within a few seconds were all issued")
 	}
 }

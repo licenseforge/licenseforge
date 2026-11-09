@@ -1143,3 +1143,25 @@ func TestReturnOfflineSeat(t *testing.T) {
 	ob, _ := json.Marshal(map[string]string{"receipt": other})
 	a.do(t, "POST", p, string(ob), admin).problem(t, 404, "not_found")
 }
+
+// A renewal within the second of the last file, with an Idempotency-Key,
+// waits for the next second instead of storing a refusal.
+func TestOfflineRenewalBurst(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "offline")
+	machine := newFP()
+	admin := a.session(t, a.adminA, true)
+	p := Prefix + "/tenants/" + a.a.Slug + "/activation-requests"
+	for i := range 3 {
+		text, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.a.ID, Product: "db", Key: is.Key,
+			Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: machine}, FPSource: "machine-id",
+			Nonce: bytes.Repeat([]byte{byte(i)}, 16), Created: time.Unix(1_800_000_000, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]string{"request": text})
+		if r := a.do(t, "POST", p, string(b), admin, header("Idempotency-Key", fmt.Sprintf("burst-%d", i))); r.code != 201 {
+			t.Fatalf("request %d: %d %s", i, r.code, r.raw)
+		}
+	}
+}

@@ -847,8 +847,7 @@ paths:
         machine's seat (seat limits and moves as online, ADR-0034); a machine
         activated online answers `online_seat` (409) until it deactivates.
         Each file of a machine is newer than the last, to the second: a
-        request within a second of the last file answers `offline_too_soon`
-        (409); retry.
+        request within a second of the last file waits for the next one.
         The file's `exp` is the license's expiry, capped at now +
         `max_offline_seconds`; renewal is a new request from that machine.
         Audited with the request's hash, never its content. With

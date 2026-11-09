@@ -26,7 +26,7 @@ var ErrOffline = errors.New("activations: the plan doesn't allow offline use")
 // offline, so online deactivate can't free a seat whose file is out.
 var ErrOnlineSeat = errors.New("activations: the machine is activated online; deactivate it there first")
 
-var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline, ErrOnlineSeat, ErrTooSoon}
+var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline, ErrOnlineSeat}
 
 // Offline answers an offline activation request (ADR-0043): the lfreq1 text
 // an air-gapped machine wrote, carried in by p (activation:offline on the
@@ -293,15 +293,13 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID, FileSHA256: h}, nil
 }
 
-// ErrTooSoon: a file was issued for this machine within the last second;
-// the next one must be newer to the second (iat). Retry in a second.
-var ErrTooSoon = errors.New("activations: a file was just issued for this machine; retry in a second")
-
 // after returns now, or the second after the latest offline file of
 // licenseID on fingerprint if that isn't earlier: last_seen_at of an
 // offline seat is only ever set when a file is issued (to at least its iat).
-// The next file is at most the next second; beyond that, ErrTooSoon, so a
-// burst of requests can't push iat (and exp) ahead of the clock.
+// The next file is at most the next second of the clock; beyond that it
+// waits (under the license lock, at most about a second), so a burst of
+// requests can't push iat (and exp) ahead of the clock: they come out a
+// second apart.
 func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now time.Time) (time.Time, error) {
 	var last []struct {
 		Max *time.Time `json:"max"`
@@ -312,11 +310,17 @@ func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now t
 		return now, err
 	}
 	next := last[0].Max.UTC().Truncate(time.Second).Add(time.Second)
-	switch {
-	case !next.After(now):
+	if !next.After(now) {
 		return now, nil
-	case next.After(now.UTC().Truncate(time.Second).Add(time.Second)):
-		return time.Time{}, ErrTooSoon
+	}
+	if wait := next.Add(-time.Second).Sub(now); wait > 0 { // until next is the clock's next second
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		case <-t.C:
+		}
 	}
 	return next, nil
 }
