@@ -188,7 +188,7 @@ func (s Service) grant(ctx context.Context, tx *ent.Tx, req Request, activate bo
 			return g, err
 		}
 		var move bool
-		if g.actID, move, err = s.create(ctx, tx, l, req, binding, now); err != nil {
+		if g.actID, move, err = s.create(ctx, tx, l, req, binding, activation.ModeOnline, now); err != nil {
 			return g, err
 		}
 		if move {
@@ -318,7 +318,7 @@ func (s Service) Recheck(ctx context.Context, tx *ent.Tx, req Request) error {
 // a move. A move increments rehost_count and is refused past max_rehosts
 // (unlimited when nil). A fingerprint seen before (uninstall and reinstall on
 // the same machine) never counts again.
-func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Request, binding activation.Binding, now time.Time) (id string, move bool, err error) {
+func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Request, binding activation.Binding, mode activation.Mode, now time.Time) (id string, move bool, err error) {
 	u := tx.License.UpdateOneID(l.ID).SetUpdatedAt(now)
 	changed := false
 	if l.MaxActivations != nil {
@@ -363,7 +363,7 @@ func (s Service) create(ctx context.Context, tx *ent.Tx, l *ent.License, req Req
 		}
 	}
 	a, err := tx.Activation.Create().SetTenantID(l.TenantID).SetLicenseID(l.ID).SetFingerprint(req.Fingerprint).
-		SetFpSource(req.Source).SetBinding(binding).SetMode(activation.ModeOnline).
+		SetFpSource(req.Source).SetBinding(binding).SetMode(mode).
 		SetNillableHostname(nilIfEmpty(req.Hostname)).SetNillableAppVersion(nilIfEmpty(req.AppVersion)).
 		SetNillableSdkVersion(nilIfEmpty(req.SDKVersion)).SetFirstSeenAt(now).SetLastSeenAt(now).SetCreatedAt(now).SetUpdatedAt(now).Save(ctx) // one clock for the row
 	if err != nil {

@@ -1,4 +1,4 @@
-h1:5tbq7NcVeVGrEavfzVJ6YevK3/33ZsBthvYjUSZpKzQ=
+h1:MQoHzfUCFzq+NIeu8i7PrkApegNV7mjUAO9P1jfm+fw=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -43,3 +43,5 @@ h1:5tbq7NcVeVGrEavfzVJ6YevK3/33ZsBthvYjUSZpKzQ=
 20261108170000_insert_initial_state_security.sql h1:nRaU6nxvz6u4k5TtZOTLpvdIXcbN27LjsZ8ytNIhi9g=
 20261108204112_licenses_product_status_index.sql h1:ST6Kd/FVI+C/3Z8IZdN4KWpaKVrDRXAFYRKuM3YslX4=
 20261108204113_licenses_created_index.sql h1:vlJhMkrUqD93r6LStINQEOqIJeMVt+P9olKnzn2j10k=
+20261108213720_offline_activation.sql h1:KcwqpVyEzPBWKXHguBdAyqoet0vwVNzGIVVWpkg0DlQ=
+20261108213721_offline_activation_security.sql h1:apommjEmqNzJzK0psifRdLytrKlk8vn4KNSDkOVmlYc=

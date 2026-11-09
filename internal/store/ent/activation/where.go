@@ -120,6 +120,11 @@ func DeactivatedAt(v time.Time) predicate.Activation {
 	return predicate.Activation(sql.FieldEQ(FieldDeactivatedAt, v))
 }
 
+// OfflineFileSha256 applies equality check predicate on the "offline_file_sha256" field. It's identical to OfflineFileSha256EQ.
+func OfflineFileSha256(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldEQ(FieldOfflineFileSha256, v))
+}
+
 // TenantIDEQ applies the EQ predicate on the "tenant_id" field.
 func TenantIDEQ(v string) predicate.Activation {
 	return predicate.Activation(sql.FieldEQ(FieldTenantID, v))
@@ -808,6 +813,81 @@ func DeactivatedAtIsNil() predicate.Activation {
 // DeactivatedAtNotNil applies the NotNil predicate on the "deactivated_at" field.
 func DeactivatedAtNotNil() predicate.Activation {
 	return predicate.Activation(sql.FieldNotNull(FieldDeactivatedAt))
+}
+
+// OfflineFileSha256EQ applies the EQ predicate on the "offline_file_sha256" field.
+func OfflineFileSha256EQ(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldEQ(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256NEQ applies the NEQ predicate on the "offline_file_sha256" field.
+func OfflineFileSha256NEQ(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldNEQ(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256In applies the In predicate on the "offline_file_sha256" field.
+func OfflineFileSha256In(vs ...string) predicate.Activation {
+	return predicate.Activation(sql.FieldIn(FieldOfflineFileSha256, vs...))
+}
+
+// OfflineFileSha256NotIn applies the NotIn predicate on the "offline_file_sha256" field.
+func OfflineFileSha256NotIn(vs ...string) predicate.Activation {
+	return predicate.Activation(sql.FieldNotIn(FieldOfflineFileSha256, vs...))
+}
+
+// OfflineFileSha256GT applies the GT predicate on the "offline_file_sha256" field.
+func OfflineFileSha256GT(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldGT(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256GTE applies the GTE predicate on the "offline_file_sha256" field.
+func OfflineFileSha256GTE(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldGTE(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256LT applies the LT predicate on the "offline_file_sha256" field.
+func OfflineFileSha256LT(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldLT(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256LTE applies the LTE predicate on the "offline_file_sha256" field.
+func OfflineFileSha256LTE(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldLTE(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256Contains applies the Contains predicate on the "offline_file_sha256" field.
+func OfflineFileSha256Contains(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldContains(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256HasPrefix applies the HasPrefix predicate on the "offline_file_sha256" field.
+func OfflineFileSha256HasPrefix(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldHasPrefix(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256HasSuffix applies the HasSuffix predicate on the "offline_file_sha256" field.
+func OfflineFileSha256HasSuffix(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldHasSuffix(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256IsNil applies the IsNil predicate on the "offline_file_sha256" field.
+func OfflineFileSha256IsNil() predicate.Activation {
+	return predicate.Activation(sql.FieldIsNull(FieldOfflineFileSha256))
+}
+
+// OfflineFileSha256NotNil applies the NotNil predicate on the "offline_file_sha256" field.
+func OfflineFileSha256NotNil() predicate.Activation {
+	return predicate.Activation(sql.FieldNotNull(FieldOfflineFileSha256))
+}
+
+// OfflineFileSha256EqualFold applies the EqualFold predicate on the "offline_file_sha256" field.
+func OfflineFileSha256EqualFold(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldEqualFold(FieldOfflineFileSha256, v))
+}
+
+// OfflineFileSha256ContainsFold applies the ContainsFold predicate on the "offline_file_sha256" field.
+func OfflineFileSha256ContainsFold(v string) predicate.Activation {
+	return predicate.Activation(sql.FieldContainsFold(FieldOfflineFileSha256, v))
 }
 
 // HasLicense applies the HasEdge predicate on the "license" edge.

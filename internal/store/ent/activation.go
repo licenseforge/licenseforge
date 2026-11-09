@@ -46,6 +46,8 @@ type Activation struct {
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 	// DeactivatedAt holds the value of the "deactivated_at" field.
 	DeactivatedAt *time.Time `json:"deactivated_at,omitempty"`
+	// OfflineFileSha256 holds the value of the "offline_file_sha256" field.
+	OfflineFileSha256 *string `json:"offline_file_sha256,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ActivationQuery when eager-loading is set.
 	Edges        ActivationEdges `json:"edges"`
@@ -77,7 +79,7 @@ func (*Activation) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case activation.FieldID, activation.FieldTenantID, activation.FieldLicenseID, activation.FieldFingerprint, activation.FieldFpSource, activation.FieldBinding, activation.FieldMode, activation.FieldHostname, activation.FieldAppVersion, activation.FieldSdkVersion:
+		case activation.FieldID, activation.FieldTenantID, activation.FieldLicenseID, activation.FieldFingerprint, activation.FieldFpSource, activation.FieldBinding, activation.FieldMode, activation.FieldHostname, activation.FieldAppVersion, activation.FieldSdkVersion, activation.FieldOfflineFileSha256:
 			values[i] = new(sql.NullString)
 		case activation.FieldCreatedAt, activation.FieldUpdatedAt, activation.FieldFirstSeenAt, activation.FieldLastSeenAt, activation.FieldDeactivatedAt:
 			values[i] = new(sql.NullTime)
@@ -190,6 +192,13 @@ func (_m *Activation) assignValues(columns []string, values []any) error {
 				_m.DeactivatedAt = new(time.Time)
 				*_m.DeactivatedAt = value.Time
 			}
+		case activation.FieldOfflineFileSha256:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field offline_file_sha256", values[i])
+			} else if value.Valid {
+				_m.OfflineFileSha256 = new(string)
+				*_m.OfflineFileSha256 = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -279,6 +288,11 @@ func (_m *Activation) String() string {
 	if v := _m.DeactivatedAt; v != nil {
 		builder.WriteString("deactivated_at=")
 		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.OfflineFileSha256; v != nil {
+		builder.WriteString("offline_file_sha256=")
+		builder.WriteString(*v)
 	}
 	builder.WriteByte(')')
 	return builder.String()
