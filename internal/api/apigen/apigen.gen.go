@@ -1312,6 +1312,9 @@ type PlatformOwnerInvite struct {
 type PlatformTenant struct {
 	CreatedAt time.Time `json:"created_at"`
 
+	// HasMembers Whether anyone has joined (an owner first). Without members, a platform admin may re-issue the owner invitation.
+	HasMembers bool `json:"has_members"`
+
 	// Id Example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1
 	Id string `json:"id"`
 

@@ -1990,13 +1990,14 @@ components:
         next_cursor: { type: string, description: Absent on the last page. }
     PlatformTenant:
       type: object
-      required: [id, slug, name, mfa_policy, created_at]
+      required: [id, slug, name, mfa_policy, created_at, has_members]
       properties:
         id: { type: string, example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         slug: { type: string }
         name: { type: string }
         mfa_policy: { $ref: "#/components/schemas/MfaPolicy" }
         created_at: { type: string, format: date-time }
+        has_members: { type: boolean, description: "Whether anyone has joined (an owner first). Without members, a platform admin may re-issue the owner invitation." }
     PlatformTenantPage:
       type: object
       required: [items]

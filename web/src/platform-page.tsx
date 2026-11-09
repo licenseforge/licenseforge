@@ -49,9 +49,12 @@ export function PlatformPage() {
                   <td className={td}>{mfaLabel(tn.mfa_policy)}</td>
                   <td className={td}>{date.format(new Date(tn.created_at))}</td>
                   <td className={`${td} whitespace-nowrap text-right`}>
-                    <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name, slug: tn.slug })} onClick={() => setReinviting(tn)}>
-                      {t("platform.reinvite")}
-                    </Button>
+                    {/* only before anyone joined: then the tenant's owners invite (ADR-0042) */}
+                    {!tn.has_members && (
+                      <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name, slug: tn.slug })} onClick={() => setReinviting(tn)}>
+                        {t("platform.reinvite")}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -176,6 +179,7 @@ function InviteLink({ created, onClose }: { created: PlatformTenantCreated; onCl
 
 /** A new owner invite for a tenant without an owner (ADR-0042, amended). */
 function ReinviteDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: () => void }) {
+  const qc = useQueryClient();
   const [created, setCreated] = useState<PlatformTenantCreated | null>(null); // the link token lives here only
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -192,6 +196,8 @@ function ReinviteDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: 
     } catch (err) {
       onAuthError(err);
       setError(err);
+      // Joined meanwhile: the list's has_members is stale, so is the row's action.
+      if (err instanceof ApiError && err.code === "conflict") void qc.invalidateQueries({ queryKey: platformTenantsQuery.queryKey });
     } finally {
       setBusy(false);
     }
