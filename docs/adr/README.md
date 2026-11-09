@@ -47,3 +47,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0041](0041-end-to-end-tests.md) | End-to-end tests | accepted |
 | [ADR-0042](0042-platform-tenant-onboarding.md) | Platform tenant onboarding | accepted |
 | [ADR-0043](0043-offline-activation-and-deactivation-receipts.md) | Offline activation and deactivation receipts | accepted |
+| [ADR-0044](0044-outbound-webhooks.md) | Outbound webhooks | accepted |
