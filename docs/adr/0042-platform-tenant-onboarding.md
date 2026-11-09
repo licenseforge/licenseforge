@@ -21,6 +21,12 @@ A tenant can't be created through the product: no route, no command, no screen. 
 - **Headless installs:** `licenseforge tenant create --slug … --name … --owner-email …` does the same on the platform login (`LICENSEFORGE_PLATFORM_DATABASE_URL`). It records the system as actor (`via: cli`) and prints the invite path once, to be prefixed with the public URL.
 - **Dashboard:** platform admins get a Tenants screen (list, create, the invite link shown once). The session endpoint says whether the user is a platform admin, so the screen appears only for them.
 
+### Re-issuing the owner invitation (amended 2026-11-09)
+- `POST /api/v1/platform/tenants/{id}/owner-invitation` with `{owner_email}` (the same or a corrected address), and `licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E` on the platform login: a new owner invitation, the token in the response only, as at creation. Needed when the create response was lost or the invitation expired: until then the tenant had no way in (the slug is taken, the admin isn't a member).
+- **Only while the tenant has no owner**: once an owner exists, the tenant runs its own invitations (409 `conflict`). Platform admins never add members to a tenant that has one, keeping ADR-0019's separation.
+- Every pending owner invitation of the tenant is revoked in the same transaction, so a lost link can't be used afterwards. The pending invitations are locked before the owner check, the lock acceptance takes, so a concurrent acceptance either wins (409) or finds its invitation revoked.
+- Audit: `tenant.owner_invitation` on the platform chain (the tenant, the number revoked); on the tenant's chain `invitation.revoke` for each revoked invitation and `invitation.create` for the new one (never the email). Refusals on the platform chain.
+
 ## Consequences
 - Installs, the hosted offering and the e2e journeys onboard tenants through the product. The SQL seed in `e2e/env` goes.
 - The platform MFA policy now has something to gate.

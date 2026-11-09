@@ -296,3 +296,33 @@ func TestPlatformRefusalLookupUsesIndex(t *testing.T) {
 		}
 	}
 }
+
+// A lost or expired first invitation: the platform admin re-issues it
+// (ADR-0042, amended) until the tenant has an owner.
+func TestPlatformReinviteOwner(t *testing.T) {
+	f := setup(t)
+	admin := f.platformAdmin(t)
+	as := f.session(t, admin, true)
+	slug := "reinvite-" + strings.ToLower(ids.New("x")[2:10])
+	r := f.do(t, "POST", Prefix+"/platform/tenants", fmt.Sprintf(`{"slug":%q,"name":"Reinvite Co","owner_email":"typo@reinvite.example"}`, slug), as)
+	if r.code != 201 {
+		t.Fatalf("create: %d %s", r.code, r.raw)
+	}
+	lost := r.body["invitation"].(map[string]any)["token"]
+	p := Prefix + "/platform/tenants/" + slug + "/owner-invitation"
+	again := f.do(t, "POST", p, `{"owner_email":"owner@reinvite.example"}`, as)
+	inv, _ := again.body["invitation"].(map[string]any)
+	if again.code != 201 || inv["email"] != "owner@reinvite.example" || inv["token"] == lost || again.body["tenant"].(map[string]any)["slug"] != slug {
+		t.Fatalf("re-issue: %d %s", again.code, again.raw)
+	}
+	f.do(t, "POST", Prefix+"/invitations/accept", fmt.Sprintf(`{"token":%q}`, lost), f.session(t, f.newUser(t, "typo@reinvite.example"), true)).problem(t, 422, "validation_failed")
+	owner := f.newUser(t, "owner@reinvite.example")
+	if r := f.do(t, "POST", Prefix+"/invitations/accept", fmt.Sprintf(`{"token":%q}`, inv["token"]), f.session(t, owner, true)); r.code != 200 {
+		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "POST", p, `{"owner_email":"x@reinvite.example"}`, as).problem(t, 409, "conflict"); !strings.Contains(fmt.Sprint(r["detail"]), "has an owner") {
+		t.Errorf("with an owner: %v", r)
+	}
+	f.do(t, "POST", Prefix+"/platform/tenants/no-such-tenant/owner-invitation", `{"owner_email":"a@b.example"}`, as).problem(t, 404, "not_found")
+	f.do(t, "POST", p, `{"owner_email":"x@reinvite.example"}`, f.session(t, owner, true)).problem(t, 403, "forbidden")
+}

@@ -709,6 +709,41 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /platform/tenants/{id}/owner-invitation:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The tenant's ID or slug.
+        schema: { type: string, maxLength: 63 }
+    post:
+      operationId: reinvitePlatformTenantOwner
+      summary: Give a tenant without an owner a new owner invitation (ADR-0042).
+      description: |
+        For a tenant whose first owner invitation was lost or expired. Platform
+        admins only. Every pending owner invitation of the tenant is revoked
+        and a new one is created for owner_email (the same or a corrected
+        address); its token is in this response only. Once the tenant has an
+        owner it runs its own invitations: 409 `conflict`. An unknown tenant
+        is 404. Audited on the platform chain and the tenant's chain.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlatformOwnerInvite" }
+      responses:
+        "201":
+          description: The tenant and the new invitation, its token shown once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlatformTenantCreated" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /activation/tenants/{tenant}/activate:
     parameters:
       - $ref: "#/components/parameters/ActivationTenant"
@@ -1976,6 +2011,11 @@ components:
       properties:
         slug: { type: string, maxLength: 63, description: "Lowercase letters and digits joined by single dashes, e.g. acme. It names the tenant in URLs and can't change." }
         name: { type: string, maxLength: 200 }
+        owner_email: { type: string, maxLength: 320, description: "Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email." }
+    PlatformOwnerInvite:
+      type: object
+      required: [owner_email]
+      properties:
         owner_email: { type: string, maxLength: 320, description: "Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email." }
     PlatformTenantCreated:
       type: object
