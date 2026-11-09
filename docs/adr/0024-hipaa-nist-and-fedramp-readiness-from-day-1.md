@@ -43,7 +43,7 @@ So "from day 1" means: **the product is built and documented so that a FedRAMP M
 
 ### Secure development (SSDF, SR, SI)
 - SSDF practice mapping in the repo; DCO sign-off enforced in CI, branch protection, code review, CodeQL, dependency scanning, secret scanning (already live on GitHub).
-- SBOM + SLSA provenance + cosign signatures on every release ([ADR-0021 Certification readiness](0021-certification-readiness.md)).
+- SBOM + SLSA provenance + cosign signatures on every release: images, chart, binaries; SDKs use their ecosystem's mechanism ([ADR-0021 Certification readiness](0021-certification-readiness.md), amended 2026-11-09).
 - **Vulnerability remediation SLAs aligned to FedRAMP continuous monitoring**: Critical/High 30 days, Moderate 90 days, Low 180 days. Published in the org-wide `SECURITY.md` (licenseforge/.github).
 
 ### Documentation as code
