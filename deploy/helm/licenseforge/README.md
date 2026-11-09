@@ -44,6 +44,8 @@ succeeds. The Job's deadline (`migrate.activeDeadlineSeconds`, 280s) is below
 Helm's default `--timeout` of 5m; raise both together for long migrations. Set `image.digest` to pin the exact (signed) image, and
 `image.tag=<version>-fips` for the FIPS build.
 
+The Secrets can come from a secret manager (External Secrets Operator, Secrets Store CSI Driver): see [Secret managers](../../../docs/secret-managers.md).
+
 ## Dashboard login (OIDC)
 
 ```sh
