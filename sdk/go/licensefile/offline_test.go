@@ -20,11 +20,18 @@ type offlineCase struct {
 	Want   map[string]any `json:"want,omitempty"`
 }
 
+type fileHashCase struct {
+	Name       string `json:"name"`
+	Input      string `json:"input"` // a license file as carried
+	FileSHA256 string `json:"file_sha256"`
+}
+
 type offlineVectors struct {
-	Format      string        `json:"format"`
-	Note        string        `json:"note"`
-	Conventions []string      `json:"conventions"`
-	Cases       []offlineCase `json:"cases"`
+	Format      string         `json:"format"`
+	Note        string         `json:"note"`
+	Conventions []string       `json:"conventions"`
+	Cases       []offlineCase  `json:"cases"`
+	FileHashes  []fileHashCase `json:"file_hashes"`
 }
 
 const (
@@ -92,10 +99,23 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			req("bind_none_without_fp", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":{"type":"none"}`, "malformed"),
 			req("bind_missing", `"bind":{"type":"machine","fp":"`+vFP+`"},`, ``, "malformed"),
 			req("bind_unknown_field", `"type":"machine"`, `"type":"machine","x":"y"`, "malformed"),
-			req("fp_uppercase", vFP, strings.ToUpper(vFP[7:]), "malformed"),
+			req("fp_uppercase", vFP, "sha256:"+strings.ToUpper(vFP[7:]), "malformed"),
+			req("bind_duplicate_key", `"type":"machine"`, `"type":"machine","type":"cluster"`, "malformed"),
+			req("key_128_chars", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, strings.Repeat("K", 128), "ok"),
+			req("key_129_chars", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, strings.Repeat("K", 129), "malformed"),
+			req("key_with_del", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, `LF-ABCDE\u007f`, "malformed"),
+			req("key_non_ascii", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, `LF-ABCDÉ`, "malformed"),
+			req("tenant_256_bytes", `"tenant":"tnt_acme"`, `"tenant":"`+strings.Repeat("é", 128)+`"`, "ok"),
+			req("tenant_257_bytes", `"tenant":"tnt_acme"`, `"tenant":"`+strings.Repeat("é", 128)+`a"`, "malformed"),
+			req("tenant_lone_surrogate", `"tenant":"tnt_acme"`, `"tenant":"\ud800"`, "malformed"),
+			req("v_string", `"v":1`, `"v":"1"`, "malformed"),
+			req("v_huge", `"v":1`, `"v":123456789012345678901234567890`, "unsupported_version"),
+			req("v2_skips_field_rules", `"v":1,"tenant":"tnt_acme"`, `"v":2,"future":true`, "unsupported_version"),
+			req("created_1969", "2026-11-08T10:00:00Z", "1969-12-31T23:59:59Z", "malformed"),
 			req("fp_wrong_prefix", vFP, "md5:"+vFP[7:], "malformed"),
 			req("nonce_short", vNonce, "AAECAwQFBgcICQoLDA0O", "malformed"),
 			req("nonce_padded", vNonce, vNonce+"==", "malformed"),
+			req("nonce_with_newline", vNonce, vNonce[:10]+`\n`+vNonce[10:], "malformed"),
 			req("created_offset", "2026-11-08T10:00:00Z", "2026-11-08T10:00:00+00:00", "malformed"),
 			req("created_not_a_date", "2026-11-08T10:00:00Z", "2026-02-30T10:00:00Z", "malformed"),
 			req("hostname_empty", `"created"`, `"hostname":"","created"`, "malformed"),
@@ -109,13 +129,46 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			{Name: "wrong_prefix", Kind: "request", Input: with(t, ReceiptVersion, vReq, "", ""), Result: "malformed"},
 			{Name: "padded_base64", Kind: "request", Input: with(t, RequestVersion, vReq, "", "") + "=", Result: "malformed"},
 			{Name: "oversize", Kind: "request", Input: with(t, RequestVersion, vReq, "", "") + strings.Repeat(" ", MaxOfflineSize), Result: "malformed"},
+			{Name: "exactly_4096_bytes", Kind: "request", Input: exactly(with(t, RequestVersion, vReq, "", ""), MaxOfflineSize), Result: "ok"},
+			{Name: "armored", Kind: "request", Input: "-----BEGIN LICENSEFORGE LICENSE-----\n" + with(t, RequestVersion, vReq, "", "") + "\n-----END LICENSEFORGE LICENSE-----\n", Result: "malformed"},
+			{Name: "no_prefix", Kind: "request", Input: strings.TrimPrefix(with(t, RequestVersion, vReq, "", ""), RequestVersion+"."), Result: "malformed"},
+			{Name: "empty_body", Kind: "request", Input: RequestVersion + ".", Result: "malformed"},
 			rcpt("receipt_unknown_field", `"created"`, `"lease":"x","created"`, "malformed"),
 			rcpt("receipt_hash_uppercase", vHash, strings.ToUpper(vHash), "malformed"),
 			rcpt("receipt_hash_short", vHash, vHash[:62], "malformed"),
 			rcpt("receipt_empty_license", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":""`, "malformed"),
+			rcpt("receipt_license_128_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 128)+`"`, "ok"),
+			rcpt("receipt_license_129_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 129)+`"`, "malformed"),
+			rcpt("receipt_fp_without_prefix", `"fp":"`+vFP, `"fp":"`+vFP[7:], "malformed"),
+			rcpt("receipt_fp_uppercase", `"fp":"`+vFP, `"fp":"sha256:`+strings.ToUpper(vFP[7:]), "malformed"),
+			rcpt("receipt_fp_short", `"fp":"`+vFP, `"fp":"`+vFP[:70], "malformed"),
 			rcpt("receipt_unsupported_version", `"v":1`, `"v":3`, "unsupported_version"),
 		},
+		FileHashes: fileHashes(t),
 	}
+}
+
+// exactly pads token with spaces to n bytes.
+func exactly(token string, n int) string { return token + strings.Repeat(" ", n-len(token)) }
+
+// fileHashes: the same token, carried four ways, has one file_sha256.
+func fileHashes(t *testing.T) []fileHashCase {
+	t.Helper()
+	const token = "lf1.k1.cGF5bG9hZA.c2ln"
+	var out []fileHashCase
+	for _, c := range []struct{ name, input string }{
+		{"bare_token", token},
+		{"armored_lf", "-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n-----END LICENSEFORGE LICENSE-----\n"},
+		{"armored_crlf", "-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token + "\r\n-----END LICENSEFORGE LICENSE-----\r\n"},
+		{"bom_wrapped_trailing_blank_lines", "\uFEFF-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token[:9] + "\r\n" + token[9:] + "\r\n-----END LICENSEFORGE LICENSE-----\r\n\r\n\r\n"},
+	} {
+		h, err := FileSHA256(c.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fileHashCase{Name: c.name, Input: c.input, FileSHA256: h})
+	}
+	return out
 }
 
 func TestOfflineVectors(t *testing.T) {
@@ -142,6 +195,11 @@ func TestOfflineVectors(t *testing.T) {
 	var vf offlineVectors
 	if err := json.Unmarshal(got, &vf); err != nil {
 		t.Fatal(err)
+	}
+	for _, c := range vf.FileHashes {
+		if got, err := FileSHA256(c.Input); err != nil || got != c.FileSHA256 || got != vf.FileHashes[0].FileSHA256 {
+			t.Errorf("file hash %s: %s, %v; want %s", c.Name, got, err, c.FileSHA256)
+		}
 	}
 	for _, c := range vf.Cases {
 		var fields map[string]any
@@ -189,14 +247,14 @@ func TestOfflineVectors(t *testing.T) {
 func TestOfflineRoundTrip(t *testing.T) {
 	created := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
 	nonce := bytes.Repeat([]byte{7}, 16)
-	r := Request{Tenant: "tnt_a", Product: "p", Key: "LF-KEY", Binding: Binding{Type: BindCluster, Fingerprint: vFP}, FPSource: "kubernetes",
+	r := Request{Tenant: "tnt_a", Product: "p", Key: " LF-KEY\r\n", Binding: Binding{Type: BindCluster, Fingerprint: vFP}, FPSource: "kubernetes",
 		Nonce: nonce, Created: created, Hostname: "h", AppVersion: "1", SDKVersion: "go/1"}
 	s, err := EncodeRequest(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, err := ParseRequest(s); err != nil || got.Tenant != r.Tenant || got.Binding != r.Binding || !bytes.Equal(got.Nonce, nonce) ||
-		!got.Created.Equal(created) || got.Hostname != "h" || got.SDKVersion != "go/1" {
+		!got.Created.Equal(created) || got.Hostname != "h" || got.SDKVersion != "go/1" || got.Key != "LF-KEY" {
 		t.Errorf("request round trip: %+v, %v", got, err)
 	}
 	// The hash is the token's, whatever armor and line endings carry it.
@@ -225,10 +283,11 @@ func TestOfflineRoundTrip(t *testing.T) {
 		t.Errorf("receipt round trip: %+v, %v", got, err)
 	}
 	for name, bad := range map[string]Request{
-		"no binding":  {Tenant: "t", Product: "p", Key: "k", Nonce: nonce, Created: created},
-		"short nonce": {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce[:8], Created: created},
-		"no tenant":   {Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created},
-		"no source":   {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce, Created: created},
+		"no binding":    {Tenant: "t", Product: "p", Key: "k", Nonce: nonce, Created: created},
+		"short nonce":   {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce[:8], Created: created},
+		"no tenant":     {Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created},
+		"no source":     {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce, Created: created},
+		"invalid UTF-8": {Tenant: "t\xff", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created}, // json.Marshal would write U+FFFD
 	} {
 		if _, err := EncodeRequest(bad); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: encoded (%v)", name, err)

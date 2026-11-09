@@ -33,3 +33,6 @@ Clock rollback mitigation: SDK persists the highest timestamp seen; significant 
 ## Alternatives considered
 - **Hardware dongles**: hardware logistics, not cloud/k8s friendly.
 - **Phone-home required periodically**: defeats air-gapped.
+
+## Refined by ADR-0043 (2026-11-08)
+Request and receipt formats, offline seats and the offline file term are decided in [ADR-0043 Offline activation and deactivation receipts](0043-offline-activation-and-deactivation-receipts.md). A deactivation receipt is bound to the SHA-256 of the returned file's `lf1` token, not of its bytes.

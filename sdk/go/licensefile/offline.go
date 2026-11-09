@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Offline activation artifacts (ADR-0043, spec "Offline activation"): an
@@ -58,7 +59,7 @@ var (
 // EncodeRequest returns r as an lfreq1 token, after the checks ParseRequest
 // applies, so an SDK can't write a request the server refuses.
 func EncodeRequest(r Request) (string, error) {
-	m := map[string]any{"v": 1, "tenant": r.Tenant, "product": r.Product, "key": r.Key,
+	m := map[string]any{"v": 1, "tenant": r.Tenant, "product": r.Product, "key": stripSpace(r.Key), // as pasted: spaces and line breaks go
 		"bind":      map[string]string{"type": string(r.Binding.Type), "fp": r.Binding.Fingerprint},
 		"fp_source": r.FPSource, "nonce": b64.EncodeToString(r.Nonce), "created": r.Created.UTC().Format(timeLayout)}
 	for k, v := range map[string]string{"hostname": r.Hostname, "app_version": r.AppVersion, "sdk_version": r.SDKVersion} {
@@ -188,12 +189,9 @@ func decodeOffline(version, s string, known []string) (map[string]json.RawMessag
 	if len(s) > MaxOfflineSize {
 		return nil, malformed("larger than %d bytes", MaxOfflineSize)
 	}
-	token, err := unarmor(s)
-	if err != nil {
-		return nil, err
-	}
+	token := stripSpace(s) // no armor: an armored token fails the prefix
 	body, ok := strings.CutPrefix(token, version+".")
-	if !ok || body == "" {
+	if !ok { // an empty body fails the JSON rules
 		return nil, malformed("not an %s token", version)
 	}
 	payload, err := b64.DecodeString(body)
@@ -226,7 +224,22 @@ func decodeOffline(version, s string, known []string) (map[string]json.RawMessag
 	return m, nil
 }
 
+// stripSpace removes one leading BOM and every SP, HT, CR and LF.
+func stripSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if strings.ContainsRune(specWhitespace, r) {
+			return -1
+		}
+		return r
+	}, strings.TrimPrefix(s, "\uFEFF"))
+}
+
 func encodeOffline(version string, m map[string]any, check func(string) error) (string, error) {
+	for k, v := range m {
+		if s, ok := v.(string); ok && !utf8.ValidString(s) {
+			return "", malformed("%s is not valid UTF-8", k)
+		}
+	}
 	payload, err := json.Marshal(m) // keys sorted: one encoding per artifact
 	if err != nil {
 		return "", fmt.Errorf("licensefile: %s: %w", version, err)
@@ -272,7 +285,7 @@ func nonceAndCreated(m map[string]json.RawMessage) ([]byte, time.Time, error) {
 		return nil, time.Time{}, err
 	}
 	nonce, err := b64.DecodeString(n)
-	if err != nil || len(nonce) != nonceSize {
+	if err != nil || len(n) != 22 || len(nonce) != nonceSize { // 22: Go's decoder would skip CR and LF
 		return nil, time.Time{}, malformed("nonce must be %d bytes, base64url", nonceSize)
 	}
 	c, err := reqString(m, "created")
