@@ -224,10 +224,23 @@ func TestWebhookChecks(t *testing.T) {
 			t.Errorf("endpoint accepted: %s", name)
 		}
 	}
-	record := func(eventType, outcome, category string, status any) error {
+	recordAt := func(seq int, eventID string, attempt int, eventType, outcome, category string, status any) error {
 		_, err := f.owner.Exec(`INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, status_code, duration_ms, attempted_at)
-			VALUES ($1, $2, $3, 1, $4, $5, 1, $6, $7, $8, 10, now())`, ids.WebhookDelivery(), f.tenant, ep, ids.AuditEvent(), eventType, outcome, category, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 10, now())`, ids.WebhookDelivery(), f.tenant, ep, seq, eventID, eventType, attempt, outcome, category, status)
 		return err
+	}
+	record := func(eventType, outcome, category string, status any) error {
+		return recordAt(1, ids.AuditEvent(), 1, eventType, outcome, category, status)
+	}
+	for name, err := range map[string]error{
+		"seq 0":            recordAt(0, ids.AuditEvent(), 1, "license.issued", "failure", "timeout", nil),
+		"not an audit ID":  recordAt(1, "whatever", 1, "license.issued", "failure", "timeout", nil),
+		"attempt 9":        recordAt(1, ids.AuditEvent(), 9, "license.issued", "failure", "timeout", nil),
+		"success on a 3xx": recordAt(1, ids.AuditEvent(), 1, "license.issued", "success", "http", 302),
+	} {
+		if err == nil {
+			t.Errorf("record accepted: %s", name)
+		}
 	}
 	if err := record("license.issued", "success", "http", 204); err != nil {
 		t.Errorf("a 204: %v", err)
