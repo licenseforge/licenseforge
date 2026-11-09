@@ -1655,7 +1655,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The Go SDK isn't published yet (no sdk/go/v* tag; the licenseforge.io import path doesn't resolve). When it is, the Go checksum database protects it, like other Go modules (ADR-0021, amended): no cosign signature."
+                "remarks": "The Go SDK isn't published yet (no sdk/go/v* tag; the licenseforge.io import path doesn't resolve). When it is, the Go checksum database makes each version tamper-evident (everyone gets the same bytes) but doesn't authenticate the publisher: that rests on who can push sdk/go/v* tags (not yet covered by the release-tag ruleset) and on control of licenseforge.io's go-import meta tag (ADR-0021, amended; no cosign signature)."
               }
             ]
           }
