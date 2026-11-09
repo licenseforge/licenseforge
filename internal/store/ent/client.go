@@ -38,6 +38,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookdelivery"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookendpoint"
 
 	stdsql "database/sql"
 )
@@ -93,6 +96,12 @@ type Client struct {
 	Tenant *TenantClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
+	// WebhookCursor is the client for interacting with the WebhookCursor builders.
+	WebhookCursor *WebhookCursorClient
+	// WebhookDelivery is the client for interacting with the WebhookDelivery builders.
+	WebhookDelivery *WebhookDeliveryClient
+	// WebhookEndpoint is the client for interacting with the WebhookEndpoint builders.
+	WebhookEndpoint *WebhookEndpointClient
 }
 
 // NewClient creates a new client configured with the given options.
@@ -127,6 +136,9 @@ func (c *Client) init() {
 	c.SigningKey = NewSigningKeyClient(c.config)
 	c.Tenant = NewTenantClient(c.config)
 	c.User = NewUserClient(c.config)
+	c.WebhookCursor = NewWebhookCursorClient(c.config)
+	c.WebhookDelivery = NewWebhookDeliveryClient(c.config)
+	c.WebhookEndpoint = NewWebhookEndpointClient(c.config)
 }
 
 type (
@@ -242,6 +254,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		SigningKey:        NewSigningKeyClient(cfg),
 		Tenant:            NewTenantClient(cfg),
 		User:              NewUserClient(cfg),
+		WebhookCursor:     NewWebhookCursorClient(cfg),
+		WebhookDelivery:   NewWebhookDeliveryClient(cfg),
+		WebhookEndpoint:   NewWebhookEndpointClient(cfg),
 	}, nil
 }
 
@@ -284,6 +299,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		SigningKey:        NewSigningKeyClient(cfg),
 		Tenant:            NewTenantClient(cfg),
 		User:              NewUserClient(cfg),
+		WebhookCursor:     NewWebhookCursorClient(cfg),
+		WebhookDelivery:   NewWebhookDeliveryClient(cfg),
+		WebhookEndpoint:   NewWebhookEndpointClient(cfg),
 	}, nil
 }
 
@@ -317,7 +335,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.AuditExportCursor, c.AuditExportSink, c.Customer, c.Feature,
 		c.IdempotencyKey, c.Invitation, c.InvitationProduct, c.License, c.Membership,
 		c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin, c.Product,
-		c.Session, c.SigningKey, c.Tenant, c.User,
+		c.Session, c.SigningKey, c.Tenant, c.User, c.WebhookCursor, c.WebhookDelivery,
+		c.WebhookEndpoint,
 	} {
 		n.Use(hooks...)
 	}
@@ -331,7 +350,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.AuditExportCursor, c.AuditExportSink, c.Customer, c.Feature,
 		c.IdempotencyKey, c.Invitation, c.InvitationProduct, c.License, c.Membership,
 		c.MembershipProduct, c.Plan, c.PlanFeature, c.PlatformAdmin, c.Product,
-		c.Session, c.SigningKey, c.Tenant, c.User,
+		c.Session, c.SigningKey, c.Tenant, c.User, c.WebhookCursor, c.WebhookDelivery,
+		c.WebhookEndpoint,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -386,6 +406,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Tenant.mutate(ctx, m)
 	case *UserMutation:
 		return c.User.mutate(ctx, m)
+	case *WebhookCursorMutation:
+		return c.WebhookCursor.mutate(ctx, m)
+	case *WebhookDeliveryMutation:
+		return c.WebhookDelivery.mutate(ctx, m)
+	case *WebhookEndpointMutation:
+		return c.WebhookEndpoint.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
 	}
@@ -4092,6 +4118,54 @@ func (c *TenantClient) QueryAuditAnchors(_m *Tenant) *AuditAnchorQuery {
 	return query
 }
 
+// QueryWebhookEndpoints queries the webhook_endpoints edge of a Tenant.
+func (c *TenantClient) QueryWebhookEndpoints(_m *Tenant) *WebhookEndpointQuery {
+	query := (&WebhookEndpointClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(webhookendpoint.Table, webhookendpoint.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookEndpointsTable, tenant.WebhookEndpointsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWebhookCursors queries the webhook_cursors edge of a Tenant.
+func (c *TenantClient) QueryWebhookCursors(_m *Tenant) *WebhookCursorQuery {
+	query := (&WebhookCursorClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(webhookcursor.Table, webhookcursor.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookCursorsTable, tenant.WebhookCursorsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWebhookDeliveries queries the webhook_deliveries edge of a Tenant.
+func (c *TenantClient) QueryWebhookDeliveries(_m *Tenant) *WebhookDeliveryQuery {
+	query := (&WebhookDeliveryClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, id),
+			sqlgraph.To(webhookdelivery.Table, webhookdelivery.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookDeliveriesTable, tenant.WebhookDeliveriesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *TenantClient) Hooks() []Hook {
 	return c.hooks.Tenant
@@ -4346,21 +4420,468 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 	}
 }
 
+// WebhookCursorClient is a client for the WebhookCursor schema.
+type WebhookCursorClient struct {
+	config
+}
+
+// NewWebhookCursorClient returns a client for the WebhookCursor from the given config.
+func NewWebhookCursorClient(c config) *WebhookCursorClient {
+	return &WebhookCursorClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `webhookcursor.Hooks(f(g(h())))`.
+func (c *WebhookCursorClient) Use(hooks ...Hook) {
+	c.hooks.WebhookCursor = append(c.hooks.WebhookCursor, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `webhookcursor.Intercept(f(g(h())))`.
+func (c *WebhookCursorClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WebhookCursor = append(c.inters.WebhookCursor, interceptors...)
+}
+
+// Create returns a builder for creating a WebhookCursor entity.
+func (c *WebhookCursorClient) Create() *WebhookCursorCreate {
+	mutation := newWebhookCursorMutation(c.config, OpCreate)
+	return &WebhookCursorCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WebhookCursor entities.
+func (c *WebhookCursorClient) CreateBulk(builders ...*WebhookCursorCreate) *WebhookCursorCreateBulk {
+	return &WebhookCursorCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WebhookCursorClient) MapCreateBulk(slice any, setFunc func(*WebhookCursorCreate, int)) *WebhookCursorCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WebhookCursorCreateBulk{err: fmt.Errorf("calling to WebhookCursorClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WebhookCursorCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WebhookCursorCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WebhookCursor.
+func (c *WebhookCursorClient) Update() *WebhookCursorUpdate {
+	mutation := newWebhookCursorMutation(c.config, OpUpdate)
+	return &WebhookCursorUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WebhookCursorClient) UpdateOne(_m *WebhookCursor) *WebhookCursorUpdateOne {
+	mutation := newWebhookCursorMutation(c.config, OpUpdateOne, withWebhookCursor(_m))
+	return &WebhookCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WebhookCursorClient) UpdateOneID(id string) *WebhookCursorUpdateOne {
+	mutation := newWebhookCursorMutation(c.config, OpUpdateOne, withWebhookCursorID(id))
+	return &WebhookCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WebhookCursor.
+func (c *WebhookCursorClient) Delete() *WebhookCursorDelete {
+	mutation := newWebhookCursorMutation(c.config, OpDelete)
+	return &WebhookCursorDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WebhookCursorClient) DeleteOne(_m *WebhookCursor) *WebhookCursorDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WebhookCursorClient) DeleteOneID(id string) *WebhookCursorDeleteOne {
+	builder := c.Delete().Where(webhookcursor.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WebhookCursorDeleteOne{builder}
+}
+
+// Query returns a query builder for WebhookCursor.
+func (c *WebhookCursorClient) Query() *WebhookCursorQuery {
+	return &WebhookCursorQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWebhookCursor},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WebhookCursor entity by its id.
+func (c *WebhookCursorClient) Get(ctx context.Context, id string) (*WebhookCursor, error) {
+	return c.Query().Where(webhookcursor.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WebhookCursorClient) GetX(ctx context.Context, id string) *WebhookCursor {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a WebhookCursor.
+func (c *WebhookCursorClient) QueryTenant(_m *WebhookCursor) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(webhookcursor.Table, webhookcursor.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, webhookcursor.TenantTable, webhookcursor.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WebhookCursorClient) Hooks() []Hook {
+	return c.hooks.WebhookCursor
+}
+
+// Interceptors returns the client interceptors.
+func (c *WebhookCursorClient) Interceptors() []Interceptor {
+	return c.inters.WebhookCursor
+}
+
+func (c *WebhookCursorClient) mutate(ctx context.Context, m *WebhookCursorMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WebhookCursorCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WebhookCursorUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WebhookCursorUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WebhookCursorDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WebhookCursor mutation op: %q", m.Op())
+	}
+}
+
+// WebhookDeliveryClient is a client for the WebhookDelivery schema.
+type WebhookDeliveryClient struct {
+	config
+}
+
+// NewWebhookDeliveryClient returns a client for the WebhookDelivery from the given config.
+func NewWebhookDeliveryClient(c config) *WebhookDeliveryClient {
+	return &WebhookDeliveryClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `webhookdelivery.Hooks(f(g(h())))`.
+func (c *WebhookDeliveryClient) Use(hooks ...Hook) {
+	c.hooks.WebhookDelivery = append(c.hooks.WebhookDelivery, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `webhookdelivery.Intercept(f(g(h())))`.
+func (c *WebhookDeliveryClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WebhookDelivery = append(c.inters.WebhookDelivery, interceptors...)
+}
+
+// Create returns a builder for creating a WebhookDelivery entity.
+func (c *WebhookDeliveryClient) Create() *WebhookDeliveryCreate {
+	mutation := newWebhookDeliveryMutation(c.config, OpCreate)
+	return &WebhookDeliveryCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WebhookDelivery entities.
+func (c *WebhookDeliveryClient) CreateBulk(builders ...*WebhookDeliveryCreate) *WebhookDeliveryCreateBulk {
+	return &WebhookDeliveryCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WebhookDeliveryClient) MapCreateBulk(slice any, setFunc func(*WebhookDeliveryCreate, int)) *WebhookDeliveryCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WebhookDeliveryCreateBulk{err: fmt.Errorf("calling to WebhookDeliveryClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WebhookDeliveryCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WebhookDeliveryCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WebhookDelivery.
+func (c *WebhookDeliveryClient) Update() *WebhookDeliveryUpdate {
+	mutation := newWebhookDeliveryMutation(c.config, OpUpdate)
+	return &WebhookDeliveryUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WebhookDeliveryClient) UpdateOne(_m *WebhookDelivery) *WebhookDeliveryUpdateOne {
+	mutation := newWebhookDeliveryMutation(c.config, OpUpdateOne, withWebhookDelivery(_m))
+	return &WebhookDeliveryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WebhookDeliveryClient) UpdateOneID(id string) *WebhookDeliveryUpdateOne {
+	mutation := newWebhookDeliveryMutation(c.config, OpUpdateOne, withWebhookDeliveryID(id))
+	return &WebhookDeliveryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WebhookDelivery.
+func (c *WebhookDeliveryClient) Delete() *WebhookDeliveryDelete {
+	mutation := newWebhookDeliveryMutation(c.config, OpDelete)
+	return &WebhookDeliveryDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WebhookDeliveryClient) DeleteOne(_m *WebhookDelivery) *WebhookDeliveryDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WebhookDeliveryClient) DeleteOneID(id string) *WebhookDeliveryDeleteOne {
+	builder := c.Delete().Where(webhookdelivery.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WebhookDeliveryDeleteOne{builder}
+}
+
+// Query returns a query builder for WebhookDelivery.
+func (c *WebhookDeliveryClient) Query() *WebhookDeliveryQuery {
+	return &WebhookDeliveryQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWebhookDelivery},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WebhookDelivery entity by its id.
+func (c *WebhookDeliveryClient) Get(ctx context.Context, id string) (*WebhookDelivery, error) {
+	return c.Query().Where(webhookdelivery.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WebhookDeliveryClient) GetX(ctx context.Context, id string) *WebhookDelivery {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a WebhookDelivery.
+func (c *WebhookDeliveryClient) QueryTenant(_m *WebhookDelivery) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(webhookdelivery.Table, webhookdelivery.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, webhookdelivery.TenantTable, webhookdelivery.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WebhookDeliveryClient) Hooks() []Hook {
+	return c.hooks.WebhookDelivery
+}
+
+// Interceptors returns the client interceptors.
+func (c *WebhookDeliveryClient) Interceptors() []Interceptor {
+	return c.inters.WebhookDelivery
+}
+
+func (c *WebhookDeliveryClient) mutate(ctx context.Context, m *WebhookDeliveryMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WebhookDeliveryCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WebhookDeliveryUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WebhookDeliveryUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WebhookDeliveryDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WebhookDelivery mutation op: %q", m.Op())
+	}
+}
+
+// WebhookEndpointClient is a client for the WebhookEndpoint schema.
+type WebhookEndpointClient struct {
+	config
+}
+
+// NewWebhookEndpointClient returns a client for the WebhookEndpoint from the given config.
+func NewWebhookEndpointClient(c config) *WebhookEndpointClient {
+	return &WebhookEndpointClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `webhookendpoint.Hooks(f(g(h())))`.
+func (c *WebhookEndpointClient) Use(hooks ...Hook) {
+	c.hooks.WebhookEndpoint = append(c.hooks.WebhookEndpoint, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `webhookendpoint.Intercept(f(g(h())))`.
+func (c *WebhookEndpointClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WebhookEndpoint = append(c.inters.WebhookEndpoint, interceptors...)
+}
+
+// Create returns a builder for creating a WebhookEndpoint entity.
+func (c *WebhookEndpointClient) Create() *WebhookEndpointCreate {
+	mutation := newWebhookEndpointMutation(c.config, OpCreate)
+	return &WebhookEndpointCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WebhookEndpoint entities.
+func (c *WebhookEndpointClient) CreateBulk(builders ...*WebhookEndpointCreate) *WebhookEndpointCreateBulk {
+	return &WebhookEndpointCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WebhookEndpointClient) MapCreateBulk(slice any, setFunc func(*WebhookEndpointCreate, int)) *WebhookEndpointCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WebhookEndpointCreateBulk{err: fmt.Errorf("calling to WebhookEndpointClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WebhookEndpointCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WebhookEndpointCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WebhookEndpoint.
+func (c *WebhookEndpointClient) Update() *WebhookEndpointUpdate {
+	mutation := newWebhookEndpointMutation(c.config, OpUpdate)
+	return &WebhookEndpointUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WebhookEndpointClient) UpdateOne(_m *WebhookEndpoint) *WebhookEndpointUpdateOne {
+	mutation := newWebhookEndpointMutation(c.config, OpUpdateOne, withWebhookEndpoint(_m))
+	return &WebhookEndpointUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WebhookEndpointClient) UpdateOneID(id string) *WebhookEndpointUpdateOne {
+	mutation := newWebhookEndpointMutation(c.config, OpUpdateOne, withWebhookEndpointID(id))
+	return &WebhookEndpointUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WebhookEndpoint.
+func (c *WebhookEndpointClient) Delete() *WebhookEndpointDelete {
+	mutation := newWebhookEndpointMutation(c.config, OpDelete)
+	return &WebhookEndpointDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WebhookEndpointClient) DeleteOne(_m *WebhookEndpoint) *WebhookEndpointDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WebhookEndpointClient) DeleteOneID(id string) *WebhookEndpointDeleteOne {
+	builder := c.Delete().Where(webhookendpoint.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WebhookEndpointDeleteOne{builder}
+}
+
+// Query returns a query builder for WebhookEndpoint.
+func (c *WebhookEndpointClient) Query() *WebhookEndpointQuery {
+	return &WebhookEndpointQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWebhookEndpoint},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WebhookEndpoint entity by its id.
+func (c *WebhookEndpointClient) Get(ctx context.Context, id string) (*WebhookEndpoint, error) {
+	return c.Query().Where(webhookendpoint.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WebhookEndpointClient) GetX(ctx context.Context, id string) *WebhookEndpoint {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTenant queries the tenant edge of a WebhookEndpoint.
+func (c *WebhookEndpointClient) QueryTenant(_m *WebhookEndpoint) *TenantQuery {
+	query := (&TenantClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(webhookendpoint.Table, webhookendpoint.FieldID, id),
+			sqlgraph.To(tenant.Table, tenant.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, webhookendpoint.TenantTable, webhookendpoint.TenantColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WebhookEndpointClient) Hooks() []Hook {
+	return c.hooks.WebhookEndpoint
+}
+
+// Interceptors returns the client interceptors.
+func (c *WebhookEndpointClient) Interceptors() []Interceptor {
+	return c.inters.WebhookEndpoint
+}
+
+func (c *WebhookEndpointClient) mutate(ctx context.Context, m *WebhookEndpointMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WebhookEndpointCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WebhookEndpointUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WebhookEndpointUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WebhookEndpointDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WebhookEndpoint mutation op: %q", m.Op())
+	}
+}
+
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
 		APIToken, APITokenProduct, Activation, AuditAnchor, AuditEvent,
 		AuditExportCursor, AuditExportSink, Customer, Feature, IdempotencyKey,
 		Invitation, InvitationProduct, License, Membership, MembershipProduct, Plan,
-		PlanFeature, PlatformAdmin, Product, Session, SigningKey, Tenant,
-		User []ent.Hook
+		PlanFeature, PlatformAdmin, Product, Session, SigningKey, Tenant, User,
+		WebhookCursor, WebhookDelivery, WebhookEndpoint []ent.Hook
 	}
 	inters struct {
 		APIToken, APITokenProduct, Activation, AuditAnchor, AuditEvent,
 		AuditExportCursor, AuditExportSink, Customer, Feature, IdempotencyKey,
 		Invitation, InvitationProduct, License, Membership, MembershipProduct, Plan,
-		PlanFeature, PlatformAdmin, Product, Session, SigningKey, Tenant,
-		User []ent.Interceptor
+		PlanFeature, PlatformAdmin, Product, Session, SigningKey, Tenant, User,
+		WebhookCursor, WebhookDelivery, WebhookEndpoint []ent.Interceptor
 	}
 )
 

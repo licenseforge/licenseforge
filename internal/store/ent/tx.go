@@ -60,6 +60,12 @@ type Tx struct {
 	Tenant *TenantClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
+	// WebhookCursor is the client for interacting with the WebhookCursor builders.
+	WebhookCursor *WebhookCursorClient
+	// WebhookDelivery is the client for interacting with the WebhookDelivery builders.
+	WebhookDelivery *WebhookDeliveryClient
+	// WebhookEndpoint is the client for interacting with the WebhookEndpoint builders.
+	WebhookEndpoint *WebhookEndpointClient
 
 	// lazily loaded.
 	client     *Client
@@ -214,6 +220,9 @@ func (tx *Tx) init() {
 	tx.SigningKey = NewSigningKeyClient(tx.config)
 	tx.Tenant = NewTenantClient(tx.config)
 	tx.User = NewUserClient(tx.config)
+	tx.WebhookCursor = NewWebhookCursorClient(tx.config)
+	tx.WebhookDelivery = NewWebhookDeliveryClient(tx.config)
+	tx.WebhookEndpoint = NewWebhookEndpointClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.

@@ -21,6 +21,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookdelivery"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookendpoint"
 )
 
 // TenantCreate is the builder for creating a Tenant entity.
@@ -260,6 +263,51 @@ func (_c *TenantCreate) AddAuditAnchors(v ...*AuditAnchor) *TenantCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAuditAnchorIDs(ids...)
+}
+
+// AddWebhookEndpointIDs adds the "webhook_endpoints" edge to the WebhookEndpoint entity by IDs.
+func (_c *TenantCreate) AddWebhookEndpointIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddWebhookEndpointIDs(ids...)
+	return _c
+}
+
+// AddWebhookEndpoints adds the "webhook_endpoints" edges to the WebhookEndpoint entity.
+func (_c *TenantCreate) AddWebhookEndpoints(v ...*WebhookEndpoint) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddWebhookEndpointIDs(ids...)
+}
+
+// AddWebhookCursorIDs adds the "webhook_cursors" edge to the WebhookCursor entity by IDs.
+func (_c *TenantCreate) AddWebhookCursorIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddWebhookCursorIDs(ids...)
+	return _c
+}
+
+// AddWebhookCursors adds the "webhook_cursors" edges to the WebhookCursor entity.
+func (_c *TenantCreate) AddWebhookCursors(v ...*WebhookCursor) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddWebhookCursorIDs(ids...)
+}
+
+// AddWebhookDeliveryIDs adds the "webhook_deliveries" edge to the WebhookDelivery entity by IDs.
+func (_c *TenantCreate) AddWebhookDeliveryIDs(ids ...string) *TenantCreate {
+	_c.mutation.AddWebhookDeliveryIDs(ids...)
+	return _c
+}
+
+// AddWebhookDeliveries adds the "webhook_deliveries" edges to the WebhookDelivery entity.
+func (_c *TenantCreate) AddWebhookDeliveries(v ...*WebhookDelivery) *TenantCreate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddWebhookDeliveryIDs(ids...)
 }
 
 // Mutation returns the TenantMutation object of the builder.
@@ -564,6 +612,54 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.WebhookEndpointsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.WebhookCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.WebhookDeliveriesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

@@ -23,6 +23,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookdelivery"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookendpoint"
 )
 
 // TenantUpdate is the builder for updating Tenant entities.
@@ -263,6 +266,51 @@ func (_u *TenantUpdate) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
 	return _u.AddAuditAnchorIDs(ids...)
 }
 
+// AddWebhookEndpointIDs adds the "webhook_endpoints" edge to the WebhookEndpoint entity by IDs.
+func (_u *TenantUpdate) AddWebhookEndpointIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddWebhookEndpointIDs(ids...)
+	return _u
+}
+
+// AddWebhookEndpoints adds the "webhook_endpoints" edges to the WebhookEndpoint entity.
+func (_u *TenantUpdate) AddWebhookEndpoints(v ...*WebhookEndpoint) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookEndpointIDs(ids...)
+}
+
+// AddWebhookCursorIDs adds the "webhook_cursors" edge to the WebhookCursor entity by IDs.
+func (_u *TenantUpdate) AddWebhookCursorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddWebhookCursorIDs(ids...)
+	return _u
+}
+
+// AddWebhookCursors adds the "webhook_cursors" edges to the WebhookCursor entity.
+func (_u *TenantUpdate) AddWebhookCursors(v ...*WebhookCursor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookCursorIDs(ids...)
+}
+
+// AddWebhookDeliveryIDs adds the "webhook_deliveries" edge to the WebhookDelivery entity by IDs.
+func (_u *TenantUpdate) AddWebhookDeliveryIDs(ids ...string) *TenantUpdate {
+	_u.mutation.AddWebhookDeliveryIDs(ids...)
+	return _u
+}
+
+// AddWebhookDeliveries adds the "webhook_deliveries" edges to the WebhookDelivery entity.
+func (_u *TenantUpdate) AddWebhookDeliveries(v ...*WebhookDelivery) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookDeliveryIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdate) Mutation() *TenantMutation {
 	return _u.mutation
@@ -476,6 +524,69 @@ func (_u *TenantUpdate) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAuditAnchorIDs(ids...)
+}
+
+// ClearWebhookEndpoints clears all "webhook_endpoints" edges to the WebhookEndpoint entity.
+func (_u *TenantUpdate) ClearWebhookEndpoints() *TenantUpdate {
+	_u.mutation.ClearWebhookEndpoints()
+	return _u
+}
+
+// RemoveWebhookEndpointIDs removes the "webhook_endpoints" edge to WebhookEndpoint entities by IDs.
+func (_u *TenantUpdate) RemoveWebhookEndpointIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveWebhookEndpointIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookEndpoints removes "webhook_endpoints" edges to WebhookEndpoint entities.
+func (_u *TenantUpdate) RemoveWebhookEndpoints(v ...*WebhookEndpoint) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookEndpointIDs(ids...)
+}
+
+// ClearWebhookCursors clears all "webhook_cursors" edges to the WebhookCursor entity.
+func (_u *TenantUpdate) ClearWebhookCursors() *TenantUpdate {
+	_u.mutation.ClearWebhookCursors()
+	return _u
+}
+
+// RemoveWebhookCursorIDs removes the "webhook_cursors" edge to WebhookCursor entities by IDs.
+func (_u *TenantUpdate) RemoveWebhookCursorIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveWebhookCursorIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookCursors removes "webhook_cursors" edges to WebhookCursor entities.
+func (_u *TenantUpdate) RemoveWebhookCursors(v ...*WebhookCursor) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookCursorIDs(ids...)
+}
+
+// ClearWebhookDeliveries clears all "webhook_deliveries" edges to the WebhookDelivery entity.
+func (_u *TenantUpdate) ClearWebhookDeliveries() *TenantUpdate {
+	_u.mutation.ClearWebhookDeliveries()
+	return _u
+}
+
+// RemoveWebhookDeliveryIDs removes the "webhook_deliveries" edge to WebhookDelivery entities by IDs.
+func (_u *TenantUpdate) RemoveWebhookDeliveryIDs(ids ...string) *TenantUpdate {
+	_u.mutation.RemoveWebhookDeliveryIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookDeliveries removes "webhook_deliveries" edges to WebhookDelivery entities.
+func (_u *TenantUpdate) RemoveWebhookDeliveries(v ...*WebhookDelivery) *TenantUpdate {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookDeliveryIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -1017,6 +1128,141 @@ func (_u *TenantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.WebhookEndpointsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookEndpointsIDs(); len(nodes) > 0 && !_u.mutation.WebhookEndpointsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookEndpointsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WebhookCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookCursorsIDs(); len(nodes) > 0 && !_u.mutation.WebhookCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WebhookDeliveriesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookDeliveriesIDs(); len(nodes) > 0 && !_u.mutation.WebhookDeliveriesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookDeliveriesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{tenant.Label}
@@ -1262,6 +1508,51 @@ func (_u *TenantUpdateOne) AddAuditAnchors(v ...*AuditAnchor) *TenantUpdateOne {
 	return _u.AddAuditAnchorIDs(ids...)
 }
 
+// AddWebhookEndpointIDs adds the "webhook_endpoints" edge to the WebhookEndpoint entity by IDs.
+func (_u *TenantUpdateOne) AddWebhookEndpointIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddWebhookEndpointIDs(ids...)
+	return _u
+}
+
+// AddWebhookEndpoints adds the "webhook_endpoints" edges to the WebhookEndpoint entity.
+func (_u *TenantUpdateOne) AddWebhookEndpoints(v ...*WebhookEndpoint) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookEndpointIDs(ids...)
+}
+
+// AddWebhookCursorIDs adds the "webhook_cursors" edge to the WebhookCursor entity by IDs.
+func (_u *TenantUpdateOne) AddWebhookCursorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddWebhookCursorIDs(ids...)
+	return _u
+}
+
+// AddWebhookCursors adds the "webhook_cursors" edges to the WebhookCursor entity.
+func (_u *TenantUpdateOne) AddWebhookCursors(v ...*WebhookCursor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookCursorIDs(ids...)
+}
+
+// AddWebhookDeliveryIDs adds the "webhook_deliveries" edge to the WebhookDelivery entity by IDs.
+func (_u *TenantUpdateOne) AddWebhookDeliveryIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.AddWebhookDeliveryIDs(ids...)
+	return _u
+}
+
+// AddWebhookDeliveries adds the "webhook_deliveries" edges to the WebhookDelivery entity.
+func (_u *TenantUpdateOne) AddWebhookDeliveries(v ...*WebhookDelivery) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWebhookDeliveryIDs(ids...)
+}
+
 // Mutation returns the TenantMutation object of the builder.
 func (_u *TenantUpdateOne) Mutation() *TenantMutation {
 	return _u.mutation
@@ -1475,6 +1766,69 @@ func (_u *TenantUpdateOne) RemoveAuditAnchors(v ...*AuditAnchor) *TenantUpdateOn
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAuditAnchorIDs(ids...)
+}
+
+// ClearWebhookEndpoints clears all "webhook_endpoints" edges to the WebhookEndpoint entity.
+func (_u *TenantUpdateOne) ClearWebhookEndpoints() *TenantUpdateOne {
+	_u.mutation.ClearWebhookEndpoints()
+	return _u
+}
+
+// RemoveWebhookEndpointIDs removes the "webhook_endpoints" edge to WebhookEndpoint entities by IDs.
+func (_u *TenantUpdateOne) RemoveWebhookEndpointIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveWebhookEndpointIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookEndpoints removes "webhook_endpoints" edges to WebhookEndpoint entities.
+func (_u *TenantUpdateOne) RemoveWebhookEndpoints(v ...*WebhookEndpoint) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookEndpointIDs(ids...)
+}
+
+// ClearWebhookCursors clears all "webhook_cursors" edges to the WebhookCursor entity.
+func (_u *TenantUpdateOne) ClearWebhookCursors() *TenantUpdateOne {
+	_u.mutation.ClearWebhookCursors()
+	return _u
+}
+
+// RemoveWebhookCursorIDs removes the "webhook_cursors" edge to WebhookCursor entities by IDs.
+func (_u *TenantUpdateOne) RemoveWebhookCursorIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveWebhookCursorIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookCursors removes "webhook_cursors" edges to WebhookCursor entities.
+func (_u *TenantUpdateOne) RemoveWebhookCursors(v ...*WebhookCursor) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookCursorIDs(ids...)
+}
+
+// ClearWebhookDeliveries clears all "webhook_deliveries" edges to the WebhookDelivery entity.
+func (_u *TenantUpdateOne) ClearWebhookDeliveries() *TenantUpdateOne {
+	_u.mutation.ClearWebhookDeliveries()
+	return _u
+}
+
+// RemoveWebhookDeliveryIDs removes the "webhook_deliveries" edge to WebhookDelivery entities by IDs.
+func (_u *TenantUpdateOne) RemoveWebhookDeliveryIDs(ids ...string) *TenantUpdateOne {
+	_u.mutation.RemoveWebhookDeliveryIDs(ids...)
+	return _u
+}
+
+// RemoveWebhookDeliveries removes "webhook_deliveries" edges to WebhookDelivery entities.
+func (_u *TenantUpdateOne) RemoveWebhookDeliveries(v ...*WebhookDelivery) *TenantUpdateOne {
+	ids := make([]string, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWebhookDeliveryIDs(ids...)
 }
 
 // Where appends a list predicates to the TenantUpdate builder.
@@ -2039,6 +2393,141 @@ func (_u *TenantUpdateOne) sqlSave(ctx context.Context) (_node *Tenant, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(auditanchor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WebhookEndpointsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookEndpointsIDs(); len(nodes) > 0 && !_u.mutation.WebhookEndpointsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookEndpointsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookEndpointsTable,
+			Columns: []string{tenant.WebhookEndpointsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookendpoint.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WebhookCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookCursorsIDs(); len(nodes) > 0 && !_u.mutation.WebhookCursorsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookCursorsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookCursorsTable,
+			Columns: []string{tenant.WebhookCursorsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookcursor.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WebhookDeliveriesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWebhookDeliveriesIDs(); len(nodes) > 0 && !_u.mutation.WebhookDeliveriesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WebhookDeliveriesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   tenant.WebhookDeliveriesTable,
+			Columns: []string{tenant.WebhookDeliveriesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(webhookdelivery.FieldID, field.TypeString),
 			},
 		}
 		for _, k := range nodes {

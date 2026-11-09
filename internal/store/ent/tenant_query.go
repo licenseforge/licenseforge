@@ -25,6 +25,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/product"
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookdelivery"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookendpoint"
 )
 
 // TenantQuery is the builder for querying Tenant entities.
@@ -44,6 +47,9 @@ type TenantQuery struct {
 	withIdempotencyKeys    *IdempotencyKeyQuery
 	withAuditExportCursors *AuditExportCursorQuery
 	withAuditAnchors       *AuditAnchorQuery
+	withWebhookEndpoints   *WebhookEndpointQuery
+	withWebhookCursors     *WebhookCursorQuery
+	withWebhookDeliveries  *WebhookDeliveryQuery
 	modifiers              []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -301,6 +307,72 @@ func (_q *TenantQuery) QueryAuditAnchors() *AuditAnchorQuery {
 	return query
 }
 
+// QueryWebhookEndpoints chains the current query on the "webhook_endpoints" edge.
+func (_q *TenantQuery) QueryWebhookEndpoints() *WebhookEndpointQuery {
+	query := (&WebhookEndpointClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(webhookendpoint.Table, webhookendpoint.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookEndpointsTable, tenant.WebhookEndpointsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryWebhookCursors chains the current query on the "webhook_cursors" edge.
+func (_q *TenantQuery) QueryWebhookCursors() *WebhookCursorQuery {
+	query := (&WebhookCursorClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(webhookcursor.Table, webhookcursor.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookCursorsTable, tenant.WebhookCursorsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryWebhookDeliveries chains the current query on the "webhook_deliveries" edge.
+func (_q *TenantQuery) QueryWebhookDeliveries() *WebhookDeliveryQuery {
+	query := (&WebhookDeliveryClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tenant.Table, tenant.FieldID, selector),
+			sqlgraph.To(webhookdelivery.Table, webhookdelivery.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, tenant.WebhookDeliveriesTable, tenant.WebhookDeliveriesColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // First returns the first Tenant entity from the query.
 // Returns a *NotFoundError when no Tenant was found.
 func (_q *TenantQuery) First(ctx context.Context) (*Tenant, error) {
@@ -503,6 +575,9 @@ func (_q *TenantQuery) Clone() *TenantQuery {
 		withIdempotencyKeys:    _q.withIdempotencyKeys.Clone(),
 		withAuditExportCursors: _q.withAuditExportCursors.Clone(),
 		withAuditAnchors:       _q.withAuditAnchors.Clone(),
+		withWebhookEndpoints:   _q.withWebhookEndpoints.Clone(),
+		withWebhookCursors:     _q.withWebhookCursors.Clone(),
+		withWebhookDeliveries:  _q.withWebhookDeliveries.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -619,6 +694,39 @@ func (_q *TenantQuery) WithAuditAnchors(opts ...func(*AuditAnchorQuery)) *Tenant
 	return _q
 }
 
+// WithWebhookEndpoints tells the query-builder to eager-load the nodes that are connected to
+// the "webhook_endpoints" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithWebhookEndpoints(opts ...func(*WebhookEndpointQuery)) *TenantQuery {
+	query := (&WebhookEndpointClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWebhookEndpoints = query
+	return _q
+}
+
+// WithWebhookCursors tells the query-builder to eager-load the nodes that are connected to
+// the "webhook_cursors" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithWebhookCursors(opts ...func(*WebhookCursorQuery)) *TenantQuery {
+	query := (&WebhookCursorClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWebhookCursors = query
+	return _q
+}
+
+// WithWebhookDeliveries tells the query-builder to eager-load the nodes that are connected to
+// the "webhook_deliveries" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *TenantQuery) WithWebhookDeliveries(opts ...func(*WebhookDeliveryQuery)) *TenantQuery {
+	query := (&WebhookDeliveryClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWebhookDeliveries = query
+	return _q
+}
+
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
 //
@@ -697,7 +805,7 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 	var (
 		nodes       = []*Tenant{}
 		_spec       = _q.querySpec()
-		loadedTypes = [10]bool{
+		loadedTypes = [13]bool{
 			_q.withProducts != nil,
 			_q.withCustomers != nil,
 			_q.withSigningKeys != nil,
@@ -708,6 +816,9 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 			_q.withIdempotencyKeys != nil,
 			_q.withAuditExportCursors != nil,
 			_q.withAuditAnchors != nil,
+			_q.withWebhookEndpoints != nil,
+			_q.withWebhookCursors != nil,
+			_q.withWebhookDeliveries != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -800,6 +911,27 @@ func (_q *TenantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Tenan
 		if err := _q.loadAuditAnchors(ctx, query, nodes,
 			func(n *Tenant) { n.Edges.AuditAnchors = []*AuditAnchor{} },
 			func(n *Tenant, e *AuditAnchor) { n.Edges.AuditAnchors = append(n.Edges.AuditAnchors, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWebhookEndpoints; query != nil {
+		if err := _q.loadWebhookEndpoints(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.WebhookEndpoints = []*WebhookEndpoint{} },
+			func(n *Tenant, e *WebhookEndpoint) { n.Edges.WebhookEndpoints = append(n.Edges.WebhookEndpoints, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWebhookCursors; query != nil {
+		if err := _q.loadWebhookCursors(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.WebhookCursors = []*WebhookCursor{} },
+			func(n *Tenant, e *WebhookCursor) { n.Edges.WebhookCursors = append(n.Edges.WebhookCursors, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWebhookDeliveries; query != nil {
+		if err := _q.loadWebhookDeliveries(ctx, query, nodes,
+			func(n *Tenant) { n.Edges.WebhookDeliveries = []*WebhookDelivery{} },
+			func(n *Tenant, e *WebhookDelivery) { n.Edges.WebhookDeliveries = append(n.Edges.WebhookDeliveries, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -1091,6 +1223,96 @@ func (_q *TenantQuery) loadAuditAnchors(ctx context.Context, query *AuditAnchorQ
 	}
 	query.Where(predicate.AuditAnchor(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(tenant.AuditAnchorsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadWebhookEndpoints(ctx context.Context, query *WebhookEndpointQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *WebhookEndpoint)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(webhookendpoint.FieldTenantID)
+	}
+	query.Where(predicate.WebhookEndpoint(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.WebhookEndpointsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadWebhookCursors(ctx context.Context, query *WebhookCursorQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *WebhookCursor)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(webhookcursor.FieldTenantID)
+	}
+	query.Where(predicate.WebhookCursor(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.WebhookCursorsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.TenantID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "tenant_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *TenantQuery) loadWebhookDeliveries(ctx context.Context, query *WebhookDeliveryQuery, nodes []*Tenant, init func(*Tenant), assign func(*Tenant, *WebhookDelivery)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[string]*Tenant)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(webhookdelivery.FieldTenantID)
+	}
+	query.Where(predicate.WebhookDelivery(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(tenant.WebhookDeliveriesColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

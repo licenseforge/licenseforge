@@ -51,3 +51,6 @@ func AuditEvent() string        { return New("aud") }
 func AuditExportCursor() string { return New("aec") }
 func AuditAnchor() string       { return New("anc") }
 func IdempotencyKey() string    { return New("idk") }
+func WebhookEndpoint() string   { return New("whe") }
+func WebhookCursor() string     { return New("whc") }
+func WebhookDelivery() string   { return New("whd") }

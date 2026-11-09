@@ -47,6 +47,12 @@ const (
 	EdgeAuditExportCursors = "audit_export_cursors"
 	// EdgeAuditAnchors holds the string denoting the audit_anchors edge name in mutations.
 	EdgeAuditAnchors = "audit_anchors"
+	// EdgeWebhookEndpoints holds the string denoting the webhook_endpoints edge name in mutations.
+	EdgeWebhookEndpoints = "webhook_endpoints"
+	// EdgeWebhookCursors holds the string denoting the webhook_cursors edge name in mutations.
+	EdgeWebhookCursors = "webhook_cursors"
+	// EdgeWebhookDeliveries holds the string denoting the webhook_deliveries edge name in mutations.
+	EdgeWebhookDeliveries = "webhook_deliveries"
 	// Table holds the table name of the tenant in the database.
 	Table = "tenants"
 	// ProductsTable is the table that holds the products relation/edge.
@@ -119,6 +125,27 @@ const (
 	AuditAnchorsInverseTable = "audit_anchors"
 	// AuditAnchorsColumn is the table column denoting the audit_anchors relation/edge.
 	AuditAnchorsColumn = "tenant_id"
+	// WebhookEndpointsTable is the table that holds the webhook_endpoints relation/edge.
+	WebhookEndpointsTable = "webhook_endpoints"
+	// WebhookEndpointsInverseTable is the table name for the WebhookEndpoint entity.
+	// It exists in this package in order to avoid circular dependency with the "webhookendpoint" package.
+	WebhookEndpointsInverseTable = "webhook_endpoints"
+	// WebhookEndpointsColumn is the table column denoting the webhook_endpoints relation/edge.
+	WebhookEndpointsColumn = "tenant_id"
+	// WebhookCursorsTable is the table that holds the webhook_cursors relation/edge.
+	WebhookCursorsTable = "webhook_cursors"
+	// WebhookCursorsInverseTable is the table name for the WebhookCursor entity.
+	// It exists in this package in order to avoid circular dependency with the "webhookcursor" package.
+	WebhookCursorsInverseTable = "webhook_cursors"
+	// WebhookCursorsColumn is the table column denoting the webhook_cursors relation/edge.
+	WebhookCursorsColumn = "tenant_id"
+	// WebhookDeliveriesTable is the table that holds the webhook_deliveries relation/edge.
+	WebhookDeliveriesTable = "webhook_deliveries"
+	// WebhookDeliveriesInverseTable is the table name for the WebhookDelivery entity.
+	// It exists in this package in order to avoid circular dependency with the "webhookdelivery" package.
+	WebhookDeliveriesInverseTable = "webhook_deliveries"
+	// WebhookDeliveriesColumn is the table column denoting the webhook_deliveries relation/edge.
+	WebhookDeliveriesColumn = "tenant_id"
 )
 
 // Columns holds all SQL columns for tenant fields.
@@ -363,6 +390,48 @@ func ByAuditAnchors(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newAuditAnchorsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByWebhookEndpointsCount orders the results by webhook_endpoints count.
+func ByWebhookEndpointsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWebhookEndpointsStep(), opts...)
+	}
+}
+
+// ByWebhookEndpoints orders the results by webhook_endpoints terms.
+func ByWebhookEndpoints(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWebhookEndpointsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByWebhookCursorsCount orders the results by webhook_cursors count.
+func ByWebhookCursorsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWebhookCursorsStep(), opts...)
+	}
+}
+
+// ByWebhookCursors orders the results by webhook_cursors terms.
+func ByWebhookCursors(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWebhookCursorsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByWebhookDeliveriesCount orders the results by webhook_deliveries count.
+func ByWebhookDeliveriesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWebhookDeliveriesStep(), opts...)
+	}
+}
+
+// ByWebhookDeliveries orders the results by webhook_deliveries terms.
+func ByWebhookDeliveries(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWebhookDeliveriesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newProductsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -431,5 +500,26 @@ func newAuditAnchorsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(AuditAnchorsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, AuditAnchorsTable, AuditAnchorsColumn),
+	)
+}
+func newWebhookEndpointsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WebhookEndpointsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WebhookEndpointsTable, WebhookEndpointsColumn),
+	)
+}
+func newWebhookCursorsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WebhookCursorsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WebhookCursorsTable, WebhookCursorsColumn),
+	)
+}
+func newWebhookDeliveriesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WebhookDeliveriesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WebhookDeliveriesTable, WebhookDeliveriesColumn),
 	)
 }

@@ -600,6 +600,75 @@ func HasAuditAnchorsWith(preds ...predicate.AuditAnchor) predicate.Tenant {
 	})
 }
 
+// HasWebhookEndpoints applies the HasEdge predicate on the "webhook_endpoints" edge.
+func HasWebhookEndpoints() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WebhookEndpointsTable, WebhookEndpointsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWebhookEndpointsWith applies the HasEdge predicate on the "webhook_endpoints" edge with a given conditions (other predicates).
+func HasWebhookEndpointsWith(preds ...predicate.WebhookEndpoint) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newWebhookEndpointsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasWebhookCursors applies the HasEdge predicate on the "webhook_cursors" edge.
+func HasWebhookCursors() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WebhookCursorsTable, WebhookCursorsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWebhookCursorsWith applies the HasEdge predicate on the "webhook_cursors" edge with a given conditions (other predicates).
+func HasWebhookCursorsWith(preds ...predicate.WebhookCursor) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newWebhookCursorsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasWebhookDeliveries applies the HasEdge predicate on the "webhook_deliveries" edge.
+func HasWebhookDeliveries() predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WebhookDeliveriesTable, WebhookDeliveriesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWebhookDeliveriesWith applies the HasEdge predicate on the "webhook_deliveries" edge with a given conditions (other predicates).
+func HasWebhookDeliveriesWith(preds ...predicate.WebhookDelivery) predicate.Tenant {
+	return predicate.Tenant(func(s *sql.Selector) {
+		step := newWebhookDeliveriesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.Tenant) predicate.Tenant {
 	return predicate.Tenant(sql.AndPredicates(predicates...))

@@ -390,6 +390,11 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"retention_read":                 `SELECT licenseforge_retention true`,
 			"forward_to_entry (restrictive)": `UPDATE licenseforge_platform (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND (o.seq = audit_export_cursors.seq)))) (EXISTS ( SELECT 1 FROM audit_export_cursors o WHERE (((o.id)::text = (audit_export_cursors.id)::text) AND ((o.seq = audit_export_cursors.seq) OR ((o.seq < audit_export_cursors.seq) AND (EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_export_cursors.tenant_id)::text) AND (e.seq = audit_export_cursors.seq)))))))))`,
 		},
+		"webhook_cursors": { // ADR-0044: created at the chain's end, forward only, tenant resets only
+			"start_at_end (restrictive)":           `INSERT licenseforge_app (seq <= COALESCE(( SELECT max(e.seq) AS max FROM audit_events e WHERE ((e.tenant_id)::text = (webhook_cursors.tenant_id)::text)), (0)::bigint))`,
+			"forward_to_entry (restrictive)":       `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM webhook_cursors o WHERE (((o.id)::text = (webhook_cursors.id)::text) AND (o.seq = webhook_cursors.seq)))) (EXISTS ( SELECT 1 FROM webhook_cursors o WHERE (((o.id)::text = (webhook_cursors.id)::text) AND ((o.seq = webhook_cursors.seq) OR ((o.seq < webhook_cursors.seq) AND ((EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (webhook_cursors.tenant_id)::text) AND (e.seq = webhook_cursors.seq)))) OR (webhook_cursors.seq = ( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (webhook_cursors.tenant_id)::text)))))))))`,
+			"tenant_resets_attempts (restrictive)": `UPDATE licenseforge_app true (attempts = 0)`,
+		},
 		"audit_anchors": { // ADR-0036: insert-only, by the retention login
 			"retention_read":   `SELECT licenseforge_retention true`,
 			"retention_anchor": `INSERT licenseforge_retention ((EXISTS ( SELECT 1 FROM audit_events e WHERE (((e.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e.seq = audit_anchors.seq) AND (e.hash = audit_anchors.hash) AND (e.occurred_at < (now() - '365 days'::interval))))) AND (EXISTS ( SELECT 1 FROM audit_events e2 WHERE (((e2.tenant_id)::text = (audit_anchors.tenant_id)::text) AND (e2.seq > audit_anchors.seq)))) AND (seq > COALESCE(( SELECT max(a.seq) AS max FROM audit_anchors a WHERE ((a.tenant_id)::text = (audit_anchors.tenant_id)::text)), (0)::bigint)))`,
@@ -858,7 +863,26 @@ func TestArchivablePrivileges(t *testing.T) {
 	}
 	defer func() { _ = owner.Close() }()
 	for _, a := range archivables() {
-		rows, err := owner.Query(`
+		got := tableACL(t, owner, a.table)
+		var want []string
+		for _, role := range []string{AppRole, PlatformRole} {
+			want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
+			for _, col := range a.updatable {
+				want = append(want, role+" UPDATE "+col+" grantable=false")
+			}
+		}
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("privileges on %s:\n got %q\nwant %q", a.table, got, want)
+		}
+	}
+}
+
+// tableACL lists every grant on table and its columns to roles other than
+// the owner, as "role PRIVILEGE column grantable=bool", sorted.
+func tableACL(t *testing.T, owner *sql.DB, table string) []string {
+	t.Helper()
+	rows, err := owner.Query(`
 			WITH acl AS (
 				SELECT a.grantee, a.privilege_type, a.is_grantable, '' AS col
 				FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = $1::regclass
@@ -868,35 +892,24 @@ func TestArchivablePrivileges(t *testing.T) {
 				WHERE att.attrelid = $1::regclass AND att.attacl IS NOT NULL)
 			SELECT COALESCE(r.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable, acl.col
 			FROM acl LEFT JOIN pg_roles r ON r.oid = acl.grantee
-			WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = $1::regclass)`, "public."+a.table)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []string
-		for rows.Next() {
-			var role, priv, col string
-			var grantable bool
-			if err := rows.Scan(&role, &priv, &grantable, &col); err != nil {
-				t.Fatal(err)
-			}
-			got = append(got, fmt.Sprintf("%s %s %s grantable=%v", role, priv, col, grantable))
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			t.Fatal(err)
-		}
-		var want []string
-		for _, role := range []string{AppRole, PlatformRole} {
-			want = append(want, role+" SELECT  grantable=false", role+" INSERT  grantable=false")
-			for _, col := range a.updatable {
-				want = append(want, role+" UPDATE "+col+" grantable=false")
-			}
-		}
-		slices.Sort(got)
-		slices.Sort(want)
-		if !slices.Equal(got, want) {
-			t.Errorf("privileges on %s:\n got %q\nwant %q", a.table, got, want)
-		}
+			WHERE acl.grantee <> (SELECT relowner FROM pg_class WHERE oid = $1::regclass)`, "public."+table)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var got []string
+	for rows.Next() {
+		var role, priv, col string
+		var grantable bool
+		if err := rows.Scan(&role, &priv, &grantable, &col); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s %s %s grantable=%v", role, priv, col, grantable))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	return got
 }
 
 // Archive is one-way and at the database clock (archive_once): the serving

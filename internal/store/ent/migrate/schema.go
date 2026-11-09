@@ -1016,6 +1016,115 @@ var (
 			},
 		},
 	}
+	// WebhookCursorsColumns holds the columns for the "webhook_cursors" table.
+	WebhookCursorsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "endpoint_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64, Default: 0},
+		{Name: "claimed_by", Type: field.TypeString, Nullable: true, Size: 100, SchemaType: map[string]string{"postgres": "varchar(100)"}},
+		{Name: "claimed_until", Type: field.TypeTime, Nullable: true},
+		{Name: "attempts", Type: field.TypeInt, Default: 0},
+		{Name: "next_attempt_at", Type: field.TypeTime, Nullable: true},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// WebhookCursorsTable holds the schema information for the "webhook_cursors" table.
+	WebhookCursorsTable = &schema.Table{
+		Name:       "webhook_cursors",
+		Columns:    WebhookCursorsColumns,
+		PrimaryKey: []*schema.Column{WebhookCursorsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "webhook_cursors_tenants_webhook_cursors",
+				Columns:    []*schema.Column{WebhookCursorsColumns[7]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "webhookcursor_tenant_id_endpoint_id",
+				Unique:  true,
+				Columns: []*schema.Column{WebhookCursorsColumns[7], WebhookCursorsColumns[1]},
+			},
+		},
+	}
+	// WebhookDeliveriesColumns holds the columns for the "webhook_deliveries" table.
+	WebhookDeliveriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "endpoint_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "seq", Type: field.TypeInt64},
+		{Name: "event_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "event_type", Type: field.TypeEnum, Enums: []string{"license.issued", "license.revoked", "license.suspended", "license.reinstated", "activation.created", "activation.deactivated"}},
+		{Name: "attempt", Type: field.TypeInt},
+		{Name: "outcome", Type: field.TypeEnum, Enums: []string{"success", "failure"}},
+		{Name: "category", Type: field.TypeEnum, Enums: []string{"http", "timeout", "connection", "tls", "redirect"}},
+		{Name: "status_code", Type: field.TypeInt, Nullable: true},
+		{Name: "duration_ms", Type: field.TypeInt},
+		{Name: "attempted_at", Type: field.TypeTime},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// WebhookDeliveriesTable holds the schema information for the "webhook_deliveries" table.
+	WebhookDeliveriesTable = &schema.Table{
+		Name:       "webhook_deliveries",
+		Columns:    WebhookDeliveriesColumns,
+		PrimaryKey: []*schema.Column{WebhookDeliveriesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "webhook_deliveries_tenants_webhook_deliveries",
+				Columns:    []*schema.Column{WebhookDeliveriesColumns[11]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "webhookdelivery_tenant_id_endpoint_id_attempted_at",
+				Unique:  false,
+				Columns: []*schema.Column{WebhookDeliveriesColumns[11], WebhookDeliveriesColumns[1], WebhookDeliveriesColumns[10]},
+			},
+			{
+				Name:    "webhookdelivery_attempted_at",
+				Unique:  false,
+				Columns: []*schema.Column{WebhookDeliveriesColumns[10]},
+			},
+		},
+	}
+	// WebhookEndpointsColumns holds the columns for the "webhook_endpoints" table.
+	WebhookEndpointsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "url_ciphertext", Type: field.TypeBytes},
+		{Name: "url_display", Type: field.TypeString, Size: 300, SchemaType: map[string]string{"postgres": "varchar(300)"}},
+		{Name: "events", Type: field.TypeJSON},
+		{Name: "secret_ciphertext", Type: field.TypeBytes},
+		{Name: "previous_secret_ciphertext", Type: field.TypeBytes, Nullable: true},
+		{Name: "previous_secret_until", Type: field.TypeTime, Nullable: true},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "disabled_reason", Type: field.TypeString, Nullable: true, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
+		{Name: "tenant_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
+	}
+	// WebhookEndpointsTable holds the schema information for the "webhook_endpoints" table.
+	WebhookEndpointsTable = &schema.Table{
+		Name:       "webhook_endpoints",
+		Columns:    WebhookEndpointsColumns,
+		PrimaryKey: []*schema.Column{WebhookEndpointsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "webhook_endpoints_tenants_webhook_endpoints",
+				Columns:    []*schema.Column{WebhookEndpointsColumns[11]},
+				RefColumns: []*schema.Column{TenantsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "webhookendpoint_tenant_id_id",
+				Unique:  true,
+				Columns: []*schema.Column{WebhookEndpointsColumns[11], WebhookEndpointsColumns[0]},
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APITokensTable,
@@ -1041,6 +1150,9 @@ var (
 		SigningKeysTable,
 		TenantsTable,
 		UsersTable,
+		WebhookCursorsTable,
+		WebhookDeliveriesTable,
+		WebhookEndpointsTable,
 	}
 )
 
@@ -1287,5 +1399,36 @@ func init() {
 		"users_id_format":      "id ~ '^usr_[a-z2-7]{26}$'",
 		"users_no_empty":       "btrim((issuer)::text) <> ''::text AND btrim((subject)::text) <> ''::text AND (email IS NULL OR btrim((email)::text) <> ''::text) AND (name IS NULL OR btrim((name)::text) <> ''::text)",
 		"users_verified_email": "email IS NOT NULL OR NOT email_verified",
+	}
+	WebhookCursorsTable.ForeignKeys[0].RefTable = TenantsTable
+	WebhookCursorsTable.Annotation = &entsql.Annotation{}
+	WebhookCursorsTable.Annotation.Checks = map[string]string{
+		"webhook_cursors_attempts":  "(attempts >= 0) AND (attempts <= 8)",
+		"webhook_cursors_claim":     "(claimed_by IS NULL) = (claimed_until IS NULL)",
+		"webhook_cursors_id_format": "(id)::text ~ '^whc_[a-z2-7]{26}$'::text",
+		"webhook_cursors_seq":       "seq >= 0",
+	}
+	WebhookDeliveriesTable.ForeignKeys[0].RefTable = TenantsTable
+	WebhookDeliveriesTable.Annotation = &entsql.Annotation{}
+	WebhookDeliveriesTable.Annotation.Checks = map[string]string{
+		"webhook_deliveries_attempt":   "(attempt >= 1) AND (attempt <= 8)",
+		"webhook_deliveries_category":  "(category)::text = ANY (ARRAY['http'::text, 'timeout'::text, 'connection'::text, 'tls'::text, 'redirect'::text])",
+		"webhook_deliveries_duration":  "duration_ms >= 0",
+		"webhook_deliveries_event":     "(event_type)::text = ANY (ARRAY['license.issued'::text, 'license.revoked'::text, 'license.suspended'::text, 'license.reinstated'::text, 'activation.created'::text, 'activation.deactivated'::text])",
+		"webhook_deliveries_event_id":  "(event_id)::text ~ '^aud_[a-z2-7]{26}$'::text",
+		"webhook_deliveries_http":      "((category)::text = 'http'::text) = (status_code IS NOT NULL)",
+		"webhook_deliveries_id_format": "(id)::text ~ '^whd_[a-z2-7]{26}$'::text",
+		"webhook_deliveries_outcome":   "(outcome)::text = ANY (ARRAY['success'::text, 'failure'::text])",
+		"webhook_deliveries_seq":       "seq > 0",
+		"webhook_deliveries_status":    "(status_code IS NULL) OR ((status_code >= 100) AND (status_code <= 599))",
+		"webhook_deliveries_success":   "((outcome)::text <> 'success'::text) OR ((status_code >= 200) AND (status_code <= 299))",
+	}
+	WebhookEndpointsTable.ForeignKeys[0].RefTable = TenantsTable
+	WebhookEndpointsTable.Annotation = &entsql.Annotation{}
+	WebhookEndpointsTable.Annotation.Checks = map[string]string{
+		"webhook_endpoints_disabled":  "(enabled = (disabled_reason IS NULL)) AND ((disabled_reason IS NULL) OR (btrim((disabled_reason)::text) <> ''::text))",
+		"webhook_endpoints_events":    "(jsonb_typeof(events) = 'array'::text) AND (jsonb_array_length(events) > 0) AND (events <@ '[\"license.issued\", \"license.revoked\", \"license.suspended\", \"license.reinstated\", \"activation.created\", \"activation.deactivated\"]'::jsonb)",
+		"webhook_endpoints_id_format": "(id)::text ~ '^whe_[a-z2-7]{26}$'::text",
+		"webhook_endpoints_previous":  "(previous_secret_ciphertext IS NULL) = (previous_secret_until IS NULL)",
 	}
 }

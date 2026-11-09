@@ -74,3 +74,12 @@ type Tenant func(*sql.Selector)
 
 // User is the predicate function for user builders.
 type User func(*sql.Selector)
+
+// WebhookCursor is the predicate function for webhookcursor builders.
+type WebhookCursor func(*sql.Selector)
+
+// WebhookDelivery is the predicate function for webhookdelivery builders.
+type WebhookDelivery func(*sql.Selector)
+
+// WebhookEndpoint is the predicate function for webhookendpoint builders.
+type WebhookEndpoint func(*sql.Selector)
