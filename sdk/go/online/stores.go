@@ -106,13 +106,13 @@ func (k *KubernetesSecret) Save(lease string) error {
 
 const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// saveTimeout bounds a whole Save (every attempt): the Client holds its
-// commit lock meanwhile.
-const saveTimeout = 15 * time.Second
+// apiTimeout bounds a whole Load or Save (every attempt): the Client holds
+// its commit lock while saving. A variable for tests.
+var apiTimeout = 15 * time.Second
 
 var (
 	dnsLabel     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-	dnsSubdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	dnsSubdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`) // and at most 253
 	dataKey      = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
 )
 
@@ -177,9 +177,9 @@ func (k *kubeStore) target(resource, kind, namespace, name, key string) (path, d
 	switch {
 	case !dnsLabel.MatchString(namespace):
 		return "", "", fmt.Errorf("lease store: namespace %q isn't a valid name", namespace)
-	case !dnsSubdomain.MatchString(name):
+	case len(name) > 253 || !dnsSubdomain.MatchString(name):
 		return "", "", fmt.Errorf("lease store: %s name %q isn't a valid name", kind, name)
-	case !dataKey.MatchString(key):
+	case !dataKey.MatchString(key) || strings.HasPrefix(key, "..") || key == ".":
 		return "", "", fmt.Errorf("lease store: key %q isn't a valid %s key", key, kind)
 	}
 	return "/api/v1/namespaces/" + namespace + "/" + resource + "/" + name, key, nil
@@ -265,7 +265,7 @@ func (k *kubeStore) load(resource, kind, namespace, name, key string) (string, e
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 	var obj map[string]any
 	err = k.do(ctx, http.MethodGet, path, nil, &obj)
@@ -293,7 +293,7 @@ func (k *kubeStore) save(resource, kind, namespace, name, key, lease string) err
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 	for attempt := 0; ; attempt++ {
 		err = k.saveOnce(ctx, path, kind, name, key, lease)

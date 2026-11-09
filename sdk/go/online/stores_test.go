@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFileStore(t *testing.T) {
@@ -275,7 +276,7 @@ func TestKubernetesStoreNames(t *testing.T) {
 		k.base, k.tokenFile, k.client, k.ns = srv.URL, token, srv.Client(), "ns"
 		return k
 	}
-	if err := cm("", "fine", "").Save("x"); err != nil {
+	if err := cm("", "fine.example-1", "a.b_c-1").Save("x"); err != nil {
 		t.Fatalf("valid names refused: %v", err)
 	}
 	for name, s := range map[string]Store{
@@ -285,6 +286,11 @@ func TestKubernetesStoreNames(t *testing.T) {
 		"bad namespace":   cm("Bad_NS", "x", ""),
 		"slash key":       sec("x", "a/b"),
 		"upper-case name": sec("Lease", ""),
+		"empty label":     cm("", "a..b", ""),
+		"dash label":      cm("", "a.-b", ""),
+		"long name":       cm("", strings.Repeat("a", 254), ""),
+		"dot key":         cm("", "x", "."),
+		"dot-dot key":     cm("", "x", "..x"),
 	} {
 		if _, err := s.Load(); err == nil || !strings.Contains(err.Error(), "valid") {
 			t.Errorf("%s: Load: %v", name, err)
@@ -292,6 +298,25 @@ func TestKubernetesStoreNames(t *testing.T) {
 		if err := s.Save("x"); err == nil || !strings.Contains(err.Error(), "valid") {
 			t.Errorf("%s: Save: %v", name, err)
 		}
+	}
+	// A server that never answers: Save gives up at apiTimeout.
+	hang := make(chan struct{})
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	defer slow.Close()
+	defer close(hang)
+	defer func(d time.Duration) { apiTimeout = d }(apiTimeout)
+	apiTimeout = 300 * time.Millisecond
+	k := &KubernetesConfigMap{Name: "x"}
+	k.base, k.tokenFile, k.client, k.ns = slow.URL, token, slow.Client(), "ns"
+	done := make(chan error, 1)
+	go func() { done <- k.Save("x") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("hung server: no error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("hung server: Save didn't give up")
 	}
 	// Outside a cluster, a clear error.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
