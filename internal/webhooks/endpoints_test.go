@@ -485,7 +485,7 @@ func TestConcurrentChanges(t *testing.T) {
 	row := f.raw(t, f.a, c.ID)
 	cur, _ := f.s.decrypt(secrets.PurposeWebhookSecret, f.a, c.ID, row.SecretCiphertext)
 	prev, _ := f.s.decrypt(secrets.PurposeWebhookPrevious, f.a, c.ID, *row.PreviousSecretCiphertext)
-	if !(cur == got[0] && prev == got[1]) && !(cur == got[1] && prev == got[0]) {
+	if ok := (cur == got[0] && prev == got[1]) || (cur == got[1] && prev == got[0]); !ok {
 		t.Errorf("after two rotations: current %q previous %q, handed out %q", cur, prev, got)
 	}
 	testHookRead = nil
