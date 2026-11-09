@@ -49,10 +49,12 @@ volumes:
   - name: license
     secret:
       secretName: acme-license
-      defaultMode: 0440   # with the pod's fsGroup: not readable by other users in the pod
+      defaultMode: 0440   # readable through the pod's fsGroup, not world-readable
 ```
 
-The LicenseForge chart works the same way: an `ExternalSecret` whose `target.name` is `licenseforge-server`, with the keys `database-url`, `platform-database-url`, `identity-database-url` and `master-keys`, then `--set secrets.server=licenseforge-server`, and one for `licenseforge-migrate` (`owner-database-url`). Both must have synced before `helm install`: the migration Job runs first and fails (after `migrate.activeDeadlineSeconds`) while its Secret is missing.
+Mount the volume only in the container that needs it: the file mode doesn't keep it from other containers in the pod.
+
+The LicenseForge chart works the same way: an `ExternalSecret` whose `target.name` is `licenseforge-server`, with the keys `database-url`, `platform-database-url`, `identity-database-url` and `master-keys`, then `--set secrets.server=licenseforge-server`, and one for `licenseforge-migrate` (`owner-database-url`) with `--set secrets.migrate=licenseforge-migrate`. Both must have synced before `helm install`: the migration Job runs first and fails (after `migrate.activeDeadlineSeconds`) while its Secret is missing.
 
 ## Kubernetes: Secrets Store CSI Driver
 
@@ -123,4 +125,4 @@ template {
 - **License file**: the offline client keeps the installed file in its own store, so a file that changes on disk has to be installed again. The SDK doesn't watch files: check the mounted file now and then (in its own goroutine) and call `Install` when it changes, as the `ExampleClient_Install_mounted` example in [`sdk/go/offline`](../sdk/go/offline/example_test.go) does. Point it at your mount (`/vault/secrets/license.lic` with the agent injector).
   - The same file again changes nothing, and an older file of the same license is refused (`ErrOlderFile`), so installing at every start can't roll a renewal back.
   - Removing the file uninstalls nothing: the installed file works until its `exp`.
-  - Switching to another license through the secret manager needs `Deactivate` first (the new file is refused with `ErrOtherLicense` until then; the example tries each file once, so install it again or restart), which also gives the old seat back with a receipt. A returned file left in the mount is refused (`ErrReturned`).
+  - Switching to another license through the secret manager needs `Deactivate` first (the new file is refused with `ErrOtherLicense` until then, and the example keeps trying it), which also gives the old seat back with a receipt. A returned file left in the mount is refused (`ErrReturned`).
