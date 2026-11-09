@@ -27,11 +27,15 @@ import (
 // activate writes the license file to out; return writes the returned
 // activation's ID and time. Refusals print the API's problem and fail.
 func offline(ctx context.Context, args []string, getenv func(string) string, in io.Reader, out io.Writer, client *http.Client) error {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help") {
+		return flag.ErrHelp
+	}
 	if len(args) == 0 || (args[0] != "activate" && args[0] != "return") {
-		return errors.New("usage: licenseforge offline activate --request FILE  |  licenseforge offline return --receipt FILE  (FILE - reads stdin)")
+		return errors.New(offlineUsage)
 	}
 	op := args[0]
 	fs := flag.NewFlagSet("offline "+op, flag.ContinueOnError)
+	fs.SetOutput(io.Discard) // offlineMain prints the usage
 	name, field, path := "request", "request", "activation-requests"
 	if op == "return" {
 		name, field, path = "receipt", "receipt", "deactivation-receipts"
@@ -45,8 +49,8 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	}
 	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
 	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || !secure(u) {
-		return errors.New("offline: LICENSEFORGE_URL must be an https URL (http only for loopback hosts): the token travels with the request")
+	if err != nil || u.Host == "" || !secure(u) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("offline: LICENSEFORGE_URL must be an https URL (http only for loopback hosts) without credentials, query or fragment: the token travels with the request")
 	}
 	if tenant == "" || token == "" {
 		return errors.New("offline: LICENSEFORGE_TENANT and LICENSEFORGE_TOKEN are required")
@@ -55,11 +59,14 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	if err != nil {
 		return fmt.Errorf("offline %s: %w", op, err)
 	}
-	body, err := json.Marshal(map[string]string{field: strings.TrimSpace(text)})
+	if text = strings.TrimSpace(text); len(text) > 4096 {
+		return fmt.Errorf("offline %s: the %s is over 4096 bytes: not a %s file?", op, name, name)
+	}
+	body, err := json.Marshal(map[string]string{field: text})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/tenants/"+url.PathEscape(tenant)+"/"+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.JoinPath("api/v1/tenants", tenant, path).String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -75,13 +82,19 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 		return fmt.Errorf("offline %s: %w", op, err)
 	}
 	if resp.StatusCode/100 != 2 {
-		var p struct{ Code, Detail, RequestID string }
-		_ = json.Unmarshal(raw, &p)
-		var pid struct {
+		var p struct {
+			Code      string `json:"code"`
+			Detail    string `json:"detail"`
 			RequestID string `json:"request_id"`
 		}
-		_ = json.Unmarshal(raw, &pid)
-		return fmt.Errorf("offline %s: %d %s: %s (request %s)", op, resp.StatusCode, p.Code, p.Detail, pid.RequestID)
+		_ = json.Unmarshal(raw, &p)
+		if p.Code == "" { // not the API's problem: a proxy, a redirect
+			p.Code, p.Detail = http.StatusText(resp.StatusCode), resp.Header.Get("Location")
+		}
+		if p.RequestID == "" {
+			p.RequestID = resp.Header.Get("X-Request-Id")
+		}
+		return fmt.Errorf("offline %s: %d %s: %s (request %s)", op, resp.StatusCode, p.Code, p.Detail, p.RequestID)
 	}
 	if op == "activate" {
 		var v struct {
@@ -104,6 +117,23 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	return err
 }
 
+const offlineUsage = "usage: licenseforge offline activate --request FILE  |  licenseforge offline return --receipt FILE  (FILE - reads stdin)"
+
+// offlineMain runs offline and returns the exit code: errors (and the usage)
+// go to errOut, so stdout carries only the license file.
+func offlineMain(ctx context.Context, args []string, getenv func(string) string, in io.Reader, out, errOut io.Writer, client *http.Client) int {
+	err := offline(ctx, args, getenv, in, out, client)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		_, _ = fmt.Fprintln(errOut, offlineUsage)
+		return 0
+	case err != nil:
+		_, _ = fmt.Fprintln(errOut, "licenseforge:", err)
+		return 1
+	}
+	return 0
+}
+
 // readArg reads path, or in for "-"; requests and receipts are small.
 func readArg(path string, in io.Reader) (string, error) {
 	r := in
@@ -115,7 +145,7 @@ func readArg(path string, in io.Reader) (string, error) {
 		defer func() { _ = f.Close() }()
 		r = f
 	}
-	b, err := io.ReadAll(io.LimitReader(r, 64<<10))
+	b, err := io.ReadAll(io.LimitReader(r, 64<<10)) // more than any request: refused after trimming
 	return string(b), err
 }
 
