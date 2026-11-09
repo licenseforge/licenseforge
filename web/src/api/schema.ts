@@ -1764,6 +1764,8 @@ export interface components {
             mfa_policy: components["schemas"]["MfaPolicy"];
             /** Format: date-time */
             created_at: string;
+            /** @description Whether anyone has joined (an owner first). Without members, a platform admin may re-issue the owner invitation. */
+            has_members: boolean;
         };
         PlatformTenantPage: {
             items: components["schemas"]["PlatformTenant"][];

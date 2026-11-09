@@ -33,6 +33,14 @@ func (s *server) ListPlatformTenants(ctx context.Context, req apigen.ListPlatfor
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]string, 0, len(rows))
+	for _, t := range rows[:min(len(rows), limit)] { // not the look-ahead row
+		ids = append(ids, t.ID)
+	}
+	members, err := s.Platform.WithMembers(ctx, ids...)
+	if err != nil {
+		return nil, err
+	}
 	page := apigen.ListPlatformTenants200JSONResponse{Items: []apigen.PlatformTenant{}}
 	for i, t := range rows {
 		if i == limit {
@@ -40,7 +48,7 @@ func (s *server) ListPlatformTenants(ctx context.Context, req apigen.ListPlatfor
 			page.NextCursor = &c
 			break
 		}
-		page.Items = append(page.Items, platformTenantView(t))
+		page.Items = append(page.Items, platformTenantView(t, members[t.ID]))
 	}
 	return page, nil
 }
@@ -73,14 +81,14 @@ func (s *server) ReinvitePlatformTenantOwner(ctx context.Context, req apigen.Rei
 }
 
 func createdView(c platform.Created) apigen.PlatformTenantCreated {
-	out := apigen.PlatformTenantCreated{Tenant: platformTenantView(c.Tenant)}
+	out := apigen.PlatformTenantCreated{Tenant: platformTenantView(c.Tenant, false)} // created or re-issued: no members yet
 	out.Invitation.Id, out.Invitation.Email, out.Invitation.Role = c.Invitation.ID, c.Invitation.Email, apigen.PlatformTenantCreatedInvitationRole("owner")
 	out.Invitation.ExpiresAt, out.Invitation.Token = c.Invitation.ExpiresAt.UTC(), c.Token
 	return out
 }
 
-func platformTenantView(t *ent.Tenant) apigen.PlatformTenant {
-	return apigen.PlatformTenant{Id: t.ID, Slug: t.Slug, Name: t.Name, MfaPolicy: apigen.MfaPolicy(t.MfaPolicy), CreatedAt: t.CreatedAt.UTC()}
+func platformTenantView(t *ent.Tenant, hasMembers bool) apigen.PlatformTenant {
+	return apigen.PlatformTenant{Id: t.ID, Slug: t.Slug, Name: t.Name, MfaPolicy: apigen.MfaPolicy(t.MfaPolicy), CreatedAt: t.CreatedAt.UTC(), HasMembers: hasMembers}
 }
 
 // platformProblem maps the platform service's refusals (ADR-0042).
