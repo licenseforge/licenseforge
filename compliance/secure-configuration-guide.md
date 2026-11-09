@@ -142,7 +142,7 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 ## FIPS image
 
 - Build: `docker build --build-arg GOFIPS140=certified -t licenseforge:<version>-fips .` This uses the Go Cryptographic Module v1.0.0 (CMVP certificate #5247). The binary runs in FIPS 140-3 mode by default; don't set `GODEBUG=fips140=off`.
-- Published `-fips` images come with the release pipeline (*planned*); then set `image.tag: <version>-fips` or, better, the digest.
+- Every release publishes signed `-fips` images (`ghcr.io/licenseforge/licenseforge:<version>-fips`): set `image.tag: <version>-fips` or, better, the digest, and verify it as [Verifying releases](../docs/verifying-releases.md) shows.
 - Every algorithm the server uses is approved in that module: Ed25519, AES-256-GCM, HMAC-SHA256, HKDF-SHA256, SHA-256. CI runs the full test suite with `GODEBUG=fips140=only` on every PR.
 - FIPS covers the crypto inside the binary only. TLS at your ingress and PostgreSQL's own crypto need their own validated modules.
 
