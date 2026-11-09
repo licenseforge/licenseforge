@@ -1,0 +1,360 @@
+package licensefile
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"os"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+const offlineVectorsPath = "../../../spec/vectors/offline.json"
+
+type offlineCase struct {
+	Name   string         `json:"name"`
+	Kind   string         `json:"kind"`   // request or receipt
+	Input  string         `json:"input"`  // the token as carried
+	Result string         `json:"result"` // ok, malformed or unsupported_version
+	Want   map[string]any `json:"want,omitempty"`
+}
+
+type fileHashCase struct {
+	Name       string `json:"name"`
+	Input      string `json:"input"`       // a license file as carried
+	FileSHA256 string `json:"file_sha256"` // "": malformed, no hash
+}
+
+type offlineVectors struct {
+	Format      string         `json:"format"`
+	Note        string         `json:"note"`
+	Conventions []string       `json:"conventions"`
+	Cases       []offlineCase  `json:"cases"`
+	FileHashes  []fileHashCase `json:"file_hashes"`
+}
+
+const (
+	vFP    = "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"
+	vNonce = "AAECAwQFBgcICQoLDA0ODw" // bytes 0..15
+	// lf1.json's valid license, signed with its test:2026-11 key.
+	vLicense = "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg"
+	vHash    = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+	vReq     = `{"v":1,"tenant":"tnt_acme","product":"acme-db","key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","bind":{"type":"machine","fp":"` + vFP + `"},"fp_source":"machine-id","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
+	vRcpt    = `{"v":1,"tenant":"tnt_acme","license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa","fp":"` + vFP + `","file_sha256":"` + vHash + `","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
+)
+
+// with replaces old in payload (exactly once) and encodes it as a token.
+func with(t *testing.T, version, payload, old, repl string) string {
+	t.Helper()
+	if old != "" {
+		if strings.Count(payload, old) != 1 {
+			t.Fatalf("vector edit %q doesn't match exactly once", old)
+		}
+		payload = strings.Replace(payload, old, repl, 1)
+	}
+	return version + "." + b64.EncodeToString([]byte(payload))
+}
+
+func buildOfflineVectors(t *testing.T) offlineVectors {
+	t.Helper()
+	req := func(name, old, repl, result string) offlineCase {
+		return offlineCase{Name: name, Kind: "request", Input: with(t, RequestVersion, vReq, old, repl), Result: result}
+	}
+	rcpt := func(name, old, repl, result string) offlineCase {
+		return offlineCase{Name: name, Kind: "receipt", Input: with(t, ReceiptVersion, vRcpt, old, repl), Result: result}
+	}
+	raw := func(name, input string) offlineCase {
+		return offlineCase{Name: name, Kind: "request", Input: input, Result: "malformed"}
+	}
+	token := with(t, RequestVersion, vReq, "", "")
+	okReq := req("request", "", "", "ok")
+	okReq.Want = map[string]any{"tenant": "tnt_acme", "product": "acme-db", "key": "LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
+		"bind_type": "machine", "fp": vFP, "fp_source": "machine-id", "nonce": vNonce, "created": "2026-11-08T10:00:00Z"}
+	optional := req("request_optional_fields", `"created"`, `"hostname":"build-01","app_version":"4.2.0","sdk_version":"go/0.1.0","created"`, "ok")
+	optional.Want = map[string]any{"hostname": "build-01", "app_version": "4.2.0", "sdk_version": "go/0.1.0"}
+	okRcpt := rcpt("receipt", "", "", "ok")
+	okRcpt.Want = map[string]any{"tenant": "tnt_acme", "license_id": "lic_aaaaaaaaaaaaaaaaaaaaaaaaaa", "fp": vFP,
+		"file_sha256": vHash, "nonce": vNonce, "created": "2026-11-08T10:00:00Z"}
+	wrapped := okReq
+	wrapped.Name, wrapped.Input = "request_wrapped_with_bom", "\uFEFF\r\n"+okReq.Input[:20]+"\n "+okReq.Input[20:]+"\r\n"
+	return offlineVectors{
+		Format: "lfreq1 / lfrcpt1",
+		Note:   "Offline activation request and deactivation receipt vectors (spec/license-format.md, Offline activation). Every SDK and the server must accept the ok cases with exactly these fields and reject the others with the given class.",
+		Conventions: []string{
+			"input is the token as carried: \"lfreq1.\" or \"lfrcpt1.\" + base64url (no padding, canonical) of the JSON payload; SP, HT, CR, LF anywhere and one leading UTF-8 BOM are ignored; at most 4096 bytes.",
+			"want lists the decoded fields to compare (bind_type and fp for the request's bind; nonce as base64url; created as YYYY-MM-DDTHH:MM:SSZ).",
+		},
+		Cases: []offlineCase{
+			okReq, optional, wrapped, okRcpt,
+			req("cluster_binding", `"type":"machine","fp":"`+vFP+`"},"fp_source":"machine-id"`, `"type":"cluster","fp":"`+vFP+`"},"fp_source":"kubernetes"`, "ok"),
+			req("cluster_from_machine_id", `"type":"machine"`, `"type":"cluster"`, "malformed"),
+			req("machine_from_kubernetes", `"fp_source":"machine-id"`, `"fp_source":"kubernetes"`, "malformed"),
+			req("fp_source_unknown", `"fp_source":"machine-id"`, `"fp_source":"bios"`, "malformed"),
+			req("fp_source_missing", `"fp_source":"machine-id",`, ``, "malformed"),
+			req("unsupported_version", `"v":1`, `"v":2`, "unsupported_version"),
+			req("v_missing", `"v":1,`, ``, "malformed"),
+			req("v_not_integer", `"v":1`, `"v":1.0`, "malformed"),
+			req("unknown_field", `"created"`, `"extra":1,"created"`, "malformed"),
+			req("duplicate_key", `"product":"acme-db"`, `"product":"acme-db","product":"other"`, "malformed"),
+			req("null_field", `"key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ"`, `"key":null`, "malformed"),
+			req("empty_tenant", `"tenant":"tnt_acme"`, `"tenant":""`, "malformed"),
+			req("nul_in_product", `"product":"acme-db"`, `"product":"acme\u0000db"`, "malformed"),
+			req("key_with_space", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, `LF ABCDE`, "malformed"),
+			req("bind_none", `"type":"machine"`, `"type":"none"`, "malformed"),
+			req("bind_none_without_fp", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":{"type":"none"}`, "malformed"),
+			req("bind_missing", `"bind":{"type":"machine","fp":"`+vFP+`"},`, ``, "malformed"),
+			req("bind_unknown_field", `"type":"machine"`, `"type":"machine","x":"y"`, "malformed"),
+			req("fp_uppercase", vFP, "sha256:"+strings.ToUpper(vFP[7:]), "malformed"),
+			req("bind_duplicate_key", `"type":"machine"`, `"type":"machine","type":"cluster"`, "malformed"),
+			req("key_128_chars", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, strings.Repeat("K", 128), "ok"),
+			req("key_129_chars", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, strings.Repeat("K", 129), "malformed"),
+			req("key_with_del", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, `LF-ABCDE\u007f`, "malformed"),
+			req("key_non_ascii", `LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ`, `LF-ABCDÉ`, "malformed"),
+			req("tenant_256_bytes", `"tenant":"tnt_acme"`, `"tenant":"`+strings.Repeat("é", 128)+`"`, "ok"),
+			req("tenant_257_bytes", `"tenant":"tnt_acme"`, `"tenant":"`+strings.Repeat("é", 128)+`a"`, "malformed"),
+			req("tenant_lone_surrogate", `"tenant":"tnt_acme"`, `"tenant":"\ud800"`, "malformed"),
+			req("v_string", `"v":1`, `"v":"1"`, "malformed"),
+			req("v_huge", `"v":1`, `"v":123456789012345678901234567890`, "unsupported_version"),
+			req("v2_skips_field_rules", `"v":1,"tenant":"tnt_acme"`, `"v":2,"future":true`, "unsupported_version"),
+			req("v_exponent", `"v":1`, `"v":1e0`, "malformed"),
+			req("tenant_number", `"tenant":"tnt_acme"`, `"tenant":1`, "malformed"),
+			req("bind_string", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":"machine"`, "malformed"),
+			req("bind_null", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":null`, "malformed"),
+			req("bind_machine_without_fp", `,"fp":"`+vFP+`"`, ``, "malformed"),
+			req("nonce_number", `"nonce":"`+vNonce+`"`, `"nonce":123`, "malformed"),
+			req("nonce_trailing_bits", vNonce, vNonce[:21]+"x", "malformed"),
+			req("created_number", `"created":"2026-11-08T10:00:00Z"`, `"created":0`, "malformed"),
+			req("key_missing", `"key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",`, ``, "malformed"),
+			req("product_missing", `"product":"acme-db",`, ``, "malformed"),
+			req("nonce_missing", `"nonce":"`+vNonce+`",`, ``, "malformed"),
+			req("created_missing", `,"created":"2026-11-08T10:00:00Z"`, ``, "malformed"),
+			req("too_deep", `"v":1`, `"v":2,"x":`+strings.Repeat("[", 40)+strings.Repeat("]", 40), "malformed"), // v 2: only the depth rule refuses it
+			raw("top_level_array", with(t, RequestVersion, "["+vReq+"]", "", "")),
+			raw("payload_trailing_bits", trailingBits(t, with(t, RequestVersion, vReq, `"tnt_acme"`, `"tnt_acme1"`))), // 1 more byte: unused bits
+			raw("bom_twice", "\uFEFF\uFEFF"+token),
+			raw("bom_not_first", " \uFEFF"+token),
+			raw("nbsp_inside", token[:20]+"\u00a0"+token[20:]),
+			raw("line_separator_inside", token[:20]+"\u2028"+token[20:]),
+			raw("4097_bytes", exactly(token, MaxOfflineSize+1)),
+			raw("bom_and_4094_bytes", "\uFEFF"+exactly(token, MaxOfflineSize-2)), // 4,097 bytes, 4,095 UTF-16 units
+			req("created_1969", "2026-11-08T10:00:00Z", "1969-12-31T23:59:59Z", "malformed"),
+			req("fp_wrong_prefix", vFP, "md5:"+vFP[7:], "malformed"),
+			req("nonce_short", vNonce, "AAECAwQFBgcICQoLDA0O", "malformed"),
+			req("nonce_padded", vNonce, vNonce+"==", "malformed"),
+			req("nonce_22_chars_with_crlf", vNonce, vNonce[:20]+`\r\n`, "malformed"), // 15 bytes to a decoder that skips line breaks
+			req("nonce_with_newline", vNonce, vNonce[:10]+`\n`+vNonce[10:], "malformed"),
+			req("created_offset", "2026-11-08T10:00:00Z", "2026-11-08T10:00:00+00:00", "malformed"),
+			req("created_not_a_date", "2026-11-08T10:00:00Z", "2026-02-30T10:00:00Z", "malformed"),
+			req("hostname_empty", `"created"`, `"hostname":"","created"`, "malformed"),
+			req("hostname_control_char", `"created"`, `"hostname":"a\nb","created"`, "malformed"),
+			req("hostname_space", `"created"`, `"hostname":"build 01","created"`, "malformed"),
+			req("hostname_253_bytes", `"created"`, `"hostname":"`+strings.Repeat("a", 253)+`","created"`, "ok"),
+			req("hostname_254_bytes", `"created"`, `"hostname":"`+strings.Repeat("a", 254)+`","created"`, "malformed"),
+			req("app_version_non_ascii", `"created"`, `"app_version":"4.2-é","created"`, "malformed"),
+			req("sdk_version_65_bytes", `"created"`, `"sdk_version":"`+strings.Repeat("v", 65)+`","created"`, "malformed"),
+			req("trailing_data", vReq, vReq+"{}", "malformed"),
+			{Name: "wrong_prefix", Kind: "request", Input: with(t, ReceiptVersion, vReq, "", ""), Result: "malformed"},
+			{Name: "padded_base64", Kind: "request", Input: with(t, RequestVersion, vReq, "", "") + "=", Result: "malformed"},
+			{Name: "oversize", Kind: "request", Input: with(t, RequestVersion, vReq, "", "") + strings.Repeat(" ", MaxOfflineSize), Result: "malformed"},
+			{Name: "exactly_4096_bytes", Kind: "request", Input: exactly(with(t, RequestVersion, vReq, "", ""), MaxOfflineSize), Result: "ok"},
+			{Name: "armored", Kind: "request", Input: "-----BEGIN LICENSEFORGE LICENSE-----\n" + with(t, RequestVersion, vReq, "", "") + "\n-----END LICENSEFORGE LICENSE-----\n", Result: "malformed"},
+			{Name: "no_prefix", Kind: "request", Input: strings.TrimPrefix(with(t, RequestVersion, vReq, "", ""), RequestVersion+"."), Result: "malformed"},
+			{Name: "empty_body", Kind: "request", Input: RequestVersion + ".", Result: "malformed"},
+			rcpt("receipt_unknown_field", `"created"`, `"lease":"x","created"`, "malformed"),
+			rcpt("receipt_hash_uppercase", vHash, strings.ToUpper(vHash), "malformed"),
+			rcpt("receipt_hash_short", vHash, vHash[:62], "malformed"),
+			rcpt("receipt_empty_license", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":""`, "malformed"),
+			rcpt("receipt_fp_missing", `"fp":"`+vFP+`",`, ``, "malformed"),
+			rcpt("receipt_file_sha256_missing", `"file_sha256":"`+vHash+`",`, ``, "malformed"),
+			rcpt("receipt_tenant_missing", `"tenant":"tnt_acme",`, ``, "malformed"),
+			rcpt("receipt_license_128_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 128)+`"`, "ok"),
+			rcpt("receipt_license_129_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 129)+`"`, "malformed"),
+			rcpt("receipt_fp_without_prefix", `"fp":"`+vFP, `"fp":"`+vFP[7:], "malformed"),
+			rcpt("receipt_fp_uppercase", `"fp":"`+vFP, `"fp":"sha256:`+strings.ToUpper(vFP[7:]), "malformed"),
+			rcpt("receipt_fp_short", `"fp":"`+vFP, `"fp":"`+vFP[:70], "malformed"),
+			rcpt("receipt_unsupported_version", `"v":1`, `"v":3`, "unsupported_version"),
+		},
+		FileHashes: fileHashes(t),
+	}
+}
+
+// trailingBits sets the unused low bits of token's last base64url character.
+func trailingBits(t *testing.T, token string) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	body := token[strings.Index(token, ".")+1:]
+	if len(body)%4 < 2 {
+		t.Fatalf("no unused bits in %d characters", len(body))
+	}
+	last := strings.IndexByte(alphabet, token[len(token)-1])
+	return token[:len(token)-1] + alphabet[last+1:last+2]
+}
+
+// exactly pads token with spaces to n bytes.
+func exactly(token string, n int) string { return token + strings.Repeat(" ", n-len(token)) }
+
+// fileHashes: the same token, carried four ways, has one file_sha256.
+func fileHashes(t *testing.T) []fileHashCase {
+	t.Helper()
+	const token = vLicense
+	var out []fileHashCase
+	for _, c := range []struct{ name, input string }{
+		{"bare_token", token},
+		{"armored_lf", "-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n-----END LICENSEFORGE LICENSE-----\n"},
+		{"armored_crlf", "-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token + "\r\n-----END LICENSEFORGE LICENSE-----\r\n"},
+		{"bom_wrapped_trailing_blank_lines", "\uFEFF-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token[:9] + "\r\n" + token[9:] + "\r\n-----END LICENSEFORGE LICENSE-----\r\n\r\n\r\n"},
+	} {
+		h, err := FileSHA256(c.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fileHashCase{Name: c.name, Input: c.input, FileSHA256: h})
+	}
+	for name, input := range map[string]string{
+		"not_a_token":       "lf1.x",
+		"empty_parts":       "lf1...",
+		"missing_end_armor": "-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n",
+		"payload_padded":    strings.Replace(token, ".23l3", "=.23l3", 1),
+	} {
+		if _, err := FileSHA256(input); !errors.Is(err, ErrMalformed) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		out = append(out, fileHashCase{Name: name, Input: input})
+	}
+	slices.SortStableFunc(out[4:], func(a, b fileHashCase) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+func TestOfflineVectors(t *testing.T) {
+	want, err := json.MarshalIndent(buildOfflineVectors(t), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	if *update {
+		if err := os.WriteFile(offlineVectorsPath, want, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat("../../../go.mod"); errors.Is(err, os.ErrNotExist) {
+		t.Skip("not inside the licenseforge repository")
+	}
+	got, err := os.ReadFile(offlineVectorsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("spec/vectors/offline.json is stale; run: go test ./licensefile -update")
+	}
+	var vf offlineVectors
+	if err := json.Unmarshal(got, &vf); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range vf.FileHashes {
+		got, err := FileSHA256(c.Input)
+		if c.FileSHA256 == "" {
+			if !errors.Is(err, ErrMalformed) {
+				t.Errorf("file hash %s: %s, %v; want malformed", c.Name, got, err)
+			}
+		} else if err != nil || got != c.FileSHA256 || got != vf.FileHashes[0].FileSHA256 {
+			t.Errorf("file hash %s: %s, %v; want %s", c.Name, got, err, c.FileSHA256)
+		}
+	}
+	for _, c := range vf.Cases {
+		var fields map[string]any
+		var err error
+		if c.Kind == "request" {
+			var r *Request
+			if r, err = ParseRequest(c.Input); err == nil {
+				fields = map[string]any{"tenant": r.Tenant, "product": r.Product, "key": r.Key, "bind_type": string(r.Binding.Type),
+					"fp": r.Binding.Fingerprint, "fp_source": r.FPSource, "nonce": b64.EncodeToString(r.Nonce), "created": r.Created.Format(timeLayout),
+					"hostname": r.Hostname, "app_version": r.AppVersion, "sdk_version": r.SDKVersion}
+			}
+		} else {
+			var r *Receipt
+			if r, err = ParseReceipt(c.Input); err == nil {
+				fields = map[string]any{"tenant": r.Tenant, "license_id": r.LicenseID, "fp": r.Fingerprint, "file_sha256": r.FileSHA256,
+					"nonce": b64.EncodeToString(r.Nonce), "created": r.Created.Format(timeLayout)}
+			}
+		}
+		switch c.Result {
+		case "ok":
+			if err != nil {
+				t.Errorf("%s: %v, want ok", c.Name, err)
+			}
+			for k, v := range c.Want {
+				if fields[k] != v {
+					t.Errorf("%s: %s = %v, want %v", c.Name, k, fields[k], v)
+				}
+			}
+		case "malformed":
+			if !errors.Is(err, ErrMalformed) {
+				t.Errorf("%s: %v, want malformed", c.Name, err)
+			}
+		case "unsupported_version":
+			if !errors.Is(err, ErrUnsupportedVersion) {
+				t.Errorf("%s: %v, want unsupported_version", c.Name, err)
+			}
+		default:
+			t.Fatalf("%s: unknown result %q", c.Name, c.Result)
+		}
+	}
+}
+
+// What an SDK encodes, the parser reads back; what the parser refuses, the
+// encoder refuses too.
+func TestOfflineRoundTrip(t *testing.T) {
+	created := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	nonce := bytes.Repeat([]byte{7}, 16)
+	r := Request{Tenant: "tnt_a", Product: "p", Key: " LF-KEY\r\n", Binding: Binding{Type: BindCluster, Fingerprint: vFP}, FPSource: "kubernetes",
+		Nonce: nonce, Created: created, Hostname: "h", AppVersion: "1", SDKVersion: "go/1"}
+	s, err := EncodeRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ParseRequest(s); err != nil || got.Tenant != r.Tenant || got.Binding != r.Binding || !bytes.Equal(got.Nonce, nonce) ||
+		!got.Created.Equal(created) || got.Hostname != "h" || got.SDKVersion != "go/1" || got.Key != "LF-KEY" {
+		t.Errorf("request round trip: %+v, %v", got, err)
+	}
+	if OfflineSHA256(s) != OfflineSHA256("\uFEFF"+s[:10]+"\r\n"+s[10:]+"\n") || OfflineSHA256(s) == OfflineSHA256(s+"A") {
+		t.Error("OfflineSHA256 depends on whitespace, or not on the token")
+	}
+	// The hash is the token's, whatever armor and line endings carry it.
+	token := "lf1.k1.cGF5bG9hZA.c2ln"
+	h, err := FileSHA256(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, carried := range []string{
+		"-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n-----END LICENSEFORGE LICENSE-----\n",
+		"\uFEFF-----BEGIN LICENSEFORGE LICENSE-----\r\n" + token[:9] + "\r\n" + token[9:] + "\r\n-----END LICENSEFORGE LICENSE-----\r\n\r\n",
+	} {
+		if got, err := FileSHA256(carried); err != nil || got != h {
+			t.Errorf("FileSHA256(%q) = %s, %v; want the token's %s", carried, got, err, h)
+		}
+	}
+	if _, err := FileSHA256("not a license"); !errors.Is(err, ErrMalformed) {
+		t.Errorf("FileSHA256 of a non-license: %v", err)
+	}
+	rc := Receipt{Tenant: "tnt_a", LicenseID: "lic_x", Fingerprint: vFP, FileSHA256: h, Nonce: nonce, Created: created}
+	s, err = EncodeReceipt(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ParseReceipt(s); err != nil || got.LicenseID != rc.LicenseID || got.FileSHA256 != h || got.Fingerprint != vFP || !bytes.Equal(got.Nonce, nonce) {
+		t.Errorf("receipt round trip: %+v, %v", got, err)
+	}
+	for name, bad := range map[string]Request{
+		"no binding":    {Tenant: "t", Product: "p", Key: "k", Nonce: nonce, Created: created},
+		"short nonce":   {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce[:8], Created: created},
+		"no tenant":     {Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created},
+		"no source":     {Tenant: "t", Product: "p", Key: "k", Binding: r.Binding, Nonce: nonce, Created: created},
+		"invalid UTF-8": {Tenant: "t\xff", Product: "p", Key: "k", Binding: r.Binding, FPSource: "kubernetes", Nonce: nonce, Created: created}, // json.Marshal would write U+FFFD
+	} {
+		if _, err := EncodeRequest(bad); !errors.Is(err, ErrMalformed) {
+			t.Errorf("%s: encoded (%v)", name, err)
+		}
+	}
+}

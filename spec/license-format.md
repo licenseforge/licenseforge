@@ -131,3 +131,47 @@ Steps run in this order; the first failing step decides the error class.
 9. Anti-rollback: persist max(`now`, last_seen); if clock goes backwards beyond tolerance → invalid.
 
 That's the whole SDK core. Any language with Ed25519 (libsodium covers C/C++) can implement it in ~100 lines.
+
+## Offline activation
+An air-gapped machine activates by file exchange ([ADR-0043 Offline activation and deactivation receipts](../docs/adr/0043-offline-activation-and-deactivation-receipts.md)): the app writes an **activation request**, someone carries it to the vendor's LicenseForge, and an ordinary `lf1` license file bound to that machine comes back. To return the seat, the app deletes the file and writes a **deactivation receipt**. Both artifacts are unsigned (the machine has no key the vendor trusts): the request is authorised by the license key it carries, the receipt by naming the exact file the server issued.
+
+### Envelope
+```
+lfreq1.<base64url(payload_json)>     activation request
+lfrcpt1.<base64url(payload_json)>    deactivation receipt
+```
+- `base64url`, whitespace (SP, HT, CR, LF ignored anywhere) and one leading UTF-8 BOM: as for `lf1`. No armor: an armored request or receipt → `malformed`.
+- At most **4,096 bytes** of raw input; larger → `malformed` before any parsing.
+- The payload follows the claim encoding rules' well-formedness check (UTF-8, one object, no duplicate keys, depth, surrogates), then `v`: missing or not an integer (`"1"` is a string) → `malformed`; any integer other than `1` → `unsupported_version`, and the field rules below are not applied (a later version may change them).
+- **Unknown fields → `malformed`** (both sides are LicenseForge's; a new field comes with a new `v`). Every field below has the stated type; `null` or a wrong type → `malformed`.
+- Error classes: `malformed`, `unsupported_version`.
+
+### Request (`lfreq1`)
+| Field | Rule |
+|---|---|
+| `v` | `1` |
+| `tenant`, `product` | non-empty strings, ≤ 256 bytes, no NUL |
+| `key` | the license key, 1–128 printable ASCII characters (`0x21`–`0x7E`). Writers remove whitespace the user pasted with it; the server normalizes it exactly as for online activation (ADR-0025) |
+| `bind` | object with exactly `type` (`machine` or `cluster`) and `fp` (`sha256:` + 64 lowercase hex digits, derived as in Fingerprints) |
+| `fp_source` | where the fingerprint came from: `machine-id`, `kubernetes`, `env` or `override`; `kubernetes` exactly when `bind.type` is `cluster`. `override`: the app set the fingerprint; `env`: `LICENSEFORGE_FINGERPRINT`; `kubernetes`: the cluster ID; `machine-id`: the OS machine identity (`/etc/machine-id`, `MachineGuid`, `IOPlatformUUID`). Recorded on the activation; a client claim, never trusted for a decision |
+| `nonce` | 16 random bytes, base64url: exactly 22 characters, no padding, no whitespace inside the string |
+| `created` | the machine's clock, timestamp format; informational only, never trusted |
+| `hostname` | optional, 1–253 characters from `A-Z a-z 0-9 . _ -` |
+| `app_version`, `sdk_version` | optional, 1–64 printable ASCII characters (`0x20`–`0x7E`) |
+
+The request is as sensitive as the license key it carries: carry it like the key, and servers store only its SHA-256.
+
+The **SHA-256 of a request or receipt** (what servers record) is taken over its token with the BOM and all whitespace removed, as the parser reads it, lowercase hex: the same artifact carried with other line endings has the same hash.
+
+### Receipt (`lfrcpt1`)
+| Field | Rule |
+|---|---|
+| `v` | `1` |
+| `tenant` | as in the request |
+| `license_id` | non-empty string, ≤ 128 bytes, no NUL (the `lid` of the deleted file) |
+| `fp` | the machine's fingerprint, as in the request |
+| `file_sha256` | 64 lowercase hex digits: SHA-256 of the deleted license file's **token**, `lf1.<kid>.<payload>.<signature>` with armor, BOM and whitespace removed (as the verifier reads it), so line endings or a trailing newline added in transit don't change it. Only a file that passes the `lf1` envelope checks (every check before the key lookup) has one. The server compares it with the same hash of the token it signed |
+| `nonce`, `created` | as in the request |
+
+### Conformance vectors
+`spec/vectors/offline.json`: request and receipt inputs with the expected class and, for valid ones, the decoded fields; `file_hashes`: `lf1.json`'s valid license carried four ways (bare, armored LF and CRLF, BOM with wrapped lines and trailing blank lines) with its one `file_sha256`, and inputs with none (`file_sha256` empty: `malformed`). Every SDK and the server must pass all of them.
