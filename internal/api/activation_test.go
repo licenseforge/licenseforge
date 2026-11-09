@@ -966,3 +966,10 @@ func TestSDKOnlineClient(t *testing.T) {
 		t.Errorf("refresh after deactivate: %v", err)
 	}
 }
+
+// An offline seat's refusal reaches the SDK as a stable code (ADR-0043).
+func TestOfflineSeatProblem(t *testing.T) {
+	if p := activationProblem(fmt.Errorf("x: %w", activations.ErrOfflineSeat)); p == nil || p.status != http.StatusConflict || p.code != "offline_seat" {
+		t.Errorf("problem = %+v", p)
+	}
+}

@@ -1071,6 +1071,7 @@ func init() {
 		"activations_id_format":      "id ~ '^act_[a-z2-7]{26}$'",
 		"activations_mode":           "(mode)::text = ANY (ARRAY['online'::text, 'offline'::text])",
 		"activations_offline_file":   "offline_file_sha256 IS NULL OR offline_file_sha256 ~ '^[0-9a-f]{64}$'",
+		"activations_offline_mode":   "offline_file_sha256 IS NULL OR (mode)::text = 'offline'::text",
 		"activations_seen_order":     "last_seen_at >= first_seen_at",
 		"activations_source":         "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
 		"activations_source_binding": "((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)",

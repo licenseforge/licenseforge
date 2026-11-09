@@ -56,6 +56,8 @@ func (Activation) Annotations() []schema.Annotation {
 		// The SDK binds Kubernetes fingerprints to the cluster, all others to the machine.
 		"activations_source_binding": `((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)`,
 		"activations_offline_file":   `offline_file_sha256 IS NULL OR offline_file_sha256 ~ '^[0-9a-f]{64}$'`,
+		// Only offline seats carry a file (ADR-0043): an online seat never turns offline.
+		"activations_offline_mode": `offline_file_sha256 IS NULL OR (mode)::text = 'offline'::text`,
 	}}}
 }
 

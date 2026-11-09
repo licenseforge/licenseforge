@@ -21,7 +21,12 @@ import (
 // off, or max_offline_seconds 0).
 var ErrOffline = errors.New("activations: the plan doesn't allow offline use")
 
-var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline}
+// ErrOnlineSeat: the machine is activated online. Its SDK deactivates it
+// first (same fingerprint: no seat move); an online seat never turns
+// offline, so online deactivate can't free a seat whose file is out.
+var ErrOnlineSeat = errors.New("activations: the machine is activated online; deactivate it there first")
+
+var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline, ErrOnlineSeat}
 
 // Offline answers an offline activation request (ADR-0043): the lfreq1 text
 // an air-gapped machine wrote, carried in by p (activation:offline on the
@@ -56,6 +61,9 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 	})
 	if err != nil {
 		ev.Details["reason"] = err.Error() // recorded for refusals only
+		if errors.Is(err, ErrInvalid) {
+			ev.Details["reason"] = ErrInvalid.Error() // the details echo the request: never in the chain
+		}
 		err = audit.Refused(ctx, s.DB, tenantID, ev, err, offlineRefusals...)
 		if err == errHidden { //nolint:errorlint // exactly the recorded refusal (a recording failure is joined to it: a 500)
 			return Lease{}, ErrNotFound
@@ -116,7 +124,9 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 		Hostname: r.Hostname, AppVersion: r.AppVersion, SDKVersion: r.SDKVersion}
 	act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
 	switch {
-	case err == nil: // renewal, or an online seat going offline
+	case err == nil && act.Mode != activation.ModeOffline:
+		return Lease{}, ErrOnlineSeat
+	case err == nil: // renewal
 		ev.ObjectID = act.ID
 	case ent.IsNotFound(err):
 		id, move, err := s.create(ctx, tx, l, req, activation.Binding(r.Binding.Type), activation.ModeOffline, now)

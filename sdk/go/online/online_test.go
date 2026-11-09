@@ -343,7 +343,7 @@ func TestErrorCodes(t *testing.T) {
 		"unauthenticated": ErrUnauthenticated, "invalid_request": ErrInvalidRequest, "license_suspended": ErrSuspended,
 		"license_revoked": ErrRevoked, "license_expired": ErrExpired, "activation_limit_reached": ErrActivationLimit,
 		"rehost_limit_reached": ErrRehostLimit, "binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated,
-		"idempotency_key_reused": ErrIdempotencyReused,
+		"offline_seat": ErrOfflineSeat, "idempotency_key_reused": ErrIdempotencyReused,
 	} {
 		f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, code); return true }
 		c, sleeps := f.client(t, f.iat, nil)

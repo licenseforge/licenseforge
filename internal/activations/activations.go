@@ -62,6 +62,10 @@ var (
 	// ErrNotActivated: no active activation for this fingerprint (deactivated
 	// or reset); activate again.
 	ErrNotActivated = errors.New("activations: not activated")
+	// ErrOfflineSeat: the fingerprint's seat is an offline activation
+	// (ADR-0043): online activate, refresh and deactivate don't touch it; a
+	// deactivation receipt or the dashboard returns it.
+	ErrOfflineSeat = errors.New("activations: the machine's seat is offline; return it with a deactivation receipt")
 )
 
 // Service works on the tenant pool. Keys is the master keyring (license
@@ -124,7 +128,7 @@ func count(c metrics.OutcomeCounter, err error) {
 	case errors.Is(err, ErrInvalid):
 		c.Inc(metrics.Failure)
 	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired), errors.Is(err, ErrLimit),
-		errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
+		errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated), errors.Is(err, ErrOfflineSeat):
 		c.Inc(metrics.Denied)
 	default:
 		c.Inc(metrics.Failure)
@@ -172,6 +176,8 @@ func (s Service) grant(ctx context.Context, tx *ent.Tx, req Request, activate bo
 	}
 	act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
 	switch {
+	case err == nil && act.Mode == activation.ModeOffline:
+		return g, ErrOfflineSeat
 	case err == nil:
 		g.actID = act.ID
 		res, err := tx.ExecContext(ctx, `UPDATE activations SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()),
@@ -410,6 +416,9 @@ func (s Service) Deactivate(ctx context.Context, req Request) error {
 		if err != nil {
 			return err
 		}
+		if act.Mode == activation.ModeOffline {
+			return ErrOfflineSeat // its file stays valid: freeing the seat needs the receipt
+		}
 		ev.ObjectID = act.ID
 		if err := free(ctx, tx, act.ID); err != nil {
 			return err
@@ -581,7 +590,8 @@ func refusal(ev audit.Event, err error) (audit.Event, bool) {
 	case ev.Details == nil:
 		return ev, false
 	case errors.Is(err, ErrSuspended), errors.Is(err, ErrRevoked), errors.Is(err, ErrExpired),
-		errors.Is(err, ErrLimit), errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated):
+		errors.Is(err, ErrLimit), errors.Is(err, ErrRehostLimit), errors.Is(err, ErrBinding), errors.Is(err, ErrNotActivated),
+		errors.Is(err, ErrOfflineSeat):
 		ev.Outcome, ev.ObjectID = auditevent.OutcomeFailure, ""
 		ev.Details["reason"] = err.Error()
 		return ev, true

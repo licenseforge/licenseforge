@@ -3,7 +3,9 @@ package activations
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
+	"licenseforge.io/licenseforge/internal/store/schema"
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
 )
 
@@ -96,6 +99,15 @@ func TestOfflineRefusals(t *testing.T) {
 	online := f.issue(t, "pro")
 	revoked := f.issue(t, "offline")
 	zero := f.issue(t, "offline-zero")
+	suspended := f.issue(t, "offline")
+	if _, err := f.lic.Suspend(ctx, manager(f.a), suspended.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	inGrace := f.issue(t, "offline") // grace 60s: offline issuing allows none
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET expires_at = issued_at + interval '1 millisecond' WHERE id = $1`, inGrace.License.ID)
+		return err
+	})
 	if _, err := f.lic.Revoke(ctx, manager(f.a), revoked.License.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +126,8 @@ func TestOfflineRefusals(t *testing.T) {
 		"out of scope":    {scoped, f.offlineReq(t, is.Key, fp(), nil), ErrNotFound},
 		"offline off":     {manager(f.a), f.offlineReq(t, online.Key, fp(), nil), ErrOffline},
 		"max offline 0":   {manager(f.a), f.offlineReq(t, zero.Key, fp(), nil), ErrOffline},
+		"suspended":       {manager(f.a), f.offlineReq(t, suspended.Key, fp(), nil), ErrSuspended},
+		"in grace":        {manager(f.a), f.offlineReq(t, inGrace.Key, fp(), nil), ErrExpired},
 		"revoked":         {manager(f.a), f.offlineReq(t, revoked.Key, fp(), nil), ErrRevoked},
 		"cluster binding": {manager(f.a), f.offlineReq(t, is.Key, fp(), func(r *licensefile.Request) { r.Binding.Type, r.FPSource = licensefile.BindCluster, "kubernetes" }), ErrBinding},
 	} {
@@ -133,13 +147,131 @@ func TestOfflineRefusals(t *testing.T) {
 				t.Fatalf("%d new events", len(f.events(t))-before)
 			}
 			e := es[len(es)-1]
-			if e.Outcome == auditevent.OutcomeSuccess || e.ObjectID != nil || strings.Contains(e.Details, is.Key[3:12]) || !strings.Contains(e.Details, "request_sha256") {
+			want := auditevent.OutcomeFailure
+			if errors.Is(c.want, authz.ErrDenied) || name == "out of scope" {
+				want = auditevent.OutcomeDenied
+			}
+			if e.Outcome != want || e.ObjectID != nil || strings.Contains(e.Details, is.Key[3:12]) || !strings.Contains(e.Details, "request_sha256") {
 				t.Errorf("event %+v", e)
+			}
+			// Invalid requests: a fixed reason, nothing the request said.
+			if errors.Is(c.want, ErrInvalid) && (!strings.Contains(e.Details, `"reason":"`+ErrInvalid.Error()+`"`) || strings.Contains(e.Details, "other") || strings.Contains(e.Details, f.a+`"`) && name == "other tenant") {
+				t.Errorf("invalid request reason: %s", e.Details)
+			}
+			if !errors.Is(c.want, ErrInvalid) && want == auditevent.OutcomeFailure && !strings.Contains(e.Details, c.want.Error()) {
+				t.Errorf("reason not recorded: %s", e.Details)
 			}
 		})
 	}
 	if as := f.activations(t, is.License.ID); len(as) != 0 {
 		t.Errorf("a refusal took a seat: %+v", as)
+	}
+}
+
+// Offline seats are returned by receipt or the dashboard only; online seats
+// never turn offline (ADR-0043): the SDK's online calls can't free a seat
+// whose file is still valid.
+func TestOfflineAndOnlineSeatsStayApart(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	online := f.issue(t, "offline")
+	machine := fp()
+	act, err := f.s.Activate(ctx, f.req(online.Key, machine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, online.Key, machine, nil)); !errors.Is(err, ErrOnlineSeat) {
+		t.Errorf("offline on an online seat: %v", err)
+	}
+	err = f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error { // the schema backs it
+		_, err := tx.ExecContext(ctx, `UPDATE activations SET offline_file_sha256 = repeat('a', 64) WHERE id = $1`, act.ActivationID)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "activations_offline_mode") {
+		t.Errorf("file on an online seat: %v", err)
+	}
+
+	is := f.issue(t, "offline")
+	machine = fp()
+	got, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, call := range map[string]func() error{
+		"activate":   func() error { _, err := f.s.Activate(ctx, f.req(is.Key, machine)); return err },
+		"refresh":    func() error { _, err := f.s.Refresh(ctx, f.req(is.Key, machine)); return err },
+		"deactivate": func() error { return f.s.Deactivate(ctx, f.req(is.Key, machine)) },
+	} {
+		if err := call(); !errors.Is(err, ErrOfflineSeat) {
+			t.Errorf("online %s of an offline seat: %v", name, err)
+		}
+	}
+	if as := f.activations(t, is.License.ID); len(as) != 1 || as[0].DeactivatedAt != nil {
+		t.Fatalf("offline seat changed: %+v", as)
+	}
+	refused := 0 // activate and deactivate are audited, refresh isn't
+	for _, e := range f.events(t) {
+		if e.Outcome == auditevent.OutcomeFailure && strings.Contains(e.Details, "seat is offline") {
+			refused++
+		}
+	}
+	if refused != 2 {
+		t.Errorf("%d audited refusals of the offline seat", refused)
+	}
+	// The dashboard can return it.
+	if a, err := f.s.DeactivateByID(ctx, manager(f.a), is.License.ID, got.ActivationID); err != nil || a.DeactivatedAt == nil {
+		t.Errorf("dashboard deactivate: %+v, %v", a, err)
+	}
+}
+
+// Seats are counted under the license's exclusive lock: a request waits
+// for a refresh's share lock (and so for every other seat taker) instead
+// of counting alongside it. Deterministic: the request must be seen waiting.
+func TestOfflineTakesTheLicenseLock(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "offline") // max_activations 1
+	if _, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, fp(), nil)); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	done := make(chan error, 1)
+	err = f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if _, err := tx.License.Query().Where(license.ID(is.License.ID)).ForShare().Only(ctx); err != nil {
+			return err
+		}
+		text := f.offlineReq(t, is.Key, fp(), nil)
+		go func() { _, err := f.s.Offline(ctx, manager(f.a), text); done <- err }()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			select {
+			case err := <-done:
+				return fmt.Errorf("the request didn't wait for the license lock: %v", err)
+			default:
+			}
+			var n int
+			if err := admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+				WHERE l.locktype IN ('tuple', 'transactionid') AND NOT l.granted AND a.datname = $1`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return errors.New("the request never waited")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, ErrLimit) {
+		t.Errorf("after the lock: %v", err)
 	}
 }
 
@@ -160,8 +292,13 @@ func TestOfflineClaims(t *testing.T) {
 		"perpetual, max offline": {nil, sec(60), ptr(iat.Add(time.Minute)), 0},
 		"perpetual":              {nil, nil, nil, 0},
 	} {
-		l := &ent.License{ID: "lic_x", TenantID: "tnt_x", BindType: license.BindTypeMachine, ExpiresAt: c.expires, MaxOfflineSeconds: c.maxOffline, GraceSeconds: 60}
+		updates := now.Add(time.Hour)
+		l := &ent.License{ID: "lic_x", TenantID: "tnt_x", BindType: license.BindTypeMachine, ExpiresAt: c.expires, MaxOfflineSeconds: c.maxOffline, GraceSeconds: 60,
+			UpdatesUntil: &updates, Entitlements: schema.LicenseEntitlements{Features: []string{"sso"}, Limits: map[string]int64{"seats": 5}}}
 		got := offlineClaims(l, "p", now, "fp")
+		if got.UpdatesUntil == nil || !got.UpdatesUntil.Equal(updates.Truncate(time.Second)) || !got.Entitlements.HasFeature("sso") || got.Entitlements.Limits["seats"] != 5 {
+			t.Errorf("%s: updates_until %v, entitlements %+v", name, got.UpdatesUntil, got.Entitlements)
+		}
 		if (got.Expires == nil) != (c.exp == nil) || (c.exp != nil && !got.Expires.Equal(*c.exp)) || got.Grace != c.grace ||
 			!got.IssuedAt.Equal(iat) || got.RefreshAfter != nil || got.MaxOffline != nil {
 			t.Errorf("%s: exp %v grace %v; want %v %v", name, got.Expires, got.Grace, c.exp, c.grace)

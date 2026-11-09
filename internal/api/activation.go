@@ -112,7 +112,7 @@ func authenticated(ctx context.Context, err error) error {
 		return err
 	}
 	for _, known := range []error{activations.ErrSuspended, activations.ErrRevoked, activations.ErrExpired, activations.ErrLimit,
-		activations.ErrRehostLimit, activations.ErrBinding, activations.ErrNotActivated} {
+		activations.ErrRehostLimit, activations.ErrBinding, activations.ErrNotActivated, activations.ErrOfflineSeat} {
 		if errors.Is(err, known) {
 			m.ok = true
 		}
@@ -221,6 +221,7 @@ func activationProblem(err error) *problem {
 		{activations.ErrRehostLimit, http.StatusConflict, "rehost_limit_reached", "The license's machines have moved as often as it allows."},
 		{activations.ErrBinding, http.StatusUnprocessableEntity, "binding_mismatch", "The fingerprint doesn't bind what the license requires."},
 		{activations.ErrNotActivated, http.StatusNotFound, "not_activated", "This machine isn't activated; activate it."},
+		{activations.ErrOfflineSeat, http.StatusConflict, "offline_seat", "This machine's seat is offline; return it with a deactivation receipt."},
 	} {
 		if errors.Is(err, m.err) {
 			return &problem{status: m.status, code: m.code, detail: m.detail, err: err}

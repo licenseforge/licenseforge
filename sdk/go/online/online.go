@@ -57,6 +57,7 @@ var (
 	ErrRehostLimit       = errors.New("online: the license's machines have moved as often as it allows")
 	ErrBindingMismatch   = errors.New("online: the fingerprint doesn't bind what the license requires")
 	ErrNotActivated      = errors.New("online: this machine isn't activated")
+	ErrOfflineSeat       = errors.New("online: this machine's seat is offline; return it with a deactivation receipt")
 	ErrRateLimited       = errors.New("online: rate limited")
 	ErrIdempotencyReused = errors.New("online: idempotency key reused")
 	ErrInProgress        = errors.New("online: a request with this idempotency key is in progress")
@@ -76,7 +77,7 @@ var codes = map[string]error{
 	"unauthenticated": ErrUnauthenticated, "invalid_request": ErrInvalidRequest,
 	"license_suspended": ErrSuspended, "license_revoked": ErrRevoked, "license_expired": ErrExpired,
 	"activation_limit_reached": ErrActivationLimit, "rehost_limit_reached": ErrRehostLimit,
-	"binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated, "rate_limited": ErrRateLimited,
+	"binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated, "offline_seat": ErrOfflineSeat, "rate_limited": ErrRateLimited,
 	"idempotency_key_reused": ErrIdempotencyReused, "idempotency_in_progress": ErrInProgress,
 }
 
