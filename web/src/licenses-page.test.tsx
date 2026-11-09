@@ -287,6 +287,24 @@ describe("offline (ADR-0043)", () => {
     expect(revoke).toHaveBeenCalledWith("blob:lic"); // the first file's URL, once replaced
   });
 
+  it("a network failure reads as a generic error; the toggles and upload wait for the request; the hint describes the field", async () => {
+    let fail!: (e: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn((req: Request) =>
+      req.method === "GET" ? Promise.resolve(json({ items: [] })) : new Promise<Response>((_, reject) => (fail = reject))));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    const area = el.querySelector<HTMLTextAreaElement>('textarea[name="request"]')!;
+    expect(document.getElementById(area.getAttribute("aria-describedby")!)?.textContent).toContain("It contains the license key");
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(button("Return a seat")!.disabled).toBe(true));
+    expect(el.querySelector<HTMLInputElement>('input[type="file"]')!.disabled).toBe(true);
+    await act(async () => fail(new TypeError("Failed to fetch")));
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("Something went wrong. Try again."));
+    expect(area.getAttribute("aria-invalid")).toBe("true");
+    expect(button("Return a seat")!.disabled).toBe(false);
+  });
+
   it("says why a request was refused", async () => {
     vi.stubGlobal("fetch", vi.fn(async (req: Request) =>
       req.method === "GET" ? json({ items: [] }) : json({ type: "about:blank", title: "x", status: 409, code: "offline_not_allowed", request_id: "r" }, 409)));
@@ -310,6 +328,7 @@ describe("offline (ADR-0043)", () => {
     };
     await pick(new File(["x".repeat(9000)], "big.log"));
     await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("That file is too large to be a request or receipt."));
+    expect(el.querySelector<HTMLTextAreaElement>('textarea[name="receipt"]')!.value).toBe(""); // not read
     await pick(new File([" lfrcpt1.c\n"], "r.txt"));
     await vi.waitFor(() => expect(el.querySelector<HTMLTextAreaElement>('textarea[name="receipt"]')!.value).toBe("lfrcpt1.c"));
     await act(async () => el.querySelector("form")!.requestSubmit());

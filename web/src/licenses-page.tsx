@@ -316,6 +316,7 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [tooLarge, setTooLarge] = useState(false);
   const [file, setFile] = useState<{ url: string; expires: string | null } | null>(null);
   const [returned, setReturned] = useState<string | null>(null);
   // The key belongs to one text: a retry of the same text reuses it, any
@@ -326,6 +327,7 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
     setKind(k);
     setText("");
     setError(null);
+    setTooLarge(false);
     setReturned(null);
     setFile(null);
     key.current = { text: "", key: crypto.randomUUID() };
@@ -334,11 +336,8 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    if (f.size > 8192) {
-      setError(new Error(t("offline.tooLarge")));
-      return;
-    }
-    setError(null);
+    setTooLarge(f.size > 8192);
+    if (f.size > 8192) return;
     setText((await f.text()).trim());
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -382,13 +381,14 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
           <label className="block">
             <span className="font-medium">{t(`offline.${field}`)}</span>
             <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => setText(e.target.value)}
-              spellCheck={false} autoComplete="off" aria-describedby="offline-hint" aria-invalid={error !== null} />
+              spellCheck={false} autoComplete="off" aria-describedby="offline-hint" aria-invalid={error !== null || tooLarge} />
             <span id="offline-hint" className="mt-1 block text-xs text-muted-foreground">{t(`offline.${field}Hint`)}</span>
           </label>
           <label className="block text-xs">
-            {t("offline.upload")} <input type="file" onChange={upload} />
+            {t("offline.upload")} <input type="file" disabled={busy} onChange={upload} />
           </label>
-          {error !== null && <p role="alert" className="font-medium">{error instanceof ApiError ? errorText(error) : (error as Error).message}</p>}
+          {tooLarge && <p role="alert" className="font-medium">{t("offline.tooLarge")}</p>}
+          {error !== null && <p role="alert" className="font-medium">{errorText(error)}</p>}
           <div className="flex justify-end">
             <Button type="submit" disabled={busy || text.trim() === ""}>{t(kind === "activate" ? "offline.submitActivate" : "offline.submitReturn")}</Button>
           </div>
