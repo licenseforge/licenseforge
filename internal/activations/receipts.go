@@ -59,7 +59,7 @@ func (s Service) Return(ctx context.Context, p authz.Principal, receipt string) 
 	if !ok { // an outage: a 500, whatever it wraps
 		return nil, fmt.Errorf("activations: offline return: %v", err) //nolint:errorlint // deliberately not matchable
 	}
-	ev.Outcome, ev.ObjectID, ev.Details["reason"] = outcome, "", err.Error()
+	ev.Outcome, ev.Details["reason"] = outcome, err.Error()
 	if errors.Is(err, ErrInvalid) {
 		ev.Details["reason"] = ErrInvalid.Error() // the details echo the receipt: never in the chain
 	}
