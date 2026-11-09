@@ -58,7 +58,7 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 		return err
 	})
 	if err != nil {
-		ev.ObjectID, ev.Details["reason"] = "", err.Error() // recorded for refusals only
+		ev.Details["reason"] = err.Error() // recorded for refusals only
 		err = audit.Refused(ctx, s.DB, tenantID, ev, err, offlineRefusals...)
 		if err == errHidden { //nolint:errorlint // exactly the recorded refusal (a recording failure is joined to it: a 500)
 			return Lease{}, ErrNotFound
