@@ -794,6 +794,48 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /tenants/{tenant}/activation-requests:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    post:
+      operationId: createOfflineActivation
+      summary: Answer an offline activation request with a license file for that machine (ADR-0043).
+      description: |
+        The request is the `lfreq1` text an air-gapped machine's SDK wrote
+        (license format spec, Offline activation); it carries the license
+        key, so treat it like the key. Needs activation:offline on the
+        license's product; an unknown key or a license outside the caller's
+        scope answers 404. The license must be usable and its plan must allow
+        offline use (`offline_not_allowed`, 409). Takes or reuses the
+        machine's seat (seat limits and moves as online, ADR-0034); a machine
+        activated online answers `online_seat` (409) until it deactivates.
+        The file's `exp` is the license's expiry, capped at now +
+        `max_offline_seconds`; renewal is a new request from that machine.
+        Audited with the request's hash, never its content. With
+        Idempotency-Key, a retry within 24 hours gets the first answer.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: 1-255 printable ASCII characters; scoped to the tenant and the credential.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfflineActivationRequest" }
+      responses:
+        "201":
+          description: The signed license file for that machine.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfflineActivation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/products:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1369,6 +1411,21 @@ components:
         issued_at: { type: string, format: date-time, description: Server time (ADR-0018). }
         expires_at: { type: string, format: date-time }
         refresh_after: { type: string, format: date-time }
+    OfflineActivationRequest:
+      type: object
+      required: [request]
+      additionalProperties: false
+      properties:
+        request: { type: string, maxLength: 4096, description: "The lfreq1 activation request text, as the machine wrote it." }
+    OfflineActivation:
+      type: object
+      required: [license_file, activation_id, kid, file_sha256, expires_at]
+      properties:
+        license_file: { type: string, description: "The signed lf1 license file (armored) to install on the machine." }
+        activation_id: { type: string }
+        kid: { type: string }
+        file_sha256: { type: string, description: "The hash a deactivation receipt for this file must carry." }
+        expires_at: { type: string, format: date-time, nullable: true, description: "The file's exp; null for a perpetual file." }
     Activation:
       type: object
       required: [id, license_id, fingerprint, fp_source, binding, mode, hostname, app_version, sdk_version, first_seen_at, last_seen_at, deactivated_at, created_at]

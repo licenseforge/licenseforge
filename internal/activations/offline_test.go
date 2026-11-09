@@ -307,3 +307,53 @@ func TestOfflineClaims(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// OfflineTx audits a refusal in the caller's transaction, which commits it
+// with the stored outcome; RecheckOffline re-checks the caller's rights.
+func TestOfflineTxAndRecheck(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	online := f.issue(t, "pro") // offline not allowed
+	support := authz.Principal{Kind: authz.User, ID: "usr_s", TenantID: f.a, Role: authz.Support, Scope: authz.Scope{All: true}}
+	scoped := authz.Principal{Kind: authz.User, ID: "usr_o", TenantID: f.a, Role: authz.Manager, Scope: authz.Scope{Products: []string{"prd_" + strings.Repeat("0", 26)}}}
+	before := len(f.events(t))
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		if _, err := f.s.OfflineTx(ctx, tx, manager(f.a), f.offlineReq(t, online.Key, fp(), nil)); !errors.Is(err, ErrOffline) {
+			t.Errorf("OfflineTx: %v", err)
+		}
+		if _, err := f.s.OfflineTx(ctx, tx, support, f.offlineReq(t, online.Key, fp(), nil)); !errors.Is(err, authz.ErrDenied) {
+			t.Errorf("OfflineTx as support: %v", err)
+		}
+		if _, err := f.s.OfflineTx(ctx, tx, scoped, f.offlineReq(t, online.Key, fp(), nil)); err != ErrNotFound { //nolint:errorlint // exactly, not the internal errHidden
+			t.Errorf("OfflineTx out of scope: %v", err)
+		}
+		return nil // the caller commits the refusals it stores
+	})
+	es := f.events(t)
+	if len(es) != before+3 || es[before].Outcome != auditevent.OutcomeFailure || es[before+1].Outcome != auditevent.OutcomeDenied || es[before+2].Outcome != auditevent.OutcomeDenied {
+		t.Fatalf("refusals recorded: %+v", es[before:])
+	}
+	is := f.issue(t, "offline")
+	text := f.offlineReq(t, is.Key, fp(), nil)
+	f.tx(t, f.a, func(tx *ent.Tx) error {
+		for name, c := range map[string]struct {
+			p    authz.Principal
+			text string
+			want error
+		}{
+			"allowed":      {manager(f.a), text, nil},
+			"support":      {support, text, authz.ErrDenied},
+			"out of scope": {scoped, text, ErrNotFound},
+			"unknown key":  {manager(f.a), f.offlineReq(t, licensekey.New(), fp(), nil), ErrNotFound},
+			"malformed":    {manager(f.a), "lfreq1.e30", ErrInvalid},
+		} {
+			if err := f.s.RecheckOffline(ctx, tx, c.p, c.text); !errors.Is(err, c.want) || (c.want == nil && err != nil) || errors.Is(err, errHidden) {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		return nil
+	})
+	if len(f.activations(t, is.License.ID)) != 0 {
+		t.Error("RecheckOffline took a seat")
+	}
+}
