@@ -4558,6 +4558,30 @@ func (response Deactivate404ApplicationProblemPlusJSONResponse) VisitDeactivateR
 	return err
 }
 
+type Deactivate409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type Deactivate409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers Deactivate409ResponseHeaders
+}
+
+func (response Deactivate409ApplicationProblemPlusJSONResponse) VisitDeactivateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Deactivate413ResponseHeaders struct {
 	XRequestId *string
 }
@@ -4720,6 +4744,30 @@ func (response RefreshLease404ApplicationProblemPlusJSONResponse) VisitRefreshLe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshLease409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RefreshLease409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RefreshLease409ResponseHeaders
+}
+
+func (response RefreshLease409ApplicationProblemPlusJSONResponse) VisitRefreshLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

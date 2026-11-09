@@ -520,7 +520,9 @@ func (c *Client) wakeBounds(cl *licensefile.Claims, now time.Time) (half, before
 // Run returns on ctx's end; with ErrNoLease when there is no lease to keep
 // fresh; or with a refusal retrying can't fix, which the app must act on:
 // ErrNotActivated (the seat was freed: Activate again), ErrRevoked,
-// ErrUnauthenticated or ErrBindingMismatch (stop running as licensed). On
+// ErrUnauthenticated or ErrBindingMismatch (stop running as licensed), or
+// ErrOfflineSeat (the machine was activated offline since: use its offline
+// file). On
 // ErrRevoked (403) and ErrNotActivated (404) from the API it forgets the
 // lease first, unless a newer one was committed meanwhile: the server has
 // said this machine is no longer licensed, so Current fails from then on.
@@ -594,8 +596,8 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 		if errors.Is(err, ErrRevoked) || errors.Is(err, ErrNotActivated) {
 			return err // claimed with an unexpected status: stop, but keep the lease
 		}
-		if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrBindingMismatch) {
-			return err
+		if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrBindingMismatch) || errors.Is(err, ErrOfflineSeat) {
+			return err // the lease is kept until it ends
 		}
 		failures, retry = failures+1, 0
 		if isAPI {

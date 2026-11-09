@@ -388,6 +388,14 @@ func TestRun(t *testing.T) {
 	if len(*sleeps) < 3 || (*sleeps)[0] != 30*time.Minute || (*sleeps)[1] != 30*time.Minute || (*sleeps)[2] < 120*time.Second {
 		t.Errorf("sleeps %v", *sleeps)
 	}
+	// An offline seat stops Run too; the lease stays until it ends.
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 409, "offline_seat"); return true }
+	if err := c.Run(context.Background(), nil); !errors.Is(err, ErrOfflineSeat) {
+		t.Errorf("Run on an offline seat = %v", err)
+	}
+	if _, _, err := c.Current(); err != nil {
+		t.Errorf("lease forgotten on offline_seat: %v", err)
+	}
 	// Revoked stops Run with the error.
 	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, "license_revoked"); return true }
 	var reported error

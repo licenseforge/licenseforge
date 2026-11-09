@@ -654,7 +654,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh an active activation's lease (also validate). Never takes a seat.
-         * @description `not_activated` (404) asks the SDK to activate again.
+         * @description `not_activated` (404) asks the SDK to activate again. `offline_seat` (409): the machine's seat is an offline activation (ADR-0043); it uses its offline file.
          */
         post: operations["refreshLease"];
         delete?: never;
@@ -675,7 +675,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Deactivate this machine or cluster, freeing its seat. */
+        /**
+         * Deactivate this machine or cluster, freeing its seat.
+         * @description `offline_seat` (409): an offline seat is returned with a deactivation receipt or from the dashboard (ADR-0043), never here.
+         */
         post: operations["deactivate"];
         delete?: never;
         options?: never;
@@ -2722,6 +2725,7 @@ export interface operations {
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
@@ -2753,6 +2757,7 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
         };

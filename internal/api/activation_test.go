@@ -65,6 +65,7 @@ func actSetup(t *testing.T) *actFixture {
 		for slug, c := range map[string]func(*ent.PlanCreate){
 			"pro":     func(c *ent.PlanCreate) { c.SetDurationMonths(12).SetMaxActivations(2).SetLeaseSeconds(3600) },
 			"cluster": func(c *ent.PlanCreate) { c.SetBindType(plan.BindTypeCluster) },
+			"offline": func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetOfflineAllowed(true).SetMaxOfflineSeconds(86400) },
 		} {
 			pc := tx.Plan.Create().SetTenantID(f.a.ID).SetProductID(f.prodA).SetSlug(slug).SetName(slug)
 			c(pc)
@@ -967,9 +968,24 @@ func TestSDKOnlineClient(t *testing.T) {
 	}
 }
 
-// An offline seat's refusal reaches the SDK as a stable code (ADR-0043).
-func TestOfflineSeatProblem(t *testing.T) {
-	if p := activationProblem(fmt.Errorf("x: %w", activations.ErrOfflineSeat)); p == nil || p.status != http.StatusConflict || p.code != "offline_seat" {
-		t.Errorf("problem = %+v", p)
+// An offline seat (ADR-0043) answers the SDK's online calls with 409
+// offline_seat, and an idempotent activate replays it.
+func TestOfflineSeatOverHTTP(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "offline")
+	fp := newFP()
+	text, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.a.ID, Product: "db", Key: is.Key,
+		Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: fp}, FPSource: "machine-id", Nonce: make([]byte, 16), Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
 	}
+	m := authz.Principal{Kind: authz.User, ID: "usr_mgr", TenantID: a.a.ID, Role: authz.Manager, Scope: authz.Scope{All: true}}
+	if _, err := a.srv.Activations.Offline(context.Background(), m, text); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(fp), licenseAuth(is.Key), header("Idempotency-Key", "off")).problem(t, 409, "offline_seat")
+	}
+	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)).problem(t, 409, "offline_seat")
+	a.do(t, "POST", actPath(a.a.ID, "deactivate"), `{"fingerprint":"`+fp+`"}`, licenseAuth(is.Key)).problem(t, 409, "offline_seat")
 }
