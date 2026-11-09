@@ -178,3 +178,38 @@ it("labels MFA policies and explains a platform MFA refusal on create", async ()
   expect(new URL(el.querySelector("dialog a")!.getAttribute("href")!, "https://x").searchParams.get("return")).toBe("/platform/");
   act(() => root.unmount());
 });
+
+it("re-issues an owner invite: the new link once, or why not when the tenant has an owner", async () => {
+  const posts: { path: string; body: unknown }[] = [];
+  let conflict = false;
+  const { el, root, qc } = await render(async (req) => {
+    if (req.method === "POST") {
+      posts.push({ path: new URL(req.url).pathname, body: await req.json() });
+      return conflict
+        ? json({ type: "about:blank", title: "Conflict", status: 409, code: "conflict", detail: "the tenant has an owner", request_id: "r" }, 409)
+        : json({ tenant, invitation: { id: "inv_2", email: "new@acme.example", role: "owner", expires_at: "2026-11-16T00:00:00Z", token: TOKEN } }, 201);
+    }
+    return json({ items: [tenant] });
+  });
+  await vi.waitFor(() => expect(el.textContent).toContain("Acme Corp"));
+  const open = async () => {
+    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="New owner invite for Acme Corp"]')!.click());
+    const input = el.querySelector<HTMLInputElement>('input[name="owner_email"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, " new@acme.example ");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => el.querySelector("form")!.requestSubmit());
+  };
+  await open();
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toContain(`/invite#token=${TOKEN}`));
+  expect(posts).toEqual([{ path: "/api/v1/platform/tenants/tnt_1/owner-invitation", body: { owner_email: "new@acme.example" } }]);
+  await act(async () => button(el, "Close").click());
+  await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
+  expect(JSON.stringify([document.body.innerHTML, qc.getQueryCache().getAll().map((q) => q.state), qc.getMutationCache().getAll().map((m) => m.state)])).not.toContain(TOKEN);
+
+  conflict = true;
+  await open();
+  await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("This tenant already has an owner: its owners invite members."));
+  act(() => root.unmount());
+});
