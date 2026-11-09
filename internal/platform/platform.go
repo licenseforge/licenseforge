@@ -197,9 +197,9 @@ func ownerInvitation(ctx context.Context, tx *ent.Tx, a Actor, tenantID, email s
 
 // ReinviteOwner gives a tenant without an owner a new owner invitation for
 // ownerEmail (ADR-0042, amended): when the first was lost or expired. ref is
-// the tenant's ID or slug. Every pending owner invitation is revoked; they
-// are locked first (the lock acceptance takes), then the tenant is checked
-// for an owner, so a concurrent acceptance either wins (ErrConflict) or
+// the tenant's ID or slug. Every pending owner invitation is revoked; after
+// a per-tenant advisory lock (one re-issue at a time) they are locked (the
+// lock acceptance takes), then the tenant is checked for members, so a concurrent acceptance either wins (ErrConflict) or
 // finds its invitation revoked. Checks, audit and refusals as CreateTenant;
 // tenant.owner_invitation goes on the platform chain.
 func (s Service) ReinviteOwner(ctx context.Context, a Actor, ref, ownerEmail string) (Created, error) {
