@@ -216,7 +216,7 @@ func TestStatesAndOptions(t *testing.T) {
 // kind's state (the clock guard's, a shared store) fails loudly.
 func TestState(t *testing.T) {
 	e := newEnv(t, nil)
-	for _, corrupt := range []string{"{not json", "null", "{}", "[]"} {
+	for _, corrupt := range []string{"{not json", "null", "{}", "[]", `{"offline":1,"file":5}`} {
 		e.store.b = []byte(corrupt)
 		if _, _, err := e.c.Current(); !errors.Is(err, ErrNoLicense) {
 			t.Errorf("corrupt %q: %v", corrupt, err)
@@ -253,6 +253,12 @@ func TestInstallFutureFileUnheldGuard(t *testing.T) {
 	}
 	if e.store.b != nil {
 		t.Error("the file was stored")
+	}
+	// A vendor clock a few minutes fast needs no raise (the claim checks'
+	// default tolerance): installed even with an unwritable guard.
+	e.c.cfg.ClockTolerance = nil
+	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) { c.IssuedAt = e.now.Add(5 * time.Minute) })); err != nil {
+		t.Errorf("five minutes fast: %v", err)
 	}
 }
 
