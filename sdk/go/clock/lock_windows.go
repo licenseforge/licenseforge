@@ -44,7 +44,7 @@ func lockFile(path string, wait time.Duration) (func(), error) {
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
-			return nil, errLockBusy
+			return nil, ErrLocked
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
