@@ -224,6 +224,18 @@ func issuable(ctx context.Context, tx *ent.Tx, r *licensefile.Request, l *ent.Li
 }
 
 func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event) (Lease, error) {
+	// A renewal right after the last file waits for the next second here,
+	// before the license lock, so it doesn't hold the lock while it sleeps
+	// (after() waits under the lock only for concurrent requests).
+	if r, err := licensefile.ParseRequest(text); err == nil {
+		now, err := licenses.DBNow(ctx, tx)
+		if err != nil {
+			return Lease{}, err
+		}
+		if _, err := after(ctx, tx, "", r.Binding.Fingerprint, now); err != nil {
+			return Lease{}, err
+		}
+	}
 	r, l, err := s.resolve(ctx, tx, tenantID, text, ev, true)
 	if err != nil {
 		return Lease{}, err
@@ -300,12 +312,21 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 // waits (under the license lock, at most about a second), so a burst of
 // requests can't push iat (and exp) ahead of the clock: they come out a
 // second apart.
+//
+// ponytail: concurrent requests for one machine still sleep under the
+// license lock, about a second each, holding up that license's other
+// calls; a per-license rate limit on the management API if that matters.
+// licenseID "": any license's offline file on fingerprint (the unlocked
+// wait before the lock).
 func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now time.Time) (time.Time, error) {
 	var last []struct {
 		Max *time.Time `json:"max"`
 	}
-	err := tx.Activation.Query().Where(activation.LicenseID(licenseID), activation.Fingerprint(fingerprint), activation.ModeEQ(activation.ModeOffline)).
-		Aggregate(ent.Max(activation.FieldLastSeenAt)).Scan(ctx, &last)
+	q := tx.Activation.Query().Where(activation.Fingerprint(fingerprint), activation.ModeEQ(activation.ModeOffline))
+	if licenseID != "" {
+		q.Where(activation.LicenseID(licenseID))
+	}
+	err := q.Aggregate(ent.Max(activation.FieldLastSeenAt)).Scan(ctx, &last)
 	if err != nil || len(last) == 0 || last[0].Max == nil {
 		return now, err
 	}
