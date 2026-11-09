@@ -123,8 +123,12 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 			ForUpdate(func(o *sql.LockOptions) { o.Strength = sql.LockNoKeyUpdate }).Only(ctx); ent.IsNotFound(err) {
 			// Revoked: it can't be locked (license_transitions) and takes no
 			// new seats, so freeing one needs no lock.
-			if revoked, err := tx.License.Query().Where(license.ID(l.ID), license.RevokedAtNotNil()).Exist(ctx); err != nil || !revoked {
-				return errors.Join(ErrNotFound, err)
+			revoked, err := tx.License.Query().Where(license.ID(l.ID), license.RevokedAtNotNil()).Exist(ctx)
+			if err != nil {
+				return err // an outage, not "not found"
+			}
+			if !revoked {
+				return ErrNotFound
 			}
 		} else if err != nil {
 			return err

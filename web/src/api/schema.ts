@@ -686,6 +686,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/deactivation-receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return an offline seat on the machine's deactivation receipt (ADR-0043).
+         * @description The receipt is the `lfrcpt1` text the machine's SDK wrote after
+         *     deleting its license file (license format spec, Offline activation).
+         *     Needs activation:offline on the license's product; a license outside
+         *     the caller's scope, or no file of that machine matching the receipt,
+         *     answers 404. Frees the seat when the receipt names the seat's current
+         *     file; another file of a seat still out (an older one: the machine
+         *     renewed since; or one never issued for it) answers
+         *     `receipt_superseded` (409). A receipt for a seat already free
+         *     answers 200 with the activation unchanged and isn't audited again.
+         *     Allowed whatever the license's status. Audited with the receipt's
+         *     hash. Naturally idempotent: no Idempotency-Key.
+         */
+        post: operations["returnOfflineSeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/activation-requests": {
         parameters: {
             query?: never;
@@ -709,6 +742,8 @@ export interface paths {
          *     and its plan must allow offline use (`offline_not_allowed`, 409). Takes or reuses the
          *     machine's seat (seat limits and moves as online, ADR-0034); a machine
          *     activated online answers `online_seat` (409) until it deactivates.
+         *     Each file of a machine is newer than the last, to the second: a
+         *     request within a second of the last file waits for the next one.
          *     The file's `exp` is the license's expiry, capped at now +
          *     `max_offline_seconds`; renewal is a new request from that machine.
          *     Audited with the request's hash, never its content. With
@@ -1108,6 +1143,10 @@ export interface components {
         OfflineActivationRequest: {
             /** @description The lfreq1 activation request text, as the machine wrote it. */
             request: string;
+        };
+        DeactivationReceipt: {
+            /** @description The lfrcpt1 deactivation receipt text, as the machine wrote it. */
+            receipt: string;
         };
         OfflineActivation: {
             /** @description The signed lf1 license file (armored) to install on the machine. */
@@ -2815,6 +2854,40 @@ export interface operations {
             409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    returnOfflineSeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeactivationReceipt"];
+            };
+        };
+        responses: {
+            /** @description The activation, deactivated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     createOfflineActivation: {

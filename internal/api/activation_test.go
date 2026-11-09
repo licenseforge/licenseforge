@@ -1098,3 +1098,70 @@ func TestCreateOfflineActivation(t *testing.T) {
 		t.Errorf("replay leaked: %v", r)
 	}
 }
+
+// Returning an offline seat over the management API (ADR-0043).
+func TestReturnOfflineSeat(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "offline")
+	machine := newFP()
+	text, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.a.ID, Product: "db", Key: is.Key,
+		Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: machine}, FPSource: "machine-id", Nonce: make([]byte, 16), Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := a.session(t, a.adminA, true)
+	rb, _ := json.Marshal(map[string]string{"request": text})
+	file := a.do(t, "POST", Prefix+"/tenants/"+a.a.Slug+"/activation-requests", string(rb), admin)
+	if file.code != 201 {
+		t.Fatalf("offline file: %d %s", file.code, file.raw)
+	}
+	receipt := func(hash string) string {
+		r, err := licensefile.EncodeReceipt(licensefile.Receipt{Tenant: a.a.ID, LicenseID: is.License.ID, Fingerprint: machine, FileSHA256: hash,
+			Nonce: make([]byte, 16), Created: time.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]string{"receipt": r})
+		return string(b)
+	}
+	p := Prefix + "/tenants/" + a.a.Slug + "/deactivation-receipts"
+	a.do(t, "POST", p, receipt(strings.Repeat("0", 64)), admin).problem(t, 409, "receipt_superseded")
+	a.do(t, "POST", p, `{"receipt":"lfrcpt1.e30"}`, admin).problem(t, 400, "invalid_request")
+	viewer := a.session(t, a.viewerA, true)
+	a.do(t, "POST", p, receipt(file.body["file_sha256"].(string)), viewer).problem(t, 403, "forbidden")
+	for range 2 { // a repeat answers the same
+		r := a.do(t, "POST", p, receipt(file.body["file_sha256"].(string)), admin)
+		if r.code != 200 || r.body["id"] != file.body["activation_id"] || r.body["deactivated_at"] == nil {
+			t.Fatalf("return: %d %s", r.code, r.raw)
+		}
+	}
+	other, err := licensefile.EncodeReceipt(licensefile.Receipt{Tenant: a.a.ID, LicenseID: is.License.ID, Fingerprint: newFP(),
+		FileSHA256: file.body["file_sha256"].(string), Nonce: make([]byte, 16), Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ob, _ := json.Marshal(map[string]string{"receipt": other})
+	a.do(t, "POST", p, string(ob), admin).problem(t, 404, "not_found")
+}
+
+// A renewal within the second of the last file, with an Idempotency-Key,
+// waits for the next second instead of storing a refusal.
+func TestOfflineRenewalBurst(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "offline")
+	machine := newFP()
+	admin := a.session(t, a.adminA, true)
+	p := Prefix + "/tenants/" + a.a.Slug + "/activation-requests"
+	for i := range 3 {
+		text, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.a.ID, Product: "db", Key: is.Key,
+			Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: machine}, FPSource: "machine-id",
+			Nonce: bytes.Repeat([]byte{byte(i)}, 16), Created: time.Unix(1_800_000_000, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]string{"request": text})
+		if r := a.do(t, "POST", p, string(b), admin, header("Idempotency-Key", fmt.Sprintf("burst-%d", i))); r.code != 201 {
+			t.Fatalf("request %d: %d %s", i, r.code, r.raw)
+		}
+	}
+}

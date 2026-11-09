@@ -363,6 +363,16 @@ func (s *server) ListActivations(ctx context.Context, req apigen.ListActivations
 	return page, nil
 }
 
+// ReturnOfflineSeat frees an offline seat on a deactivation receipt
+// (ADR-0043).
+func (s *server) ReturnOfflineSeat(ctx context.Context, req apigen.ReturnOfflineSeatRequestObject) (apigen.ReturnOfflineSeatResponseObject, error) {
+	a, err := s.Activations.Return(ctx, principal(ctx), req.Body.Receipt)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ReturnOfflineSeat200JSONResponse(activationView(a)), nil
+}
+
 func (s *server) DeactivateActivation(ctx context.Context, req apigen.DeactivateActivationRequestObject) (apigen.DeactivateActivationResponseObject, error) {
 	a, err := s.Activations.DeactivateByID(ctx, principal(ctx), req.Id, req.ActivationId)
 	if err != nil {
