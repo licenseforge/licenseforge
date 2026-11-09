@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/licensekey"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
@@ -97,6 +98,7 @@ func TestOfflineRefusals(t *testing.T) {
 	is := f.issue(t, "offline")
 	online := f.issue(t, "pro")
 	revoked := f.issue(t, "offline")
+	zero := f.issue(t, "offline-zero")
 	if _, err := f.lic.Revoke(ctx, manager(f.a), revoked.License.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -110,10 +112,11 @@ func TestOfflineRefusals(t *testing.T) {
 		"not a request":   {manager(f.a), "lfreq1.e30", ErrInvalid},
 		"other tenant":    {manager(f.b), f.offlineReq(t, is.Key, fp(), nil), ErrInvalid},
 		"other product":   {manager(f.a), f.offlineReq(t, is.Key, fp(), func(r *licensefile.Request) { r.Product = "other" }), ErrInvalid},
-		"unknown key":     {manager(f.a), f.offlineReq(t, "LF-AAAAA-AAAAA-AAAAA-AAAAA-AAAAA", fp(), nil), ErrNotFound},
+		"unknown key":     {manager(f.a), f.offlineReq(t, licensekey.New(), fp(), nil), ErrNotFound}, // well-formed, no license
 		"no permission":   {support, f.offlineReq(t, is.Key, fp(), nil), authz.ErrDenied},
 		"out of scope":    {scoped, f.offlineReq(t, is.Key, fp(), nil), ErrNotFound},
 		"offline off":     {manager(f.a), f.offlineReq(t, online.Key, fp(), nil), ErrOffline},
+		"max offline 0":   {manager(f.a), f.offlineReq(t, zero.Key, fp(), nil), ErrOffline},
 		"revoked":         {manager(f.a), f.offlineReq(t, revoked.Key, fp(), nil), ErrRevoked},
 		"cluster binding": {manager(f.a), f.offlineReq(t, is.Key, fp(), func(r *licensefile.Request) { r.Binding.Type, r.FPSource = licensefile.BindCluster, "kubernetes" }), ErrBinding},
 	} {
