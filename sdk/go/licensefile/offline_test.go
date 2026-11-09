@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +23,8 @@ type offlineCase struct {
 
 type fileHashCase struct {
 	Name       string `json:"name"`
-	Input      string `json:"input"` // a license file as carried
-	FileSHA256 string `json:"file_sha256"`
+	Input      string `json:"input"`       // a license file as carried
+	FileSHA256 string `json:"file_sha256"` // "": malformed, no hash
 }
 
 type offlineVectors struct {
@@ -37,9 +38,11 @@ type offlineVectors struct {
 const (
 	vFP    = "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684"
 	vNonce = "AAECAwQFBgcICQoLDA0ODw" // bytes 0..15
-	vHash  = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-	vReq   = `{"v":1,"tenant":"tnt_acme","product":"acme-db","key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","bind":{"type":"machine","fp":"` + vFP + `"},"fp_source":"machine-id","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
-	vRcpt  = `{"v":1,"tenant":"tnt_acme","license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa","fp":"` + vFP + `","file_sha256":"` + vHash + `","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
+	// lf1.json's valid license, signed with its test:2026-11 key.
+	vLicense = "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg"
+	vHash    = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+	vReq     = `{"v":1,"tenant":"tnt_acme","product":"acme-db","key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ","bind":{"type":"machine","fp":"` + vFP + `"},"fp_source":"machine-id","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
+	vRcpt    = `{"v":1,"tenant":"tnt_acme","license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa","fp":"` + vFP + `","file_sha256":"` + vHash + `","nonce":"` + vNonce + `","created":"2026-11-08T10:00:00Z"}`
 )
 
 // with replaces old in payload (exactly once) and encodes it as a token.
@@ -62,6 +65,10 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 	rcpt := func(name, old, repl, result string) offlineCase {
 		return offlineCase{Name: name, Kind: "receipt", Input: with(t, ReceiptVersion, vRcpt, old, repl), Result: result}
 	}
+	raw := func(name, input string) offlineCase {
+		return offlineCase{Name: name, Kind: "request", Input: input, Result: "malformed"}
+	}
+	token := with(t, RequestVersion, vReq, "", "")
 	okReq := req("request", "", "", "ok")
 	okReq.Want = map[string]any{"tenant": "tnt_acme", "product": "acme-db", "key": "LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",
 		"bind_type": "machine", "fp": vFP, "fp_source": "machine-id", "nonce": vNonce, "created": "2026-11-08T10:00:00Z"}
@@ -111,6 +118,27 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			req("v_string", `"v":1`, `"v":"1"`, "malformed"),
 			req("v_huge", `"v":1`, `"v":123456789012345678901234567890`, "unsupported_version"),
 			req("v2_skips_field_rules", `"v":1,"tenant":"tnt_acme"`, `"v":2,"future":true`, "unsupported_version"),
+			req("v_exponent", `"v":1`, `"v":1e0`, "malformed"),
+			req("tenant_number", `"tenant":"tnt_acme"`, `"tenant":1`, "malformed"),
+			req("bind_string", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":"machine"`, "malformed"),
+			req("bind_null", `"bind":{"type":"machine","fp":"`+vFP+`"}`, `"bind":null`, "malformed"),
+			req("bind_machine_without_fp", `,"fp":"`+vFP+`"`, ``, "malformed"),
+			req("nonce_number", `"nonce":"`+vNonce+`"`, `"nonce":123`, "malformed"),
+			req("nonce_trailing_bits", vNonce, vNonce[:21]+"x", "malformed"),
+			req("created_number", `"created":"2026-11-08T10:00:00Z"`, `"created":0`, "malformed"),
+			req("key_missing", `"key":"LF-ABCDE-FGHIJ-KLMNO-PQRST-UVWXYZ",`, ``, "malformed"),
+			req("product_missing", `"product":"acme-db",`, ``, "malformed"),
+			req("nonce_missing", `"nonce":"`+vNonce+`",`, ``, "malformed"),
+			req("created_missing", `,"created":"2026-11-08T10:00:00Z"`, ``, "malformed"),
+			req("too_deep", `"created"`, `"x":`+strings.Repeat("[", 40)+strings.Repeat("]", 40)+`,"created"`, "malformed"),
+			raw("top_level_array", with(t, RequestVersion, "["+vReq+"]", "", "")),
+			raw("payload_trailing_bits", trailingBits(t, with(t, RequestVersion, vReq, `"tnt_acme"`, `"tnt_acme1"`))), // 1 more byte: unused bits
+			raw("bom_twice", "\uFEFF\uFEFF"+token),
+			raw("bom_not_first", " \uFEFF"+token),
+			raw("nbsp_inside", token[:20]+"\u00a0"+token[20:]),
+			raw("line_separator_inside", token[:20]+"\u2028"+token[20:]),
+			raw("4097_bytes", exactly(token, MaxOfflineSize+1)),
+			raw("bom_and_4094_bytes", "\uFEFF"+exactly(token, MaxOfflineSize-2)), // 4,097 bytes, 4,095 UTF-16 units
 			req("created_1969", "2026-11-08T10:00:00Z", "1969-12-31T23:59:59Z", "malformed"),
 			req("fp_wrong_prefix", vFP, "md5:"+vFP[7:], "malformed"),
 			req("nonce_short", vNonce, "AAECAwQFBgcICQoLDA0O", "malformed"),
@@ -137,6 +165,9 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			rcpt("receipt_hash_uppercase", vHash, strings.ToUpper(vHash), "malformed"),
 			rcpt("receipt_hash_short", vHash, vHash[:62], "malformed"),
 			rcpt("receipt_empty_license", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":""`, "malformed"),
+			rcpt("receipt_fp_missing", `"fp":"`+vFP+`",`, ``, "malformed"),
+			rcpt("receipt_file_sha256_missing", `"file_sha256":"`+vHash+`",`, ``, "malformed"),
+			rcpt("receipt_tenant_missing", `"tenant":"tnt_acme",`, ``, "malformed"),
 			rcpt("receipt_license_128_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 128)+`"`, "ok"),
 			rcpt("receipt_license_129_bytes", `"license_id":"lic_aaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"license_id":"`+strings.Repeat("l", 129)+`"`, "malformed"),
 			rcpt("receipt_fp_without_prefix", `"fp":"`+vFP, `"fp":"`+vFP[7:], "malformed"),
@@ -148,13 +179,25 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 	}
 }
 
+// trailingBits sets the unused low bits of token's last base64url character.
+func trailingBits(t *testing.T, token string) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	body := token[strings.Index(token, ".")+1:]
+	if len(body)%4 < 2 {
+		t.Fatalf("no unused bits in %d characters", len(body))
+	}
+	last := strings.IndexByte(alphabet, token[len(token)-1])
+	return token[:len(token)-1] + alphabet[last+1:last+2]
+}
+
 // exactly pads token with spaces to n bytes.
 func exactly(token string, n int) string { return token + strings.Repeat(" ", n-len(token)) }
 
 // fileHashes: the same token, carried four ways, has one file_sha256.
 func fileHashes(t *testing.T) []fileHashCase {
 	t.Helper()
-	const token = "lf1.k1.cGF5bG9hZA.c2ln"
+	const token = vLicense
 	var out []fileHashCase
 	for _, c := range []struct{ name, input string }{
 		{"bare_token", token},
@@ -168,6 +211,18 @@ func fileHashes(t *testing.T) []fileHashCase {
 		}
 		out = append(out, fileHashCase{Name: c.name, Input: c.input, FileSHA256: h})
 	}
+	for name, input := range map[string]string{
+		"not_a_token":       "lf1.x",
+		"empty_parts":       "lf1...",
+		"missing_end_armor": "-----BEGIN LICENSEFORGE LICENSE-----\n" + token + "\n",
+		"payload_padded":    strings.Replace(token, ".23l3", "=.23l3", 1),
+	} {
+		if _, err := FileSHA256(input); !errors.Is(err, ErrMalformed) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		out = append(out, fileHashCase{Name: name, Input: input})
+	}
+	slices.SortStableFunc(out[4:], func(a, b fileHashCase) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -197,7 +252,12 @@ func TestOfflineVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range vf.FileHashes {
-		if got, err := FileSHA256(c.Input); err != nil || got != c.FileSHA256 || got != vf.FileHashes[0].FileSHA256 {
+		got, err := FileSHA256(c.Input)
+		if c.FileSHA256 == "" {
+			if !errors.Is(err, ErrMalformed) {
+				t.Errorf("file hash %s: %s, %v; want malformed", c.Name, got, err)
+			}
+		} else if err != nil || got != c.FileSHA256 || got != vf.FileHashes[0].FileSHA256 {
 			t.Errorf("file hash %s: %s, %v; want %s", c.Name, got, err, c.FileSHA256)
 		}
 	}
@@ -256,6 +316,9 @@ func TestOfflineRoundTrip(t *testing.T) {
 	if got, err := ParseRequest(s); err != nil || got.Tenant != r.Tenant || got.Binding != r.Binding || !bytes.Equal(got.Nonce, nonce) ||
 		!got.Created.Equal(created) || got.Hostname != "h" || got.SDKVersion != "go/1" || got.Key != "LF-KEY" {
 		t.Errorf("request round trip: %+v, %v", got, err)
+	}
+	if OfflineSHA256(s) != OfflineSHA256("\uFEFF"+s[:10]+"\r\n"+s[10:]+"\n") || OfflineSHA256(s) == OfflineSHA256(s+"A") {
+		t.Error("OfflineSHA256 depends on whitespace, or not on the token")
 	}
 	// The hash is the token's, whatever armor and line endings carry it.
 	token := "lf1.k1.cGF5bG9hZA.c2ln"

@@ -57,7 +57,8 @@ var (
 )
 
 // EncodeRequest returns r as an lfreq1 token, after the checks ParseRequest
-// applies, so an SDK can't write a request the server refuses.
+// applies, so an SDK can't write a request the server refuses. Created is
+// written in whole seconds.
 func EncodeRequest(r Request) (string, error) {
 	m := map[string]any{"v": 1, "tenant": r.Tenant, "product": r.Product, "key": stripSpace(r.Key), // as pasted: spaces and line breaks go
 		"bind":      map[string]string{"type": string(r.Binding.Type), "fp": r.Binding.Fingerprint},
@@ -165,21 +166,27 @@ func ParseReceipt(s string) (*Receipt, error) {
 // FileSHA256 is the receipt's file_sha256 of a license file: SHA-256 of its
 // token (lf1.<kid>.<payload>.<signature>, armor, BOM and whitespace removed,
 // as Verify reads it), lowercase hex. Line endings or a trailing newline an
-// editor or a transfer adds don't change it. A file that isn't an lf1 token
-// has none.
+// editor or a transfer adds don't change it. A file that fails Verify's
+// envelope checks (before the key lookup) has none. The server hashes the
+// file it signed the same way.
 func FileSHA256(file string) (string, error) {
 	if len(file) > MaxSize {
 		return "", fmt.Errorf("%w: too large", ErrMalformed)
 	}
-	token, err := unarmor(file)
+	parts, _, err := envelope(file)
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(token, Version+".") {
-		return "", ErrMalformed
-	}
-	h := sha256.Sum256([]byte(token))
+	h := sha256.Sum256([]byte(strings.Join(parts, ".")))
 	return hex.EncodeToString(h[:]), nil
+}
+
+// OfflineSHA256 identifies a request or receipt: SHA-256 of the token with
+// the BOM and whitespace removed (what the parser reads), lowercase hex, so
+// line endings changed in transit don't make it another artifact.
+func OfflineSHA256(s string) string {
+	h := sha256.Sum256([]byte(stripSpace(s)))
+	return hex.EncodeToString(h[:])
 }
 
 // decodeOffline checks the envelope (size, BOM and whitespace as for lf1,
@@ -240,7 +247,7 @@ func encodeOffline(version string, m map[string]any, check func(string) error) (
 			return "", malformed("%s is not valid UTF-8", k)
 		}
 	}
-	payload, err := json.Marshal(m) // keys sorted: one encoding per artifact
+	payload, err := json.Marshal(m) // keys sorted
 	if err != nil {
 		return "", fmt.Errorf("licensefile: %s: %w", version, err)
 	}

@@ -111,22 +111,11 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 	if len(license) > MaxSize {
 		return nil, "", fmt.Errorf("%w: too large", ErrMalformed)
 	}
-	token, err := unarmor(license)
+	parts, sig, err := envelope(license)
 	if err != nil {
 		return nil, "", err
 	}
-	parts := strings.Split(token, ".")
-	if len(parts) != 4 || parts[0] != Version || !kidRE.MatchString(parts[1]) || parts[2] == "" {
-		return nil, "", ErrMalformed
-	}
 	kid = parts[1]
-	sig, err := b64.DecodeString(parts[3])
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: signature encoding", ErrMalformed)
-	}
-	if _, err := b64.DecodeString(parts[2]); err != nil {
-		return nil, "", fmt.Errorf("%w: payload encoding", ErrMalformed)
-	}
 
 	key, err := keys.find(kid)
 	if err != nil {
@@ -151,6 +140,26 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 
 	payload, _ = b64.DecodeString(parts[2]) // validated above
 	return payload, kid, nil
+}
+
+// envelope applies the spec's envelope rules up to the key lookup: armor,
+// four parts, version, kid, canonical base64url payload and signature.
+func envelope(license string) (parts []string, sig []byte, err error) {
+	token, err := unarmor(license)
+	if err != nil {
+		return nil, nil, err
+	}
+	parts = strings.Split(token, ".")
+	if len(parts) != 4 || parts[0] != Version || !kidRE.MatchString(parts[1]) || parts[2] == "" {
+		return nil, nil, ErrMalformed
+	}
+	if sig, err = b64.DecodeString(parts[3]); err != nil {
+		return nil, nil, fmt.Errorf("%w: signature encoding", ErrMalformed)
+	}
+	if _, err := b64.DecodeString(parts[2]); err != nil {
+		return nil, nil, fmt.Errorf("%w: payload encoding", ErrMalformed)
+	}
+	return parts, sig, nil
 }
 
 // unarmor applies the spec's whitespace, BOM and armor rules and returns the bare token.

@@ -161,6 +161,8 @@ lfrcpt1.<base64url(payload_json)>    deactivation receipt
 
 The request is as sensitive as the license key it carries: carry it like the key, and servers store only its SHA-256.
 
+The **SHA-256 of a request or receipt** (what servers record) is taken over its token with the BOM and all whitespace removed, as the parser reads it, lowercase hex: the same artifact carried with other line endings has the same hash.
+
 ### Receipt (`lfrcpt1`)
 | Field | Rule |
 |---|---|
@@ -168,8 +170,8 @@ The request is as sensitive as the license key it carries: carry it like the key
 | `tenant` | as in the request |
 | `license_id` | non-empty string, ≤ 128 bytes, no NUL (the `lid` of the deleted file) |
 | `fp` | the machine's fingerprint, as in the request |
-| `file_sha256` | 64 lowercase hex digits: SHA-256 of the deleted license file's **token**, `lf1.<kid>.<payload>.<signature>` with armor, BOM and whitespace removed (as the verifier reads it), so line endings or a trailing newline added in transit don't change it. Taken over a file that verifies; input that isn't an `lf1` token has no `file_sha256` |
+| `file_sha256` | 64 lowercase hex digits: SHA-256 of the deleted license file's **token**, `lf1.<kid>.<payload>.<signature>` with armor, BOM and whitespace removed (as the verifier reads it), so line endings or a trailing newline added in transit don't change it. Only a file that passes the `lf1` envelope checks (every check before the key lookup) has one. The server compares it with the same hash of the token it signed |
 | `nonce`, `created` | as in the request |
 
 ### Conformance vectors
-`spec/vectors/offline.json`: request and receipt inputs with the expected class and, for valid ones, the decoded fields; `file_hashes`: one token carried four ways (bare, armored LF and CRLF, BOM with wrapped lines and trailing blank lines) with its one `file_sha256`. Every SDK and the server must pass all of them.
+`spec/vectors/offline.json`: request and receipt inputs with the expected class and, for valid ones, the decoded fields; `file_hashes`: `lf1.json`'s valid license carried four ways (bare, armored LF and CRLF, BOM with wrapped lines and trailing blank lines) with its one `file_sha256`, and inputs with none (`file_sha256` empty: `malformed`). Every SDK and the server must pass all of them.
