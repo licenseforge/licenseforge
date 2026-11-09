@@ -68,6 +68,25 @@ export async function deactivateActivation(tenant: string, license: string, acti
   );
 }
 
+export type OfflineActivation = components["schemas"]["OfflineActivation"];
+
+/**
+ * Answers an air-gapped machine's activation request (ADR-0043) with its
+ * license file. The request holds the license key: pass it straight through,
+ * keep it in component state only. idempotencyKey is fixed for one attempt
+ * (see keepIdempotencyKey), so a retry never issues a second file.
+ */
+export async function createOfflineActivation(tenant: string, request: string, idempotencyKey: string): Promise<OfflineActivation> {
+  return unwrap(
+    await api.POST("/tenants/{tenant}/activation-requests", { params: { path: { tenant }, header: { "Idempotency-Key": idempotencyKey } }, body: { request } }),
+  );
+}
+
+/** Returns an offline seat on the machine's deactivation receipt (ADR-0043). */
+export async function returnOfflineSeat(tenant: string, receipt: string): Promise<Activation> {
+  return unwrap(await api.POST("/tenants/{tenant}/deactivation-receipts", { params: { path: { tenant } }, body: { receipt } }));
+}
+
 /** Support rehost (ADR-0039): the license's seat moves count from zero again. */
 export async function resetRehosts(tenant: string, license: string): Promise<License> {
   return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/rehosts/reset", { params: { path: { tenant, id: license } } }));
