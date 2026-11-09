@@ -45,7 +45,10 @@ type Purpose string
 // Purposes in use.
 const (
 	PurposeLicenseKey          Purpose = "license_key"
-	PurposeIdempotencyResponse Purpose = "idempotency_response" // stored response bodies (internal/idempotency)
+	PurposeIdempotencyResponse Purpose = "idempotency_response"    // stored response bodies (internal/idempotency)
+	PurposeWebhookURL          Purpose = "webhook_url"             // a webhook endpoint's URL (ADR-0044: often holds a token)
+	PurposeWebhookSecret       Purpose = "webhook_secret"          // its current signing secret
+	PurposeWebhookPrevious     Purpose = "webhook_previous_secret" // the previous one, during a rotation
 )
 
 // Binding is what a ciphertext belongs to. Decrypt needs the same binding as
