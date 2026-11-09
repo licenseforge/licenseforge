@@ -156,7 +156,7 @@ func (d *DB) Close() error {
 // reuse drops anything a request left behind (session settings, prepared
 // statements, temp state, advisory locks, LISTENs).
 func openPool(dsn string) (*sql.DB, error) {
-	cfg, err := pgx.ParseConfig(dsn)
+	cfg, err := parseDSN(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -421,10 +421,11 @@ func Migrate(ctx context.Context, ownerDSN string) (err error) {
 	if err != nil {
 		return err
 	}
-	db, err := sql.Open("pgx", ownerDSN)
+	cfg, err := parseDSN(ownerDSN)
 	if err != nil {
 		return err
 	}
+	db := stdlib.OpenDB(*cfg)
 	defer func() { _ = db.Close() }()
 	conn, err := db.Conn(ctx) // advisory lock and work on one session
 	if err != nil {
