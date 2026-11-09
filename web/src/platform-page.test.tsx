@@ -209,10 +209,10 @@ it("re-issues an owner invite: the new link once, or why not when the tenant has
   expect(JSON.stringify([document.body.innerHTML, qc.getQueryCache().getAll().map((q) => q.state), qc.getMutationCache().getAll().map((m) => m.state)])).not.toContain(TOKEN);
 
   conflict = true;
-  const lists = (fetch as unknown as { mock: { calls: [Request][] } }).mock.calls.filter(([r]) => r.method === "GET").length;
+  const lists = (fetch as unknown as { mock: { calls: [Request][] } }).mock.calls.filter(([r]) => r.method === "GET" && new URL(r.url).pathname === "/api/v1/platform/tenants").length;
   await open();
   await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("This tenant already has an owner: its owners invite members."));
-  await vi.waitFor(() => expect((fetch as unknown as { mock: { calls: [Request][] } }).mock.calls.filter(([r]) => r.method === "GET").length).toBeGreaterThan(lists)); // the stale row refreshed
+  await vi.waitFor(() => expect((fetch as unknown as { mock: { calls: [Request][] } }).mock.calls.filter(([r]) => r.method === "GET" && new URL(r.url).pathname === "/api/v1/platform/tenants").length).toBeGreaterThan(lists)); // the stale row refreshed
   act(() => root.unmount());
 });
 
