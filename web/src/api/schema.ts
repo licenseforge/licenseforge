@@ -614,6 +614,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/tenants/{id}/owner-invitation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give a tenant without an owner a new owner invitation (ADR-0042).
+         * @description For a tenant whose first owner invitation was lost or expired. Platform
+         *     admins only. Every pending owner invitation of the tenant is revoked
+         *     and a new one is created for owner_email (the same or a corrected
+         *     address); its token is in this response only. Once the tenant has an
+         *     owner it runs its own invitations: 409 `conflict`. An unknown tenant
+         *     is 404. Audited on the platform chain and the tenant's chain.
+         */
+        post: operations["reinvitePlatformTenantOwner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/activation/tenants/{tenant}/activate": {
         parameters: {
             query?: never;
@@ -1748,6 +1776,10 @@ export interface components {
             /** @description Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email. */
             owner_email: string;
         };
+        PlatformOwnerInvite: {
+            /** @description Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email. */
+            owner_email: string;
+        };
         PlatformTenantCreated: {
             tenant: components["schemas"]["PlatformTenant"];
             invitation: {
@@ -2747,6 +2779,40 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    reinvitePlatformTenantOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's ID or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformOwnerInvite"];
+            };
+        };
+        responses: {
+            /** @description The tenant and the new invitation, its token shown once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenantCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];

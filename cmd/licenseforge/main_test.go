@@ -557,3 +557,29 @@ func TestTenantCreate(t *testing.T) {
 		}
 	}
 }
+
+// `licenseforge tenant invite-owner` re-issues a lost owner invitation.
+func TestTenantInviteOwner(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", env.PlatformURL)
+	slug := "cli-re-" + strings.ToLower(ids.New("x")[2:10])
+	if err := tenantCreate(ctx, []string{"--slug", slug, "--name", "Lost", "--owner-email", "lost@example.com"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := tenantInviteOwner(ctx, []string{"--tenant", slug, "--owner-email", "found@example.com"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^tenant ` + slug + ` \(tnt_\S+\): 1 earlier owner invitation\(s\) revoked\ninvite for found@example\.com, valid until \S+, shown once:\n  /invite#token=\S+$`).MatchString(out.String()) {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	for _, args := range [][]string{{"--tenant", slug}, {"--tenant", slug, "--owner-email", "a@b.example", "extra"}, {"--tenant", "no-such-tenant", "--owner-email", "a@b.example"}} {
+		if err := tenantInviteOwner(ctx, args, io.Discard); err == nil {
+			t.Errorf("%v: no error", args)
+		}
+	}
+	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", env.TenantURL)
+	if err := tenantInviteOwner(ctx, []string{"--tenant", slug, "--owner-email", "a@b.example"}, io.Discard); err == nil {
+		t.Error("ran on the tenant login")
+	}
+}

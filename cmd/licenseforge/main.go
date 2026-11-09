@@ -105,7 +105,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -121,8 +121,8 @@ func main() {
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
 	cmd := strings.Join(flag.Args(), " ")
-	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && args[1] == "create" {
-		cmd = "tenant create" // with its own flags
+	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") {
+		cmd = "tenant " + args[1] // with its own flags
 	} else if len(args) >= 1 && args[0] == "offline" {
 		cmd = "offline"
 	}
@@ -149,6 +149,11 @@ func main() {
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0) // the usage was printed
+		}
+	case "tenant invite-owner":
+		err = tenantInviteOwner(ctx, flag.Args()[2:], os.Stdout)
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
 		}
 	default:
 		flag.Usage()
@@ -219,6 +224,37 @@ func tenantCreate(ctx context.Context, args []string, out io.Writer) error {
 	}
 	_, err = fmt.Fprintf(out, "tenant %s (%s) created\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
 		c.Tenant.Slug, c.Tenant.ID, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
+	return err
+}
+
+// tenantInviteOwner re-issues the owner invitation of a tenant that has no
+// owner yet (ADR-0042, amended), on the platform login, and prints the new
+// invite path once; earlier pending owner invitations stop working.
+func tenantInviteOwner(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("tenant invite-owner", flag.ContinueOnError)
+	ref := fs.String("tenant", "", "the tenant's slug or ID (required)")
+	owner := fs.String("owner-email", "", "the owner's email: they sign in with it, verified, and accept (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *ref == "" || *owner == "" || fs.NArg() > 0 {
+		return errors.New("tenant invite-owner: --tenant and --owner-email are required, and nothing else")
+	}
+	dsn, err := mustEnv("LICENSEFORGE_PLATFORM_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	db, err := store.OpenPlatform(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	c, err := platform.Service{DB: db}.ReinviteOwner(ctx, platform.Actor{}, *ref, *owner)
+	if err != nil {
+		return fmt.Errorf("tenant invite-owner: %w", err)
+	}
+	_, err = fmt.Fprintf(out, "tenant %s (%s): %d earlier owner invitation(s) revoked\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
+		c.Tenant.Slug, c.Tenant.ID, c.Revoked, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
 	return err
 }
 

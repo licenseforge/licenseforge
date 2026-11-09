@@ -1302,6 +1302,12 @@ type PlanPatch struct {
 // PlanPatchExpiryBasis defines model for PlanPatch.ExpiryBasis.
 type PlanPatchExpiryBasis string
 
+// PlatformOwnerInvite defines model for PlatformOwnerInvite.
+type PlatformOwnerInvite struct {
+	// OwnerEmail Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email.
+	OwnerEmail string `json:"owner_email"`
+}
+
 // PlatformTenant defines model for PlatformTenant.
 type PlatformTenant struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -1694,6 +1700,9 @@ type AcceptInvitationJSONRequestBody AcceptInvitationJSONBody
 // CreatePlatformTenantJSONRequestBody defines body for CreatePlatformTenant for application/json ContentType.
 type CreatePlatformTenantJSONRequestBody = PlatformTenantCreate
 
+// ReinvitePlatformTenantOwnerJSONRequestBody defines body for ReinvitePlatformTenantOwner for application/json ContentType.
+type ReinvitePlatformTenantOwnerJSONRequestBody = PlatformOwnerInvite
+
 // UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
 type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
 
@@ -1765,6 +1774,9 @@ type ServerInterface interface {
 	// CreatePlatformTenant Create a tenant and invite its first owner (platform admins, ADR-0042).
 	// (POST /platform/tenants)
 	CreatePlatformTenant(w http.ResponseWriter, r *http.Request)
+	// ReinvitePlatformTenantOwner Give a tenant without an owner a new owner invitation (ADR-0042).
+	// (POST /platform/tenants/{id}/owner-invitation)
+	ReinvitePlatformTenantOwner(w http.ResponseWriter, r *http.Request, id string)
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant)
@@ -2104,6 +2116,32 @@ func (siw *ServerInterfaceWrapper) CreatePlatformTenant(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreatePlatformTenant(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReinvitePlatformTenantOwner operation middleware
+func (siw *ServerInterfaceWrapper) ReinvitePlatformTenantOwner(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReinvitePlatformTenantOwner(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4330,6 +4368,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tenants", wrapper.ListMyTenants)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/platform/tenants", wrapper.ListPlatformTenants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/platform/tenants", wrapper.CreatePlatformTenant)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/platform/tenants/{id}/owner-invitation", wrapper.ReinvitePlatformTenantOwner)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/deactivate", wrapper.Deactivate)
@@ -5408,6 +5447,192 @@ type CreatePlatformTenant422ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response CreatePlatformTenant422ApplicationProblemPlusJSONResponse) VisitCreatePlatformTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwnerRequestObject struct {
+	Id   string `json:"id"`
+	Body *ReinvitePlatformTenantOwnerJSONRequestBody
+}
+
+type ReinvitePlatformTenantOwnerResponseObject interface {
+	VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error
+}
+
+type ReinvitePlatformTenantOwner201JSONResponse PlatformTenantCreated
+
+func (response ReinvitePlatformTenantOwner201JSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ReinvitePlatformTenantOwner400ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner401ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner401ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner403ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner403ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner404ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner404ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner409ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner409ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner413ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner413ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReinvitePlatformTenantOwner422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReinvitePlatformTenantOwner422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReinvitePlatformTenantOwner422ResponseHeaders
+}
+
+func (response ReinvitePlatformTenantOwner422ApplicationProblemPlusJSONResponse) VisitReinvitePlatformTenantOwnerResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -12199,6 +12424,9 @@ type StrictServerInterface interface {
 	// CreatePlatformTenant Create a tenant and invite its first owner (platform admins, ADR-0042).
 	// (POST /platform/tenants)
 	CreatePlatformTenant(ctx context.Context, request CreatePlatformTenantRequestObject) (CreatePlatformTenantResponseObject, error)
+	// ReinvitePlatformTenantOwner Give a tenant without an owner a new owner invitation (ADR-0042).
+	// (POST /platform/tenants/{id}/owner-invitation)
+	ReinvitePlatformTenantOwner(ctx context.Context, request ReinvitePlatformTenantOwnerRequestObject) (ReinvitePlatformTenantOwnerResponseObject, error)
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
@@ -12592,6 +12820,39 @@ func (sh *strictHandler) CreatePlatformTenant(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreatePlatformTenantResponseObject); ok {
 		if err := validResponse.VisitCreatePlatformTenantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReinvitePlatformTenantOwner operation middleware
+func (sh *strictHandler) ReinvitePlatformTenantOwner(w http.ResponseWriter, r *http.Request, id string) {
+	var request ReinvitePlatformTenantOwnerRequestObject
+
+	request.Id = id
+
+	var body ReinvitePlatformTenantOwnerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReinvitePlatformTenantOwner(ctx, request.(ReinvitePlatformTenantOwnerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReinvitePlatformTenantOwner")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReinvitePlatformTenantOwnerResponseObject); ok {
+		if err := validResponse.VisitReinvitePlatformTenantOwnerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

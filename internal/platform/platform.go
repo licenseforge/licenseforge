@@ -23,6 +23,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 	"licenseforge.io/licenseforge/internal/store/ent/invitation"
+	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/platformadmin"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
@@ -32,6 +33,8 @@ import (
 var (
 	// ErrNotAdmin: the caller isn't an enabled platform admin.
 	ErrNotAdmin = errors.New("platform: not a platform admin")
+	// ErrNotFound: no such tenant (the platform tenant included).
+	ErrNotFound = errors.New("platform: no such tenant")
 	ErrInvalid  = errors.New("platform: invalid request")
 	ErrConflict = errors.New("platform: conflict")
 )
@@ -120,6 +123,7 @@ type Created struct {
 	Tenant     *ent.Tenant
 	Invitation *ent.Invitation
 	Token      string
+	Revoked    int // ReinviteOwner: earlier pending owner invitations revoked
 }
 
 // CreateTenant creates a tenant and an owner invitation (every product,
@@ -153,25 +157,120 @@ func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEma
 		if err != nil {
 			return err
 		}
-		c.Token = rand.Text()
-		create := tx.Invitation.Create().SetTenantID(c.Tenant.ID).SetEmail(ownerEmail).SetRole(invitation.RoleOwner).SetScopeAll(true).
-			SetTokenHash(store.InvitationTokenHash(c.Token)).SetExpiresAt(time.Now().Add(invitations.DefaultTTL))
-		if a.UserID != "" {
-			create.SetInvitedBy(a.UserID)
-		}
-		if c.Invitation, err = create.Save(ctx); err != nil {
-			return err
-		}
 		ev.ObjectID, ev.Outcome = c.Tenant.ID, auditevent.OutcomeSuccess
 		ev.Details["slug"] = slug
 		if _, err := audit.Record(ctx, tx, audit.PlatformTenant, ev); err != nil {
 			return err
 		}
-		inv := a.event("invitation.create", "invitation")
-		inv.ObjectID, inv.Outcome = c.Invitation.ID, auditevent.OutcomeSuccess
-		inv.Details["role"], inv.Details["scope_all"], inv.Details["products"] = "owner", true, 0
-		inv.Details["expires_at"] = c.Invitation.ExpiresAt.UTC().Format(time.RFC3339)
-		_, err = audit.Record(ctx, tx, c.Tenant.ID, inv)
+		c.Invitation, c.Token, err = ownerInvitation(ctx, tx, a, c.Tenant.ID, ownerEmail)
+		return err
+	})
+	if err != nil {
+		return Created{}, s.refused(ctx, ev, err)
+	}
+	return c, nil
+}
+
+// ownerInvitation creates an owner invitation (every product,
+// invitations.DefaultTTL) for email in tenantID and records invitation.create
+// on the tenant's chain (never the email, ADR-0029). It returns the token.
+func ownerInvitation(ctx context.Context, tx *ent.Tx, a Actor, tenantID, email string) (*ent.Invitation, string, error) {
+	token := rand.Text()
+	create := tx.Invitation.Create().SetTenantID(tenantID).SetEmail(email).SetRole(invitation.RoleOwner).SetScopeAll(true).
+		SetTokenHash(store.InvitationTokenHash(token)).SetExpiresAt(time.Now().Add(invitations.DefaultTTL))
+	if a.UserID != "" {
+		create.SetInvitedBy(a.UserID)
+	}
+	row, err := create.Save(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	inv := a.event("invitation.create", "invitation")
+	inv.ObjectID, inv.Outcome = row.ID, auditevent.OutcomeSuccess
+	inv.Details["role"], inv.Details["scope_all"], inv.Details["products"] = "owner", true, 0
+	inv.Details["expires_at"] = row.ExpiresAt.UTC().Format(time.RFC3339)
+	if _, err := audit.Record(ctx, tx, tenantID, inv); err != nil {
+		return nil, "", err
+	}
+	return row, token, nil
+}
+
+// ReinviteOwner gives a tenant without an owner a new owner invitation for
+// ownerEmail (ADR-0042, amended): when the first was lost or expired. ref is
+// the tenant's ID or slug. Every pending owner invitation is revoked; after
+// a per-tenant advisory lock (one re-issue at a time) they are locked (the
+// lock acceptance takes), then the tenant is checked for members, so a concurrent acceptance either wins (ErrConflict) or
+// finds its invitation revoked. Checks, audit and refusals as CreateTenant;
+// tenant.owner_invitation goes on the platform chain.
+func (s Service) ReinviteOwner(ctx context.Context, a Actor, ref, ownerEmail string) (Created, error) {
+	ev := a.event("tenant.owner_invitation", "tenant")
+	var c Created
+	err := s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
+		if a.UserID != "" {
+			ok, err := isAdmin(ctx, tx, a.UserID, true)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrNotAdmin
+			}
+		}
+		if !identity.UsableEmail(ownerEmail) {
+			return &InvalidError{Field: "/owner_email", Message: "must be an email address without spaces or invisible characters"}
+		}
+		var err error
+		c.Tenant, err = tx.Tenant.Query().Where(tenant.IDNEQ(audit.PlatformTenant), tenant.Or(tenant.ID(ref), tenant.Slug(ref))).Only(ctx)
+		if ent.IsNotFound(err) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		ev.ObjectID = c.Tenant.ID // a refusal from here on names the tenant only when it has an owner (refused)
+		// One re-issue per tenant at a time: another one's new invitation
+		// would be invisible to this one's pending query (taken after the
+		// first commits) and both would stay open. An advisory lock, not the
+		// tenant row: an acceptance's membership insert key-share locks that
+		// row while holding its invitation, and never takes this lock.
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.owner_invitation:' || $1, 0))`, c.Tenant.ID); err != nil {
+			return err
+		}
+		pending, err := tx.Invitation.Query().Where(invitation.TenantID(c.Tenant.ID), invitation.RoleEQ(invitation.RoleOwner),
+			invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil()).Order(ent.Asc(invitation.FieldID)).ForUpdate().All(ctx)
+		if err != nil {
+			return err
+		}
+		// Any member (a suspended owner too: re-enable that user instead)
+		// means the tenant runs its own invitations.
+		members, err := tx.Membership.Query().Where(membership.TenantID(c.Tenant.ID)).Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if members {
+			return &InvalidError{Field: "/", Message: "the tenant has an owner: its owners invite members", Conflict: true}
+		}
+		ev.ObjectID, ev.Outcome = c.Tenant.ID, auditevent.OutcomeSuccess
+		c.Revoked = len(pending)
+		ev.Details["slug"], ev.Details["revoked"] = c.Tenant.Slug, c.Revoked
+		if _, err := audit.Record(ctx, tx, audit.PlatformTenant, ev); err != nil {
+			return err
+		}
+		for _, p := range pending {
+			res, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, p.ID)
+			if err != nil {
+				return err
+			}
+			if n, err := res.RowsAffected(); err != nil || n != 1 { // locked above: can't change meanwhile
+				return errors.Join(errors.New("platform: invitation changed while locked"), err)
+			}
+			rev := a.event("invitation.revoke", "invitation")
+			rev.ObjectID, rev.Outcome = p.ID, auditevent.OutcomeSuccess
+			rev.Details["role"] = "owner"
+			if _, err := audit.Record(ctx, tx, c.Tenant.ID, rev); err != nil {
+				return err
+			}
+		}
+		c.Invitation, c.Token, err = ownerInvitation(ctx, tx, a, c.Tenant.ID, ownerEmail)
 		return err
 	})
 	if err != nil {
@@ -220,12 +319,15 @@ func (s Service) refused(ctx context.Context, ev audit.Event, err error) error {
 	switch {
 	case errors.Is(err, ErrNotAdmin):
 		ev.Outcome = auditevent.OutcomeDenied
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrConflict):
+	case errors.Is(err, ErrInvalid), errors.Is(err, ErrConflict), errors.Is(err, ErrNotFound):
 		ev.Outcome = auditevent.OutcomeFailure
 	default:
 		return err
 	}
-	ev.ObjectID = ""
+	var inv *InvalidError
+	if !errors.As(err, &inv) || inv.Field != "/" {
+		ev.ObjectID = "" // kept for a refused re-issue: which tenant (with an owner) it was
+	}
 	via, cli := ev.Details["via"]
 	ev.Details = map[string]any{}
 	if cli {
