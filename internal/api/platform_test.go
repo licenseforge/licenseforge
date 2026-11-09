@@ -316,9 +316,23 @@ func TestPlatformReinviteOwner(t *testing.T) {
 		t.Fatalf("re-issue: %d %s", again.code, again.raw)
 	}
 	f.do(t, "POST", Prefix+"/invitations/accept", fmt.Sprintf(`{"token":%q}`, lost), f.session(t, f.newUser(t, "typo@reinvite.example"), true)).problem(t, 422, "validation_failed")
+	hasMembers := func() any {
+		for _, it := range f.do(t, "GET", Prefix+"/platform/tenants?limit=200", "", as).body["items"].([]any) {
+			if m := it.(map[string]any); m["slug"] == slug {
+				return m["has_members"]
+			}
+		}
+		return nil
+	}
+	if again.body["tenant"].(map[string]any)["has_members"] != false || hasMembers() != false {
+		t.Errorf("before acceptance: has_members %v", hasMembers())
+	}
 	owner := f.newUser(t, "owner@reinvite.example")
 	if r := f.do(t, "POST", Prefix+"/invitations/accept", fmt.Sprintf(`{"token":%q}`, inv["token"]), f.session(t, owner, true)); r.code != 200 {
 		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	if hasMembers() != true {
+		t.Errorf("after acceptance: has_members %v", hasMembers())
 	}
 	if r := f.do(t, "POST", p, `{"owner_email":"x@reinvite.example"}`, as).problem(t, 409, "conflict"); !strings.Contains(fmt.Sprint(r["detail"]), "has an owner") {
 		t.Errorf("with an owner: %v", r)

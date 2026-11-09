@@ -117,6 +117,23 @@ func (s Service) Tenants(ctx context.Context, limit int, afterAt time.Time, afte
 	return out, err
 }
 
+// WithMembers returns which of tenantIDs have at least one member (one
+// query, whatever the page size).
+func (s Service) WithMembers(ctx context.Context, tenantIDs ...string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(tenantIDs) == 0 {
+		return out, nil
+	}
+	err := s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
+		ids, err := tx.Membership.Query().Where(membership.TenantIDIn(tenantIDs...)).Unique(true).Select(membership.FieldTenantID).Strings(ctx)
+		for _, id := range ids {
+			out[id] = true
+		}
+		return err
+	})
+	return out, err
+}
+
 // Created is a new tenant and its owner's invitation. Token is the invite
 // link's secret: shown once, only its hash is stored.
 type Created struct {

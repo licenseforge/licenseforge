@@ -7,7 +7,7 @@ import { PlatformPage } from "./platform-page";
 import { createAppRouter } from "./router";
 
 const TOKEN = "OWNER-INVITE-TOKEN-abc789";
-const tenant = { id: "tnt_1", slug: "acme", name: "Acme Corp", mfa_policy: "none", created_at: "2026-11-08T00:00:00Z" };
+const tenant = { id: "tnt_1", slug: "acme", name: "Acme Corp", mfa_policy: "none", created_at: "2026-11-08T00:00:00Z", has_members: false };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": status >= 400 ? "application/problem+json" : "application/json" } });
 
@@ -237,5 +237,13 @@ it("the re-issue dialog waits for its answer and explains other refusals", async
   await submit();
   await vi.waitFor(() => expect(el.querySelector('dialog [role="alert"]')?.textContent).toContain("Not found"));
   expect(el.textContent).not.toContain("already has an owner");
+  act(() => root.unmount());
+});
+
+it("offers a new owner invite only for tenants nobody has joined yet", async () => {
+  const { el, root } = await render(async () => json({ items: [tenant, { ...tenant, id: "tnt_9", slug: "busy", name: "Busy Co", has_members: true }] }));
+  await vi.waitFor(() => expect(el.textContent).toContain("Busy Co"));
+  expect(el.querySelector('button[aria-label="New owner invite for Acme Corp (acme)"]')).not.toBeNull();
+  expect(el.querySelector('button[aria-label="New owner invite for Busy Co (busy)"]')).toBeNull();
   act(() => root.unmount());
 });

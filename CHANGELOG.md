@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Added
+- `PlatformTenant.has_members` in the platform API (one query per page): whether anyone has joined the tenant. The platform Tenants screen offers "New owner invite" only for tenants without members, the only ones it works for (ADR-0042).
 - Dashboard: "New owner invite" on each row of the platform Tenants screen (ADR-0042, amended): an owner email, then the new invite link shown once; a tenant that already has an owner says so. The create dialog and this one share the link view.
 - Re-issue a tenant's owner invitation (ADR-0042, amended): `POST /api/v1/platform/tenants/{id|slug}/owner-invitation` with `{owner_email}` (platform admins) and `licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E` (platform login), for a tenant whose first invitation was lost or expired. Only while the tenant has no owner (409 otherwise); earlier pending owner invitations are revoked; the new token is shown once. Audited on the platform chain (`tenant.owner_invitation`) and the tenant's (`invitation.revoke`, `invitation.create`).
 - Dashboard: an "Offline" section on the license dialog for managers (ADR-0043): "Offline activation" (paste or upload a request; download `license.lic`, with its validity) and "Return a seat" (paste or upload a receipt). The request holds the license key: it stays in the component's state only and is cleared once answered; a retry after a network error or 5xx reuses the Idempotency-Key, a refusal gets a new one.

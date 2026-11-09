@@ -49,9 +49,12 @@ export function PlatformPage() {
                   <td className={td}>{mfaLabel(tn.mfa_policy)}</td>
                   <td className={td}>{date.format(new Date(tn.created_at))}</td>
                   <td className={`${td} whitespace-nowrap text-right`}>
-                    <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name, slug: tn.slug })} onClick={() => setReinviting(tn)}>
-                      {t("platform.reinvite")}
-                    </Button>
+                    {/* only before anyone joined: then the tenant's owners invite (ADR-0042) */}
+                    {!tn.has_members && (
+                      <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name, slug: tn.slug })} onClick={() => setReinviting(tn)}>
+                        {t("platform.reinvite")}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
