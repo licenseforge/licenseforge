@@ -55,6 +55,17 @@ func (s Service) RecordLogin(ctx context.Context, userID string, outcome auditev
 	})
 }
 
+// RecordLogout appends user.logout for userID's session sessionID to the
+// platform chain (AU-2, AC-12), in a transaction of its own.
+func (s Service) RecordLogout(ctx context.Context, userID, sessionID string, src Source) error {
+	return s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
+		_, err := audit.Record(ctx, tx, audit.PlatformTenant, audit.Event{ActorType: auditevent.ActorTypeUser, ActorID: userID,
+			Action: "user.logout", ObjectType: "session", ObjectID: sessionID, Outcome: auditevent.OutcomeSuccess,
+			SourceIP: src.IP, UserAgent: src.UserAgent})
+		return err
+	})
+}
+
 // Bootstrap makes u the first platform admin when u matches setting
 // (LICENSEFORGE_BOOTSTRAP_ADMIN, BootstrapMatches) and there is no platform
 // admin yet (ADR-0003, ADR-0029, ADR-0031). The grant and its platform-chain

@@ -90,7 +90,7 @@ func TestSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EndSession(ctx, cookie2); err != nil {
+	if _, err := s.EndSession(ctx, cookie2); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Session(ctx, cookie2); !errors.Is(err, ErrNoSession) {

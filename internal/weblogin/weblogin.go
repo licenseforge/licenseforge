@@ -448,7 +448,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	// A fresh session on every login (no fixation); end the one presented.
 	if old, err := r.Cookie(SessionCookie); err == nil {
-		if err := h.id.EndSession(ctx, old.Value); err != nil {
+		if _, err := h.id.EndSession(ctx, old.Value); err != nil { // replaced by this login: not a logout
 			h.fail(w, http.StatusInternalServerError, "end old session", err)
 			return
 		}
@@ -464,7 +464,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	// No session without its record (AU-5, fail closed).
 	if err := h.id.RecordLogin(ctx, u.ID, auditevent.OutcomeSuccess, "", source(r), &auth); err != nil {
-		h.fail(w, http.StatusInternalServerError, "audit login", errors.Join(err, h.id.EndSession(ctx, cookie)))
+		h.fail(w, http.StatusInternalServerError, "audit login", errors.Join(err, func() error { _, err := h.id.EndSession(ctx, cookie); return err }()))
 		return
 	}
 	// AC-8 evidence: the banner this user agreed to, from their flow cookie

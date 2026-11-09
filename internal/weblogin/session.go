@@ -127,14 +127,26 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// logout ends the session (needs the CSRF token like any unsafe request).
+// logout ends the session (needs the CSRF token like any unsafe request)
+// and records user.logout on the platform chain (AU-2). The session is gone
+// first: a failed entry is a 500 (and the audit failure metric), never a
+// session kept alive. A failed delete keeps the cookie: the session is live.
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	c, _ := r.Cookie(SessionCookie)
-	if err := h.id.EndSession(r.Context(), c.Value); err != nil {
+	id, err := h.id.EndSession(r.Context(), c.Value)
+	if err != nil { // the session is still alive: keep the cookie, so a retry can end it
 		h.log.Error("logout", "err", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	setCookie(w, SessionCookie, "", -1)
+	if id != "" {
+		err = h.id.RecordLogout(r.Context(), User(r.Context()).ID, id, source(r))
+	}
+	if err != nil {
+		h.log.Error("logout", "err", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

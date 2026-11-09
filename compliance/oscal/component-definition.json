@@ -337,7 +337,7 @@
               {
                 "uuid": "74627718-5e8c-5d06-a842-f12117e54a3b",
                 "control-id": "au-2",
-                "description": "Logged today: api_token.create and api_token.revoke, and license.offline_file, with success, failure and denied outcomes. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token) and platform_admin.bootstrap. The audit log design covers admin actions, logins, token use, key operations and platform-admin actions (ADR-0021, ADR-0027).",
+                "description": "On the tenant's chain, every change made through the product, with its refusals (failure, denied) by a caller the tenant knows: members (member.update, member.remove), invitations (create, revoke; accept on success), API tokens (create, revoke), signing keys (signing_key.create, promote, discard), the tenant's MFA policy and audit retention (tenant.mfa_policy.update, tenant.audit_retention.update), the catalog (product, feature, plan: create, update, archive; plan.features.update), customers, licenses (issue, suspend, reinstate, revoke, key_reveal, rehosts_reset, offline_file), activations (create, deactivate, offline, offline_return), reads of the audit log (audit_event.read), sessions refused by the tenant's MFA policy (session.mfa_required), and audit.retention on every chain it cuts. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token), user.logout, platform_admin.bootstrap, tenant.create, tenant.owner_invitation (the CLI's with via: cli), session refusals on the platform routes (session.platform_denied, session.mfa_required) and audit.checkpoint (ADR-0021, ADR-0027).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -364,14 +364,34 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
                     "rel": "reference",
                     "text": "TestLoginBootstrapsAndRecords"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session_test.go",
+                    "rel": "reference",
+                    "text": "TestSessionAndLogout"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestLogoutEndsTheSessionWithoutAudit"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestKeyOperationsAreAudited"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/members/members_test.go",
+                    "rel": "reference",
+                    "text": "TestUpdate"
                   }
                 ],
-                "remarks": "Not logged yet: logouts, login failures before a verified ID token (logged only: anyone can cause them), signing key operations, member and platform-admin grants and removals (Roadmap v0.1: audit log; member/invitation/token HTTP handlers)."
+                "remarks": "Not audited: (1) refusals before a credential maps to the tenant's own objects, which anyone can cause: unknown or malformed API tokens, license keys and invitation tokens, invitation acceptances refused for any reason, CSRF and origin refusals, and a signed-in user asking for a tenant they don't belong to (counted in the HTTP metrics; the API also logs them); login failures before a verified ID token likewise; (2) session expiry (idle and absolute timeouts), and a session replaced by a new login; (3) session refusals beyond the first per session (recorded once, so polling can't flood the chain; a failed write is logged, not the answer); (4) changes the operator makes in SQL, which have no API yet: platform-admin grants and removals beyond the bootstrap, user suspension and erasure, customer erasure (ADR-0029, ADR-0031); (5) idempotent replays, which return the stored outcome; (6) online lease refreshes, their refusals and re-activations of a known machine: metrics, not entries (ADR-0034)."
               },
               {
                 "uuid": "f23fe45c-968e-5a4a-8454-6ea41630f923",
                 "control-id": "au-3",
-                "description": "Each entry records actor type and ID, action, object type and ID, outcome (success, failure, denied), tenant, a database-clock timestamp, source IP, user agent and a details object. Actions through the API (and logins) take the source IP (the connection, or X-Forwarded-For from a trusted proxy) and user agent from the request, and the details carry its request_id (the response's X-Request-Id) to correlate with server logs. The details hold no secrets and no PHI.",
+                "description": "Each entry records actor type and ID, action, object type and ID, outcome (success, failure, denied), tenant, a database-clock timestamp, source IP, user agent and a details object. Actions through the API, logins and logouts take the source IP (the connection, or X-Forwarded-For from a trusted proxy) and user agent from the request; API actions' details also carry its request_id (the response's X-Request-Id) to correlate with server logs. The details hold no secrets and no PHI.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -405,7 +425,7 @@
               {
                 "uuid": "faf7b508-d0a9-5d87-bf88-48f6d461c273",
                 "control-id": "au-5",
-                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036). The server verifies every chain every 15 minutes, incrementally from its last verified heads and fully weekly, and records the heads in audit.checkpoint entries; the chart's PrometheusRule alerts on write failures, verification failures, a stalled verifier (no chain verified for two intervals), persisting verification errors, an overdue full pass and export lag.",
+                "description": "Fails closed: a successful action's entry is written in the same transaction, so if the audit insert fails, the action rolls back. The one exception for a successful action is logout: the session (identity pool) ends first, since ending it is the safe side, and a failed entry (platform pool) answers 500 and counts in the metric below. Every failed write counts in licenseforge_audit_write_failures_total{chain} and every broken chain Verify finds in licenseforge_audit_verify_failures_total (Prometheus, ADR-0036). The server verifies every chain every 15 minutes, incrementally from its last verified heads and fully weekly, and records the heads in audit.checkpoint entries; the chart's PrometheusRule alerts on write failures, verification failures, a stalled verifier (no chain verified for two intervals), persisting verification errors, an overdue full pass and export lag.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -571,7 +591,7 @@
                     "text": "TestRecordRefusesStaleSnapshot"
                   }
                 ],
-                "remarks": "Same coverage gaps as AU-2."
+                "remarks": "The same exceptions as AU-2."
               },
               {
                 "uuid": "74e36684-a47a-5b56-b0c4-0a14ddd664bd",
