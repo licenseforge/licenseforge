@@ -117,6 +117,7 @@ var (
 		{Name: "first_seen_at", Type: field.TypeTime},
 		{Name: "last_seen_at", Type: field.TypeTime},
 		{Name: "deactivated_at", Type: field.TypeTime, Nullable: true},
+		{Name: "offline_file_sha256", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "char(64)"}},
 		{Name: "license_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
 	// ActivationsTable holds the schema information for the "activations" table.
@@ -127,7 +128,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "activations_licenses_activations",
-				Columns:    []*schema.Column{ActivationsColumns[14]},
+				Columns:    []*schema.Column{ActivationsColumns[15]},
 				RefColumns: []*schema.Column{LicensesColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -141,7 +142,7 @@ var (
 			{
 				Name:    "activation_license_id_fingerprint",
 				Unique:  true,
-				Columns: []*schema.Column{ActivationsColumns[14], ActivationsColumns[4]},
+				Columns: []*schema.Column{ActivationsColumns[15], ActivationsColumns[4]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "deactivated_at IS NULL",
 				},
@@ -149,7 +150,7 @@ var (
 			{
 				Name:    "activation_history",
 				Unique:  false,
-				Columns: []*schema.Column{ActivationsColumns[14], ActivationsColumns[4]},
+				Columns: []*schema.Column{ActivationsColumns[15], ActivationsColumns[4]},
 			},
 		},
 	}
@@ -1069,6 +1070,7 @@ func init() {
 		"activations_fingerprint":    "fingerprint ~ '^sha256:[0-9a-f]{64}$'",
 		"activations_id_format":      "id ~ '^act_[a-z2-7]{26}$'",
 		"activations_mode":           "(mode)::text = ANY (ARRAY['online'::text, 'offline'::text])",
+		"activations_offline_file":   "offline_file_sha256 IS NULL OR offline_file_sha256 ~ '^[0-9a-f]{64}$'",
 		"activations_seen_order":     "last_seen_at >= first_seen_at",
 		"activations_source":         "(fp_source)::text = ANY (ARRAY['override'::text, 'env'::text, 'kubernetes'::text, 'machine-id'::text])",
 		"activations_source_binding": "((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)",

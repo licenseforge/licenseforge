@@ -43,6 +43,8 @@ const (
 	FieldLastSeenAt = "last_seen_at"
 	// FieldDeactivatedAt holds the string denoting the deactivated_at field in the database.
 	FieldDeactivatedAt = "deactivated_at"
+	// FieldOfflineFileSha256 holds the string denoting the offline_file_sha256 field in the database.
+	FieldOfflineFileSha256 = "offline_file_sha256"
 	// EdgeLicense holds the string denoting the license edge name in mutations.
 	EdgeLicense = "license"
 	// Table holds the table name of the activation in the database.
@@ -73,6 +75,7 @@ var Columns = []string{
 	FieldFirstSeenAt,
 	FieldLastSeenAt,
 	FieldDeactivatedAt,
+	FieldOfflineFileSha256,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -257,6 +260,11 @@ func ByLastSeenAt(opts ...sql.OrderTermOption) OrderOption {
 // ByDeactivatedAt orders the results by the deactivated_at field.
 func ByDeactivatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDeactivatedAt, opts...).ToFunc()
+}
+
+// ByOfflineFileSha256 orders the results by the offline_file_sha256 field.
+func ByOfflineFileSha256(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOfflineFileSha256, opts...).ToFunc()
 }
 
 // ByLicenseField orders the results by license field.

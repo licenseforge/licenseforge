@@ -1807,28 +1807,29 @@ func (m *APITokenProductMutation) ResetEdge(name string) error {
 // ActivationMutation represents an operation that mutates the Activation nodes in the graph.
 type ActivationMutation struct {
 	config
-	op             Op
-	typ            string
-	id             *string
-	tenant_id      *string
-	created_at     *time.Time
-	updated_at     *time.Time
-	fingerprint    *string
-	fp_source      *activation.FpSource
-	binding        *activation.Binding
-	mode           *activation.Mode
-	hostname       *string
-	app_version    *string
-	sdk_version    *string
-	first_seen_at  *time.Time
-	last_seen_at   *time.Time
-	deactivated_at *time.Time
-	clearedFields  map[string]struct{}
-	license        *string
-	clearedlicense bool
-	done           bool
-	oldValue       func(context.Context) (*Activation, error)
-	predicates     []predicate.Activation
+	op                  Op
+	typ                 string
+	id                  *string
+	tenant_id           *string
+	created_at          *time.Time
+	updated_at          *time.Time
+	fingerprint         *string
+	fp_source           *activation.FpSource
+	binding             *activation.Binding
+	mode                *activation.Mode
+	hostname            *string
+	app_version         *string
+	sdk_version         *string
+	first_seen_at       *time.Time
+	last_seen_at        *time.Time
+	deactivated_at      *time.Time
+	offline_file_sha256 *string
+	clearedFields       map[string]struct{}
+	license             *string
+	clearedlicense      bool
+	done                bool
+	oldValue            func(context.Context) (*Activation, error)
+	predicates          []predicate.Activation
 }
 
 var _ ent.Mutation = (*ActivationMutation)(nil)
@@ -2491,6 +2492,55 @@ func (m *ActivationMutation) ResetDeactivatedAt() {
 	delete(m.clearedFields, activation.FieldDeactivatedAt)
 }
 
+// SetOfflineFileSha256 sets the "offline_file_sha256" field.
+func (m *ActivationMutation) SetOfflineFileSha256(s string) {
+	m.offline_file_sha256 = &s
+}
+
+// OfflineFileSha256 returns the value of the "offline_file_sha256" field in the mutation.
+func (m *ActivationMutation) OfflineFileSha256() (r string, exists bool) {
+	v := m.offline_file_sha256
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOfflineFileSha256 returns the old "offline_file_sha256" field's value of the Activation entity.
+// If the Activation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ActivationMutation) OldOfflineFileSha256(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOfflineFileSha256 is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOfflineFileSha256 requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOfflineFileSha256: %w", err)
+	}
+	return oldValue.OfflineFileSha256, nil
+}
+
+// ClearOfflineFileSha256 clears the value of the "offline_file_sha256" field.
+func (m *ActivationMutation) ClearOfflineFileSha256() {
+	m.offline_file_sha256 = nil
+	m.clearedFields[activation.FieldOfflineFileSha256] = struct{}{}
+}
+
+// OfflineFileSha256Cleared returns if the "offline_file_sha256" field was cleared in this mutation.
+func (m *ActivationMutation) OfflineFileSha256Cleared() bool {
+	_, ok := m.clearedFields[activation.FieldOfflineFileSha256]
+	return ok
+}
+
+// ResetOfflineFileSha256 resets all changes to the "offline_file_sha256" field.
+func (m *ActivationMutation) ResetOfflineFileSha256() {
+	m.offline_file_sha256 = nil
+	delete(m.clearedFields, activation.FieldOfflineFileSha256)
+}
+
 // ClearLicense clears the "license" edge to the License entity.
 func (m *ActivationMutation) ClearLicense() {
 	m.clearedlicense = true
@@ -2552,7 +2602,7 @@ func (m *ActivationMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ActivationMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.tenant_id != nil {
 		fields = append(fields, activation.FieldTenantID)
 	}
@@ -2595,6 +2645,9 @@ func (m *ActivationMutation) Fields() []string {
 	if m.deactivated_at != nil {
 		fields = append(fields, activation.FieldDeactivatedAt)
 	}
+	if m.offline_file_sha256 != nil {
+		fields = append(fields, activation.FieldOfflineFileSha256)
+	}
 	return fields
 }
 
@@ -2631,6 +2684,8 @@ func (m *ActivationMutation) Field(name string) (ent.Value, bool) {
 		return m.LastSeenAt()
 	case activation.FieldDeactivatedAt:
 		return m.DeactivatedAt()
+	case activation.FieldOfflineFileSha256:
+		return m.OfflineFileSha256()
 	}
 	return nil, false
 }
@@ -2668,6 +2723,8 @@ func (m *ActivationMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldLastSeenAt(ctx)
 	case activation.FieldDeactivatedAt:
 		return m.OldDeactivatedAt(ctx)
+	case activation.FieldOfflineFileSha256:
+		return m.OldOfflineFileSha256(ctx)
 	}
 	return nil, fmt.Errorf("unknown Activation field %s", name)
 }
@@ -2775,6 +2832,13 @@ func (m *ActivationMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDeactivatedAt(v)
 		return nil
+	case activation.FieldOfflineFileSha256:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOfflineFileSha256(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Activation field %s", name)
 }
@@ -2817,6 +2881,9 @@ func (m *ActivationMutation) ClearedFields() []string {
 	if m.FieldCleared(activation.FieldDeactivatedAt) {
 		fields = append(fields, activation.FieldDeactivatedAt)
 	}
+	if m.FieldCleared(activation.FieldOfflineFileSha256) {
+		fields = append(fields, activation.FieldOfflineFileSha256)
+	}
 	return fields
 }
 
@@ -2842,6 +2909,9 @@ func (m *ActivationMutation) ClearField(name string) error {
 		return nil
 	case activation.FieldDeactivatedAt:
 		m.ClearDeactivatedAt()
+		return nil
+	case activation.FieldOfflineFileSha256:
+		m.ClearOfflineFileSha256()
 		return nil
 	}
 	return fmt.Errorf("unknown Activation nullable field %s", name)
@@ -2892,6 +2962,9 @@ func (m *ActivationMutation) ResetField(name string) error {
 		return nil
 	case activation.FieldDeactivatedAt:
 		m.ResetDeactivatedAt()
+		return nil
+	case activation.FieldOfflineFileSha256:
+		m.ResetOfflineFileSha256()
 		return nil
 	}
 	return fmt.Errorf("unknown Activation field %s", name)

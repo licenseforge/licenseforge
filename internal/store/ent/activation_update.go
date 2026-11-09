@@ -128,6 +128,26 @@ func (_u *ActivationUpdate) ClearDeactivatedAt() *ActivationUpdate {
 	return _u
 }
 
+// SetOfflineFileSha256 sets the "offline_file_sha256" field.
+func (_u *ActivationUpdate) SetOfflineFileSha256(v string) *ActivationUpdate {
+	_u.mutation.SetOfflineFileSha256(v)
+	return _u
+}
+
+// SetNillableOfflineFileSha256 sets the "offline_file_sha256" field if the given value is not nil.
+func (_u *ActivationUpdate) SetNillableOfflineFileSha256(v *string) *ActivationUpdate {
+	if v != nil {
+		_u.SetOfflineFileSha256(*v)
+	}
+	return _u
+}
+
+// ClearOfflineFileSha256 clears the value of the "offline_file_sha256" field.
+func (_u *ActivationUpdate) ClearOfflineFileSha256() *ActivationUpdate {
+	_u.mutation.ClearOfflineFileSha256()
+	return _u
+}
+
 // Mutation returns the ActivationMutation object of the builder.
 func (_u *ActivationUpdate) Mutation() *ActivationMutation {
 	return _u.mutation
@@ -233,6 +253,12 @@ func (_u *ActivationUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	}
 	if _u.mutation.DeactivatedAtCleared() {
 		_spec.ClearField(activation.FieldDeactivatedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OfflineFileSha256(); ok {
+		_spec.SetField(activation.FieldOfflineFileSha256, field.TypeString, value)
+	}
+	if _u.mutation.OfflineFileSha256Cleared() {
+		_spec.ClearField(activation.FieldOfflineFileSha256, field.TypeString)
 	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
@@ -351,6 +377,26 @@ func (_u *ActivationUpdateOne) SetNillableDeactivatedAt(v *time.Time) *Activatio
 // ClearDeactivatedAt clears the value of the "deactivated_at" field.
 func (_u *ActivationUpdateOne) ClearDeactivatedAt() *ActivationUpdateOne {
 	_u.mutation.ClearDeactivatedAt()
+	return _u
+}
+
+// SetOfflineFileSha256 sets the "offline_file_sha256" field.
+func (_u *ActivationUpdateOne) SetOfflineFileSha256(v string) *ActivationUpdateOne {
+	_u.mutation.SetOfflineFileSha256(v)
+	return _u
+}
+
+// SetNillableOfflineFileSha256 sets the "offline_file_sha256" field if the given value is not nil.
+func (_u *ActivationUpdateOne) SetNillableOfflineFileSha256(v *string) *ActivationUpdateOne {
+	if v != nil {
+		_u.SetOfflineFileSha256(*v)
+	}
+	return _u
+}
+
+// ClearOfflineFileSha256 clears the value of the "offline_file_sha256" field.
+func (_u *ActivationUpdateOne) ClearOfflineFileSha256() *ActivationUpdateOne {
+	_u.mutation.ClearOfflineFileSha256()
 	return _u
 }
 
@@ -489,6 +535,12 @@ func (_u *ActivationUpdateOne) sqlSave(ctx context.Context) (_node *Activation, 
 	}
 	if _u.mutation.DeactivatedAtCleared() {
 		_spec.ClearField(activation.FieldDeactivatedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OfflineFileSha256(); ok {
+		_spec.SetField(activation.FieldOfflineFileSha256, field.TypeString, value)
+	}
+	if _u.mutation.OfflineFileSha256Cleared() {
+		_spec.ClearField(activation.FieldOfflineFileSha256, field.TypeString)
 	}
 	_node = &Activation{config: _u.config}
 	_spec.Assign = _node.assignValues
