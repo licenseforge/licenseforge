@@ -130,7 +130,7 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			req("product_missing", `"product":"acme-db",`, ``, "malformed"),
 			req("nonce_missing", `"nonce":"`+vNonce+`",`, ``, "malformed"),
 			req("created_missing", `,"created":"2026-11-08T10:00:00Z"`, ``, "malformed"),
-			req("too_deep", `"created"`, `"x":`+strings.Repeat("[", 40)+strings.Repeat("]", 40)+`,"created"`, "malformed"),
+			req("too_deep", `"v":1`, `"v":2,"x":`+strings.Repeat("[", 40)+strings.Repeat("]", 40), "malformed"), // v 2: only the depth rule refuses it
 			raw("top_level_array", with(t, RequestVersion, "["+vReq+"]", "", "")),
 			raw("payload_trailing_bits", trailingBits(t, with(t, RequestVersion, vReq, `"tnt_acme"`, `"tnt_acme1"`))), // 1 more byte: unused bits
 			raw("bom_twice", "\uFEFF\uFEFF"+token),
@@ -143,6 +143,7 @@ func buildOfflineVectors(t *testing.T) offlineVectors {
 			req("fp_wrong_prefix", vFP, "md5:"+vFP[7:], "malformed"),
 			req("nonce_short", vNonce, "AAECAwQFBgcICQoLDA0O", "malformed"),
 			req("nonce_padded", vNonce, vNonce+"==", "malformed"),
+			req("nonce_22_chars_with_crlf", vNonce, vNonce[:20]+`\r\n`, "malformed"), // 15 bytes to a decoder that skips line breaks
 			req("nonce_with_newline", vNonce, vNonce[:10]+`\n`+vNonce[10:], "malformed"),
 			req("created_offset", "2026-11-08T10:00:00Z", "2026-11-08T10:00:00+00:00", "malformed"),
 			req("created_not_a_date", "2026-11-08T10:00:00Z", "2026-02-30T10:00:00Z", "malformed"),
