@@ -498,74 +498,98 @@ func TestConcurrentChanges(t *testing.T) {
 	}
 }
 
-// A secret that can't be decrypted any more is replaced, not kept.
+// A secret that can't be decrypted any more (another master key, or not
+// bound to this row) is replaced, and no previous secret is kept.
 func TestRotateUnreadableSecret(t *testing.T) {
 	f := setup(t)
 	ctx := f.as(f.a, f.ownerA, authz.Owner)
-	c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	other, err := secrets.ParseKeyring("k9=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, secrets.KeySize)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lost, err := other.Encrypt([]byte("whsec_x"), secrets.Binding{Purpose: secrets.PurposeWebhookSecret, TenantID: f.a, RowID: c.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
-		return tx.WebhookEndpoint.UpdateOneID(c.ID).SetSecretCiphertext([]byte(lost)).Exec(ctx)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, secret, err := f.s.RotateSecret(ctx, c.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	row := f.raw(t, f.a, c.ID)
-	if got, err := f.s.decrypt(secrets.PurposeWebhookSecret, f.a, c.ID, row.SecretCiphertext); err != nil || got != secret || (row.PreviousSecretCiphertext != nil && len(*row.PreviousSecretCiphertext) > 0) || row.PreviousSecretUntil != nil {
-		t.Errorf("after rotating a lost secret: %q, %v, previous %v", got, err, row.PreviousSecretCiphertext)
+	for name, lost := range map[string]func(id string) (string, error){
+		"unknown key": func(id string) (string, error) {
+			return other.Encrypt([]byte("whsec_x"), secrets.Binding{Purpose: secrets.PurposeWebhookSecret, TenantID: f.a, RowID: id})
+		},
+		"wrong binding": func(string) (string, error) {
+			return f.s.Keys.Encrypt([]byte("whsec_x"), secrets.Binding{Purpose: secrets.PurposeWebhookSecret, TenantID: f.a, RowID: ids.WebhookEndpoint()})
+		},
+	} {
+		c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.s.RotateSecret(ctx, c.ID); err != nil { // a previous secret to drop
+			t.Fatal(err)
+		}
+		bad, err := lost(c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+			return tx.WebhookEndpoint.UpdateOneID(c.ID).SetSecretCiphertext([]byte(bad)).Exec(ctx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, secret, err := f.s.RotateSecret(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		row := f.raw(t, f.a, c.ID)
+		if got, err := f.s.decrypt(secrets.PurposeWebhookSecret, f.a, c.ID, row.SecretCiphertext); err != nil || got != secret ||
+			(row.PreviousSecretCiphertext != nil && len(*row.PreviousSecretCiphertext) > 0) || row.PreviousSecretUntil != nil {
+			t.Errorf("%s: after rotating: %q, %v, previous until %v", name, got, err, row.PreviousSecretUntil)
+		}
+		var d map[string]any
+		ev := f.events(t, f.a, "webhook.rotate_secret")
+		if err := json.Unmarshal([]byte(ev[0].Details), &d); err != nil || d["previous_kept"] != false {
+			t.Errorf("%s: audit details %s, %v", name, ev[0].Details, err)
+		}
 	}
 }
 
 // Delete locks the cursor first, as the dispatcher's result transaction
-// does: one recording a delivery meanwhile finishes, then the delete
-// removes it too; no deadlock.
+// does: one recording a delivery or disabling the endpoint meanwhile
+// finishes, then the delete goes ahead; no deadlock.
 func TestDeleteWhileRecording(t *testing.T) {
 	f := setup(t)
 	ctx := f.as(f.a, f.ownerA, authz.Owner)
-	c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	platform, err := sql.Open("pgx", env.PlatformURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = platform.Close() }()
-	tx, err := platform.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE webhook_cursors SET attempts = attempts WHERE endpoint_id = $1`, c.ID); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- f.s.Delete(ctx, c.ID) }()
-	storetest.WaitForLockWaiter(t, env)
-	if _, err := tx.Exec(`INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, duration_ms, attempted_at)
-		VALUES ($1, $2, $3, 1, $4, 'license.issued', 1, 'failure', 'timeout', 1, now())`, ids.WebhookDelivery(), f.a, c.ID, ids.AuditEvent()); err != nil {
-		t.Fatalf("recording while a delete waits: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Errorf("delete: %v", err)
-	}
-	if _, err := f.s.Get(ctx, c.ID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("after delete: %v", err)
+	for name, q := range map[string]string{
+		"record": `INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, duration_ms, attempted_at)
+			VALUES ($2, $3, $1, 1, $4, 'license.issued', 1, 'failure', 'timeout', 1, now())`,
+		"disable": `UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'failing', updated_at = now()
+			WHERE id = $1 AND $2::text IS NOT NULL AND $3::text IS NOT NULL AND $4::text IS NOT NULL`,
+	} {
+		c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := platform.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(`UPDATE webhook_cursors SET attempts = attempts WHERE endpoint_id = $1`, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- f.s.Delete(ctx, c.ID) }()
+		storetest.WaitForLockWaiter(t, env)
+		if _, err := tx.Exec(q, c.ID, ids.WebhookDelivery(), f.a, ids.AuditEvent()); err != nil {
+			t.Fatalf("%s while a delete waits: %v", name, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Errorf("%s: delete: %v", name, err)
+		}
+		if _, err := f.s.Get(ctx, c.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: after delete: %v", name, err)
+		}
 	}
 }
