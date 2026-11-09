@@ -343,7 +343,7 @@ func TestErrorCodes(t *testing.T) {
 		"unauthenticated": ErrUnauthenticated, "invalid_request": ErrInvalidRequest, "license_suspended": ErrSuspended,
 		"license_revoked": ErrRevoked, "license_expired": ErrExpired, "activation_limit_reached": ErrActivationLimit,
 		"rehost_limit_reached": ErrRehostLimit, "binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated,
-		"idempotency_key_reused": ErrIdempotencyReused,
+		"offline_seat": ErrOfflineSeat, "idempotency_key_reused": ErrIdempotencyReused,
 	} {
 		f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, code); return true }
 		c, sleeps := f.client(t, f.iat, nil)
@@ -387,6 +387,14 @@ func TestRun(t *testing.T) {
 	// 503, not before its Retry-After; then refresh_after again.
 	if len(*sleeps) < 3 || (*sleeps)[0] != 30*time.Minute || (*sleeps)[1] != 30*time.Minute || (*sleeps)[2] < 120*time.Second {
 		t.Errorf("sleeps %v", *sleeps)
+	}
+	// An offline seat stops Run too; the lease stays until it ends.
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 409, "offline_seat"); return true }
+	if err := c.Run(context.Background(), nil); !errors.Is(err, ErrOfflineSeat) {
+		t.Errorf("Run on an offline seat = %v", err)
+	}
+	if _, _, err := c.Current(); err != nil {
+		t.Errorf("lease forgotten on offline_seat: %v", err)
 	}
 	// Revoked stops Run with the error.
 	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 403, "license_revoked"); return true }

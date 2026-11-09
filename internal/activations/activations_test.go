@@ -103,6 +103,10 @@ func setup(t *testing.T) fixture {
 			"site":    func(c *ent.PlanCreate) { c.SetBindType(plan.BindTypeNone) },
 			"moves":   func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetMaxRehosts(2) },
 			"locked":  func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetMaxRehosts(0) },
+			"offline": func(c *ent.PlanCreate) {
+				c.SetDurationMonths(12).SetMaxActivations(1).SetOfflineAllowed(true).SetMaxOfflineSeconds(86400).SetGraceSeconds(60)
+			},
+			"offline-zero": func(c *ent.PlanCreate) { c.SetOfflineAllowed(true).SetMaxOfflineSeconds(0) },
 		} {
 			pc := tx.Plan.Create().SetTenantID(f.a).SetProductID(p.ID).SetSlug(slug).SetName(slug)
 			c(pc)

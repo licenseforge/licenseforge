@@ -153,6 +153,20 @@ func (_c *ActivationCreate) SetNillableDeactivatedAt(v *time.Time) *ActivationCr
 	return _c
 }
 
+// SetOfflineFileSha256 sets the "offline_file_sha256" field.
+func (_c *ActivationCreate) SetOfflineFileSha256(v string) *ActivationCreate {
+	_c.mutation.SetOfflineFileSha256(v)
+	return _c
+}
+
+// SetNillableOfflineFileSha256 sets the "offline_file_sha256" field if the given value is not nil.
+func (_c *ActivationCreate) SetNillableOfflineFileSha256(v *string) *ActivationCreate {
+	if v != nil {
+		_c.SetOfflineFileSha256(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *ActivationCreate) SetID(v string) *ActivationCreate {
 	_c.mutation.SetID(v)
@@ -392,6 +406,10 @@ func (_c *ActivationCreate) createSpec() (*Activation, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DeactivatedAt(); ok {
 		_spec.SetField(activation.FieldDeactivatedAt, field.TypeTime, value)
 		_node.DeactivatedAt = &value
+	}
+	if value, ok := _c.mutation.OfflineFileSha256(); ok {
+		_spec.SetField(activation.FieldOfflineFileSha256, field.TypeString, value)
+		_node.OfflineFileSha256 = &value
 	}
 	if nodes := _c.mutation.LicenseIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{

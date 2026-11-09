@@ -57,6 +57,7 @@ var (
 	ErrRehostLimit       = errors.New("online: the license's machines have moved as often as it allows")
 	ErrBindingMismatch   = errors.New("online: the fingerprint doesn't bind what the license requires")
 	ErrNotActivated      = errors.New("online: this machine isn't activated")
+	ErrOfflineSeat       = errors.New("online: this machine's seat is offline; return it with a deactivation receipt")
 	ErrRateLimited       = errors.New("online: rate limited")
 	ErrIdempotencyReused = errors.New("online: idempotency key reused")
 	ErrInProgress        = errors.New("online: a request with this idempotency key is in progress")
@@ -76,7 +77,7 @@ var codes = map[string]error{
 	"unauthenticated": ErrUnauthenticated, "invalid_request": ErrInvalidRequest,
 	"license_suspended": ErrSuspended, "license_revoked": ErrRevoked, "license_expired": ErrExpired,
 	"activation_limit_reached": ErrActivationLimit, "rehost_limit_reached": ErrRehostLimit,
-	"binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated, "rate_limited": ErrRateLimited,
+	"binding_mismatch": ErrBindingMismatch, "not_activated": ErrNotActivated, "offline_seat": ErrOfflineSeat, "rate_limited": ErrRateLimited,
 	"idempotency_key_reused": ErrIdempotencyReused, "idempotency_in_progress": ErrInProgress,
 }
 
@@ -519,7 +520,9 @@ func (c *Client) wakeBounds(cl *licensefile.Claims, now time.Time) (half, before
 // Run returns on ctx's end; with ErrNoLease when there is no lease to keep
 // fresh; or with a refusal retrying can't fix, which the app must act on:
 // ErrNotActivated (the seat was freed: Activate again), ErrRevoked,
-// ErrUnauthenticated or ErrBindingMismatch (stop running as licensed). On
+// ErrUnauthenticated or ErrBindingMismatch (stop running as licensed), or
+// ErrOfflineSeat (the machine was activated offline since: use its offline
+// file). On
 // ErrRevoked (403) and ErrNotActivated (404) from the API it forgets the
 // lease first, unless a newer one was committed meanwhile: the server has
 // said this machine is no longer licensed, so Current fails from then on.
@@ -593,8 +596,8 @@ func (c *Client) Run(ctx context.Context, onErr func(error)) error {
 		if errors.Is(err, ErrRevoked) || errors.Is(err, ErrNotActivated) {
 			return err // claimed with an unexpected status: stop, but keep the lease
 		}
-		if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrBindingMismatch) {
-			return err
+		if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrBindingMismatch) || errors.Is(err, ErrOfflineSeat) {
+			return err // the lease is kept until it ends
 		}
 		failures, retry = failures+1, 0
 		if isAPI {

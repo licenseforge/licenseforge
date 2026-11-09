@@ -32,6 +32,9 @@ func (Activation) Fields() []ent.Field {
 		field.Time("first_seen_at").Immutable(),
 		field.Time("last_seen_at"),
 		field.Time("deactivated_at").Optional().Nillable(),
+		// The token hash of the last offline file issued for this seat
+		// (ADR-0043): a deactivation receipt must name it.
+		field.String("offline_file_sha256").Optional().Nillable().SchemaType(map[string]string{"postgres": "char(64)"}),
 	}
 }
 
@@ -52,6 +55,9 @@ func (Activation) Annotations() []schema.Annotation {
 		"activations_deactivated": `deactivated_at IS NULL OR deactivated_at >= first_seen_at`,
 		// The SDK binds Kubernetes fingerprints to the cluster, all others to the machine.
 		"activations_source_binding": `((fp_source)::text = 'kubernetes'::text) = ((binding)::text = 'cluster'::text)`,
+		"activations_offline_file":   `offline_file_sha256 IS NULL OR offline_file_sha256 ~ '^[0-9a-f]{64}$'`,
+		// Only offline seats carry a file (ADR-0043): an online seat never turns offline.
+		"activations_offline_mode": `offline_file_sha256 IS NULL OR (mode)::text = 'offline'::text`,
 	}}}
 }
 
