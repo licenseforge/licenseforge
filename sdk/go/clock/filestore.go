@@ -25,8 +25,9 @@ type FileStore struct{ Path string }
 // lockWait bounds how long a check waits for another process's lock.
 const lockWait = 2 * time.Second
 
-// errLockBusy means another process held the lock for the whole wait.
-var errLockBusy = errors.New("clock: state locked by another process")
+// ErrLocked means another process held the lock for the whole wait: the
+// change wasn't written. Retry.
+var ErrLocked = errors.New("clock: state locked by another process")
 
 // Update implements Store.
 func (f FileStore) Update(fn func(current []byte) ([]byte, error)) error {
@@ -45,7 +46,7 @@ func (f FileStore) Update(fn func(current []byte) ([]byte, error)) error {
 	var writeErr error
 	switch {
 	case next == nil:
-	case errors.Is(lockErr, errLockBusy):
+	case errors.Is(lockErr, ErrLocked):
 		writeErr = lockErr // another process is updating; skip our write
 	default:
 		writeErr = f.write(next)

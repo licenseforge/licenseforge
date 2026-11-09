@@ -33,6 +33,12 @@ var (
 	// ErrReturned: the file is one this machine returned (or older than it):
 	// its seat was given back, so it can't be installed again.
 	ErrReturned = errors.New("offline: this license file was returned; request a new one")
+	// ErrOtherLicense: another license's file is installed. Deactivate it
+	// first, so its seat can be returned with a receipt.
+	ErrOtherLicense = errors.New("offline: another license is installed; deactivate it first")
+	// ErrForeignState: the store holds something else, such as the clock
+	// guard's state: give each its own store (file).
+	ErrForeignState = errors.New("offline: the store holds other state (shared with the clock guard?); use a store of its own")
 )
 
 // Config configures a Client. Clock, the versions, Hostname,
@@ -45,9 +51,12 @@ type Config struct {
 	Fingerprint fingerprint.Result
 	Hostname    string
 	AppVersion  string
-	// Store keeps the installed file and the files returned. Use persistent
-	// storage: on a memory store, a returned file could be installed again
-	// after a restart.
+	// Store keeps the installed file and the files returned: its own file
+	// (clock.FileStore), never the clock guard's. Use persistent storage: on
+	// a memory store, a returned file could be installed again after a
+	// restart. Unreadable state counts as none (ADR-0014), and a store
+	// without file locking (some network file systems) can lose a returned
+	// file when two processes change it at once.
 	Store clock.Store
 	// Clock protects the time checks against the clock being turned back
 	// (ADR-0018); strongly advised offline, where no server time comes in.
@@ -90,21 +99,26 @@ func (c *Client) Request() (string, error) {
 
 // state is what the Store holds.
 type state struct {
+	Kind int    `json:"offline"` // 1: tells this state from others in a shared store
 	File string `json:"file,omitempty"`
 	// Returned: license ID → iat of the newest file returned. Deleting the
 	// state forgets it, like deleting the clock state (ADR-0014).
 	Returned map[string]time.Time `json:"returned,omitempty"`
 }
 
+// decode reads the stored state. Unparsable state counts as none, as in
+// package clock: corrupting it gains no more than deleting it (ADR-0014).
+// Well-formed state of another kind is ErrForeignState: the stores are
+// mixed up, and writing would destroy the other state.
 func decode(b []byte) (state, error) {
-	var s state
-	if len(b) == 0 {
-		return s, nil
+	var got state
+	if len(b) == 0 || json.Unmarshal(b, &got) != nil {
+		return state{Kind: 1}, nil
 	}
-	if err := json.Unmarshal(b, &s); err != nil {
-		return s, fmt.Errorf("offline: state unreadable: %w", err)
+	if got.Kind != 1 {
+		return got, ErrForeignState
 	}
-	return s, nil
+	return got, nil
 }
 
 // update runs fn on the stored state; fn returns the new state, or nil for
@@ -165,19 +179,26 @@ func (c *Client) options() (licensefile.CheckOptions, error) {
 }
 
 // Install verifies file (the vendor's answer to Request) and installs it,
-// replacing the file installed before (a renewal). A file that isn't usable
-// now, or that this machine returned, is refused and nothing changes.
+// replacing the installed file of the same license (a renewal). A file that
+// isn't usable now, that this machine returned, or of another license while
+// one is installed (ErrOtherLicense) is refused and nothing changes; with
+// Config.Clock, the guard is raised to the file's iat only once it is
+// installed. ErrLocked from a clock.FileStore: another process is changing
+// the state; retry.
 func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, error) {
 	claims, err := c.verify(file)
 	if err != nil {
 		return nil, "", err
 	}
-	if c.cfg.Clock != nil {
-		_ = c.cfg.Clock.Observe(claims.IssuedAt, c.now()) // a genuine time; Current reports a clock that can't be read
-	}
+	local := c.now()
 	o, err := c.options()
 	if err != nil {
 		return nil, "", err
+	}
+	// The vendor's clock may be ahead of this machine's: within the guard's
+	// tolerance, its iat is a time this machine will accept (ADR-0018).
+	if c.cfg.Clock != nil && claims.IssuedAt.After(o.Now) && !claims.IssuedAt.After(local.Add(c.cfg.Clock.Tolerance())) {
+		o.Now = claims.IssuedAt
 	}
 	st, err := claims.Check(o)
 	if err != nil {
@@ -187,11 +208,19 @@ func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, 
 		if r, ok := s.Returned[claims.LicenseID]; ok && !claims.IssuedAt.After(r) {
 			return nil, ErrReturned
 		}
+		if s.File != "" {
+			if cur, err := c.verify(s.File); err == nil && cur.LicenseID != claims.LicenseID {
+				return nil, ErrOtherLicense
+			}
+		}
 		s.File = file
 		return &s, nil
 	})
 	if err != nil {
 		return nil, "", err
+	}
+	if c.cfg.Clock != nil {
+		_ = c.cfg.Clock.Observe(claims.IssuedAt, local) // a genuine time now in use; Current reports a guard that can't be written
 	}
 	return claims, st, nil
 }
@@ -221,9 +250,12 @@ func (c *Client) Current() (*licensefile.Claims, licensefile.Status, error) {
 
 // Deactivate gives the seat back: it deletes the installed file, remembers
 // it so it can't be installed again, and returns the deactivation receipt
-// (lfrcpt1) for the vendor, who frees the seat with it. Keep the receipt
-// until the vendor has it: it is the only proof. Without it, the vendor can
-// still free the seat from the dashboard.
+// (lfrcpt1) for the vendor, who frees the seat with it. The receipt is
+// returned only once the state is saved. Keep it until the vendor has it:
+// it is the only proof. A file that no longer verifies on this machine
+// (its signing key dropped from Keys, a changed fingerprint) can't be
+// deactivated here (ErrBadFile): the vendor frees the seat from the
+// dashboard.
 func (c *Client) Deactivate() (string, error) {
 	var receipt string
 	err := c.update(func(s state) (*state, error) {

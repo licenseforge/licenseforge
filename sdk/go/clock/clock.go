@@ -159,6 +159,9 @@ func (g *Guard) update(fn func(mark time.Time) (time.Time, error)) error {
 	}
 }
 
+// Tolerance is how far the local clock may be behind the mark.
+func (g *Guard) Tolerance() time.Duration { return g.tolerance }
+
 // Now returns the time to use for license checks given the system clock.
 //
 // Errors: ErrRollback and ErrUnreadable mean no usable time. ErrNotPersisted

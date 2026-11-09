@@ -3,6 +3,7 @@ package offline
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"sync"
 	"testing"
@@ -22,18 +23,23 @@ const (
 var priv = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{5}, 32))
 
 type memStore struct {
-	mu sync.Mutex
-	b  []byte
+	mu       sync.Mutex
+	b        []byte
+	failSave bool
 }
 
 func (m *memStore) Update(fn func([]byte) ([]byte, error)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	next, err := fn(m.b)
-	if err == nil && next != nil {
-		m.b = next
+	if err != nil || next == nil {
+		return err
 	}
-	return err
+	if m.failSave {
+		return errors.New("read-only file system")
+	}
+	m.b = next
+	return nil
 }
 
 type env struct {
@@ -137,9 +143,117 @@ func TestInstallAndDeactivate(t *testing.T) {
 	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) { c.IssuedAt = c.IssuedAt.Add(time.Minute) })); err != nil {
 		t.Errorf("newer file: %v", err)
 	}
-	// Another license's file isn't affected by lic_a's return.
-	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) { c.LicenseID = "lic_b" })); err != nil {
+	// Another license's file waits until lic_a is deactivated (its seat
+	// needs a receipt), and isn't affected by lic_a's return.
+	b := e.file(t, func(c *licensefile.Claims) { c.LicenseID = "lic_b" })
+	if _, _, err := e.c.Install(b); !errors.Is(err, ErrOtherLicense) {
+		t.Errorf("another license over lic_a: %v", err)
+	}
+	if _, err := e.c.Deactivate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.c.Install(b); err != nil {
 		t.Errorf("another license: %v", err)
+	}
+	// Deactivate saves before it answers: on a failed write, no receipt and
+	// the file stays installed.
+	e.store.failSave = true
+	if r, err := e.c.Deactivate(); err == nil || r != "" {
+		t.Errorf("failed save: %q, %v", r, err)
+	}
+	e.store.failSave = false
+	if c, _, err := e.c.Current(); err != nil || c.LicenseID != "lic_b" {
+		t.Errorf("after a failed deactivate: %v", err)
+	}
+	// An expired file can still be returned.
+	e.now = e.now.Add(48 * time.Hour)
+	if _, err := e.c.Deactivate(); err != nil {
+		t.Errorf("expired file: %v", err)
+	}
+}
+
+func TestStatesAndOptions(t *testing.T) {
+	e := newEnv(t, nil)
+	// In grace: the term ended ten minutes ago, grace an hour.
+	if _, st, err := e.c.Install(e.file(t, func(c *licensefile.Claims) {
+		x := e.now.Add(-10 * time.Minute)
+		c.Expires, c.Grace = &x, time.Hour
+	})); err != nil || st != licensefile.StatusGrace {
+		t.Errorf("grace: %v %v", st, err)
+	}
+	// BuildDate reaches updates_until.
+	e.c.cfg.BuildDate = e.now
+	if _, _, err := e.c.Current(); err != nil {
+		t.Errorf("no updates_until: %v", err)
+	}
+	e.c.cfg.BuildDate = time.Time{}
+	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) {
+		u := e.now.Add(-24 * time.Hour)
+		c.IssuedAt, c.UpdatesUntil = c.IssuedAt.Add(time.Second), &u
+	})); err != nil {
+		t.Fatal(err)
+	}
+	e.c.cfg.BuildDate = e.now
+	if _, _, err := e.c.Current(); !errors.Is(err, licensefile.ErrUpdatesExpired) {
+		t.Errorf("build after updates_until: %v", err)
+	}
+	// A cluster-bound file under a machine configuration, same fingerprint.
+	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) { c.Binding.Type = licensefile.BindCluster })); !errors.Is(err, ErrBadFile) {
+		t.Errorf("cluster file: %v", err)
+	}
+	// Requests carry fresh random nonces.
+	e.c.rand = rand.Reader
+	r1, _ := e.c.Request()
+	r2, _ := e.c.Request()
+	p1, err1 := licensefile.ParseRequest(r1)
+	p2, err2 := licensefile.ParseRequest(r2)
+	if err1 != nil || err2 != nil || len(p1.Nonce) != 16 || bytes.Equal(p1.Nonce, p2.Nonce) {
+		t.Errorf("nonces %x %x", p1.Nonce, p2.Nonce)
+	}
+}
+
+// State: corrupt counts as none and is repaired by Install; another
+// kind's state (the clock guard's, a shared store) fails loudly.
+func TestState(t *testing.T) {
+	e := newEnv(t, nil)
+	e.store.b = []byte("{not json")
+	if _, _, err := e.c.Current(); !errors.Is(err, ErrNoLicense) {
+		t.Errorf("corrupt: %v", err)
+	}
+	if _, _, err := e.c.Install(e.file(t, nil)); err != nil {
+		t.Errorf("Install over corrupt state: %v", err)
+	}
+	g, err := clock.New(e.store, "LF-ABCDE-FGHIJ", clock.Options{}) // the mistake: one store for both
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.c.cfg.Clock = g
+	_, _, err = e.c.Current() // the guard writes its mark over the offline state...
+	if _, _, err2 := e.c.Current(); !errors.Is(err, ErrForeignState) && !errors.Is(err2, ErrForeignState) {
+		t.Errorf("shared store: %v, %v", err, err2) // ...which the next read notices
+	}
+}
+
+// A file refused for an iat too far ahead leaves the guard, and the
+// installed file, as they were.
+func TestRefusedFutureFile(t *testing.T) {
+	g, err := clock.New(&memStore{}, "LF-ABCDE-FGHIJ", clock.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, g)
+	if _, _, err := e.c.Install(e.file(t, nil)); err != nil { // 23h left
+		t.Fatal(err)
+	}
+	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) {
+		c.IssuedAt = e.now.Add(100 * time.Hour)
+		x := c.IssuedAt.Add(time.Hour)
+		c.Expires = &x
+	})); err == nil {
+		t.Fatal("a file 100h ahead was installed")
+	}
+	if _, st, err := e.c.Current(); err != nil || st != licensefile.StatusValid {
+		t.Errorf("installed file after the refusal: %v %v", st, err)
 	}
 }
 
@@ -194,6 +308,9 @@ func TestInstallRaisesTheClock(t *testing.T) {
 	f := e.file(t, func(c *licensefile.Claims) { c.IssuedAt = e.now.Add(time.Hour) }) // the vendor's clock: an hour ahead
 	if _, st, err := e.c.Install(f); err != nil || st != licensefile.StatusValid {
 		t.Errorf("Install = %v %v", st, err)
+	}
+	if _, st, err := e.c.Current(); err != nil || st != licensefile.StatusValid { // through the raised guard
+		t.Errorf("Current = %v %v", st, err)
 	}
 }
 
