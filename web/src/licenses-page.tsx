@@ -344,6 +344,7 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setTooLarge(false);
     try {
       if (kind === "activate") {
         const body = text.trim();
@@ -380,7 +381,7 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
         <form onSubmit={submit} className="mt-2 space-y-2 text-sm">
           <label className="block">
             <span className="font-medium">{t(`offline.${field}`)}</span>
-            <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => setText(e.target.value)}
+            <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => { setText(e.target.value); setTooLarge(false); }}
               spellCheck={false} autoComplete="off" aria-describedby="offline-hint" aria-invalid={error !== null || tooLarge} />
             <span id="offline-hint" className="mt-1 block text-xs text-muted-foreground">{t(`offline.${field}Hint`)}</span>
           </label>
