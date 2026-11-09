@@ -61,8 +61,8 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 	})
 	if err != nil {
 		outcome, ok := refusalOutcome(err)
-		if !ok {
-			return Lease{}, err
+		if !ok { // an outage: a 500, whatever it wraps
+			return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable
 		}
 		ev = offlineRefusal(ev, err)
 		ev.Outcome = outcome
@@ -114,9 +114,10 @@ func (s Service) OfflineTx(ctx context.Context, tx *ent.Tx, p authz.Principal, r
 
 // RecheckOffline is the replay check of a stored offline activation
 // (ADR-0032: rerun for the original operation): request's key still finds a
-// license p may issue offline files for, the license still may get one
-// (not revoked, suspended or expired since), and the machine's offline seat
-// is still out. It reads in tx and changes nothing.
+// license p may issue offline files for, and the license still may get one
+// (not revoked, suspended or expired since): a stored refusal replays as
+// it was. Before a stored file goes out again, the caller checks
+// OfflineFileCurrent. It reads in tx and changes nothing.
 func (s Service) RecheckOffline(ctx context.Context, tx *ent.Tx, p authz.Principal, request string) error {
 	ctx = authz.WithPrincipal(ctx, p)
 	tenantID, err := authz.TenantID(ctx)
@@ -131,17 +132,28 @@ func (s Service) RecheckOffline(ctx context.Context, tx *ent.Tx, p authz.Princip
 	if err != nil {
 		return err
 	}
-	if _, _, err := issuable(ctx, tx, r, l); err != nil {
+	_, _, err = issuable(ctx, tx, r, l)
+	return err
+}
+
+// OfflineFileCurrent: before a stored offline file is handed out again,
+// activationID (in p's tenant) still holds its seat offline and fileSHA256
+// is still its current file, not one returned or renewed since (a receipt
+// for an older file is refused, ADR-0043). ErrNotActivated otherwise.
+func (s Service) OfflineFileCurrent(ctx context.Context, p authz.Principal, activationID, fileSHA256 string) error {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
 		return err
 	}
-	// The stored file's seat is still out: not returned (receipt or
-	// dashboard) since. A replay re-delivers that same, recorded file.
-	ok, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(r.Binding.Fingerprint),
-		activation.DeactivatedAtIsNil(), activation.ModeEQ(activation.ModeOffline)).Exist(ctx)
-	if err == nil && !ok {
-		err = ErrNotActivated
-	}
-	return err
+	return s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		ok, err := tx.Activation.Query().Where(activation.ID(activationID), activation.DeactivatedAtIsNil(),
+			activation.ModeEQ(activation.ModeOffline), activation.OfflineFileSha256(fileSHA256)).Exist(ctx)
+		if err == nil && !ok {
+			err = ErrNotActivated
+		}
+		return err
+	})
 }
 
 // offlineRefusal sets ev's reason for err: invalid requests get a fixed one,

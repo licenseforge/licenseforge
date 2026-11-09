@@ -209,7 +209,8 @@ func (s *server) idempotent(ctx context.Context, p authz.Principal, key, op stri
 // license file bound to that machine (ADR-0043); idempotent with
 // Idempotency-Key, like IssueLicense. A replay isn't audited again: it
 // re-delivers the file recorded at issue, to the same credential, after
-// RecheckOffline (license still issuable, seat still out).
+// RecheckOffline (license still issuable) and OfflineFileCurrent (the
+// file still the seat's current one).
 func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateOfflineActivationRequestObject) (apigen.CreateOfflineActivationResponseObject, error) {
 	p := principal(ctx)
 	text := req.Body.Request
@@ -224,7 +225,7 @@ func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateO
 		}
 		return apigen.CreateOfflineActivation201JSONResponse(v), nil
 	}
-	out, _, err := s.idempotent(ctx, p, *req.Params.IdempotencyKey, "CreateOfflineActivation",
+	out, replayed, err := s.idempotent(ctx, p, *req.Params.IdempotencyKey, "CreateOfflineActivation",
 		func(ctx context.Context, tx *ent.Tx) error { return s.Activations.RecheckOffline(ctx, tx, p, text) },
 		func(ctx context.Context, tx *ent.Tx) (any, error) {
 			l, err := s.Activations.OfflineTx(ctx, tx, p, text)
@@ -235,6 +236,15 @@ func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateO
 		})
 	if err != nil {
 		return nil, err
+	}
+	if replayed && out.Status == http.StatusCreated {
+		var v apigen.OfflineActivation
+		if err := json.Unmarshal(out.Body, &v); err != nil {
+			return nil, err
+		}
+		if err := s.Activations.OfflineFileCurrent(ctx, p, v.ActivationId, v.FileSha256); err != nil {
+			return nil, err // returned or renewed since: the stored file isn't handed out
+		}
 	}
 	return outcome(out), nil
 }

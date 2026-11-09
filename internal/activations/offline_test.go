@@ -342,7 +342,7 @@ func TestOfflineTxAndRecheck(t *testing.T) {
 			text string
 			want error
 		}{
-			"no seat out":  {manager(f.a), text, ErrNotActivated}, // nothing issued for it yet
+			"allowed":      {manager(f.a), text, nil}, // a stored refusal (no seat) replays too
 			"support":      {support, text, authz.ErrDenied},
 			"out of scope": {scoped, text, ErrNotFound},
 			"unknown key":  {manager(f.a), f.offlineReq(t, licensekey.New(), fp(), nil), ErrNotFound},
@@ -368,13 +368,16 @@ func TestOfflineTxAndRecheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recheck(text); err != nil {
-		t.Errorf("seat out: %v", err)
+	if err := f.s.OfflineFileCurrent(ctx, manager(f.a), got.ActivationID, got.FileSHA256); err != nil {
+		t.Errorf("current file: %v", err)
+	}
+	if err := f.s.OfflineFileCurrent(ctx, manager(f.a), got.ActivationID, strings.Repeat("0", 64)); !errors.Is(err, ErrNotActivated) {
+		t.Errorf("another file: %v", err)
 	}
 	if _, err := f.s.DeactivateByID(ctx, manager(f.a), is.License.ID, got.ActivationID); err != nil {
 		t.Fatal(err)
 	}
-	if err := recheck(text); !errors.Is(err, ErrNotActivated) {
+	if err := f.s.OfflineFileCurrent(ctx, manager(f.a), got.ActivationID, got.FileSHA256); !errors.Is(err, ErrNotActivated) {
 		t.Errorf("seat returned: %v", err)
 	}
 	revoked := f.issue(t, "offline")
@@ -420,6 +423,9 @@ func TestOfflineTxOutageIsNotARefusal(t *testing.T) {
 	})
 	if err == nil || errors.Is(err, signing.ErrNotFound) {
 		t.Errorf("outage: %v", err)
+	}
+	if _, err := s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, fp(), nil)); err == nil || errors.Is(err, signing.ErrNotFound) {
+		t.Errorf("outage outside a caller's tx: %v", err)
 	}
 	if len(f.events(t)) != before || len(f.activations(t, is.License.ID)) != 0 {
 		t.Error("an outage was recorded or kept the seat")
