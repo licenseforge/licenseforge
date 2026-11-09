@@ -8,6 +8,7 @@ Module `licenseforge.io/licenseforge/sdk/go`, standard library only (ADR-0023, A
 | `fingerprint` | This machine's (or Kubernetes cluster's) fingerprint, as the server binds it (ADR-0017). |
 | `clock` | Protects time checks against the clock being turned back (ADR-0018). |
 | `online` | Activates against the server with a license key and keeps the signed lease fresh (ADR-0004, ADR-0034). |
+| `offline` | Air-gapped machines: writes the activation request, installs the vendor's license file, returns the seat with a deactivation receipt (ADR-0006, ADR-0043). |
 
 ## Online activation
 
@@ -55,3 +56,29 @@ if status == licensefile.StatusGrace { /* warn: the term ended, renewal pending 
 - **Recovering from a far-future `iat`**: a lease issued by a server whose clock ran far ahead makes every correct later lease look older (a replay) and be refused. `Forget()` drops the cached and stored lease without contacting the server; then `Refresh` (or `Activate`). A refresh still in flight when `Forget` runs doesn't bring the lease back (`ErrSuperseded`).
 - **Deactivate**: a machine the server already has as not activated (deactivated before, or the first attempt's answer was lost) counts as success; either way the lease is forgotten.
 - **Offline**: with a cached lease the app keeps working through server outages until the lease's `max_offline` or `exp` (+ grace at the end of the term) runs out.
+
+## Offline activation
+
+For machines that can't reach the server (ADR-0043). Requests, files and receipts are carried by hand; the vendor answers them in the dashboard, the CLI or `POST /tenants/{tenant}/activation-requests` and `/deactivation-receipts`.
+
+```go
+guard, err := clock.New(clock.FileStore{Path: stateDir + "/clock"}, licenseKey, clock.Options{})
+c, err := offline.New(offline.Config{
+	TenantID:    tenantID,
+	Product:     "acme-db",
+	LicenseKey:  licenseKey,
+	Keys:        trustedKeys,
+	Fingerprint: fp,
+	Store:       clock.FileStore{Path: stateDir + "/offline"}, // the installed file and the files returned
+	Clock:       guard,                                        // strongly advised: no server time comes in offline
+})
+req, err := c.Request()          // give this to the vendor: it contains the license key
+claims, status, err := c.Install(fileFromVendor)
+claims, status, err = c.Current() // before each licensed operation; any error: not licensed
+receipt, err := c.Deactivate()   // gives the seat back: the file is deleted; send the receipt to the vendor
+```
+
+- **Install** verifies the file (signature, tenant, product, this machine's fingerprint, a machine or cluster binding) and checks it now; anything else is refused and nothing changes. Installing a renewed file replaces the old one; `Current` reads the store on every call, so another process picks it up without a restart.
+- **The file is the offline term**: it works until its `exp` (the license's expiry, or the plan's `max_offline_seconds` from issue), with grace only when the license's own term ends. Renew with a new `Request` from the same machine (same seat).
+- **Deactivate** deletes the file and remembers it in the store: that file, and older ones of the same license, can't be installed again (`ErrReturned`); deleting the store forgets this, like deleting the clock state (ADR-0014). Keep the receipt until the vendor has it; without it the vendor frees the seat from the dashboard, and the file would have worked until its `exp` anyway.
+- **Time**: with `Config.Clock`, `Install` raises the guard to the file's `iat` and every check uses the guarded time, so turning the clock back doesn't extend the file.

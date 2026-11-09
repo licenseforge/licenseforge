@@ -108,6 +108,10 @@ func TestInstallAndDeactivate(t *testing.T) {
 	if _, st, err := e2.c.Current(); err != nil || st != licensefile.StatusValid {
 		t.Errorf("Current from the store = %v %v", st, err)
 	}
+	e2.now = e2.now.Add(24 * time.Hour) // past exp: the installed file stops working
+	if _, _, err := e2.c.Current(); !errors.Is(err, licensefile.ErrExpired) {
+		t.Errorf("expired: %v", err)
+	}
 	receipt, err := e.c.Deactivate()
 	if err != nil {
 		t.Fatal(err)
@@ -159,11 +163,37 @@ func TestInstallRefusals(t *testing.T) {
 			t.Errorf("%s: %v, want %v", name, err, c.want)
 		}
 	}
+	wrongKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{6}, 32))
+	payload, _ := licensefile.Encode(licensefile.Claims{LicenseID: "lic_a", Tenant: tenant, Product: "acme-db", IssuedAt: e.now,
+		Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: machine}})
+	forged, err := licensefile.Sign("k1", wrongKey, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.c.Install(forged); !errors.Is(err, ErrBadFile) {
+		t.Errorf("another key: %v", err)
+	}
 	if _, _, err := e.c.Install("not a license"); !errors.Is(err, ErrBadFile) {
 		t.Errorf("garbage: %v", err)
 	}
 	if e.store.b != nil {
 		t.Errorf("a refused file was stored: %s", e.store.b)
+	}
+}
+
+// A machine whose clock is behind the file's iat (within the guard's
+// tolerance) runs it: installing raises the guard to the iat.
+func TestInstallRaisesTheClock(t *testing.T) {
+	g, err := clock.New(&memStore{}, "LF-ABCDE-FGHIJ", clock.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, g)
+	strict := time.Duration(0)
+	e.c.cfg.ClockTolerance = &strict                                                  // only the guard can make the iat reachable
+	f := e.file(t, func(c *licensefile.Claims) { c.IssuedAt = e.now.Add(time.Hour) }) // the vendor's clock: an hour ahead
+	if _, st, err := e.c.Install(f); err != nil || st != licensefile.StatusValid {
+		t.Errorf("Install = %v %v", st, err)
 	}
 }
 
