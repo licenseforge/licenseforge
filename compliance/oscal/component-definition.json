@@ -1472,7 +1472,7 @@
               {
                 "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
                 "control-id": "si-7",
-                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance and SBOM attestations, so users verify what they deploy (docs/verifying-releases.md).",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1629,7 +1629,7 @@
               {
                 "uuid": "6e02511f-677f-518f-a809-94d3e788d566",
                 "control-id": "sr-11",
-                "description": "Go modules are verified against go.sum and the Go checksum database; base images are pulled by digest. LicenseForge's own images (standard and -fips), chart and binaries' checksums are cosign-signed (keyless) with SLSA provenance and SBOM attestations.",
+                "description": "Go modules are verified against go.sum and the Go checksum database; base images are pulled by digest. LicenseForge's own images (standard and -fips), chart and binaries' checksums are cosign-signed (keyless) with SLSA provenance, and SBOM attestations for images and binaries.",
                 "props": [
                   {
                     "name": "implementation-status",
