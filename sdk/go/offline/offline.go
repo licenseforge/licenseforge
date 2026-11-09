@@ -33,6 +33,9 @@ var (
 	// ErrReturned: the file is one this machine returned (or older than it):
 	// its seat was given back, so it can't be installed again.
 	ErrReturned = errors.New("offline: this license file was returned; request a new one")
+	// ErrOlderFile: the installed file of the same license is newer (a
+	// renewal): installing this one would roll it back.
+	ErrOlderFile = errors.New("offline: a newer license file is installed")
 	// ErrOtherLicense: another license's file is installed. Deactivate it
 	// first, so its seat can be returned with a receipt.
 	ErrOtherLicense = errors.New("offline: another license is installed; deactivate it first")
@@ -183,12 +186,15 @@ func (c *Client) options() (licensefile.CheckOptions, error) {
 }
 
 // Install verifies file (the vendor's answer to Request) and installs it,
-// replacing the installed file of the same license (a renewal). A file that
-// isn't usable now, that this machine returned, or of another license while
-// one is installed (ErrOtherLicense) is refused; with Config.Clock, a file
-// whose iat is ahead of this machine's clock raises the guard to it once
-// its checks pass (refused if the guard can't hold it). ErrLocked from a clock.FileStore: another process is changing
-// the state; retry.
+// replacing the installed file of the same license: a renewal, or a file
+// with the same iat (the same file again changes nothing). Refused: a file
+// that isn't usable now, one this machine returned (ErrReturned), one older
+// than the installed file of its license (ErrOlderFile), and another
+// license's while one is installed (ErrOtherLicense); an installed file that
+// no longer verifies here blocks nothing. With Config.Clock, a file whose iat
+// is ahead of this machine's clock raises the guard to it once its checks
+// pass (refused if the guard can't hold it). ErrLocked from a
+// clock.FileStore: another process is changing the state; retry.
 func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, error) {
 	claims, err := c.verify(file)
 	if err != nil {
@@ -220,8 +226,13 @@ func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, 
 			return nil, ErrReturned
 		}
 		if s.File != "" {
-			if cur, err := c.verify(s.File); err == nil && cur.LicenseID != claims.LicenseID {
-				return nil, ErrOtherLicense
+			if cur, err := c.verify(s.File); err == nil {
+				switch {
+				case cur.LicenseID != claims.LicenseID:
+					return nil, ErrOtherLicense
+				case claims.IssuedAt.Before(cur.IssuedAt):
+					return nil, ErrOlderFile
+				}
 			}
 		}
 		s.File = file
