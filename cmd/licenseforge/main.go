@@ -253,8 +253,8 @@ func tenantInviteOwner(ctx context.Context, args []string, out io.Writer) error 
 	if err != nil {
 		return fmt.Errorf("tenant invite-owner: %w", err)
 	}
-	_, err = fmt.Fprintf(out, "tenant %s (%s): earlier owner invitations revoked\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
-		c.Tenant.Slug, c.Tenant.ID, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
+	_, err = fmt.Fprintf(out, "tenant %s (%s): %d earlier owner invitation(s) revoked\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
+		c.Tenant.Slug, c.Tenant.ID, c.Revoked, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
 	return err
 }
 

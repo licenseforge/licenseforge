@@ -123,6 +123,7 @@ type Created struct {
 	Tenant     *ent.Tenant
 	Invitation *ent.Invitation
 	Token      string
+	Revoked    int // ReinviteOwner: earlier pending owner invitations revoked
 }
 
 // CreateTenant creates a tenant and an owner invitation (every product,
@@ -225,29 +226,46 @@ func (s Service) ReinviteOwner(ctx context.Context, a Actor, ref, ownerEmail str
 		if err != nil {
 			return err
 		}
+		ev.ObjectID = c.Tenant.ID // a refusal from here on names the tenant only when it has an owner (refused)
+		// One re-issue per tenant at a time: another one's new invitation
+		// would be invisible to this one's pending query (taken after the
+		// first commits) and both would stay open. An advisory lock, not the
+		// tenant row: an acceptance's membership insert key-share locks that
+		// row while holding its invitation, and never takes this lock.
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.owner_invitation:' || $1, 0))`, c.Tenant.ID); err != nil {
+			return err
+		}
 		pending, err := tx.Invitation.Query().Where(invitation.TenantID(c.Tenant.ID), invitation.RoleEQ(invitation.RoleOwner),
 			invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil()).Order(ent.Asc(invitation.FieldID)).ForUpdate().All(ctx)
 		if err != nil {
 			return err
 		}
-		owner, err := tx.Membership.Query().Where(membership.TenantID(c.Tenant.ID), membership.RoleEQ(membership.RoleOwner)).Exist(ctx)
+		// Any member (a suspended owner too: re-enable that user instead)
+		// means the tenant runs its own invitations.
+		members, err := tx.Membership.Query().Where(membership.TenantID(c.Tenant.ID)).Exist(ctx)
 		if err != nil {
 			return err
 		}
-		if owner {
+		if members {
 			return &InvalidError{Field: "/", Message: "the tenant has an owner: its owners invite members", Conflict: true}
 		}
 		ev.ObjectID, ev.Outcome = c.Tenant.ID, auditevent.OutcomeSuccess
-		ev.Details["slug"], ev.Details["revoked"] = c.Tenant.Slug, len(pending)
+		c.Revoked = len(pending)
+		ev.Details["slug"], ev.Details["revoked"] = c.Tenant.Slug, c.Revoked
 		if _, err := audit.Record(ctx, tx, audit.PlatformTenant, ev); err != nil {
 			return err
 		}
 		for _, p := range pending {
-			if _, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, p.ID); err != nil {
+			res, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, p.ID)
+			if err != nil {
 				return err
+			}
+			if n, err := res.RowsAffected(); err != nil || n != 1 { // locked above: can't change meanwhile
+				return errors.Join(errors.New("platform: invitation changed while locked"), err)
 			}
 			rev := a.event("invitation.revoke", "invitation")
 			rev.ObjectID, rev.Outcome = p.ID, auditevent.OutcomeSuccess
+			rev.Details["role"] = "owner"
 			if _, err := audit.Record(ctx, tx, c.Tenant.ID, rev); err != nil {
 				return err
 			}
@@ -306,7 +324,10 @@ func (s Service) refused(ctx context.Context, ev audit.Event, err error) error {
 	default:
 		return err
 	}
-	ev.ObjectID = ""
+	var inv *InvalidError
+	if !errors.As(err, &inv) || inv.Field != "/" {
+		ev.ObjectID = "" // kept for a refused re-issue: which tenant (with an owner) it was
+	}
 	via, cli := ev.Details["via"]
 	ev.Details = map[string]any{}
 	if cli {

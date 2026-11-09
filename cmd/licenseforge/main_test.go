@@ -570,7 +570,7 @@ func TestTenantInviteOwner(t *testing.T) {
 	if err := tenantInviteOwner(ctx, []string{"--tenant", slug, "--owner-email", "found@example.com"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`(?m)^tenant ` + slug + ` \(tnt_\S+\): earlier owner invitations revoked\ninvite for found@example\.com, valid until \S+, shown once:\n  /invite#token=\S+$`).MatchString(out.String()) {
+	if !regexp.MustCompile(`(?m)^tenant ` + slug + ` \(tnt_\S+\): 1 earlier owner invitation\(s\) revoked\ninvite for found@example\.com, valid until \S+, shown once:\n  /invite#token=\S+$`).MatchString(out.String()) {
 		t.Fatalf("output:\n%s", out.String())
 	}
 	for _, args := range [][]string{{"--tenant", slug}, {"--tenant", slug, "--owner-email", "a@b.example", "extra"}, {"--tenant", "no-such-tenant", "--owner-email", "a@b.example"}} {

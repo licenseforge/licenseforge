@@ -23,7 +23,8 @@ A tenant can't be created through the product: no route, no command, no screen. 
 
 ### Re-issuing the owner invitation (amended 2026-11-09)
 - `POST /api/v1/platform/tenants/{id}/owner-invitation` with `{owner_email}` (the same or a corrected address), and `licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E` on the platform login: a new owner invitation, the token in the response only, as at creation. Needed when the create response was lost or the invitation expired: until then the tenant had no way in (the slug is taken, the admin isn't a member).
-- **Only while the tenant has no owner**: once an owner exists, the tenant runs its own invitations (409 `conflict`). Platform admins never add members to a tenant that has one, keeping ADR-0019's separation.
+- **Only while the tenant has no members**: once it has one (an owner first), the tenant runs its own invitations (409 `conflict`, the refusal naming the tenant). A suspended owner still counts: re-enable that user rather than hand the tenant to someone else. Platform admins never add members to a tenant that has one, keeping ADR-0019's separation.
+- Re-issues of one tenant run one at a time (a per-tenant advisory lock, never taken by acceptance), so two at once leave one open link.
 - Every pending owner invitation of the tenant is revoked in the same transaction, so a lost link can't be used afterwards. The pending invitations are locked before the owner check, the lock acceptance takes, so a concurrent acceptance either wins (409) or finds its invitation revoked.
 - Audit: `tenant.owner_invitation` on the platform chain (the tenant, the number revoked); on the tenant's chain `invitation.revoke` for each revoked invitation and `invitation.create` for the new one (never the email). Refusals on the platform chain.
 

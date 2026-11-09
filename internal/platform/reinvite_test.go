@@ -12,6 +12,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ent/invitation"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 )
@@ -81,6 +82,15 @@ func TestReinviteOwner(t *testing.T) {
 	if _, err := f.s.ReinviteOwner(ctx, Actor{UserID: f.admin}, first.Tenant.ID, "x@lost.example"); !errors.Is(err, ErrConflict) {
 		t.Errorf("tenant with an owner: %v", err)
 	}
+	conflict := 0 // the refusal names the tenant with an owner
+	for _, e := range f.chain(t, audit.PlatformTenant) {
+		if e.Action == "tenant.owner_invitation" && e.Outcome == auditevent.OutcomeFailure && e.ObjectID != nil && *e.ObjectID == first.Tenant.ID {
+			conflict++
+		}
+	}
+	if conflict != 1 {
+		t.Errorf("%d conflict refusals naming the tenant", conflict)
+	}
 	es := f.chain(t, first.Tenant.ID)
 	var actions []string
 	for _, e := range es {
@@ -99,7 +109,7 @@ func TestReinviteOwner(t *testing.T) {
 			strings.Contains(e.Details, `"revoked":1`) {
 			issued++
 		}
-		if e.Action == "tenant.owner_invitation" && e.Outcome == auditevent.OutcomeFailure && e.ObjectID == nil {
+		if e.Action == "tenant.owner_invitation" && e.Outcome == auditevent.OutcomeFailure {
 			refused++
 		}
 	}
@@ -111,8 +121,103 @@ func TestReinviteOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.s.ReinviteOwner(ctx, Actor{}, c.Tenant.Slug, "o@cli.example"); err != nil || r.Invitation.InvitedBy != nil {
+	if r, err := f.s.ReinviteOwner(ctx, Actor{}, c.Tenant.Slug, "o@cli.example"); err != nil || r.Invitation.InvitedBy != nil || r.Revoked != 1 {
 		t.Errorf("system actor: %+v, %v", r.Invitation, err)
+	}
+	if _, err := f.s.ReinviteOwner(ctx, Actor{}, c.Tenant.Slug, "not an email"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("CLI refusal: %v", err)
+	}
+	via := map[auditevent.Outcome]bool{}
+	for _, e := range f.chain(t, audit.PlatformTenant) {
+		if e.Action == "tenant.owner_invitation" && e.ActorType == auditevent.ActorTypeSystem && strings.Contains(e.Details, `"via":"cli"`) {
+			via[e.Outcome] = true
+		}
+	}
+	if !via[auditevent.OutcomeSuccess] || !via[auditevent.OutcomeFailure] {
+		t.Errorf("CLI entries without via: %v", via)
+	}
+}
+
+// An expired owner invitation is revoked too; several pending ones all are.
+func TestReinviteRevokesEveryPending(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "exp-"+storetest.Suffix(), "Expired", "o@exp.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE invitations SET created_at = now() - interval '9 days', expires_at = now() - interval '2 days' WHERE id = $1`, c.Invitation.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.s.ReinviteOwner(ctx, Actor{UserID: f.admin}, c.Tenant.ID, "o@exp.example")
+	if err != nil || r.Revoked != 1 {
+		t.Fatalf("expired: %d revoked, %v", r.Revoked, err)
+	}
+	if err := f.accept(c.Token, f.user(t, "o@exp.example")); !errors.Is(err, store.ErrInvitation) {
+		t.Errorf("expired link: %v", err)
+	}
+}
+
+// Two re-issues at once leave one open owner invitation: they take turns
+// (deterministic: both are seen waiting before the first may proceed).
+func TestConcurrentReinvites(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "twice-"+storetest.Suffix(), "Twice", "o@twice.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	done := make(chan Created, 2)
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE`, c.Invitation.ID); err != nil {
+			return err
+		}
+		for range 2 {
+			go func() {
+				r, err := f.s.ReinviteOwner(ctx, Actor{UserID: f.admin}, c.Tenant.ID, "o@twice.example")
+				if err != nil {
+					t.Error(err)
+				}
+				done <- r
+			}()
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var n int
+			if err := admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+				WHERE NOT l.granted AND a.datname = $1`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n >= 2 {
+				return nil // both wait: release the invitation
+			}
+			if time.Now().After(deadline) {
+				return errors.New("the re-issues never both waited")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	<-done
+	var open int
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) (err error) {
+		open, err = tx.Invitation.Query().Where(invitation.TenantID(c.Tenant.ID), invitation.AcceptedAtIsNil(), invitation.RevokedAtIsNil()).Count(ctx)
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if open != 1 {
+		t.Errorf("%d open owner invitations after two re-issues", open)
 	}
 }
 
