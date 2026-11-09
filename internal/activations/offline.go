@@ -60,7 +60,7 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 		return err
 	})
 	if err != nil {
-		outcome, ok := refusalOutcome(err)
+		outcome, ok := refusalOutcome(err, offlineRefusals)
 		if !ok { // an outage: a 500, whatever it wraps
 			return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable
 		}
@@ -97,7 +97,7 @@ func (s Service) OfflineTx(ctx context.Context, tx *ent.Tx, p authz.Principal, r
 	if err == nil {
 		return out, nil
 	}
-	outcome, ok := refusalOutcome(err)
+	outcome, ok := refusalOutcome(err, offlineRefusals)
 	if !ok { // an outage: never stored as a refusal (it would commit with any seat writes)
 		return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable: a 500
 	}
@@ -166,20 +166,6 @@ func offlineRefusal(ev audit.Event, err error) audit.Event {
 	return ev
 }
 
-// refusalOutcome classifies err like audit.Refused: denied, a failure
-// among offlineRefusals, or not a refusal (an outage: unrecorded).
-func refusalOutcome(err error) (auditevent.Outcome, bool) {
-	if errors.Is(err, authz.ErrDenied) {
-		return auditevent.OutcomeDenied, true
-	}
-	for _, f := range offlineRefusals {
-		if errors.Is(err, f) {
-			return auditevent.OutcomeFailure, true
-		}
-	}
-	return "", false
-}
-
 // resolve parses the request and finds its license, locked as authenticate
 // does, under ctx's principal: the checks before the license's own state.
 func (s Service) resolve(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event, exclusive bool) (*licensefile.Request, *ent.License, error) {
@@ -238,6 +224,18 @@ func issuable(ctx context.Context, tx *ent.Tx, r *licensefile.Request, l *ent.Li
 }
 
 func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event) (Lease, error) {
+	// A renewal right after the last file waits for the next second here,
+	// before the license lock, so it doesn't hold the lock while it sleeps
+	// (after() waits under the lock only for concurrent requests).
+	if r, err := licensefile.ParseRequest(text); err == nil {
+		now, err := licenses.DBNow(ctx, tx)
+		if err != nil {
+			return Lease{}, err
+		}
+		if _, err := after(ctx, tx, "", r.Binding.Fingerprint, now); err != nil {
+			return Lease{}, err
+		}
+	}
 	r, l, err := s.resolve(ctx, tx, tenantID, text, ev, true)
 	if err != nil {
 		return Lease{}, err
@@ -248,6 +246,13 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	}
 	req := Request{TenantID: tenantID, Fingerprint: r.Binding.Fingerprint, Source: activation.FpSource(r.FPSource),
 		Hostname: r.Hostname, AppVersion: r.AppVersion, SDKVersion: r.SDKVersion}
+	// Every file of this machine is newer than the ones before, to the
+	// second (iat): an identical file would let an old receipt return the new
+	// seat, and the SDK refuses a file no newer than one it returned.
+	at, err := after(ctx, tx, l.ID, req.Fingerprint, now)
+	if err != nil {
+		return Lease{}, err
+	}
 	act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
 	switch {
 	case err == nil && act.Mode != activation.ModeOffline:
@@ -266,7 +271,7 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	default:
 		return Lease{}, err
 	}
-	c := offlineClaims(l, slug, now, r.Binding.Fingerprint)
+	c := offlineClaims(l, slug, at, r.Binding.Fingerprint)
 	// Lock order: the license row (above), the audit lock, then the signing
 	// key rows (audit.Lock). Signing in tx: no second pool connection.
 	if err := audit.Lock(ctx, tx, tenantID); err != nil {
@@ -284,9 +289,9 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	if err != nil {
 		return Lease{}, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE activations SET offline_file_sha256 = $2, last_seen_at = GREATEST(last_seen_at, clock_timestamp()),
+	res, err := tx.ExecContext(ctx, `UPDATE activations SET offline_file_sha256 = $2, last_seen_at = GREATEST(last_seen_at, clock_timestamp(), $6),
 		hostname = $3, app_version = $4, sdk_version = $5, updated_at = clock_timestamp() WHERE id = $1 AND deactivated_at IS NULL`,
-		ev.ObjectID, h, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion))
+		ev.ObjectID, h, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion), c.IssuedAt) // at least the iat: after() reads it
 	if err != nil {
 		return Lease{}, err
 	}
@@ -298,6 +303,47 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 		return Lease{}, err
 	}
 	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID, FileSHA256: h}, nil
+}
+
+// after returns now, or the second after the latest offline file of
+// licenseID on fingerprint if that isn't earlier: last_seen_at of an
+// offline seat is only ever set when a file is issued (to at least its iat).
+// The next file is at most the next second of the clock; beyond that it
+// waits (under the license lock, at most about a second), so a burst of
+// requests can't push iat (and exp) ahead of the clock: they come out a
+// second apart.
+//
+// ponytail: concurrent requests for one machine still sleep under the
+// license lock, about a second each, holding up that license's other
+// calls; a per-license rate limit on the management API if that matters.
+// licenseID "": any license's offline file on fingerprint (the unlocked
+// wait before the lock).
+func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now time.Time) (time.Time, error) {
+	var last []struct {
+		Max *time.Time `json:"max"`
+	}
+	q := tx.Activation.Query().Where(activation.Fingerprint(fingerprint), activation.ModeEQ(activation.ModeOffline))
+	if licenseID != "" {
+		q.Where(activation.LicenseID(licenseID))
+	}
+	err := q.Aggregate(ent.Max(activation.FieldLastSeenAt)).Scan(ctx, &last)
+	if err != nil || len(last) == 0 || last[0].Max == nil {
+		return now, err
+	}
+	next := last[0].Max.UTC().Truncate(time.Second).Add(time.Second)
+	if !next.After(now) {
+		return now, nil
+	}
+	if wait := next.Add(-time.Second).Sub(now); wait > 0 { // until next is the clock's next second
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		case <-t.C:
+		}
+	}
+	return next, nil
 }
 
 // offlineClaims: issued at now; exp the license's expiry, capped at iat +

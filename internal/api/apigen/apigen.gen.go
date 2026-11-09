@@ -803,6 +803,12 @@ type CustomerPatch struct {
 	Name         *string             `json:"name,omitempty"`
 }
 
+// DeactivationReceipt defines model for DeactivationReceipt.
+type DeactivationReceipt struct {
+	// Receipt The lfrcpt1 deactivation receipt text, as the machine wrote it.
+	Receipt string `json:"receipt"`
+}
+
 // DeactivationRequest defines model for DeactivationRequest.
 type DeactivationRequest struct {
 	Fingerprint string `json:"fingerprint"`
@@ -1703,6 +1709,9 @@ type CreateCustomerJSONRequestBody = CustomerCreate
 // UpdateCustomerApplicationMergePatchPlusJSONRequestBody defines body for UpdateCustomer for application/merge-patch+json ContentType.
 type UpdateCustomerApplicationMergePatchPlusJSONRequestBody = CustomerPatch
 
+// ReturnOfflineSeatJSONRequestBody defines body for ReturnOfflineSeat for application/json ContentType.
+type ReturnOfflineSeatJSONRequestBody = DeactivationReceipt
+
 // CreateFeatureJSONRequestBody defines body for CreateFeature for application/json ContentType.
 type CreateFeatureJSONRequestBody = FeatureCreate
 
@@ -1789,6 +1798,9 @@ type ServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
+	// ReturnOfflineSeat Return an offline seat on the machine's deactivation receipt (ADR-0043).
+	// (POST /tenants/{tenant}/deactivation-receipts)
+	ReturnOfflineSeat(w http.ResponseWriter, r *http.Request, tenant Tenant)
 	// ListFeatures List features in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/features)
 	ListFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListFeaturesParams)
@@ -2538,6 +2550,32 @@ func (siw *ServerInterfaceWrapper) ArchiveCustomer(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveCustomer(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReturnOfflineSeat operation middleware
+func (siw *ServerInterfaceWrapper) ReturnOfflineSeat(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReturnOfflineSeat(w, r, tenant)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4295,6 +4333,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/deactivate", wrapper.Deactivate)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/deactivation-receipts", wrapper.ReturnOfflineSeat)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/activation-requests", wrapper.CreateOfflineActivation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products", wrapper.ListProducts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products", wrapper.CreateProduct)
@@ -6947,6 +6986,192 @@ func (response ArchiveCustomer409ApplicationProblemPlusJSONResponse) VisitArchiv
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeatRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Body   *ReturnOfflineSeatJSONRequestBody
+}
+
+type ReturnOfflineSeatResponseObject interface {
+	VisitReturnOfflineSeatResponse(w http.ResponseWriter) error
+}
+
+type ReturnOfflineSeat200JSONResponse Activation
+
+func (response ReturnOfflineSeat200JSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ReturnOfflineSeat400ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat401ResponseHeaders
+}
+
+func (response ReturnOfflineSeat401ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat403ResponseHeaders
+}
+
+func (response ReturnOfflineSeat403ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat404ResponseHeaders
+}
+
+func (response ReturnOfflineSeat404ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat409ResponseHeaders
+}
+
+func (response ReturnOfflineSeat409ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat413ResponseHeaders
+}
+
+func (response ReturnOfflineSeat413ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReturnOfflineSeat422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReturnOfflineSeat422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ReturnOfflineSeat422ResponseHeaders
+}
+
+func (response ReturnOfflineSeat422ApplicationProblemPlusJSONResponse) VisitReturnOfflineSeatResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -12007,6 +12232,9 @@ type StrictServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(ctx context.Context, request ArchiveCustomerRequestObject) (ArchiveCustomerResponseObject, error)
+	// ReturnOfflineSeat Return an offline seat on the machine's deactivation receipt (ADR-0043).
+	// (POST /tenants/{tenant}/deactivation-receipts)
+	ReturnOfflineSeat(ctx context.Context, request ReturnOfflineSeatRequestObject) (ReturnOfflineSeatResponseObject, error)
 	// ListFeatures List features in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/features)
 	ListFeatures(ctx context.Context, request ListFeaturesRequestObject) (ListFeaturesResponseObject, error)
@@ -12693,6 +12921,39 @@ func (sh *strictHandler) ArchiveCustomer(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveCustomerResponseObject); ok {
 		if err := validResponse.VisitArchiveCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReturnOfflineSeat operation middleware
+func (sh *strictHandler) ReturnOfflineSeat(w http.ResponseWriter, r *http.Request, tenant Tenant) {
+	var request ReturnOfflineSeatRequestObject
+
+	request.Tenant = tenant
+
+	var body ReturnOfflineSeatJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReturnOfflineSeat(ctx, request.(ReturnOfflineSeatRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReturnOfflineSeat")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReturnOfflineSeatResponseObject); ok {
+		if err := validResponse.VisitReturnOfflineSeatResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

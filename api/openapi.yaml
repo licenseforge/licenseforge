@@ -794,6 +794,42 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /tenants/{tenant}/deactivation-receipts:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    post:
+      operationId: returnOfflineSeat
+      summary: Return an offline seat on the machine's deactivation receipt (ADR-0043).
+      description: |
+        The receipt is the `lfrcpt1` text the machine's SDK wrote after
+        deleting its license file (license format spec, Offline activation).
+        Needs activation:offline on the license's product; a license outside
+        the caller's scope, or no file of that machine matching the receipt,
+        answers 404. Frees the seat when the receipt names the seat's current
+        file; another file of a seat still out (an older one: the machine
+        renewed since; or one never issued for it) answers
+        `receipt_superseded` (409). A receipt for a seat already free
+        answers 200 with the activation unchanged and isn't audited again.
+        Allowed whatever the license's status. Audited with the receipt's
+        hash. Naturally idempotent: no Idempotency-Key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeactivationReceipt" }
+      responses:
+        "200":
+          description: The activation, deactivated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/activation-requests:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -810,6 +846,8 @@ paths:
         and its plan must allow offline use (`offline_not_allowed`, 409). Takes or reuses the
         machine's seat (seat limits and moves as online, ADR-0034); a machine
         activated online answers `online_seat` (409) until it deactivates.
+        Each file of a machine is newer than the last, to the second: a
+        request within a second of the last file waits for the next one.
         The file's `exp` is the license's expiry, capped at now +
         `max_offline_seconds`; renewal is a new request from that machine.
         Audited with the request's hash, never its content. With
@@ -1421,6 +1459,12 @@ components:
       additionalProperties: false
       properties:
         request: { type: string, maxLength: 4096, description: "The lfreq1 activation request text, as the machine wrote it." }
+    DeactivationReceipt:
+      type: object
+      required: [receipt]
+      additionalProperties: false
+      properties:
+        receipt: { type: string, maxLength: 4096, description: "The lfrcpt1 deactivation receipt text, as the machine wrote it." }
     OfflineActivation:
       type: object
       required: [license_file, activation_id, kid, file_sha256, expires_at]

@@ -213,7 +213,7 @@ func activationProblem(err error) *problem {
 		detail string
 	}{
 		{activations.ErrUnauthenticated, http.StatusUnauthorized, "unauthenticated", "Missing or invalid license key."},
-		{activations.ErrInvalid, http.StatusBadRequest, "invalid_request", "Malformed fingerprint, source, metadata or offline activation request."},
+		{activations.ErrInvalid, http.StatusBadRequest, "invalid_request", "Malformed fingerprint, source, metadata, or offline activation request or receipt."},
 		{activations.ErrSuspended, http.StatusForbidden, "license_suspended", "The license is suspended."},
 		{activations.ErrRevoked, http.StatusForbidden, "license_revoked", "The license is revoked."},
 		{activations.ErrExpired, http.StatusForbidden, "license_expired", "The license has expired."},
@@ -223,6 +223,7 @@ func activationProblem(err error) *problem {
 		{activations.ErrNotActivated, http.StatusNotFound, "not_activated", "This machine isn't activated; activate it."},
 		{activations.ErrOffline, http.StatusConflict, "offline_not_allowed", "The license's plan doesn't allow offline use."},
 		{activations.ErrOnlineSeat, http.StatusConflict, "online_seat", "The machine is activated online; deactivate it there first."},
+		{activations.ErrSuperseded, http.StatusConflict, "receipt_superseded", "The receipt isn't for the seat's current file (renewed since, or not a file issued for it)."},
 		{activations.ErrOfflineSeat, http.StatusConflict, "offline_seat", "This machine's seat is offline; return it with a deactivation receipt."},
 	} {
 		if errors.Is(err, m.err) {
