@@ -686,6 +686,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/activation-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer an offline activation request with a license file for that machine (ADR-0043).
+         * @description The request is the `lfreq1` text an air-gapped machine's SDK wrote
+         *     (license format spec, Offline activation); it carries the license
+         *     key, so treat it like the key. Needs activation:offline on the
+         *     license's product; an unknown key or a license outside the caller's
+         *     scope answers 404. The license must be usable (403
+         *     `license_suspended`, `license_revoked`, `license_expired`; no grace)
+         *     and its plan must allow offline use (`offline_not_allowed`, 409). Takes or reuses the
+         *     machine's seat (seat limits and moves as online, ADR-0034); a machine
+         *     activated online answers `online_seat` (409) until it deactivates.
+         *     The file's `exp` is the license's expiry, capped at now +
+         *     `max_offline_seconds`; renewal is a new request from that machine.
+         *     Audited with the request's hash, never its content. With
+         *     Idempotency-Key, a retry within 24 hours gets the first answer once
+         *     the caller's rights, the license and the seat are checked again: a
+         *     license revoked since, or a seat returned since (`not_activated`,
+         *     404), gets no file.
+         */
+        post: operations["createOfflineActivation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/products": {
         parameters: {
             query?: never;
@@ -1066,6 +1104,23 @@ export interface components {
             expires_at: string;
             /** Format: date-time */
             refresh_after: string;
+        };
+        OfflineActivationRequest: {
+            /** @description The lfreq1 activation request text, as the machine wrote it. */
+            request: string;
+        };
+        OfflineActivation: {
+            /** @description The signed lf1 license file (armored) to install on the machine. */
+            license_file: string;
+            activation_id: string;
+            kid: string;
+            /** @description The hash a deactivation receipt for this file must carry. */
+            file_sha256: string;
+            /**
+             * Format: date-time
+             * @description The file's exp; null for a perpetual file.
+             */
+            expires_at: string | null;
         };
         Activation: {
             /** @example act_01jcz5b2y3c4d5e6f7g8h9j0k1 */
@@ -2760,6 +2815,43 @@ export interface operations {
             409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    createOfflineActivation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1-255 printable ASCII characters; scoped to the tenant and the credential. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OfflineActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description The signed license file for that machine. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfflineActivation"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     listProducts: {

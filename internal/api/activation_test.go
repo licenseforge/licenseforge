@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -988,4 +989,112 @@ func TestOfflineSeatOverHTTP(t *testing.T) {
 	}
 	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)).problem(t, 409, "offline_seat")
 	a.do(t, "POST", actPath(a.a.ID, "deactivate"), `{"fingerprint":"`+fp+`"}`, licenseAuth(is.Key)).problem(t, 409, "offline_seat")
+}
+
+// Offline activation over the management API (ADR-0043): a session with
+// activation:offline turns a request into a file; Idempotency-Key replays it
+// after re-checking the caller's rights.
+func TestCreateOfflineActivation(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is := a.issue(t, "offline")
+	reqFor := func(key, fp string, nonce ...byte) string {
+		n := make([]byte, 16)
+		copy(n, nonce)
+		text, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.a.ID, Product: "db", Key: key,
+			Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: fp}, FPSource: "machine-id", Nonce: n, Created: time.Unix(1_800_000_000, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]string{"request": text})
+		return string(b)
+	}
+	p := Prefix + "/tenants/" + a.a.Slug + "/activation-requests"
+	admin := a.session(t, a.adminA, true)
+	machine := newFP()
+	body := reqFor(is.Key, machine)
+	k := header("Idempotency-Key", "air-1")
+	first := a.do(t, "POST", p, body, admin, k)
+	if first.code != 201 || first.body["expires_at"] == nil {
+		t.Fatalf("first: %d %s", first.code, first.raw)
+	}
+	file, _ := first.body["license_file"].(string)
+	if h, err := licensefile.FileSHA256(file); err != nil || h != first.body["file_sha256"] {
+		t.Errorf("file_sha256 %v, file's %s (%v)", first.body["file_sha256"], h, err)
+	}
+	again := a.do(t, "POST", p, body, admin, k)
+	if again.code != 201 || again.body["license_file"] != file || again.body["activation_id"] != first.body["activation_id"] {
+		t.Errorf("replay: %d %s", again.code, again.raw)
+	}
+	if as := a.activations(t, is.License.ID); len(as) != 1 || as[0].Mode != activation.ModeOffline {
+		t.Errorf("activations %+v", as)
+	}
+	online := a.issue(t, "pro")
+	onlineFP := newFP()
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(onlineFP), licenseAuth(online.Key)); r.code != 200 {
+		t.Fatalf("activate: %d %s", r.code, r.raw)
+	}
+	other := a.issue(t, "offline")
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(onlineFP), licenseAuth(other.Key)); r.code != 200 {
+		t.Fatalf("activate: %d %s", r.code, r.raw)
+	}
+	// An idempotent refusal is stored, replayed, and audited once.
+	refusals := func() int {
+		var n int
+		if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) (err error) {
+			n, err = tx.AuditEvent.Query().Where(auditevent.Action("activation.offline"), auditevent.OutcomeEQ(auditevent.OutcomeFailure)).Count(ctx)
+			return
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before, rk, rb := refusals(), header("Idempotency-Key", "air-refused"), reqFor(online.Key, newFP())
+	a.do(t, "POST", p, rb, admin, rk).problem(t, 409, "offline_not_allowed")
+	a.do(t, "POST", p, rb, admin, rk).problem(t, 409, "offline_not_allowed")
+	if n := refusals() - before; n != 1 {
+		t.Errorf("refusal stored and replayed: %d audited", n)
+	}
+	wrong, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.b.ID, Product: "db", Key: is.Key,
+		Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: newFP()}, FPSource: "machine-id", Nonce: make([]byte, 16), Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, _ := json.Marshal(map[string]string{"request": wrong})
+	a.do(t, "POST", p, string(wb), admin).problem(t, 400, "invalid_request")
+	a.do(t, "POST", p, reqFor(other.Key, onlineFP), admin).problem(t, 409, "online_seat")
+	// A stored seat refusal replays as it was.
+	lk, lb := header("Idempotency-Key", "air-limit"), reqFor(is.Key, newFP())
+	a.do(t, "POST", p, lb, admin, lk).problem(t, 409, "activation_limit_reached")
+	a.do(t, "POST", p, lb, admin, lk).problem(t, 409, "activation_limit_reached")
+	ok, ob := header("Idempotency-Key", "air-online"), reqFor(other.Key, onlineFP)
+	a.do(t, "POST", p, ob, admin, ok).problem(t, 409, "online_seat")
+	a.do(t, "POST", p, ob, admin, ok).problem(t, 409, "online_seat")
+	a.do(t, "POST", p, `{"request":"lfreq1.e30"}`, admin).problem(t, 400, "invalid_request")
+	a.do(t, "POST", p, reqFor(licensekey.New(), newFP()), admin).problem(t, 404, "not_found")
+
+	// Renewed since (a new request from the same machine): the first
+	// answer's file is no longer the seat's current one, so its replay is
+	// refused, as a receipt for it would be. The renewal's own replay works.
+	time.Sleep(time.Second) // a new iat: a new file
+	nk := header("Idempotency-Key", "air-renew")
+	renewal := reqFor(is.Key, machine, 1)
+	if r := a.do(t, "POST", p, renewal, admin, nk); r.code != 201 || r.body["license_file"] == file || r.body["activation_id"] != first.body["activation_id"] {
+		t.Fatalf("renewal: %d %s", r.code, r.raw)
+	}
+	a.do(t, "POST", p, body, admin, k).problem(t, 404, "not_activated")
+	if r := a.do(t, "POST", p, renewal, admin, nk); r.code != 201 {
+		t.Errorf("renewal replay: %d %s", r.code, r.raw)
+	}
+	// A replay re-checks the caller's rights: demoted to viewer, the stored
+	// file isn't handed out again.
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE memberships SET role = 'viewer' WHERE id = $1`, a.mem[a.adminA])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.do(t, "POST", p, body, admin, k).problem(t, 403, "forbidden"); r["license_file"] != nil {
+		t.Errorf("replay leaked: %v", r)
+	}
 }

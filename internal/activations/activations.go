@@ -93,6 +93,7 @@ type Lease struct {
 	KID          string
 	Claims       licensefile.Claims
 	ActivationID string
+	FileSHA256   string // offline files only: what a deactivation receipt carries
 }
 
 var fpRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

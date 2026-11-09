@@ -1161,6 +1161,27 @@ type MyTenantPage struct {
 	Items []MyTenant `json:"items"`
 }
 
+// OfflineActivation defines model for OfflineActivation.
+type OfflineActivation struct {
+	ActivationId string `json:"activation_id"`
+
+	// ExpiresAt The file's exp; null for a perpetual file.
+	ExpiresAt *time.Time `json:"expires_at"`
+
+	// FileSha256 The hash a deactivation receipt for this file must carry.
+	FileSha256 string `json:"file_sha256"`
+	Kid        string `json:"kid"`
+
+	// LicenseFile The signed lf1 license file (armored) to install on the machine.
+	LicenseFile string `json:"license_file"`
+}
+
+// OfflineActivationRequest defines model for OfflineActivationRequest.
+type OfflineActivationRequest struct {
+	// Request The lfreq1 activation request text, as the machine wrote it.
+	Request string `json:"request"`
+}
+
 // Plan defines model for Plan.
 type Plan struct {
 	ArchivedAt *time.Time `json:"archived_at"`
@@ -1521,6 +1542,12 @@ type ListPlatformTenantsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// CreateOfflineActivationParams defines parameters for CreateOfflineActivation.
+type CreateOfflineActivationParams struct {
+	// IdempotencyKey 1-255 printable ASCII characters; scoped to the tenant and the credential.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // ListApiTokensParams defines parameters for ListApiTokens.
 type ListApiTokensParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1664,6 +1691,9 @@ type CreatePlatformTenantJSONRequestBody = PlatformTenantCreate
 // UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
 type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
 
+// CreateOfflineActivationJSONRequestBody defines body for CreateOfflineActivation for application/json ContentType.
+type CreateOfflineActivationJSONRequestBody = OfflineActivationRequest
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = ApiTokenCreate
 
@@ -1729,6 +1759,9 @@ type ServerInterface interface {
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(w http.ResponseWriter, r *http.Request, tenant Tenant)
+	// CreateOfflineActivation Answer an offline activation request with a license file for that machine (ADR-0043).
+	// (POST /tenants/{tenant}/activation-requests)
+	CreateOfflineActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, params CreateOfflineActivationParams)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListApiTokensParams)
@@ -2085,6 +2118,56 @@ func (siw *ServerInterfaceWrapper) UpdateTenant(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateTenant(w, r, tenant)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOfflineActivation operation middleware
+func (siw *ServerInterfaceWrapper) CreateOfflineActivation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateOfflineActivationParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOfflineActivation(w, r, tenant, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4212,6 +4295,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/activate", wrapper.Activate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/refresh", wrapper.RefreshLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/activation/tenants/{tenant}/deactivate", wrapper.Deactivate)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/activation-requests", wrapper.CreateOfflineActivation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products", wrapper.ListProducts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products", wrapper.CreateProduct)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.GetProduct)
@@ -5471,6 +5555,193 @@ type UpdateTenant422ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response UpdateTenant422ApplicationProblemPlusJSONResponse) VisitUpdateTenantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivationRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params CreateOfflineActivationParams
+	Body   *CreateOfflineActivationJSONRequestBody
+}
+
+type CreateOfflineActivationResponseObject interface {
+	VisitCreateOfflineActivationResponse(w http.ResponseWriter) error
+}
+
+type CreateOfflineActivation201JSONResponse OfflineActivation
+
+func (response CreateOfflineActivation201JSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateOfflineActivation400ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation401ResponseHeaders
+}
+
+func (response CreateOfflineActivation401ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation403ResponseHeaders
+}
+
+func (response CreateOfflineActivation403ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation404ResponseHeaders
+}
+
+func (response CreateOfflineActivation404ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation409ResponseHeaders
+}
+
+func (response CreateOfflineActivation409ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation413ResponseHeaders
+}
+
+func (response CreateOfflineActivation413ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation422ResponseHeaders
+}
+
+func (response CreateOfflineActivation422ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -11706,6 +11977,9 @@ type StrictServerInterface interface {
 	// UpdateTenant Change the tenant's settings (JSON Merge Patch); today its MFA policy (ADR-0038).
 	// (PATCH /tenants/{tenant})
 	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
+	// CreateOfflineActivation Answer an offline activation request with a license file for that machine (ADR-0043).
+	// (POST /tenants/{tenant}/activation-requests)
+	CreateOfflineActivation(ctx context.Context, request CreateOfflineActivationRequestObject) (CreateOfflineActivationResponseObject, error)
 	// ListApiTokens List the tenant's API tokens, newest first. Never returns secrets or hashes.
 	// (GET /tenants/{tenant}/api-tokens)
 	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
@@ -12123,6 +12397,40 @@ func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, te
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateTenantResponseObject); ok {
 		if err := validResponse.VisitUpdateTenantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOfflineActivation operation middleware
+func (sh *strictHandler) CreateOfflineActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, params CreateOfflineActivationParams) {
+	var request CreateOfflineActivationRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	var body CreateOfflineActivationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOfflineActivation(ctx, request.(CreateOfflineActivationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOfflineActivation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOfflineActivationResponseObject); ok {
+		if err := validResponse.VisitCreateOfflineActivationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

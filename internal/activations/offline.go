@@ -60,12 +60,19 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 		return err
 	})
 	if err != nil {
-		ev.Details["reason"] = err.Error() // recorded for refusals only
-		if errors.Is(err, ErrInvalid) {
-			ev.Details["reason"] = ErrInvalid.Error() // the details echo the request: never in the chain
+		outcome, ok := refusalOutcome(err)
+		if !ok { // an outage: a 500, whatever it wraps
+			return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable
 		}
-		err = audit.Refused(ctx, s.DB, tenantID, ev, err, offlineRefusals...)
-		if err == errHidden { //nolint:errorlint // exactly the recorded refusal (a recording failure is joined to it: a 500)
+		ev = offlineRefusal(ev, err)
+		ev.Outcome = outcome
+		if rerr := s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+			_, err := audit.Record(ctx, tx, tenantID, ev)
+			return err
+		}); rerr != nil { // not the refusal: an unrecorded refusal is a 500
+			return Lease{}, fmt.Errorf("activations: recording a refused offline activation: %w", rerr)
+		}
+		if err == errHidden { //nolint:errorlint // exactly the recorded refusal
 			return Lease{}, ErrNotFound
 		}
 		return Lease{}, err
@@ -73,52 +80,171 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 	return out, nil
 }
 
-func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event) (Lease, error) {
+// OfflineTx is Offline inside the caller's transaction tx (for
+// idempotency.Store.Do, ADR-0032): the file is signed and recorded before
+// tx commits, so a stored outcome always carries it, and a refusal is
+// audited in tx (the caller commits refusals it stores). Errors that aren't
+// refusals are returned unrecorded, for tx to roll back.
+func (s Service) OfflineTx(ctx context.Context, tx *ent.Tx, p authz.Principal, request string) (Lease, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return Lease{}, err
+	}
+	ev := audit.By(p, "activation.offline", "activation", "")
+	ev.Details = map[string]any{"request_sha256": licensefile.OfflineSHA256(request)}
+	out, err := s.offline(ctx, tx, tenantID, request, &ev)
+	if err == nil {
+		return out, nil
+	}
+	outcome, ok := refusalOutcome(err)
+	if !ok { // an outage: never stored as a refusal (it would commit with any seat writes)
+		return Lease{}, fmt.Errorf("activations: offline activation: %v", err) //nolint:errorlint // deliberately not matchable: a 500
+	}
+	ev = offlineRefusal(ev, err)
+	ev.Outcome = outcome
+	if _, rerr := audit.Record(ctx, tx, tenantID, ev); rerr != nil { // not the refusal: a 4xx would be stored without its entry
+		return Lease{}, fmt.Errorf("activations: recording a refused offline activation: %w", rerr)
+	}
+	if err == errHidden { //nolint:errorlint // exactly the recorded refusal
+		return Lease{}, ErrNotFound
+	}
+	return Lease{}, err
+}
+
+// RecheckOffline is the replay check of a stored offline activation
+// (ADR-0032: rerun for the original operation): request's key still finds a
+// license p may issue offline files for, and the license still may get one
+// (not revoked, suspended or expired since): a stored refusal replays as
+// it was. Before a stored file goes out again, the caller checks
+// OfflineFileCurrent. It reads in tx and changes nothing.
+func (s Service) RecheckOffline(ctx context.Context, tx *ent.Tx, p authz.Principal, request string) error {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+	ev := audit.Event{Details: map[string]any{}}
+	r, l, err := s.resolve(ctx, tx, tenantID, request, &ev, false)
+	if err == errHidden { //nolint:errorlint // unrecorded here
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	_, _, err = issuable(ctx, tx, r, l)
+	return err
+}
+
+// OfflineFileCurrent: before a stored offline file is handed out again,
+// activationID (in p's tenant) still holds its seat offline and fileSHA256
+// is still its current file, not one returned or renewed since (a receipt
+// for an older file is refused, ADR-0043). ErrNotActivated otherwise.
+func (s Service) OfflineFileCurrent(ctx context.Context, p authz.Principal, activationID, fileSHA256 string) error {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		ok, err := tx.Activation.Query().Where(activation.ID(activationID), activation.DeactivatedAtIsNil(),
+			activation.ModeEQ(activation.ModeOffline), activation.OfflineFileSha256(fileSHA256)).Exist(ctx)
+		if err == nil && !ok {
+			err = ErrNotActivated
+		}
+		return err
+	})
+}
+
+// offlineRefusal sets ev's reason for err: invalid requests get a fixed one,
+// since their details echo the request, which never goes in the chain.
+func offlineRefusal(ev audit.Event, err error) audit.Event {
+	ev.Details["reason"] = err.Error()
+	if errors.Is(err, ErrInvalid) {
+		ev.Details["reason"] = ErrInvalid.Error()
+	}
+	return ev
+}
+
+// refusalOutcome classifies err like audit.Refused: denied, a failure
+// among offlineRefusals, or not a refusal (an outage: unrecorded).
+func refusalOutcome(err error) (auditevent.Outcome, bool) {
+	if errors.Is(err, authz.ErrDenied) {
+		return auditevent.OutcomeDenied, true
+	}
+	for _, f := range offlineRefusals {
+		if errors.Is(err, f) {
+			return auditevent.OutcomeFailure, true
+		}
+	}
+	return "", false
+}
+
+// resolve parses the request and finds its license, locked as authenticate
+// does, under ctx's principal: the checks before the license's own state.
+func (s Service) resolve(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event, exclusive bool) (*licensefile.Request, *ent.License, error) {
 	r, err := licensefile.ParseRequest(text)
 	if err != nil {
-		return Lease{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	if r.Tenant != tenantID {
-		return Lease{}, fmt.Errorf("%w: the request is for tenant %q", ErrInvalid, r.Tenant)
+		return nil, nil, fmt.Errorf("%w: the request is for tenant %q", ErrInvalid, r.Tenant)
 	}
 	key, err := licensekey.Normalize(r.Key)
 	if err != nil {
-		return Lease{}, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
-	l, err := s.authenticate(ctx, tx, tenantID, key, true)
+	l, err := s.authenticate(ctx, tx, tenantID, key, exclusive)
 	if errors.Is(err, ErrUnauthenticated) {
-		return Lease{}, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	if err != nil {
-		return Lease{}, err
+		return nil, nil, err
 	}
 	ev.Details["license_id"], ev.Details["product_id"] = l.ID, l.ProductID
 	ev.Details["fingerprint"], ev.Details["fp_source"] = r.Binding.Fingerprint, r.FPSource
 	if authz.Require(ctx, authz.ActivationRead, l.ProductID) != nil {
-		return Lease{}, errHidden
+		return nil, nil, errHidden
 	}
 	if err := authz.Require(ctx, authz.ActivationOffline, l.ProductID); err != nil {
-		return Lease{}, err
+		return nil, nil, err
 	}
+	return r, l, nil
+}
+
+// issuable: the license may get an offline file for r now (the database
+// clock): r's product, usable without grace, offline allowed, r's binding.
+func issuable(ctx context.Context, tx *ent.Tx, r *licensefile.Request, l *ent.License) (productSlug string, now time.Time, err error) {
 	p, err := tx.Product.Get(ctx, l.ProductID)
 	if err != nil {
-		return Lease{}, err
+		return "", now, err
 	}
 	if r.Product != p.Slug {
-		return Lease{}, fmt.Errorf("%w: the request is for product %q, the license for %q", ErrInvalid, r.Product, p.Slug)
+		return "", now, fmt.Errorf("%w: the request is for product %q, the license for %q", ErrInvalid, r.Product, p.Slug)
 	}
-	now, err := licenses.DBNow(ctx, tx)
+	if now, err = licenses.DBNow(ctx, tx); err != nil {
+		return "", now, err
+	}
+	if err := usable(l, now, false); err != nil {
+		return "", now, err
+	}
+	if !l.OfflineAllowed || (l.MaxOfflineSeconds != nil && *l.MaxOfflineSeconds == 0) {
+		return "", now, ErrOffline
+	}
+	if string(l.BindType) != string(r.Binding.Type) {
+		return "", now, fmt.Errorf("%w: the license binds %s", ErrBinding, l.BindType)
+	}
+	return p.Slug, now, nil
+}
+
+func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string, ev *audit.Event) (Lease, error) {
+	r, l, err := s.resolve(ctx, tx, tenantID, text, ev, true)
 	if err != nil {
 		return Lease{}, err
 	}
-	if err := usable(l, now, false); err != nil {
+	slug, now, err := issuable(ctx, tx, r, l)
+	if err != nil {
 		return Lease{}, err
-	}
-	if !l.OfflineAllowed || (l.MaxOfflineSeconds != nil && *l.MaxOfflineSeconds == 0) {
-		return Lease{}, ErrOffline
-	}
-	if string(l.BindType) != string(r.Binding.Type) {
-		return Lease{}, fmt.Errorf("%w: the license binds %s", ErrBinding, l.BindType)
 	}
 	req := Request{TenantID: tenantID, Fingerprint: r.Binding.Fingerprint, Source: activation.FpSource(r.FPSource),
 		Hostname: r.Hostname, AppVersion: r.AppVersion, SDKVersion: r.SDKVersion}
@@ -140,7 +266,7 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	default:
 		return Lease{}, err
 	}
-	c := offlineClaims(l, p.Slug, now, r.Binding.Fingerprint)
+	c := offlineClaims(l, slug, now, r.Binding.Fingerprint)
 	// Lock order: the license row (above), the audit lock, then the signing
 	// key rows (audit.Lock). Signing in tx: no second pool connection.
 	if err := audit.Lock(ctx, tx, tenantID); err != nil {
@@ -171,7 +297,7 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	if _, err := audit.Record(ctx, tx, tenantID, *ev); err != nil {
 		return Lease{}, err
 	}
-	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID}, nil
+	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID, FileSHA256: h}, nil
 }
 
 // offlineClaims: issued at now; exp the license's expiry, capped at iat +

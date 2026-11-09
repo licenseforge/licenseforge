@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/idempotency"
@@ -141,23 +142,14 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 		}
 		return apigen.IssueLicense201JSONResponse(issuedView(got)), nil
 	}
-	body, _ := ctx.Value(bodyKey{}).([]byte)
-	ri, _ := ctx.Value(reqKey{}).(reqInfo)
-	out, replayed, err := s.Idempotency.Do(ctx, idempotency.Request{TenantID: p.TenantID, Credential: p.ID, Key: *req.Params.IdempotencyKey,
-		Operation: "IssueLicense", Body: body},
+	out, replayed, err := s.idempotent(ctx, p, *req.Params.IdempotencyKey, "IssueLicense",
 		func(ctx context.Context, tx *ent.Tx) error { return s.Licenses.RecheckIssue(ctx, tx, p, ir.ProductID) },
-		func(ctx context.Context, tx *ent.Tx) (idempotency.Outcome, error) {
+		func(ctx context.Context, tx *ent.Tx) (any, error) {
 			got, err := s.Licenses.IssueTx(ctx, tx, p, ir)
 			if err != nil {
-				pr := mapErr(err)
-				if pr.status >= 500 {
-					return idempotency.Outcome{}, err // rolled back with the issue; the client may retry
-				}
-				s.Log.InfoContext(ctx, "api refusal", "request_id", ri.id, "status", pr.status, "code", pr.code, "err", err, "idempotent", true)
-				return idempotency.Outcome{Status: pr.status, Body: pr.body(ri.id)}, nil
+				return nil, err
 			}
-			b, err := json.Marshal(issuedView(got))
-			return idempotency.Outcome{Status: http.StatusCreated, Body: append(b, '\n')}, err
+			return issuedView(got), nil
 		})
 	if err != nil {
 		return nil, err
@@ -175,7 +167,33 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 			return nil, err
 		}
 	}
-	if out.Status >= 400 { // a replayed problem names this request, like X-Request-Id
+	return outcome(out), nil
+}
+
+// idempotent runs a create under Idempotency-Key key for p (internal/
+// idempotency): run's result or refusal commits with its outcome (201 with
+// run's view, or the problem a refusal maps to), and a retry gets the
+// stored answer once recheck passes again. Errors that map to 5xx roll
+// back. A replayed problem names this request, like X-Request-Id.
+func (s *server) idempotent(ctx context.Context, p authz.Principal, key, op string, recheck func(context.Context, *ent.Tx) error,
+	run func(context.Context, *ent.Tx) (any, error)) (idempotency.Outcome, bool, error) {
+	body, _ := ctx.Value(bodyKey{}).([]byte)
+	ri, _ := ctx.Value(reqKey{}).(reqInfo)
+	out, replayed, err := s.Idempotency.Do(ctx, idempotency.Request{TenantID: p.TenantID, Credential: p.ID, Key: key, Operation: op, Body: body},
+		recheck, func(ctx context.Context, tx *ent.Tx) (idempotency.Outcome, error) {
+			view, err := run(ctx, tx)
+			if err != nil {
+				pr := mapErr(err)
+				if pr.status >= 500 {
+					return idempotency.Outcome{}, err // rolled back; the client may retry
+				}
+				s.Log.InfoContext(ctx, "api refusal", "request_id", ri.id, "status", pr.status, "code", pr.code, "err", err, "idempotent", true)
+				return idempotency.Outcome{Status: pr.status, Body: pr.body(ri.id)}, nil
+			}
+			b, err := json.Marshal(view)
+			return idempotency.Outcome{Status: http.StatusCreated, Body: append(b, '\n')}, err
+		})
+	if err == nil && out.Status >= 400 {
 		var m map[string]any
 		if json.Unmarshal(out.Body, &m) == nil {
 			m["request_id"] = ri.id
@@ -184,7 +202,59 @@ func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseReques
 			}
 		}
 	}
+	return out, replayed, err
+}
+
+// CreateOfflineActivation answers an offline activation request with a
+// license file bound to that machine (ADR-0043); idempotent with
+// Idempotency-Key, like IssueLicense. A replay isn't audited again: it
+// re-delivers the file recorded at issue, to the same credential, after
+// RecheckOffline (license still issuable) and OfflineFileCurrent (the
+// file still the seat's current one).
+func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateOfflineActivationRequestObject) (apigen.CreateOfflineActivationResponseObject, error) {
+	p := principal(ctx)
+	text := req.Body.Request
+	if req.Params.IdempotencyKey == nil {
+		l, err := s.Activations.Offline(ctx, p, text)
+		if err != nil {
+			return nil, err
+		}
+		v, err := offlineView(l)
+		if err != nil {
+			return nil, err
+		}
+		return apigen.CreateOfflineActivation201JSONResponse(v), nil
+	}
+	out, replayed, err := s.idempotent(ctx, p, *req.Params.IdempotencyKey, "CreateOfflineActivation",
+		func(ctx context.Context, tx *ent.Tx) error { return s.Activations.RecheckOffline(ctx, tx, p, text) },
+		func(ctx context.Context, tx *ent.Tx) (any, error) {
+			l, err := s.Activations.OfflineTx(ctx, tx, p, text)
+			if err != nil {
+				return nil, err
+			}
+			return offlineView(l)
+		})
+	if err != nil {
+		return nil, err
+	}
+	if replayed && out.Status == http.StatusCreated {
+		var v apigen.OfflineActivation
+		if err := json.Unmarshal(out.Body, &v); err != nil {
+			return nil, err
+		}
+		if err := s.Activations.OfflineFileCurrent(ctx, p, v.ActivationId, v.FileSha256); err != nil {
+			return nil, err // returned or renewed since: the stored file isn't handed out
+		}
+	}
 	return outcome(out), nil
+}
+
+func offlineView(l activations.Lease) (apigen.OfflineActivation, error) {
+	return apigen.OfflineActivation{LicenseFile: l.File, ActivationId: l.ActivationID, Kid: l.KID, FileSha256: l.FileSHA256, ExpiresAt: l.Claims.Expires}, nil
+}
+
+func (o outcome) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+	return o.VisitIssueLicenseResponse(w)
 }
 
 // outcome writes a stored or fresh idempotent outcome as it is.
