@@ -178,3 +178,64 @@ it("labels MFA policies and explains a platform MFA refusal on create", async ()
   expect(new URL(el.querySelector("dialog a")!.getAttribute("href")!, "https://x").searchParams.get("return")).toBe("/platform/");
   act(() => root.unmount());
 });
+
+it("re-issues an owner invite: the new link once, or why not when the tenant has an owner", async () => {
+  const posts: { path: string; body: unknown }[] = [];
+  let conflict = false;
+  const { el, root, qc } = await render(async (req) => {
+    if (req.method === "POST") {
+      posts.push({ path: new URL(req.url).pathname, body: await req.json() });
+      return conflict
+        ? json({ type: "about:blank", title: "Conflict", status: 409, code: "conflict", detail: "the tenant has an owner", request_id: "r" }, 409)
+        : json({ tenant, invitation: { id: "inv_2", email: "new@acme.example", role: "owner", expires_at: "2026-11-16T00:00:00Z", token: TOKEN } }, 201);
+    }
+    return json({ items: [tenant] });
+  });
+  await vi.waitFor(() => expect(el.textContent).toContain("Acme Corp"));
+  const open = async () => {
+    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="New owner invite for Acme Corp (acme)"]')!.click());
+    const input = el.querySelector<HTMLInputElement>('input[name="owner_email"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, " new@acme.example ");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => el.querySelector("form")!.requestSubmit());
+  };
+  await open();
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toContain(`/invite#token=${TOKEN}`));
+  expect(posts).toEqual([{ path: "/api/v1/platform/tenants/tnt_1/owner-invitation", body: { owner_email: "new@acme.example" } }]);
+  await act(async () => button(el, "Close").click());
+  await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
+  expect(JSON.stringify([document.body.innerHTML, qc.getQueryCache().getAll().map((q) => q.state), qc.getMutationCache().getAll().map((m) => m.state)])).not.toContain(TOKEN);
+
+  conflict = true;
+  await open();
+  await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("This tenant already has an owner: its owners invite members."));
+  act(() => root.unmount());
+});
+
+// Re-issue: no closing mid-request; other refusals as on create.
+it("the re-issue dialog waits for its answer and explains other refusals", async () => {
+  let answer: (r: Response) => void = () => {};
+  let reply: () => Promise<Response> = () => new Promise<Response>((r) => (answer = r));
+  const { el, root } = await render(async (req) => (req.method === "POST" ? reply() : json({ items: [tenant] })));
+  await vi.waitFor(() => expect(el.textContent).toContain("Acme Corp"));
+  const submit = async () => {
+    if (!el.querySelector("dialog")) await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="New owner invite for Acme Corp (acme)"]')!.click());
+    await act(async () => el.querySelector("form")!.requestSubmit());
+  };
+  await submit();
+  expect(button(el, "Cancel").disabled).toBe(true);
+  await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true }))); // Esc
+  expect(el.querySelector("dialog")).not.toBeNull();
+  await act(async () => answer(json({ code: "validation_failed", title: "x", status: 422, errors: [{ field: "/owner_email", message: "must be an email address" }] }, 422)));
+  await vi.waitFor(() => expect(el.querySelector('input[name="owner_email"]')!.getAttribute("aria-invalid")).toBe("true"));
+  reply = async () => json({ code: "mfa_required", title: "x", status: 403, required_assurance: "mfa", session_assurance: "none" }, 403);
+  await submit();
+  await vi.waitFor(() => expect(new URL(el.querySelector("dialog a")!.getAttribute("href")!, "https://x").searchParams.get("return")).toBe("/platform/"));
+  reply = async () => json({ code: "not_found", title: "x", status: 404, request_id: "r" }, 404);
+  await submit();
+  await vi.waitFor(() => expect(el.querySelector('dialog [role="alert"]')?.textContent).toContain("Not found"));
+  expect(el.textContent).not.toContain("already has an owner");
+  act(() => root.unmount());
+});
