@@ -17,10 +17,10 @@ import (
 	"licenseforge.io/licenseforge/sdk/go/licensefile"
 )
 
-// ErrSuperseded: the receipt names an older file of a seat that is still
-// out (the machine renewed since); only the current file's receipt returns
-// it (ADR-0043).
-var ErrSuperseded = errors.New("activations: the receipt is for an older file; the machine renewed since")
+// ErrSuperseded: the machine's seat is out, but the receipt names another
+// file than its current one (an older one: renewed since; or none issued for
+// it); only the current file's receipt returns it (ADR-0043).
+var ErrSuperseded = errors.New("activations: the receipt isn't for the seat's current file (renewed since, or not a file issued for it)")
 
 var receiptRefusals = []error{ErrInvalid, ErrNotFound, ErrSuperseded}
 
@@ -105,8 +105,12 @@ func (s Service) ret(ctx context.Context, tx *ent.Tx, tenantID, text string, ev 
 	// no new seats, so freeing one needs no lock.
 	if _, err := tx.License.Query().Where(license.ID(l.ID)).
 		ForUpdate(func(o *sql.LockOptions) { o.Strength = sql.LockNoKeyUpdate }).Only(ctx); ent.IsNotFound(err) {
-		if revoked, err := tx.License.Query().Where(license.ID(l.ID), license.RevokedAtNotNil()).Exist(ctx); err != nil || !revoked {
-			return nil, errors.Join(ErrNotFound, err)
+		revoked, err := tx.License.Query().Where(license.ID(l.ID), license.RevokedAtNotNil()).Exist(ctx)
+		if err != nil {
+			return nil, err // an outage, not "not found"
+		}
+		if !revoked {
+			return nil, ErrNotFound
 		}
 	} else if err != nil {
 		return nil, err
@@ -114,11 +118,14 @@ func (s Service) ret(ctx context.Context, tx *ent.Tx, tenantID, text string, ev 
 	mine := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(r.Fingerprint), activation.ModeEQ(activation.ModeOffline))
 	act, err := mine.Clone().Where(activation.OfflineFileSha256(r.FileSHA256)).Order(ent.Desc(activation.FieldCreatedAt)).First(ctx)
 	switch {
-	case err == nil && act.DeactivatedAt != nil:
-		return act, nil // returned before: the same answer, no new entry
 	case err == nil:
 		ev.ObjectID = act.ID
-		if err := free(ctx, tx, act.ID); err != nil {
+		if err := free(ctx, tx, act.ID); errors.Is(err, ErrNotActivated) {
+			// Already free (returned before, deactivated from the dashboard, or
+			// concurrently: a revoked license is read unlocked): the seat
+			// unchanged, no new entry.
+			return tx.Activation.Get(ctx, act.ID)
+		} else if err != nil {
 			return nil, err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess

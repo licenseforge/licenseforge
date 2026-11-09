@@ -705,8 +705,9 @@ export interface paths {
          *     Needs activation:offline on the license's product; a license outside
          *     the caller's scope, or no file of that machine matching the receipt,
          *     answers 404. Frees the seat when the receipt names the seat's current
-         *     file; an older file of a seat still out (the machine renewed since)
-         *     answers `receipt_superseded` (409). A receipt for a seat already free
+         *     file; another file of a seat still out (an older one: the machine
+         *     renewed since; or one never issued for it) answers
+         *     `receipt_superseded` (409). A receipt for a seat already free
          *     answers 200 with the activation unchanged and isn't audited again.
          *     Allowed whatever the license's status. Audited with the receipt's
          *     hash. Naturally idempotent: no Idempotency-Key.

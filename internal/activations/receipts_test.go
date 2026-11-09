@@ -3,6 +3,7 @@ package activations
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -115,6 +116,7 @@ func TestReturnRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	l2 := f.issue(t, "offline") // the caller may act on it too
 	online := f.issue(t, "offline")
 	onlineFP := fp()
 	act, err := f.s.Activate(ctx, f.req(online.Key, onlineFP))
@@ -136,6 +138,7 @@ func TestReturnRefusals(t *testing.T) {
 		"unknown license": {manager(f.a), f.receipt(t, file, machine, func(r *licensefile.Receipt) { r.LicenseID = "lic_" + strings.Repeat("0", 26) }),
 			ErrNotFound, auditevent.OutcomeFailure},
 		"another file":    {manager(f.a), f.receipt(t, file, machine, func(r *licensefile.Receipt) { r.FileSHA256 = strings.Repeat("0", 64) }), ErrSuperseded, auditevent.OutcomeFailure},
+		"another license": {manager(f.a), f.receipt(t, file, machine, func(r *licensefile.Receipt) { r.LicenseID = l2.License.ID }), ErrNotFound, auditevent.OutcomeFailure},
 		"another machine": {manager(f.a), f.receipt(t, file, fp(), nil), ErrNotFound, auditevent.OutcomeFailure},
 		"online seat": {manager(f.a), f.receipt(t, Lease{Claims: licensefile.Claims{LicenseID: online.License.ID}, FileSHA256: strings.Repeat("a", 64)}, onlineFP, nil),
 			ErrNotFound, auditevent.OutcomeFailure},
@@ -189,6 +192,18 @@ func TestReturnFreedOrRevoked(t *testing.T) {
 	if len(f.events(t)) != before {
 		t.Error("an unchanged seat was audited")
 	}
+	sus := f.issue(t, "offline")
+	susFP := fp()
+	sfile, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, sus.Key, susFP, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lic.Suspend(ctx, manager(f.a), sus.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.s.Return(ctx, manager(f.a), f.receipt(t, sfile, susFP, nil)); err != nil || got.DeactivatedAt == nil {
+		t.Errorf("suspended license: %+v, %v", got, err)
+	}
 	rev := f.issue(t, "offline")
 	machine = fp()
 	file, err = f.s.Offline(ctx, manager(f.a), f.offlineReq(t, rev.Key, machine, nil))
@@ -200,5 +215,102 @@ func TestReturnFreedOrRevoked(t *testing.T) {
 	}
 	if got, err := f.s.Return(ctx, manager(f.a), f.receipt(t, file, machine, nil)); err != nil || got.DeactivatedAt == nil {
 		t.Errorf("revoked license: %+v, %v", got, err)
+	}
+}
+
+// A machine that returns its seat and asks again gets a newer file, even
+// within the same second: the old receipt answers the old seat unchanged,
+// and the SDK (which refuses files no newer than one it returned) takes it.
+func TestReturnThenRequestAgain(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "offline")
+	machine := fp()
+	old, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldReceipt := f.receipt(t, old, machine, nil)
+	if _, err := f.s.Return(ctx, manager(f.a), oldReceipt); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, func(r *licensefile.Request) { r.Nonce[0] = 4 }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.ActivationID == old.ActivationID || cur.FileSHA256 == old.FileSHA256 || !cur.Claims.IssuedAt.After(old.Claims.IssuedAt) {
+		t.Fatalf("new file %+v not newer than %+v", cur.Claims.IssuedAt, old.Claims.IssuedAt)
+	}
+	// A renewal right away is newer still.
+	again, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, func(r *licensefile.Request) { r.Nonce[0] = 5 }))
+	if err != nil || again.ActivationID != cur.ActivationID || !again.Claims.IssuedAt.After(cur.Claims.IssuedAt) {
+		t.Fatalf("renewal %+v, %v", again.Claims.IssuedAt, err)
+	}
+	if got, err := f.s.Return(ctx, manager(f.a), oldReceipt); err != nil || got.ID != old.ActivationID {
+		t.Errorf("old receipt again = %+v, %v", got, err)
+	}
+	if as := f.activations(t, is.License.ID); len(as) != 2 || as[1].ID != cur.ActivationID || as[1].DeactivatedAt != nil {
+		t.Errorf("the new seat changed: %+v", as)
+	}
+}
+
+// On a revoked license (read unlocked), a receipt racing a dashboard
+// deactivate answers the seat freed, not an outage.
+func TestReturnRacesAFree(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "offline")
+	machine := fp()
+	file, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lic.Revoke(ctx, manager(f.a), is.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", env.AdminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	before := len(f.events(t))
+	type result struct {
+		a   *ent.Activation
+		err error
+	}
+	done := make(chan result, 1)
+	err = f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		if err := free(ctx, tx, file.ActivationID); err != nil {
+			return err
+		}
+		go func() {
+			a, err := f.s.Return(ctx, manager(f.a), f.receipt(t, file, machine, nil))
+			done <- result{a, err}
+		}()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var n int
+			if err := admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+				WHERE l.locktype IN ('tuple', 'transactionid') AND NOT l.granted AND a.datname = $1`, env.Name).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil // the receipt waits on the row: commit the free
+			}
+			if time.Now().After(deadline) {
+				return errors.New("the receipt never waited")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.err != nil || r.a.DeactivatedAt == nil {
+		t.Errorf("Return = %+v, %v", r.a, r.err)
+	}
+	if len(f.events(t)) != before {
+		t.Error("the concurrent free was audited by the receipt")
 	}
 }

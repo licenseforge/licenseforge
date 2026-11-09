@@ -234,6 +234,13 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	}
 	req := Request{TenantID: tenantID, Fingerprint: r.Binding.Fingerprint, Source: activation.FpSource(r.FPSource),
 		Hostname: r.Hostname, AppVersion: r.AppVersion, SDKVersion: r.SDKVersion}
+	// Every file of this machine is newer than the ones before, to the
+	// second (iat): an identical file would let an old receipt return the new
+	// seat, and the SDK refuses a file no newer than one it returned.
+	at, err := after(ctx, tx, l.ID, req.Fingerprint, now)
+	if err != nil {
+		return Lease{}, err
+	}
 	act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
 	switch {
 	case err == nil && act.Mode != activation.ModeOffline:
@@ -252,7 +259,7 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	default:
 		return Lease{}, err
 	}
-	c := offlineClaims(l, slug, now, r.Binding.Fingerprint)
+	c := offlineClaims(l, slug, at, r.Binding.Fingerprint)
 	// Lock order: the license row (above), the audit lock, then the signing
 	// key rows (audit.Lock). Signing in tx: no second pool connection.
 	if err := audit.Lock(ctx, tx, tenantID); err != nil {
@@ -270,9 +277,9 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	if err != nil {
 		return Lease{}, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE activations SET offline_file_sha256 = $2, last_seen_at = GREATEST(last_seen_at, clock_timestamp()),
+	res, err := tx.ExecContext(ctx, `UPDATE activations SET offline_file_sha256 = $2, last_seen_at = GREATEST(last_seen_at, clock_timestamp(), $6),
 		hostname = $3, app_version = $4, sdk_version = $5, updated_at = clock_timestamp() WHERE id = $1 AND deactivated_at IS NULL`,
-		ev.ObjectID, h, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion))
+		ev.ObjectID, h, nilIfEmpty(req.Hostname), nilIfEmpty(req.AppVersion), nilIfEmpty(req.SDKVersion), c.IssuedAt) // at least the iat: after() reads it
 	if err != nil {
 		return Lease{}, err
 	}
@@ -284,6 +291,24 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 		return Lease{}, err
 	}
 	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID, FileSHA256: h}, nil
+}
+
+// after returns now, or the second after the latest offline file of
+// licenseID on fingerprint if that isn't earlier (a file is issued when its
+// activation is last seen). At most a second ahead of the clock.
+func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now time.Time) (time.Time, error) {
+	var last []struct {
+		Max *time.Time `json:"max"`
+	}
+	err := tx.Activation.Query().Where(activation.LicenseID(licenseID), activation.Fingerprint(fingerprint), activation.ModeEQ(activation.ModeOffline)).
+		Aggregate(ent.Max(activation.FieldLastSeenAt)).Scan(ctx, &last)
+	if err != nil || len(last) == 0 || last[0].Max == nil {
+		return now, err
+	}
+	if next := last[0].Max.UTC().Truncate(time.Second).Add(time.Second); next.After(now) {
+		return next, nil
+	}
+	return now, nil
 }
 
 // offlineClaims: issued at now; exp the license's expiry, capped at iat +
