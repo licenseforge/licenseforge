@@ -186,13 +186,15 @@ func (c *Client) options() (licensefile.CheckOptions, error) {
 }
 
 // Install verifies file (the vendor's answer to Request) and installs it,
-// replacing the installed file of the same license (a renewal; an older
-// file of it is refused, ErrOlderFile, and the same file again changes
-// nothing). A file that isn't usable now, that this machine returned, or of another license while
-// one is installed (ErrOtherLicense) is refused; with Config.Clock, a file
-// whose iat is ahead of this machine's clock raises the guard to it once
-// its checks pass (refused if the guard can't hold it). ErrLocked from a clock.FileStore: another process is changing
-// the state; retry.
+// replacing the installed file of the same license: a renewal, or a file
+// with the same iat (the same file again changes nothing). Refused: a file
+// that isn't usable now, one this machine returned (ErrReturned), one older
+// than the installed file of its license (ErrOlderFile), and another
+// license's while one is installed (ErrOtherLicense); an installed file that
+// no longer verifies here blocks nothing. With Config.Clock, a file whose iat
+// is ahead of this machine's clock raises the guard to it once its checks
+// pass (refused if the guard can't hold it). ErrLocked from a
+// clock.FileStore: another process is changing the state; retry.
 func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, error) {
 	claims, err := c.verify(file)
 	if err != nil {

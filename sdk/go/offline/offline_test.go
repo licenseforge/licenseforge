@@ -191,6 +191,13 @@ func TestInstallOlderFile(t *testing.T) {
 	if _, _, err := e.c.Install(renewed); err != nil {
 		t.Errorf("same file again: %v", err)
 	}
+	// An installed file that no longer verifies here (the fingerprint
+	// changed) doesn't block a file for this machine, older or not.
+	e.c.cfg.Fingerprint.Fingerprint = other
+	moved := e.file(t, func(c *licensefile.Claims) { c.Binding.Fingerprint = other })
+	if _, _, err := e.c.Install(moved); err != nil {
+		t.Errorf("after a fingerprint change: %v", err)
+	}
 }
 
 func TestStatesAndOptions(t *testing.T) {
