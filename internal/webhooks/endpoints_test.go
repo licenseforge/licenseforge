@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
@@ -155,6 +157,17 @@ const hookURL = "https://hooks.example.com/services/T000/B000/s3cr3tTokenInPath?
 func TestCreate(t *testing.T) {
 	f := setup(t)
 	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	// History the new endpoint must not get.
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		for range 3 {
+			if _, err := audit.Record(ctx, tx, f.a, audit.Event{ActorType: auditevent.ActorTypeSystem, Action: "license.issue", Outcome: auditevent.OutcomeSuccess}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var head int64
 	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
 		return scanOne(ctx, tx, &head, `SELECT COALESCE(max(seq), 0) FROM audit_events WHERE tenant_id = $1`, f.a)
@@ -171,7 +184,7 @@ func TestCreate(t *testing.T) {
 	if c.URL != "https://hooks.example.com:443" || !c.Enabled || strings.Join(c.Events, ",") != "license.issued,license.revoked" {
 		t.Errorf("created %+v", c.Endpoint)
 	}
-	if c.Seq != head || c.Attempts != 0 || c.InFlight { // from the chain's end: no history
+	if head < 3 || c.Seq != head || c.Attempts != 0 || c.InFlight { // from the chain's end: no history
 		t.Errorf("cursor %d/%d (head %d)", c.Seq, c.Attempts, head)
 	}
 	// Stored encrypted, bound to tenant and row: never in the clear, and
@@ -230,6 +243,12 @@ func TestCreateRefusals(t *testing.T) {
 		"no host":         {"https:///x", []string{"license.issued"}},
 		"not a URL":       {"https://exa mple.com/", []string{"license.issued"}},
 		"too long":        {"https://hooks.example.com/" + strings.Repeat("a", MaxURL), []string{"license.issued"}},
+		"long host":       {"https://" + strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 60) + "." + strings.Repeat("e", 60) + ".com/", []string{"license.issued"}},
+		"empty fragment":  {"https://hooks.example.com/x?#", []string{"license.issued"}},
+		"port too big":    {"https://hooks.example.com:99999/x", []string{"license.issued"}},
+		"port zero":       {"https://hooks.example.com:0/x", []string{"license.issued"}},
+		"odd host":        {"https://host;tok/x", []string{"license.issued"}},
+		"unicode host":    {"https://éxample.com/x", []string{"license.issued"}},
 		"no events":       {"https://hooks.example.com/x", nil},
 		"unknown event":   {"https://hooks.example.com/x", []string{"license.issued", "license.bogus"}},
 		"duplicate event": {"https://hooks.example.com/x", []string{"license.issued", "license.issued"}},
@@ -238,7 +257,7 @@ func TestCreateRefusals(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if ev := f.events(t, f.a, "webhook.create"); len(ev) != 9 || ev[0].Outcome != auditevent.OutcomeFailure {
+	if ev := f.events(t, f.a, "webhook.create"); len(ev) != 15 || ev[0].Outcome != auditevent.OutcomeFailure {
 		t.Errorf("refusals audited: %d", len(ev))
 	}
 	// A viewer may read but not create: denied (and audited) before its
@@ -374,5 +393,179 @@ func TestUpdateRotateDelete(t *testing.T) {
 		if d, _ := json.Marshal(ok.Details); bytes.Contains(d, []byte("token=")) || bytes.Contains(d, []byte("whsec_")) || bytes.Contains(d, []byte("s3cr3t")) {
 			t.Errorf("%s details %s", action, d)
 		}
+	}
+}
+
+// What the display shows is what will be dialled: lower case, no trailing
+// dot, the port normalized; every catalog event can be subscribed.
+func TestDisplay(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	for raw, want := range map[string]string{
+		"https://Hooks.Example.COM./x":    "https://hooks.example.com:443",
+		"https://hooks.example.com:0443/": "https://hooks.example.com:443",
+		"https://[2001:DB8::1]:8443/x":    "https://[2001:db8::1]:8443",
+		"https://xn--bcher-kva.example/":  "https://xn--bcher-kva.example:443",
+		"https://hooks.example.com:/x":    "https://hooks.example.com:443",
+	} {
+		c, err := f.s.Create(ctx, raw, Events)
+		if err != nil || c.URL != want {
+			t.Errorf("%s: %q, %v", raw, c.URL, err)
+		}
+		if err == nil {
+			if err := f.s.Delete(ctx, c.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// ADR-0032: an endpoint a caller can't see is "not found", existing or not,
+// so its ID can't be probed; a stale principal is refused.
+func TestNotFoundBeforeDenied(t *testing.T) {
+	f := setup(t)
+	c, err := f.s.Create(f.as(f.a, f.ownerA, authz.Owner), hookURL, []string{"license.issued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped := authz.WithPrincipal(context.Background(), authz.Principal{Kind: authz.Token, ID: ids.New("tok"), TenantID: f.a, Role: authz.Admin,
+		Scope: authz.Scope{Products: []string{ids.New("prd")}}})
+	ev := []string{"license.issued"}
+	for _, id := range []string{c.ID, ids.WebhookEndpoint()} {
+		if _, err := f.s.Get(scoped, id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get %s: %v", id, err)
+		}
+		if _, err := f.s.Update(scoped, id, nil, ev); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Update %s: %v", id, err)
+		}
+		if _, _, err := f.s.RotateSecret(scoped, id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Rotate %s: %v", id, err)
+		}
+		if err := f.s.Delete(scoped, id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Delete %s: %v", id, err)
+		}
+	}
+	// Not a member (any more): refused in the transaction.
+	gone := f.as(f.a, ids.New("usr"), authz.Owner)
+	if _, err := f.s.Create(gone, hookURL, ev); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("non-member create: %v", err)
+	}
+	if _, err := f.s.Update(gone, c.ID, nil, ev); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("non-member update: %v", err)
+	}
+	if _, err := f.s.Update(f.as(f.a, f.ownerA, authz.Owner), c.ID, nil, nil); !errors.Is(err, ErrInvalid) {
+		t.Errorf("empty update: %v", err)
+	}
+}
+
+// Changes of one endpoint take turns: two rotations hand out two secrets,
+// the later current and the earlier previous; an update racing a delete
+// finds nothing.
+func TestConcurrentChanges(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both would read the same secret here without the locks.
+	testHookRead = func() { time.Sleep(200 * time.Millisecond) }
+	t.Cleanup(func() { testHookRead = nil })
+	var wg sync.WaitGroup
+	got := make([]string, 2)
+	for i := range got {
+		wg.Go(func() {
+			var err error
+			if _, got[i], err = f.s.RotateSecret(ctx, c.ID); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	row := f.raw(t, f.a, c.ID)
+	cur, _ := f.s.decrypt(secrets.PurposeWebhookSecret, f.a, c.ID, row.SecretCiphertext)
+	prev, _ := f.s.decrypt(secrets.PurposeWebhookPrevious, f.a, c.ID, *row.PreviousSecretCiphertext)
+	if !(cur == got[0] && prev == got[1]) && !(cur == got[1] && prev == got[0]) {
+		t.Errorf("after two rotations: current %q previous %q, handed out %q", cur, prev, got)
+	}
+	testHookRead = nil
+	errs := make([]error, 2)
+	wg.Go(func() { errs[0] = f.s.Delete(ctx, c.ID) })
+	wg.Go(func() { _, errs[1] = f.s.Update(ctx, c.ID, nil, []string{"license.revoked"}) })
+	wg.Wait()
+	if errs[0] != nil || (errs[1] != nil && !errors.Is(errs[1], ErrNotFound)) {
+		t.Errorf("delete and update: %v", errs)
+	}
+}
+
+// A secret that can't be decrypted any more is replaced, not kept.
+func TestRotateUnreadableSecret(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := secrets.ParseKeyring("k9=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lost, err := other.Encrypt([]byte("whsec_x"), secrets.Binding{Purpose: secrets.PurposeWebhookSecret, TenantID: f.a, RowID: c.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		return tx.WebhookEndpoint.UpdateOneID(c.ID).SetSecretCiphertext([]byte(lost)).Exec(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := f.s.RotateSecret(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := f.raw(t, f.a, c.ID)
+	if got, err := f.s.decrypt(secrets.PurposeWebhookSecret, f.a, c.ID, row.SecretCiphertext); err != nil || got != secret || (row.PreviousSecretCiphertext != nil && len(*row.PreviousSecretCiphertext) > 0) || row.PreviousSecretUntil != nil {
+		t.Errorf("after rotating a lost secret: %q, %v, previous %v", got, err, row.PreviousSecretCiphertext)
+	}
+}
+
+// Delete locks the cursor first, as the dispatcher's result transaction
+// does: one recording a delivery meanwhile finishes, then the delete
+// removes it too; no deadlock.
+func TestDeleteWhileRecording(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform, err := sql.Open("pgx", env.PlatformURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = platform.Close() }()
+	tx, err := platform.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE webhook_cursors SET attempts = attempts WHERE endpoint_id = $1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- f.s.Delete(ctx, c.ID) }()
+	storetest.WaitForLockWaiter(t, env)
+	if _, err := tx.Exec(`INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, duration_ms, attempted_at)
+		VALUES ($1, $2, $3, 1, $4, 'license.issued', 1, 'failure', 'timeout', 1, now())`, ids.WebhookDelivery(), f.a, c.ID, ids.AuditEvent()); err != nil {
+		t.Fatalf("recording while a delete waits: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("delete: %v", err)
+	}
+	if _, err := f.s.Get(ctx, c.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("after delete: %v", err)
 	}
 }
