@@ -172,6 +172,27 @@ func TestInstallAndDeactivate(t *testing.T) {
 	}
 }
 
+// A renewal isn't rolled back by installing an older file of the same
+// license (a stale mount, a secret store rolled back); the same file again
+// changes nothing.
+func TestInstallOlderFile(t *testing.T) {
+	e := newEnv(t, nil)
+	old := e.file(t, nil)
+	renewed := e.file(t, func(c *licensefile.Claims) { c.IssuedAt = c.IssuedAt.Add(time.Minute) })
+	if _, _, err := e.c.Install(renewed); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.c.Install(old); !errors.Is(err, ErrOlderFile) {
+		t.Errorf("older file over the renewal: %v", err)
+	}
+	if c, _, err := e.c.Current(); err != nil || !c.IssuedAt.Equal(e.now.Add(-time.Hour+time.Minute).Truncate(time.Second)) {
+		t.Errorf("after: %v, %v", c, err)
+	}
+	if _, _, err := e.c.Install(renewed); err != nil {
+		t.Errorf("same file again: %v", err)
+	}
+}
+
 func TestStatesAndOptions(t *testing.T) {
 	e := newEnv(t, nil)
 	// In grace: the term ended ten minutes ago, grace an hour.

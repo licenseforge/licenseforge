@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Changed
+- Go SDK `offline`: `Install` refuses a file older (by `iat`) than the installed file of the same license (`ErrOlderFile`), so a stale copy (an old mount, a secret store rolled back) can't roll a renewal back. The same file again still installs.
 - ADR-0021 amended (and ADR-0024's release line): SDK releases use their ecosystem's integrity mechanism; the Go SDK, a Go module, relies on the Go checksum database, not cosign, which makes versions tamper-evident but doesn't authenticate the publisher. Its first release is postponed past 0.1.0-alpha.1. PS.2 and SR-11 say so, with the `sdk/go/v*` tag protection gap.
 - Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented; SI-7, SR-11 and SSDF PS.2/PS.3 record the signatures with their remaining gaps (the Go SDK isn't published; releases aren't immutable); SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
 
