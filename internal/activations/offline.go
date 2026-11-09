@@ -2,8 +2,6 @@ package activations
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -48,9 +46,8 @@ func (s Service) Offline(ctx context.Context, p authz.Principal, request string)
 	if err != nil {
 		return Lease{}, err
 	}
-	sum := sha256.Sum256([]byte(request))
 	ev := audit.By(p, "activation.offline", "activation", "")
-	ev.Details = map[string]any{"request_sha256": hex.EncodeToString(sum[:])}
+	ev.Details = map[string]any{"request_sha256": licensefile.OfflineSHA256(request)}
 	var out Lease
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error

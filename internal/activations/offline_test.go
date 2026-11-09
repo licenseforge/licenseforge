@@ -3,8 +3,6 @@ package activations
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -64,11 +62,10 @@ func TestOffline(t *testing.T) {
 	if l := f.license(t, is.License.ID); l.FirstActivatedAt == nil {
 		t.Error("first activation not recorded")
 	}
-	sum := sha256.Sum256([]byte(text))
 	es := f.events(t)
 	e := es[len(es)-1]
 	if e.Action != "activation.offline" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != got.ActivationID ||
-		e.ActorType != auditevent.ActorTypeUser || *e.ActorID != "usr_test" || !strings.Contains(e.Details, hex.EncodeToString(sum[:])) ||
+		e.ActorType != auditevent.ActorTypeUser || *e.ActorID != "usr_test" || !strings.Contains(e.Details, licensefile.OfflineSHA256(text)) ||
 		!strings.Contains(e.Details, h) || !strings.Contains(e.Details, `"new_seat":true`) || strings.Contains(e.Details, is.Key[3:12]) {
 		t.Errorf("event %+v", e)
 	}
