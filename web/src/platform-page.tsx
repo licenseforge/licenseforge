@@ -179,6 +179,7 @@ function InviteLink({ created, onClose }: { created: PlatformTenantCreated; onCl
 
 /** A new owner invite for a tenant without an owner (ADR-0042, amended). */
 function ReinviteDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: () => void }) {
+  const qc = useQueryClient();
   const [created, setCreated] = useState<PlatformTenantCreated | null>(null); // the link token lives here only
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -195,6 +196,8 @@ function ReinviteDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: 
     } catch (err) {
       onAuthError(err);
       setError(err);
+      // Joined meanwhile: the list's has_members is stale, so is the row's action.
+      if (err instanceof ApiError && err.code === "conflict") void qc.invalidateQueries({ queryKey: platformTenantsQuery.queryKey });
     } finally {
       setBusy(false);
     }

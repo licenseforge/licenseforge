@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/identity"
@@ -117,19 +118,27 @@ func (s Service) Tenants(ctx context.Context, limit int, afterAt time.Time, afte
 	return out, err
 }
 
-// WithMembers returns which of tenantIDs have at least one member (one
-// query, whatever the page size).
+// WithMembers returns which of tenantIDs have at least one member: one
+// query, an index probe per tenant (not a scan of their memberships).
 func (s Service) WithMembers(ctx context.Context, tenantIDs ...string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(tenantIDs) == 0 {
 		return out, nil
 	}
 	err := s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
-		ids, err := tx.Membership.Query().Where(membership.TenantIDIn(tenantIDs...)).Unique(true).Select(membership.FieldTenantID).Strings(ctx)
-		for _, id := range ids {
+		rows, err := tx.QueryContext(ctx, `SELECT t FROM unnest($1::text[]) t WHERE EXISTS (SELECT 1 FROM memberships m WHERE m.tenant_id = t)`, pgtype.FlatArray[string](tenantIDs))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
 			out[id] = true
 		}
-		return err
+		return rows.Err()
 	})
 	return out, err
 }

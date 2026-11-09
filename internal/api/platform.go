@@ -33,9 +33,9 @@ func (s *server) ListPlatformTenants(ctx context.Context, req apigen.ListPlatfor
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(rows))
-	for i, t := range rows {
-		ids[i] = t.ID
+	ids := make([]string, 0, len(rows))
+	for _, t := range rows[:min(len(rows), limit)] { // not the look-ahead row
+		ids = append(ids, t.ID)
 	}
 	members, err := s.Platform.WithMembers(ctx, ids...)
 	if err != nil {

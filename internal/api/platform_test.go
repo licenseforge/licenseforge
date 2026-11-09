@@ -322,6 +322,7 @@ func TestPlatformReinviteOwner(t *testing.T) {
 				return m["has_members"]
 			}
 		}
+		t.Fatal("the tenant isn't on the list's first page")
 		return nil
 	}
 	if again.body["tenant"].(map[string]any)["has_members"] != false || hasMembers() != false {
