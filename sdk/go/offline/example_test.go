@@ -18,7 +18,8 @@ import (
 func ExampleClient_Install_mounted() {
 	var c *offline.Client // from offline.New
 	const path = "/etc/acme/license/license.lic"
-	var last, logged []byte
+	var last []byte
+	var logged string // the file and error last logged
 	for ; ; time.Sleep(time.Minute) {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -33,15 +34,16 @@ func ExampleClient_Install_mounted() {
 		_, _, err = c.Install(string(b))
 		switch {
 		case err == nil, errors.Is(err, offline.ErrBadFile), errors.Is(err, offline.ErrReturned),
-			errors.Is(err, offline.ErrOlderFile), errors.Is(err, licensefile.ErrExpired):
+			errors.Is(err, offline.ErrOlderFile), errors.Is(err, licensefile.ErrExpired),
+			errors.Is(err, licensefile.ErrOfflineExceeded), errors.Is(err, licensefile.ErrUpdatesExpired):
 			last = b // installed, or refused for good: wait for another file
 		default:
 			// Retried: another license still installed (until Deactivate),
 			// the clock (not synced yet), the state store, a lock.
 		}
-		if err != nil && !bytes.Equal(b, logged) {
-			log.Printf("license file %s: %v", path, err) // once per file; the installed one, if any, stays
-			logged = b
+		if err != nil && logged != string(b)+err.Error() {
+			log.Printf("license file %s: %v", path, err) // once per file and error; the installed one, if any, stays
+			logged = string(b) + err.Error()
 		}
 	}
 }
