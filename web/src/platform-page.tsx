@@ -48,8 +48,8 @@ export function PlatformPage() {
                   <td className={`${td} font-mono text-xs`}>{tn.slug}</td>
                   <td className={td}>{mfaLabel(tn.mfa_policy)}</td>
                   <td className={td}>{date.format(new Date(tn.created_at))}</td>
-                  <td className={`${td} text-right`}>
-                    <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name })} onClick={() => setReinviting(tn)}>
+                  <td className={`${td} whitespace-nowrap text-right`}>
+                    <Button variant="ghost" aria-label={t("platform.reinviteNamed", { name: tn.name, slug: tn.slug })} onClick={() => setReinviting(tn)}>
                       {t("platform.reinvite")}
                     </Button>
                   </td>
