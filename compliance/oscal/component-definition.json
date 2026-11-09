@@ -3,7 +3,7 @@
     "uuid": "2e540aa4-20c7-5263-83d3-c2eb48ee1945",
     "metadata": {
       "title": "LicenseForge server: NIST SP 800-53 Rev 5 component definition",
-      "last-modified": "2026-11-04T00:00:00Z",
+      "last-modified": "2026-11-09T00:00:00Z",
       "version": "0.1.0-draft",
       "oscal-version": "1.2.3",
       "remarks": "Describes the controls the LicenseForge server implements or plans, for use in the system security plan of a system that runs it. Status (prop implementation-status, namespace https://licenseforge.io/ns/oscal): implemented = in main with tests; partial = in main, with the gaps in remarks; planned = a roadmap item, not in main; inherited = met by the deploying organization or its platform. Designed to support FedRAMP Moderate, HIPAA and NIST 800-53 assessments; it is not a FedRAMP authorization or readiness designation. Human-readable version: compliance/nist-800-53-matrix.md."
@@ -678,7 +678,7 @@
               {
                 "uuid": "5239a180-3516-5d95-a141-14bb3e0c2403",
                 "control-id": "cm-8",
-                "description": "Every release publishes SPDX SBOMs: one for the server binaries (a release asset) and one for each image, standard and -fips. Each is attested to the release artifact in GitHub's attestation store (Sigstore), so gh attestation verify ties it to that exact build. go.mod and go.sum pin the Go dependencies, package-lock.json the dashboard's.",
+                "description": "Every release publishes SPDX SBOMs: one for the server binaries (a release asset) and one for each image, standard and -fips, including the dashboard's npm packages and the distroless base's. Each is attested to the release artifact in GitHub's attestation store (Sigstore), so gh attestation verify ties it to that exact build. go.mod and go.sum pin the Go dependencies, package-lock.json the dashboard's.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -700,7 +700,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The chart has provenance but no SBOM of its own: it holds templates, and the images it deploys carry theirs."
+                "remarks": "SBOMs are generated from the linux/amd64 build and attested to every platform (arm64 has the same Go modules and distroless packages). The chart has provenance but no SBOM of its own: it holds templates, and the images it deploys carry theirs. The operator's inventory of the deployment (PostgreSQL, ingress, IdP, cluster) is theirs; these SBOMs feed it."
               },
               {
                 "uuid": "21b9d3a2-153b-5d0a-a776-87f258ac0efd",
@@ -1430,7 +1430,7 @@
               {
                 "uuid": "b9a68872-7cfd-52cb-8cb2-a1ecd38ba911",
                 "control-id": "si-2",
-                "description": "Remediation targets: Critical and High 30 days, Moderate 90, Low 180 (SECURITY.md, org policy). Dependabot opens dependency update PRs weekly; fixes ship through the normal PR process.",
+                "description": "Remediation targets: Critical and High 30 days, Moderate 90, Low 180 (SECURITY.md, org policy). Dependabot opens dependency update PRs weekly; fixes ship through the normal PR process and as signed releases.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1448,7 +1448,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "Fixes ship as signed releases (release.yml). Only the latest minor release gets fixes until 1.0."
+                "remarks": "Only the latest minor release gets fixes until 1.0."
               },
               {
                 "uuid": "3b223228-e2dc-5635-a8ba-8fcb516abfc3",
@@ -1472,7 +1472,7 @@
               {
                 "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
                 "control-id": "si-7",
-                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9).",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance and SBOM attestations, so users verify what they deploy (docs/verifying-releases.md).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1493,9 +1493,13 @@
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/go.sum",
                     "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
+                    "rel": "reference"
                   }
                 ],
-                "remarks": "Release signatures (cosign), SBOM and SLSA provenance are planned (Roadmap v0.1: signed releases + SBOM + SLSA provenance)."
+                "remarks": "The running server doesn't verify its own integrity; that is the deployment's admission policy (e.g. verify the cosign signature before pods start)."
               },
               {
                 "uuid": "2022ca7e-f1ce-53ab-8c6a-5b108c5e6079",
@@ -1602,7 +1606,7 @@
               {
                 "uuid": "189020f1-6f8e-5f9c-a590-a2feef62a61d",
                 "control-id": "sr-4",
-                "description": "SLSA build provenance for every release artifact (images, chart, binaries), attested in GitHub's attestation store with Sigstore. One job builds everything with a read-only token; the publish jobs build nothing, they push, sign and attest what it made, so the attested digest is the built one.",
+                "description": "SLSA build provenance (v1.0, GitHub artifact attestations on hosted runners, Sigstore) for every release artifact: images, chart, binaries. One job builds everything with a read-only token; the publish jobs build nothing: images are copied digest for digest from the built archives, and the chart's OCI manifest is created at push with the built .tgz as its single layer.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1610,7 +1614,6 @@
                     "value": "implemented"
                   }
                 ],
-                "remarks": "Provenance is from GitHub-hosted runners (SLSA Build L2-style); no hermetic or reproducible builds yet.",
                 "links": [
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/release.yml",
@@ -1620,12 +1623,13 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
                     "rel": "reference"
                   }
-                ]
+                ],
+                "remarks": "SLSA Build L2, not L3: provenance is generated in the same workflow as the build, not in an isolated reusable workflow. Builds aren't reproducible."
               },
               {
                 "uuid": "6e02511f-677f-518f-a809-94d3e788d566",
                 "control-id": "sr-11",
-                "description": "Go modules are verified against go.sum and the Go checksum database; base images are pulled by digest.",
+                "description": "Go modules are verified against go.sum and the Go checksum database; base images are pulled by digest. LicenseForge's own images (standard and -fips), chart and binaries' checksums are cosign-signed (keyless) with SLSA provenance and SBOM attestations.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1641,9 +1645,17 @@
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/Dockerfile",
                     "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/.github/workflows/release.yml",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
+                    "rel": "reference"
                   }
                 ],
-                "remarks": "LicenseForge's own images, chart and SDK releases aren't signed yet (cosign; Roadmap v0.1: signed releases)."
+                "remarks": "The Go SDK isn't published yet (no sdk/go/v* tag; the licenseforge.io import path doesn't resolve), and how SDK releases are signed is open: ADR-0021 says cosign, a Go module relies on the checksum database."
               }
             ]
           }

@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Changed
-- Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented, SSDF PS.2/PS.3 too, and SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
+- Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented; SI-7, SR-11 and SSDF PS.2/PS.3 record the signatures with their remaining gaps (the Go SDK isn't published; releases aren't immutable); SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
 
 ### Added
 - Logouts are audited (AU-2): `POST /auth/logout` records `user.logout` on the platform chain with the user, the session, source IP and user agent. The session ends first: if the entry can't be written, the answer is 500 (and the audit failure metric counts it), never a session kept alive. The NIST AU-2 entry now lists what is audited and every exception; AU-3 and AU-5 say how logins and logouts differ. A logout whose session can't be deleted keeps the cookie (500), so a retry can end it.
