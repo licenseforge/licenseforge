@@ -318,7 +318,7 @@
     {
       "name": "too_deep",
       "kind": "request",
-      "input": "lfreq1.eyJ2IjoxLCJ0ZW5hbnQiOiJ0bnRfYWNtZSIsInByb2R1Y3QiOiJhY21lLWRiIiwia2V5IjoiTEYtQUJDREUtRkdISUotS0xNTk8tUFFSU1QtVVZXWFlaIiwiYmluZCI6eyJ0eXBlIjoibWFjaGluZSIsImZwIjoic2hhMjU2OjgxZmU5YjFhMjgxMmUwNjhjMzIwYzQyNjRmMDFiNmQ0ZDE4NmE4M2NjMDAwOGZlOTU0ZmQ1ZDFiNmUzZjM2ODQifSwiZnBfc291cmNlIjoibWFjaGluZS1pZCIsIm5vbmNlIjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsIngiOltbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dLCJjcmVhdGVkIjoiMjAyNi0xMS0wOFQxMDowMDowMFoifQ",
+      "input": "lfreq1.eyJ2IjoyLCJ4IjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXSwidGVuYW50IjoidG50X2FjbWUiLCJwcm9kdWN0IjoiYWNtZS1kYiIsImtleSI6IkxGLUFCQ0RFLUZHSElKLUtMTU5PLVBRUlNULVVWV1hZWiIsImJpbmQiOnsidHlwZSI6Im1hY2hpbmUiLCJmcCI6InNoYTI1Njo4MWZlOWIxYTI4MTJlMDY4YzMyMGM0MjY0ZjAxYjZkNGQxODZhODNjYzAwMDhmZTk1NGZkNWQxYjZlM2YzNjg0In0sImZwX3NvdXJjZSI6Im1hY2hpbmUtaWQiLCJub25jZSI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHciLCJjcmVhdGVkIjoiMjAyNi0xMS0wOFQxMDowMDowMFoifQ",
       "result": "malformed"
     },
     {
@@ -391,6 +391,12 @@
       "name": "nonce_padded",
       "kind": "request",
       "input": "lfreq1.eyJ2IjoxLCJ0ZW5hbnQiOiJ0bnRfYWNtZSIsInByb2R1Y3QiOiJhY21lLWRiIiwia2V5IjoiTEYtQUJDREUtRkdISUotS0xNTk8tUFFSU1QtVVZXWFlaIiwiYmluZCI6eyJ0eXBlIjoibWFjaGluZSIsImZwIjoic2hhMjU2OjgxZmU5YjFhMjgxMmUwNjhjMzIwYzQyNjRmMDFiNmQ0ZDE4NmE4M2NjMDAwOGZlOTU0ZmQ1ZDFiNmUzZjM2ODQifSwiZnBfc291cmNlIjoibWFjaGluZS1pZCIsIm5vbmNlIjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09IiwiY3JlYXRlZCI6IjIwMjYtMTEtMDhUMTA6MDA6MDBaIn0",
+      "result": "malformed"
+    },
+    {
+      "name": "nonce_22_chars_with_crlf",
+      "kind": "request",
+      "input": "lfreq1.eyJ2IjoxLCJ0ZW5hbnQiOiJ0bnRfYWNtZSIsInByb2R1Y3QiOiJhY21lLWRiIiwia2V5IjoiTEYtQUJDREUtRkdISUotS0xNTk8tUFFSU1QtVVZXWFlaIiwiYmluZCI6eyJ0eXBlIjoibWFjaGluZSIsImZwIjoic2hhMjU2OjgxZmU5YjFhMjgxMmUwNjhjMzIwYzQyNjRmMDFiNmQ0ZDE4NmE4M2NjMDAwOGZlOTU0ZmQ1ZDFiNmUzZjM2ODQifSwiZnBfc291cmNlIjoibWFjaGluZS1pZCIsIm5vbmNlIjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9cclxuIiwiY3JlYXRlZCI6IjIwMjYtMTEtMDhUMTA6MDA6MDBaIn0",
       "result": "malformed"
     },
     {
