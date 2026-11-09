@@ -14,6 +14,7 @@ Three layers, cheapest first:
 - External Secrets Operator: AWS SM, GCP SM, Azure KV, Vault, OpenBao → Kubernetes Secret → mounted file.
 - Secrets Store CSI Driver (AWS/GCP/Azure/Vault providers) → mounted file.
 - SDK just reads the mounted file and watches it (same path as [ADR-0006 Air-gapped licensing](0006-air-gapped-licensing.md)). Rotation in the vault flows through automatically.
+  > **Amended 2026-11-09**: the SDK doesn't watch files. The app reads the mounted license key at start, and checks the mounted license file now and then, calling the offline client's `Install` when it changes (Go: `ExampleClient_Install_mounted`); `Install` refuses an older file of the same license, so a stale copy can't roll a renewal back. The "Helm examples" are the syncer manifests in `docs/secret-managers.md`: the LicenseForge chart already takes existing Secrets, so it needs no templates of its own.
 
 **2. VMs / bare metal: agent-rendered files (v0.2, docs)**
 - Vault Agent / OpenBao Agent templates render the secret to a file; SDK reads it.
