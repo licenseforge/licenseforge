@@ -1212,7 +1212,7 @@
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
                 "control-id": "sc-8",
-                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention) must verify the server's certificate (sslmode=verify-full or verify-ca, no plaintext fallback) unless the host is local; otherwise the process refuses to start. Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
                 "props": [
                   {
                     "name": "implementation-status",

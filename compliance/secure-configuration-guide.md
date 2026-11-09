@@ -10,10 +10,10 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 | Variable | Required | Default | Security notes |
 |---|---|---|---|
-| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Use `sslmode=verify-full`: a URL that doesn't verify the server is refused unless the host is local (see [Database logins](#database-logins)). Secret |
-| `LICENSEFORGE_PLATFORM_DATABASE_URL` | yes (server) | – | Platform pool, login `licenseforge_admin` (all tenants). Secret |
-| `LICENSEFORGE_IDENTITY_DATABASE_URL` | yes (server) | – | Login-path pool, login `licenseforge_login` (ADR-0029). Secret |
-| `LICENSEFORGE_OWNER_DATABASE_URL` | `migrate` only | – | Schema owner. **The server refuses to start if this is set.** Give it only to the migration Job. Secret |
+| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Use `sslmode=verify-full` (or `verify-ca` with `sslrootcert`): a URL that doesn't verify the server is refused unless the host is local (`localhost`, a loopback address or a Unix socket) (see [Database logins](#database-logins)). Secret |
+| `LICENSEFORGE_PLATFORM_DATABASE_URL` | yes (server) | – | Platform pool, login `licenseforge_admin` (all tenants). `sslmode=verify-full` (checked as for `LICENSEFORGE_DATABASE_URL`). Secret |
+| `LICENSEFORGE_IDENTITY_DATABASE_URL` | yes (server) | – | Login-path pool, login `licenseforge_login` (ADR-0029). `sslmode=verify-full` (checked as for `LICENSEFORGE_DATABASE_URL`). Secret |
+| `LICENSEFORGE_OWNER_DATABASE_URL` | `migrate` only | – | Schema owner. **The server refuses to start if this is set.** Give it only to the migration Job. `sslmode=verify-full` (checked as for `LICENSEFORGE_DATABASE_URL`). Secret |
 | `LICENSEFORGE_MASTER_KEYS` | yes (server) | – | Keyring, `id=base64key[,…]`; parsed at start ([below](#secrets-and-the-keyring)). Secret |
 | `LICENSEFORGE_ADDR` | no | `:8080` | Listen address (also `-addr`). Plain HTTP: put TLS in front ([TLS and ingress](#tls-and-ingress)). The chart's probes and NetworkPolicy assume 8080 |
 | `LICENSEFORGE_DRAIN` | no | `5s` | How long the server keeps serving after SIGTERM while readiness fails. The chart sets it from `drainSeconds` |
@@ -95,7 +95,7 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 Also:
 - `REVOKE CONNECT` and `REVOKE TEMPORARY ... FROM PUBLIC` (in the script) keep other logins out and stop temp-table shadowing.
 - On Cloud SQL, create the logins with SQL. Console-created users are members of `cloudsqlsuperuser`, which the server refuses.
-- **Use TLS with `sslmode=verify-full` in every URL.** The server, the migration and audit retention refuse to start with a URL that doesn't verify the server's certificate (`disable`, `allow`, `prefer`, the driver's default, and an unverified `require`) unless the host is a loopback address or a Unix socket. TLS 1.2 is the minimum. `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true` (Helm `databaseAllowPlaintext`) lifts the check: development clusters only.
+- **Use TLS with `sslmode=verify-full` in every URL.** The server, the migration and audit retention refuse to start with a URL that doesn't verify the server's certificate (`disable`, `allow`, `prefer` (the driver's default), `require`, and `verify-ca` without `sslrootcert`, which pgx checks against the system roots for any name) unless the host is `localhost`, a loopback address or a Unix socket. TLS 1.2 is the minimum. `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true` (Helm `databaseAllowPlaintext`; any other value is an error) lifts the check, and the server logs a warning at every start: development clusters only.
 - Use strong unique passwords or IAM authentication, and rotate them like any secret.
 - Encrypt the database disk and backups (a deployment requirement, ADR-0024).
 
