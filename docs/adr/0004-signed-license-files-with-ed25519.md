@@ -24,6 +24,8 @@ For online activation the end user only ever handles a **license key** (e.g. `LF
 | Air-gapped license file | `ConfigMap` (or Secret) **mounted as a directory** | Signed, not secret; admin updates it, kubelet propagates it, SDK re-reads on change |
 | Online lease | Memory, or SDK writes a ConfigMap **via the k8s API** | Mounted ConfigMaps are read-only inside the pod; writing needs a ServiceAccount with `get/update` on that one ConfigMap |
 
+> **Amended 2026-11-09**: the online lease may also go in a Secret where the cluster's policy prefers one (the Go SDK ships `online.KubernetesSecret` beside the default `online.KubernetesConfigMap`), with the same `get/update` on that one Secret. The lease stays signed, not secret; the choice is the vendor's.
+
 - Don't mount with `subPath`: subPath mounts never receive updates, so a renewed license wouldn't be seen until pod restart.
 - Default binding on k8s is `cluster` (kube-system namespace UID), not per-pod: pods are ephemeral, so per-pod fingerprints would burn activations on every reschedule. All replicas share one activation and one lease.
 
