@@ -45,7 +45,7 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	}
 	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
 	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || !(u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname())) {
+	if err != nil || u.Host == "" || !secure(u) {
 		return errors.New("offline: LICENSEFORGE_URL must be an https URL (http only for loopback hosts): the token travels with the request")
 	}
 	if tenant == "" || token == "" {
@@ -117,6 +117,11 @@ func readArg(path string, in io.Reader) (string, error) {
 	}
 	b, err := io.ReadAll(io.LimitReader(r, 64<<10))
 	return string(b), err
+}
+
+// secure: https, or http to a loopback host (tests, a local proxy).
+func secure(u *url.URL) bool {
+	return u.Scheme == "https" || (u.Scheme == "http" && loopback(u.Hostname()))
 }
 
 func loopback(host string) bool {
