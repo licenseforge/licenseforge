@@ -46,6 +46,9 @@
 //	LICENSEFORGE_OIDC_STEP_UP_MFA_ACR        acr_values a step-up login to mfa asks for (comma list; default none: max_age=0 only)
 //	LICENSEFORGE_OIDC_STEP_UP_PHISHING_RESISTANT_ACR the same for phishing_resistant (e.g. phr on Okta)
 //
+// `licenseforge offline activate|return` calls the API instead, with
+// LICENSEFORGE_URL, LICENSEFORGE_TENANT and LICENSEFORGE_TOKEN (cmd/licenseforge/offline.go).
+//
 // The serving process refuses to start if the owner or the retention login is
 // in its environment: serving pods must never hold them (ADR-0009, ADR-0036).
 package main
@@ -102,7 +105,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -120,6 +123,8 @@ func main() {
 	cmd := strings.Join(flag.Args(), " ")
 	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && args[1] == "create" {
 		cmd = "tenant create" // with its own flags
+	} else if len(args) >= 1 && args[0] == "offline" {
+		cmd = "offline"
 	}
 	var err error
 	switch cmd {
@@ -136,6 +141,12 @@ func main() {
 		err = migrate(ctx, log)
 	case "audit prune":
 		err = prune(ctx, log)
+	case "offline":
+		err = offline(ctx, flag.Args()[1:], os.Getenv, os.Stdin, os.Stdout,
+			&http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 	case "tenant create":
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {
