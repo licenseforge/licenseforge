@@ -57,9 +57,15 @@ type TenantEdges struct {
 	AuditExportCursors []*AuditExportCursor `json:"audit_export_cursors,omitempty"`
 	// AuditAnchors holds the value of the audit_anchors edge.
 	AuditAnchors []*AuditAnchor `json:"audit_anchors,omitempty"`
+	// WebhookEndpoints holds the value of the webhook_endpoints edge.
+	WebhookEndpoints []*WebhookEndpoint `json:"webhook_endpoints,omitempty"`
+	// WebhookCursors holds the value of the webhook_cursors edge.
+	WebhookCursors []*WebhookCursor `json:"webhook_cursors,omitempty"`
+	// WebhookDeliveries holds the value of the webhook_deliveries edge.
+	WebhookDeliveries []*WebhookDelivery `json:"webhook_deliveries,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [10]bool
+	loadedTypes [13]bool
 }
 
 // ProductsOrErr returns the Products value or an error if the edge
@@ -150,6 +156,33 @@ func (e TenantEdges) AuditAnchorsOrErr() ([]*AuditAnchor, error) {
 		return e.AuditAnchors, nil
 	}
 	return nil, &NotLoadedError{edge: "audit_anchors"}
+}
+
+// WebhookEndpointsOrErr returns the WebhookEndpoints value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) WebhookEndpointsOrErr() ([]*WebhookEndpoint, error) {
+	if e.loadedTypes[10] {
+		return e.WebhookEndpoints, nil
+	}
+	return nil, &NotLoadedError{edge: "webhook_endpoints"}
+}
+
+// WebhookCursorsOrErr returns the WebhookCursors value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) WebhookCursorsOrErr() ([]*WebhookCursor, error) {
+	if e.loadedTypes[11] {
+		return e.WebhookCursors, nil
+	}
+	return nil, &NotLoadedError{edge: "webhook_cursors"}
+}
+
+// WebhookDeliveriesOrErr returns the WebhookDeliveries value or an error if the edge
+// was not loaded in eager-loading.
+func (e TenantEdges) WebhookDeliveriesOrErr() ([]*WebhookDelivery, error) {
+	if e.loadedTypes[12] {
+		return e.WebhookDeliveries, nil
+	}
+	return nil, &NotLoadedError{edge: "webhook_deliveries"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -282,6 +315,21 @@ func (_m *Tenant) QueryAuditExportCursors() *AuditExportCursorQuery {
 // QueryAuditAnchors queries the "audit_anchors" edge of the Tenant entity.
 func (_m *Tenant) QueryAuditAnchors() *AuditAnchorQuery {
 	return NewTenantClient(_m.config).QueryAuditAnchors(_m)
+}
+
+// QueryWebhookEndpoints queries the "webhook_endpoints" edge of the Tenant entity.
+func (_m *Tenant) QueryWebhookEndpoints() *WebhookEndpointQuery {
+	return NewTenantClient(_m.config).QueryWebhookEndpoints(_m)
+}
+
+// QueryWebhookCursors queries the "webhook_cursors" edge of the Tenant entity.
+func (_m *Tenant) QueryWebhookCursors() *WebhookCursorQuery {
+	return NewTenantClient(_m.config).QueryWebhookCursors(_m)
+}
+
+// QueryWebhookDeliveries queries the "webhook_deliveries" edge of the Tenant entity.
+func (_m *Tenant) QueryWebhookDeliveries() *WebhookDeliveryQuery {
+	return NewTenantClient(_m.config).QueryWebhookDeliveries(_m)
 }
 
 // Update returns a builder for updating this Tenant.

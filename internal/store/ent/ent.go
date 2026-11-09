@@ -35,6 +35,9 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/signingkey"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ent/user"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookcursor"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookdelivery"
+	"licenseforge.io/licenseforge/internal/store/ent/webhookendpoint"
 )
 
 // ent aliases to avoid import conflicts in user's code.
@@ -118,6 +121,9 @@ func checkColumn(t, c string) error {
 			signingkey.Table:        signingkey.ValidColumn,
 			tenant.Table:            tenant.ValidColumn,
 			user.Table:              user.ValidColumn,
+			webhookcursor.Table:     webhookcursor.ValidColumn,
+			webhookdelivery.Table:   webhookdelivery.ValidColumn,
+			webhookendpoint.Table:   webhookendpoint.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)
