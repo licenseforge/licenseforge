@@ -216,9 +216,11 @@ func TestStatesAndOptions(t *testing.T) {
 // kind's state (the clock guard's, a shared store) fails loudly.
 func TestState(t *testing.T) {
 	e := newEnv(t, nil)
-	e.store.b = []byte("{not json")
-	if _, _, err := e.c.Current(); !errors.Is(err, ErrNoLicense) {
-		t.Errorf("corrupt: %v", err)
+	for _, corrupt := range []string{"{not json", "null", "{}", "[]"} {
+		e.store.b = []byte(corrupt)
+		if _, _, err := e.c.Current(); !errors.Is(err, ErrNoLicense) {
+			t.Errorf("corrupt %q: %v", corrupt, err)
+		}
 	}
 	if _, _, err := e.c.Install(e.file(t, nil)); err != nil {
 		t.Errorf("Install over corrupt state: %v", err)
@@ -231,6 +233,26 @@ func TestState(t *testing.T) {
 	_, _, err = e.c.Current() // the guard writes its mark over the offline state...
 	if _, _, err2 := e.c.Current(); !errors.Is(err, ErrForeignState) && !errors.Is(err2, ErrForeignState) {
 		t.Errorf("shared store: %v, %v", err, err2) // ...which the next read notices
+	}
+}
+
+// A guard that can't be raised to a file's future iat: Install refuses
+// what Current would.
+func TestInstallFutureFileUnheldGuard(t *testing.T) {
+	cs := &memStore{}
+	g, err := clock.New(cs, "LF-ABCDE-FGHIJ", clock.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, g)
+	strict := time.Duration(0)
+	e.c.cfg.ClockTolerance = &strict
+	cs.failSave = true
+	if _, _, err := e.c.Install(e.file(t, func(c *licensefile.Claims) { c.IssuedAt = e.now.Add(time.Hour) })); !errors.Is(err, clock.ErrNotPersisted) {
+		t.Errorf("Install with an unwritable guard: %v", err)
+	}
+	if e.store.b != nil {
+		t.Error("the file was stored")
 	}
 }
 

@@ -111,11 +111,12 @@ type state struct {
 // Well-formed state of another kind is ErrForeignState: the stores are
 // mixed up, and writing would destroy the other state.
 func decode(b []byte) (state, error) {
-	var got state
-	if len(b) == 0 || json.Unmarshal(b, &got) != nil {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(b, &keys) != nil || len(keys) == 0 { // nothing, garbage, null, {}
 		return state{Kind: 1}, nil
 	}
-	if got.Kind != 1 {
+	var got state
+	if _, ok := keys["offline"]; !ok || json.Unmarshal(b, &got) != nil || got.Kind != 1 {
 		return got, ErrForeignState
 	}
 	return got, nil
@@ -181,9 +182,9 @@ func (c *Client) options() (licensefile.CheckOptions, error) {
 // Install verifies file (the vendor's answer to Request) and installs it,
 // replacing the installed file of the same license (a renewal). A file that
 // isn't usable now, that this machine returned, or of another license while
-// one is installed (ErrOtherLicense) is refused and nothing changes; with
-// Config.Clock, the guard is raised to the file's iat only once it is
-// installed. ErrLocked from a clock.FileStore: another process is changing
+// one is installed (ErrOtherLicense) is refused; with Config.Clock, a file
+// whose iat is ahead of this machine's clock raises the guard to it once
+// its checks pass (refused if the guard can't hold it). ErrLocked from a clock.FileStore: another process is changing
 // the state; retry.
 func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, error) {
 	claims, err := c.verify(file)
@@ -196,13 +197,21 @@ func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, 
 		return nil, "", err
 	}
 	// The vendor's clock may be ahead of this machine's: within the guard's
-	// tolerance, its iat is a time this machine will accept (ADR-0018).
-	if c.cfg.Clock != nil && claims.IssuedAt.After(o.Now) && !claims.IssuedAt.After(local.Add(c.cfg.Clock.Tolerance())) {
+	// tolerance, its iat is a time this machine will accept (ADR-0018), once
+	// the guard holds it; if the guard can't be raised, Current would refuse
+	// the file, so Install does.
+	raise := c.cfg.Clock != nil && claims.IssuedAt.After(o.Now) && !claims.IssuedAt.After(local.Add(c.cfg.Clock.Tolerance()))
+	if raise {
 		o.Now = claims.IssuedAt
 	}
 	st, err := claims.Check(o)
 	if err != nil {
 		return nil, "", err
+	}
+	if raise { // after the checks: a genuine time (ADR-0018)
+		if err := c.cfg.Clock.Observe(claims.IssuedAt, local); err != nil {
+			return nil, "", fmt.Errorf("offline: the file's iat is ahead of this machine's clock and the clock guard can't hold it: %w", err)
+		}
 	}
 	err = c.update(func(s state) (*state, error) {
 		if r, ok := s.Returned[claims.LicenseID]; ok && !claims.IssuedAt.After(r) {
@@ -218,9 +227,6 @@ func (c *Client) Install(file string) (*licensefile.Claims, licensefile.Status, 
 	})
 	if err != nil {
 		return nil, "", err
-	}
-	if c.cfg.Clock != nil {
-		_ = c.cfg.Clock.Observe(claims.IssuedAt, local) // a genuine time now in use; Current reports a guard that can't be written
 	}
 	return claims, st, nil
 }
