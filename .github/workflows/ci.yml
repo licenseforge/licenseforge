@@ -83,6 +83,9 @@ jobs:
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
           if helm template t . >/dev/null 2>&1; then echo "rendered without secrets"; exit 1; fi
+          # Database plaintext only when asked (development clusters), then for every workload that connects.
+          if helm template t . $s --set auditRetention.enabled=true --set auditRetention.secret=r | grep -qF LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT; then echo "plaintext database allowed by default"; exit 1; fi
+          [ "$(helm template t . $s --set auditRetention.enabled=true --set auditRetention.secret=r --set databaseAllowPlaintext=true | grep -cF LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT)" = 3 ] || { echo "databaseAllowPlaintext not on the Deployment, migration and retention"; exit 1; }
           # The serving pods never get the owner login (ADR-0009).
           if helm template t . $s --show-only templates/deployment.yaml | grep -qE 'owner-database-url|OWNER_DATABASE_URL'; then echo "owner login in Deployment"; exit 1; fi
           # Alert rules (ADR-0036): rendered only with the Prometheus Operator's CRD and the

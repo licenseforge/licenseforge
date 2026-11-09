@@ -10,7 +10,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 
 | Variable | Required | Default | Security notes |
 |---|---|---|---|
-| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Add `sslmode=verify-full` (the server doesn't enforce TLS; see [Database logins](#database-logins)). Secret |
+| `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Use `sslmode=verify-full`: a URL that doesn't verify the server is refused unless the host is local (see [Database logins](#database-logins)). Secret |
 | `LICENSEFORGE_PLATFORM_DATABASE_URL` | yes (server) | – | Platform pool, login `licenseforge_admin` (all tenants). Secret |
 | `LICENSEFORGE_IDENTITY_DATABASE_URL` | yes (server) | – | Login-path pool, login `licenseforge_login` (ADR-0029). Secret |
 | `LICENSEFORGE_OWNER_DATABASE_URL` | `migrate` only | – | Schema owner. **The server refuses to start if this is set.** Give it only to the migration Job. Secret |
@@ -34,6 +34,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_OTLP_ENDPOINT` | no | unset = no OTLP export | OTLP/HTTP logs URL with the JSON encoding, `https://…/v1/logs` (http only on loopback; ADR-0036). TLS 1.2+, verified. A batch is delivered only on a 2xx with an empty body or an OTLP JSON body rejecting no record. No HTTP proxy is used |
 | `LICENSEFORGE_AUDIT_OTLP_CA_FILE`, `_CERT_FILE`, `_KEY_FILE` | no | system roots, no client certificate | As for syslog (chart: `audit.export.otlp.caSecret`, `clientSecret`) |
 | `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: pass it with `secretKeyRef` (chart: `headersSecret`) |
+| `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT` | no | unset = TLS required | `true` lets database URLs skip verifying the server (no TLS) to non-local hosts. Development clusters only; never in production (SC-8) |
 | `LICENSEFORGE_TRUSTED_PROXIES` | no | unset = no proxy trusted | Comma-separated CIDRs or addresses of your ingress/load balancer. Only their `X-Forwarded-For` is believed, read from the right: the client is the right-most hop that isn't a trusted proxy. List proxies only, never client networks. Prefixes broader than /8 (IPv4) or /32 (IPv6) are refused at start |
 | `LICENSEFORGE_RATE_LIMIT_ACTIVATION` | no | `1200` | Requests per client address per minute, per replica, on `/api/v1/activation/` (`0` = off). Many installs can share a customer's egress address; each license key is limited separately (60/min) |
 | `LICENSEFORGE_RATE_LIMIT_MANAGEMENT` | no | `600` | The same for the rest of `/api/v1` and `/auth/` except login |
@@ -94,7 +95,7 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 Also:
 - `REVOKE CONNECT` and `REVOKE TEMPORARY ... FROM PUBLIC` (in the script) keep other logins out and stop temp-table shadowing.
 - On Cloud SQL, create the logins with SQL. Console-created users are members of `cloudsqlsuperuser`, which the server refuses.
-- **Use TLS with `sslmode=verify-full` in every URL.** The server doesn't enforce database TLS, and the driver (pgx) defaults to `sslmode=prefer`, which falls back to plaintext and doesn't verify the server certificate.
+- **Use TLS with `sslmode=verify-full` in every URL.** The server, the migration and audit retention refuse to start with a URL that doesn't verify the server's certificate (`disable`, `allow`, `prefer`, the driver's default, and an unverified `require`) unless the host is a loopback address or a Unix socket. TLS 1.2 is the minimum. `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true` (Helm `databaseAllowPlaintext`) lifts the check: development clusters only.
 - Use strong unique passwords or IAM authentication, and rotate them like any secret.
 - Encrypt the database disk and backups (a deployment requirement, ADR-0024).
 

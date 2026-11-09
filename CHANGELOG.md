@@ -3,6 +3,10 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Security
+- **Database connections must verify the server** (ADR-0024, SC-8): the server, `licenseforge migrate` and `audit prune` refuse to start with a database URL that doesn't verify the server's certificate (`sslmode=disable`, `allow`, `prefer` (the driver's default) or an unverified `require`) unless every host is a loopback address or a Unix socket. Use `sslmode=verify-full`. Every database TLS connection is TLS 1.2+. `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true` (Helm `databaseAllowPlaintext`, rendered on the server, migration and retention) lifts the check for development clusters; the e2e environment sets it. **Upgrade note:** a deployment whose URLs lack `sslmode=verify-full` won't start until they have it.
+- Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
+
 ### Added
 - Dashboard: "New owner invite" on each row of the platform Tenants screen (ADR-0042, amended): an owner email, then the new invite link shown once; a tenant that already has an owner says so. The create dialog and this one share the link view.
 - Re-issue a tenant's owner invitation (ADR-0042, amended): `POST /api/v1/platform/tenants/{id|slug}/owner-invitation` with `{owner_email}` (platform admins) and `licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E` (platform login), for a tenant whose first invitation was lost or expired. Only while the tenant has no owner (409 otherwise); earlier pending owner invitations are revoked; the new token is shown once. Audited on the platform chain (`tenant.owner_invitation`) and the tenant's (`invitation.revoke`, `invitation.create`).

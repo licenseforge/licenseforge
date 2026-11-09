@@ -32,6 +32,11 @@ migrate:
 drainSeconds: 5
 terminationGracePeriodSeconds: 30
 
+# The server, the migration and audit retention refuse database URLs that
+# don't verify the server (sslmode=verify-full or verify-ca) unless the host
+# is local. true allows plaintext: development clusters only.
+databaseAllowPlaintext: false
+
 extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secrets
 
 # Your ingress controller's or load balancer's addresses (CIDRs, comma-

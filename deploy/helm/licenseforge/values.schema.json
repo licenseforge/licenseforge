@@ -11,6 +11,7 @@
       }
     },
     "trustedProxies": {"type": "string"},
+    "databaseAllowPlaintext": {"type": "boolean"},
     "extraCA": {
       "type": "object",
       "additionalProperties": false,

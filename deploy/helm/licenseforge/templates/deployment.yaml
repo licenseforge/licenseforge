@@ -135,6 +135,7 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ . | quote }}, key: {{ required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc) | quote }}}}
             {{- end }}
             {{- end }}
+            {{- include "licenseforge.dbPlaintextEnv" (list . 12) }}
             {{- with .Values.extraEnv }}{{ toYaml . | nindent 12 }}{{ end }}
           startupProbe: # covers the startup database connect (up to 30s) before liveness applies
             httpGet: {path: /healthz, port: http}
