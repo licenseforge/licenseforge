@@ -52,12 +52,12 @@ if status == licensefile.StatusGrace { /* warn: the term ended, renewal pending 
 - **Time (ADR-0018)**: the client keeps the offset between each lease's `iat` (authenticated server time) and the local clock, and checks with max(local, local + offset). With `Config.Clock`, it resets the guard's high-water mark to each lease's `iat`. The HTTP `Date` header is never trusted.
 - **Persistence**: `Config.Store` (`Load`/`Save` of the lease string; `Save("")` means delete; it must not call back into the client, which holds its commit lock while saving) keeps the lease across restarts (ADR-0004). Stored leases are verified again when loaded and raise the clock guard to their `iat`; without a store, the lease lives in memory (a warning). Two ship, or bring your own:
   - `online.FileStore{Path: stateDir + "/lease"}`: locked across processes, atomic writes, mode 0600.
-  - `&online.KubernetesSecret{Name: "acme-db-license"}`: one key (`lease`, or `Key`) of a Secret in the pod's namespace (or `Namespace`), through the in-cluster API with the pod's service account, so every replica of a cluster-bound app shares the lease. The token is read on every request (projected tokens rotate); a concurrent update (409) is retried. RBAC: create the Secret beforehand and grant `get` and `update` on it by name (granting `create` instead can't be limited to one name):
+  - `&online.KubernetesConfigMap{Name: "acme-db-license"}`: one key (`lease`, or `Key`) of a ConfigMap in the pod's namespace (or `Namespace`), through the in-cluster API with the pod's service account, so every replica of a cluster-bound app shares the lease (the lease is signed, not secret). The token is read on every request (projected tokens rotate). Each Save reads the object and writes it back conditionally, keeping everything else in it; a concurrent update (409) or a deletion meanwhile is retried a few times with a short jittered pause, and the whole Save is bounded at 15 seconds. `&online.KubernetesSecret{...}` is the same on a Secret, for clusters whose policy prefers one. RBAC: create the object beforehand and grant `get` and `update` on it by name (granting `create` instead can't be limited to one name):
 
     ```yaml
     rules:
       - apiGroups: [""]
-        resources: [secrets]
+        resources: [configmaps] # or secrets
         resourceNames: [acme-db-license]
         verbs: [get, update]
     ```

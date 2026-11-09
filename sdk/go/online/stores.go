@@ -3,16 +3,19 @@ package online
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -25,8 +28,13 @@ import (
 // persistent path; a lease that fails to load or verify is ignored (New).
 type FileStore struct{ Path string }
 
+var errNoPath = errors.New("lease store: FileStore.Path is empty")
+
 // Load implements Store.
 func (f FileStore) Load() (string, error) {
+	if f.Path == "" {
+		return "", errNoPath
+	}
 	var lease string
 	err := clock.FileStore{Path: f.Path}.Update(func(cur []byte) ([]byte, error) {
 		lease = strings.TrimSpace(string(cur))
@@ -37,99 +45,164 @@ func (f FileStore) Load() (string, error) {
 
 // Save implements Store.
 func (f FileStore) Save(lease string) error {
-	return clock.FileStore{Path: f.Path}.Update(func([]byte) ([]byte, error) {
+	if f.Path == "" {
+		return errNoPath
+	}
+	err := clock.FileStore{Path: f.Path}.Update(func([]byte) ([]byte, error) {
 		return []byte(lease), nil // non-nil even when empty: "" empties the file
 	})
+	if err != nil {
+		// The old file may have been unreadable while the write went
+		// through (clock.FileStore reports both): written is stored.
+		if got, lerr := f.Load(); lerr == nil && got == strings.TrimSpace(lease) {
+			return nil
+		}
+	}
+	return err
 }
 
-// KubernetesSecret keeps the lease in one key of a Secret, through the
-// in-cluster API with the pod's service account (ADR-0004): every replica
-// of a cluster-bound app shares it. RBAC: get and update on the Secret
-// (resourceNames: [Name]); create in the namespace too, unless the Secret
-// is created beforehand (recommended: create can't be limited by name).
-// The token is read on every request (projected tokens rotate).
+// KubernetesConfigMap keeps the lease in one key of a ConfigMap, through
+// the in-cluster API with the pod's service account (ADR-0004: the lease is
+// signed, not secret), so every replica of a cluster-bound app shares it.
+// RBAC: get and update on that ConfigMap (resourceNames: [Name]); create it
+// beforehand, since create can't be limited to one name.
+type KubernetesConfigMap struct {
+	Namespace string // "": the pod's own
+	Name      string
+	Key       string // "": "lease"
+	kubeStore
+}
+
+// KubernetesSecret is KubernetesConfigMap on a Secret, for clusters whose
+// policy prefers Secrets (ADR-0004, amended).
 type KubernetesSecret struct {
 	Namespace string // "": the pod's own
 	Name      string
 	Key       string // "": "lease"
+	kubeStore
+}
 
-	once sync.Once
-	api  *kubeAPI
-	err  error
+// Load implements Store: "" when the ConfigMap or the key is missing.
+func (k *KubernetesConfigMap) Load() (string, error) {
+	return k.load("configmaps", "ConfigMap", k.Namespace, k.Name, k.Key)
+}
+
+// Save implements Store: sets (or, for "", removes) the key, creating the
+// ConfigMap if it doesn't exist.
+func (k *KubernetesConfigMap) Save(lease string) error {
+	return k.save("configmaps", "ConfigMap", k.Namespace, k.Name, k.Key, lease)
+}
+
+// Load implements Store: "" when the Secret or the key is missing.
+func (k *KubernetesSecret) Load() (string, error) {
+	return k.load("secrets", "Secret", k.Namespace, k.Name, k.Key)
+}
+
+// Save implements Store: sets (or, for "", removes) the key, creating the
+// Secret if it doesn't exist.
+func (k *KubernetesSecret) Save(lease string) error {
+	return k.save("secrets", "Secret", k.Namespace, k.Name, k.Key, lease)
 }
 
 const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// kubeAPI is the API server as the pod's service account sees it.
-type kubeAPI struct {
+// saveTimeout bounds a whole Save (every attempt): the Client holds its
+// commit lock meanwhile.
+const saveTimeout = 15 * time.Second
+
+var (
+	dnsLabel     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+	dnsSubdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	dataKey      = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
+)
+
+// kubeStore is the shared part: the API server as the pod's service account
+// sees it. The token is read on every request (projected tokens rotate).
+type kubeStore struct {
+	once      sync.Once
 	base      string
 	tokenFile string
 	client    *http.Client
+	ns        string // the pod's namespace
+	err       error
 }
 
-func (k *KubernetesSecret) init() error {
+func (k *kubeStore) init() error {
 	k.once.Do(func() {
-		if k.api != nil { // set by tests
+		if k.client != nil { // set by tests
 			return
 		}
-		k.api, k.err = inCluster(serviceAccountDir)
-		if k.err == nil && k.Namespace == "" {
-			ns, err := os.ReadFile(serviceAccountDir + "/namespace")
-			k.Namespace, k.err = strings.TrimSpace(string(ns)), err
-		}
+		k.err = k.inCluster(serviceAccountDir)
 	})
-	switch {
-	case k.err != nil:
-		return fmt.Errorf("online: kubernetes secret store: %w", k.err)
-	case k.Name == "" || k.Namespace == "":
-		return errors.New("online: kubernetes secret store: Name (and a namespace) required")
-	}
-	return nil
+	return k.err
 }
 
-func inCluster(dir string) (*kubeAPI, error) {
+func (k *kubeStore) inCluster(dir string) error {
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	if host == "" {
+		return errors.New("lease store: not in a Kubernetes cluster (no KUBERNETES_SERVICE_HOST)")
+	}
 	ca, err := os.ReadFile(dir + "/ca.crt")
 	if err != nil {
-		return nil, fmt.Errorf("not in a cluster, or no service account (automountServiceAccountToken?): %w", err)
+		return fmt.Errorf("lease store: no service account (automountServiceAccountToken?): %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(ca) {
-		return nil, errors.New("invalid service account CA")
+		return errors.New("lease store: invalid service account CA")
+	}
+	ns, err := os.ReadFile(dir + "/namespace")
+	if err != nil {
+		return fmt.Errorf("lease store: the pod's namespace: %w", err)
 	}
 	port := os.Getenv("KUBERNETES_SERVICE_PORT")
 	if port == "" {
 		port = "443"
 	}
-	return &kubeAPI{base: "https://" + net.JoinHostPort(os.Getenv("KUBERNETES_SERVICE_HOST"), port), tokenFile: dir + "/token",
-		client: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}}, nil
+	k.base, k.tokenFile, k.ns = "https://"+net.JoinHostPort(host, port), dir+"/token", strings.TrimSpace(string(ns))
+	k.client = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+	return nil
 }
 
-func (k *KubernetesSecret) key() string {
-	if k.Key == "" {
-		return "lease"
+// target checks the names and returns the object's API path and data key.
+func (k *kubeStore) target(resource, kind, namespace, name, key string) (path, dkey string, err error) {
+	if err := k.init(); err != nil {
+		return "", "", err
 	}
-	return k.Key
+	if namespace == "" {
+		namespace = k.ns
+	}
+	if key == "" {
+		key = "lease"
+	}
+	switch {
+	case !dnsLabel.MatchString(namespace):
+		return "", "", fmt.Errorf("lease store: namespace %q isn't a valid name", namespace)
+	case !dnsSubdomain.MatchString(name):
+		return "", "", fmt.Errorf("lease store: %s name %q isn't a valid name", kind, name)
+	case !dataKey.MatchString(key):
+		return "", "", fmt.Errorf("lease store: key %q isn't a valid %s key", key, kind)
+	}
+	return "/api/v1/namespaces/" + namespace + "/" + resource + "/" + name, key, nil
 }
 
-// secret is the part of a Secret the store reads and writes.
-type secret struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
-	Metadata   map[string]any    `json:"metadata"`
-	Type       string            `json:"type,omitempty"`
-	Data       map[string][]byte `json:"data,omitempty"` // base64 in JSON, as the API wants
-}
-
-// errKubeStatus carries an unexpected API answer.
-type errKubeStatus struct {
+// apiError is an unexpected API answer: its status and the API's message.
+type apiError struct {
 	code int
-	body string
+	msg  string
 }
 
-func (e *errKubeStatus) Error() string { return fmt.Sprintf("kubernetes API: %d %s", e.code, e.body) }
+func (e *apiError) Error() string { return fmt.Sprintf("kubernetes API: %d %s", e.code, e.msg) }
 
-func (k *KubernetesSecret) do(method, path string, in any, out any) error {
-	token, err := os.ReadFile(k.api.tokenFile)
+func code(err error) int {
+	var e *apiError
+	if errors.As(err, &e) {
+		return e.code
+	}
+	return 0
+}
+
+func (k *kubeStore) do(ctx context.Context, method, path string, in, out any) error {
+	token, err := os.ReadFile(k.tokenFile)
 	if err != nil {
 		return err
 	}
@@ -141,22 +214,27 @@ func (k *KubernetesSecret) do(method, path string, in any, out any) error {
 		}
 		body = bytes.NewReader(b)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, k.api.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, k.base+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := k.api.client.Do(req)
+	resp, err := k.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20)) // a near-limit object (1 MiB of base64 data and metadata)
+	if err != nil {
+		return err
+	}
 	if resp.StatusCode/100 != 2 {
-		return &errKubeStatus{resp.StatusCode, strings.TrimSpace(string(raw))}
+		var st struct{ Message string }
+		if json.Unmarshal(raw, &st) != nil || st.Message == "" {
+			st.Message = string(raw[:min(len(raw), 200)])
+		}
+		return &apiError{resp.StatusCode, st.Message}
 	}
 	if out != nil {
 		return json.Unmarshal(raw, out)
@@ -164,79 +242,103 @@ func (k *KubernetesSecret) do(method, path string, in any, out any) error {
 	return nil
 }
 
-func (k *KubernetesSecret) path(name string) string {
-	p := "/api/v1/namespaces/" + url.PathEscape(k.Namespace) + "/secrets"
-	if name != "" {
-		p += "/" + url.PathEscape(name)
+// decodeValue and encodeValue convert between the lease and the object's
+// data value: base64 in a Secret, plain in a ConfigMap.
+func decodeValue(kind string, v any) (string, error) {
+	s, _ := v.(string)
+	if kind != "Secret" {
+		return s, nil
 	}
-	return p
+	b, err := base64.StdEncoding.DecodeString(s)
+	return string(b), err
 }
 
-func status(err error) int {
-	var s *errKubeStatus
-	if errors.As(err, &s) {
-		return s.code
+func encodeValue(kind, lease string) string {
+	if kind != "Secret" {
+		return lease
 	}
-	return 0
+	return base64.StdEncoding.EncodeToString([]byte(lease))
 }
 
-// Load implements Store: "" when the Secret or the key is missing.
-func (k *KubernetesSecret) Load() (string, error) {
-	if err := k.init(); err != nil {
+func (k *kubeStore) load(resource, kind, namespace, name, key string) (string, error) {
+	path, key, err := k.target(resource, kind, namespace, name, key)
+	if err != nil {
 		return "", err
 	}
-	var s secret
-	err := k.do(http.MethodGet, k.path(k.Name), nil, &s)
-	if status(err) == http.StatusNotFound {
+	ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
+	defer cancel()
+	var obj map[string]any
+	err = k.do(ctx, http.MethodGet, path, nil, &obj)
+	if code(err) == http.StatusNotFound {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("online: loading the lease from secret %s/%s: %w", k.Namespace, k.Name, err)
+		return "", fmt.Errorf("lease store: loading %s %s: %w", kind, path, err)
 	}
-	return string(s.Data[k.key()]), nil
+	data, _ := obj["data"].(map[string]any)
+	lease, err := decodeValue(kind, data[key])
+	if err != nil {
+		return "", fmt.Errorf("lease store: %s %s key %s: %w", kind, path, key, err)
+	}
+	return lease, nil
 }
 
-// Save implements Store: sets (or, for "", removes) the key, creating the
-// Secret if it doesn't exist. A concurrent writer (409) means a retry with
-// the Secret as it is now; the Client already serializes its own saves.
-func (k *KubernetesSecret) Save(lease string) error {
-	if err := k.init(); err != nil {
+// save reads the object and writes it back with the key set or removed,
+// conditional on the resourceVersion read; everything else in it (type,
+// labels, annotations, other keys) stays as it was. A concurrent writer
+// (409) or a deletion meanwhile (404 on update) means another round, after
+// a short jittered pause (replicas sharing the lease refresh together).
+func (k *kubeStore) save(resource, kind, namespace, name, key, lease string) error {
+	path, key, err := k.target(resource, kind, namespace, name, key)
+	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
+	defer cancel()
 	for attempt := 0; ; attempt++ {
-		err := k.save(lease)
-		if status(err) == http.StatusConflict && attempt < 3 { // also a create that lost a race (AlreadyExists)
-			continue
+		err = k.saveOnce(ctx, path, kind, name, key, lease)
+		if c := code(err); (c == http.StatusConflict || c == http.StatusNotFound) && attempt < 4 {
+			pause, _ := rand.Int(rand.Reader, big.NewInt(200))
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Duration(50+pause.Int64()) * time.Millisecond):
+				continue
+			}
 		}
-		if err != nil {
-			return fmt.Errorf("online: saving the lease to secret %s/%s: %w", k.Namespace, k.Name, err)
+		switch {
+		case err == nil:
+			return nil
+		case code(err) == http.StatusForbidden:
+			return fmt.Errorf("lease store: saving %s %s: %w (create the %s beforehand and grant get and update on it by name)", kind, path, err, kind)
+		default:
+			return fmt.Errorf("lease store: saving %s %s: %w", kind, path, err)
 		}
-		return nil
 	}
 }
 
-func (k *KubernetesSecret) save(lease string) error {
-	var s secret
-	err := k.do(http.MethodGet, k.path(k.Name), nil, &s)
+func (k *kubeStore) saveOnce(ctx context.Context, path, kind, name, key, lease string) error {
+	var obj map[string]any
+	err := k.do(ctx, http.MethodGet, path, nil, &obj)
 	switch {
-	case status(err) == http.StatusNotFound:
+	case code(err) == http.StatusNotFound:
 		if lease == "" {
 			return nil // nothing to remove
 		}
-		return k.do(http.MethodPost, k.path(""), secret{APIVersion: "v1", Kind: "Secret", Type: "Opaque",
-			Metadata: map[string]any{"name": k.Name}, Data: map[string][]byte{k.key(): []byte(lease)}}, nil)
+		create := map[string]any{"apiVersion": "v1", "kind": kind, "metadata": map[string]any{"name": name},
+			"data": map[string]any{key: encodeValue(kind, lease)}}
+		return k.do(ctx, http.MethodPost, path[:strings.LastIndex(path, "/")], create, nil) // 409 if created meanwhile: another round
 	case err != nil:
 		return err
 	}
-	if s.Data == nil {
-		s.Data = map[string][]byte{}
+	data, _ := obj["data"].(map[string]any)
+	if data == nil {
+		data = map[string]any{}
 	}
 	if lease == "" {
-		delete(s.Data, k.key())
+		delete(data, key)
 	} else {
-		s.Data[k.key()] = []byte(lease)
+		data[key] = encodeValue(kind, lease)
 	}
-	// The resourceVersion read above makes the update conditional: a
-	// concurrent change answers 409 and the loop reads again.
-	return k.do(http.MethodPut, k.path(k.Name), s, nil)
+	obj["data"] = data
+	return k.do(ctx, http.MethodPut, path, obj, nil) // carries the resourceVersion read: conditional
 }
