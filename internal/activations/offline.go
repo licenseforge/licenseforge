@@ -26,7 +26,7 @@ var ErrOffline = errors.New("activations: the plan doesn't allow offline use")
 // offline, so online deactivate can't free a seat whose file is out.
 var ErrOnlineSeat = errors.New("activations: the machine is activated online; deactivate it there first")
 
-var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline, ErrOnlineSeat}
+var offlineRefusals = []error{ErrInvalid, ErrNotFound, ErrSuspended, ErrRevoked, ErrExpired, ErrLimit, ErrRehostLimit, ErrBinding, ErrOffline, ErrOnlineSeat, ErrTooSoon}
 
 // Offline answers an offline activation request (ADR-0043): the lfreq1 text
 // an air-gapped machine wrote, carried in by p (activation:offline on the
@@ -293,9 +293,15 @@ func (s Service) offline(ctx context.Context, tx *ent.Tx, tenantID, text string,
 	return Lease{File: file, KID: kid, Claims: c, ActivationID: ev.ObjectID, FileSHA256: h}, nil
 }
 
+// ErrTooSoon: a file was issued for this machine within the last second;
+// the next one must be newer to the second (iat). Retry in a second.
+var ErrTooSoon = errors.New("activations: a file was just issued for this machine; retry in a second")
+
 // after returns now, or the second after the latest offline file of
-// licenseID on fingerprint if that isn't earlier (a file is issued when its
-// activation is last seen). At most a second ahead of the clock.
+// licenseID on fingerprint if that isn't earlier: last_seen_at of an
+// offline seat is only ever set when a file is issued (to at least its iat).
+// The next file is at most the next second; beyond that, ErrTooSoon, so a
+// burst of requests can't push iat (and exp) ahead of the clock.
 func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now time.Time) (time.Time, error) {
 	var last []struct {
 		Max *time.Time `json:"max"`
@@ -305,10 +311,14 @@ func after(ctx context.Context, tx *ent.Tx, licenseID, fingerprint string, now t
 	if err != nil || len(last) == 0 || last[0].Max == nil {
 		return now, err
 	}
-	if next := last[0].Max.UTC().Truncate(time.Second).Add(time.Second); next.After(now) {
-		return next, nil
+	next := last[0].Max.UTC().Truncate(time.Second).Add(time.Second)
+	switch {
+	case !next.After(now):
+		return now, nil
+	case next.After(now.UTC().Truncate(time.Second).Add(time.Second)):
+		return time.Time{}, ErrTooSoon
 	}
-	return now, nil
+	return next, nil
 }
 
 // offlineClaims: issued at now; exp the license's expiry, capped at iat +

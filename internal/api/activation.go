@@ -223,6 +223,7 @@ func activationProblem(err error) *problem {
 		{activations.ErrNotActivated, http.StatusNotFound, "not_activated", "This machine isn't activated; activate it."},
 		{activations.ErrOffline, http.StatusConflict, "offline_not_allowed", "The license's plan doesn't allow offline use."},
 		{activations.ErrOnlineSeat, http.StatusConflict, "online_seat", "The machine is activated online; deactivate it there first."},
+		{activations.ErrTooSoon, http.StatusConflict, "offline_too_soon", "A file was just issued for this machine; retry in a second."},
 		{activations.ErrSuperseded, http.StatusConflict, "receipt_superseded", "The receipt isn't for the seat's current file (renewed since, or not a file issued for it)."},
 		{activations.ErrOfflineSeat, http.StatusConflict, "offline_seat", "This machine's seat is offline; return it with a deactivation receipt."},
 	} {

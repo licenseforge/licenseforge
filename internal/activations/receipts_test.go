@@ -241,11 +241,6 @@ func TestReturnThenRequestAgain(t *testing.T) {
 	if cur.ActivationID == old.ActivationID || cur.FileSHA256 == old.FileSHA256 || !cur.Claims.IssuedAt.After(old.Claims.IssuedAt) {
 		t.Fatalf("new file %+v not newer than %+v", cur.Claims.IssuedAt, old.Claims.IssuedAt)
 	}
-	// A renewal right away is newer still.
-	again, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, func(r *licensefile.Request) { r.Nonce[0] = 5 }))
-	if err != nil || again.ActivationID != cur.ActivationID || !again.Claims.IssuedAt.After(cur.Claims.IssuedAt) {
-		t.Fatalf("renewal %+v, %v", again.Claims.IssuedAt, err)
-	}
 	if got, err := f.s.Return(ctx, manager(f.a), oldReceipt); err != nil || got.ID != old.ActivationID {
 		t.Errorf("old receipt again = %+v, %v", got, err)
 	}
@@ -312,5 +307,35 @@ func TestReturnRacesAFree(t *testing.T) {
 	}
 	if len(f.events(t)) != before {
 		t.Error("the concurrent free was audited by the receipt")
+	}
+}
+
+// A burst of requests for one machine can't push iat (and exp) ahead of
+// the clock: each file is newer than the last, at most a second ahead;
+// beyond that, ErrTooSoon.
+func TestOfflineBurstStaysOnTheClock(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "offline")
+	machine := fp()
+	var last time.Time
+	soon := 0
+	for i := range 12 {
+		got, err := f.s.Offline(ctx, manager(f.a), f.offlineReq(t, is.Key, machine, func(r *licensefile.Request) { r.Nonce[0] = byte(i) }))
+		if errors.Is(err, ErrTooSoon) {
+			soon++
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		iat := got.Claims.IssuedAt
+		if !iat.After(last) || iat.After(time.Now().Add(time.Second)) {
+			t.Fatalf("file %d: iat %v after %v, now %v", i, iat, last, time.Now())
+		}
+		last = iat
+	}
+	if soon == 0 {
+		t.Error("12 requests within a few seconds were all issued")
 	}
 }
