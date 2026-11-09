@@ -85,7 +85,7 @@ func TestSessionAndLogout(t *testing.T) {
 		t.Errorf("own origin behind a proxy refused by the origin check: %d %s", resp.StatusCode, why)
 	}
 	cookie := f.session(t)
-	_, info, err := f.ids.Session(t.Context(), cookie)
+	su, info, err := f.ids.Session(t.Context(), cookie)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,9 @@ func TestSessionAndLogout(t *testing.T) {
 		t.Fatalf("logout: %d", resp.StatusCode)
 	}
 	// Recorded on the platform chain (AU-2): who, which session, from where.
-	if es := f.entries(t, head); len(es) != 1 || es[0].Action != "user.logout" || es[0].ActorID == nil || es[0].ObjectID == nil ||
-		*es[0].ObjectID != info.ID || es[0].Outcome != auditevent.OutcomeSuccess || es[0].SourceIP == nil {
+	if es := f.entries(t, head); len(es) != 1 || es[0].Action != "user.logout" || es[0].ActorID == nil || *es[0].ActorID != su.ID ||
+		es[0].ObjectType == nil || *es[0].ObjectType != "session" || es[0].ObjectID == nil || *es[0].ObjectID != info.ID ||
+		es[0].Outcome != auditevent.OutcomeSuccess || es[0].SourceIP == nil || es[0].UserAgent == nil || *es[0].UserAgent != "Go-http-client/1.1" {
 		t.Errorf("logout entries %+v", es)
 	}
 	if _, _, err := f.ids.Session(t.Context(), cookie); err == nil {

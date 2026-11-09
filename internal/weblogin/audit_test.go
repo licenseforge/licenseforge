@@ -304,3 +304,25 @@ func TestLogoutEndsTheSessionWithoutAudit(t *testing.T) {
 		t.Errorf("logout without audit: %d, sessions %d of %d, cookie %q", resp.StatusCode, countSessions(t), before, f.session(t))
 	}
 }
+
+// A logout whose session can't be deleted keeps the cookie: the session is
+// still alive, and a retry must be able to end it.
+func TestLogoutKeepsTheCookieWhenTheSessionStays(t *testing.T) {
+	f := setup(t)
+	q := f.start(t)
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
+		t.Fatalf("login: %d", code)
+	}
+	cookie := f.session(t)
+	owner(t, `GRANT DELETE ON sessions TO licenseforge_identity`, `REVOKE DELETE ON sessions FROM licenseforge_identity`)
+	req, _ := http.NewRequest("POST", f.app.URL+"/auth/logout", nil)
+	req.Header.Set(CSRFHeader, CSRFToken(cookie))
+	resp, err := f.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if _, _, err := f.ids.Session(t.Context(), cookie); resp.StatusCode != http.StatusInternalServerError || f.session(t) != cookie || err != nil {
+		t.Errorf("failed delete: %d, cookie kept %v, session %v", resp.StatusCode, f.session(t) == cookie, err)
+	}
+}
