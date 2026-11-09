@@ -163,6 +163,184 @@ describe("LicenseDialog", () => {
   });
 });
 
+describe("offline (ADR-0043)", () => {
+  const paste = (el: HTMLElement, name: string, value: string) => {
+    const f = el.querySelector<HTMLTextAreaElement>(`textarea[name="${name}"]`)!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(f, value);
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const file = "-----BEGIN LICENSEFORGE LICENSE-----\nlf1.x\n-----END LICENSEFORGE LICENSE-----\n";
+
+  it("turns a request into a downloadable file, retrying with the same Idempotency-Key, and keeps the request nowhere", async () => {
+    const posts: { path: string; key: string | null; body: unknown }[] = [];
+    let attempt = 0;
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:lic"), revokeObjectURL: vi.fn() }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        posts.push({ path: new URL(req.url).pathname, key: req.headers.get("Idempotency-Key"), body: await req.json() });
+        return ++attempt === 1
+          ? json({ type: "about:blank", title: "x", status: 503, code: "internal", request_id: "r" }, 503)
+          : json({ license_file: file, activation_id: "act_1", kid: "k1", file_sha256: "0".repeat(64), expires_at: "2027-01-01T00:00:00Z" }, 201);
+      }),
+    );
+    const { el, qc, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "  lfreq1.SECRETREQUEST\n"));
+    await act(async () => el.querySelector("form")!.requestSubmit()); // 503
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
+    await act(async () => el.querySelector("form")!.requestSubmit()); // retry: 201
+    await vi.waitFor(() => expect(el.querySelector<HTMLAnchorElement>('a[download="license.lic"]')?.href).toBe("blob:lic"));
+    expect(posts.map((p) => p.path)).toEqual(["/api/v1/tenants/acme/activation-requests", "/api/v1/tenants/acme/activation-requests"]);
+    expect(posts[0]!.body).toEqual({ request: "lfreq1.SECRETREQUEST" });
+    expect(posts[0]!.key).toBeTruthy();
+    expect(posts[1]!.key).toBe(posts[0]!.key);
+    const kept = JSON.stringify([
+      el.innerHTML,
+      qc.getQueryCache().getAll().map((q) => q.state),
+      qc.getMutationCache().getAll().map((m) => m.state),
+    ]);
+    expect(kept).not.toContain("SECRETREQUEST");
+  });
+
+  it("a refused request gets a new key on the next attempt", async () => {
+    const keys: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        keys.push(req.headers.get("Idempotency-Key"));
+        return json({ type: "about:blank", title: "x", status: 409, code: "offline_not_allowed", detail: "no", request_id: "r" }, 409);
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("returns a seat on a receipt", async () => {
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        posts.push({ path: new URL(req.url).pathname, body: await req.json() });
+        return json({ id: "act_1", license_id: "lic_1", fingerprint: "sha256:" + "a".repeat(64), fp_source: "machine-id", binding: "machine", mode: "offline",
+          hostname: "air-1", app_version: null, sdk_version: null, first_seen_at: "", last_seen_at: "", deactivated_at: "2026-11-09T12:00:00Z", created_at: "" });
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Return a seat")!.click());
+    await act(async () => paste(el, "receipt", " lfrcpt1.b\r\n"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.textContent).toContain("Seat of air-1 returned."));
+    expect(posts).toEqual([{ path: "/api/v1/tenants/acme/deactivation-receipts", body: { receipt: "lfrcpt1.b" } }]);
+  });
+
+  it("ties the key to the text, renews it after a success and a mode switch, and says the file's term", async () => {
+    const keys: (string | null)[] = [];
+    let status = 503;
+    let expires: string | null = "2027-01-01T00:00:00Z";
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:lic"), revokeObjectURL: revoke }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        keys.push(req.headers.get("Idempotency-Key"));
+        return status === 201
+          ? json({ license_file: file, activation_id: "act_1", kid: "k1", file_sha256: "0".repeat(64), expires_at: expires }, 201)
+          : json({ type: "about:blank", title: "x", status, code: "internal", request_id: "r" }, status);
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    const submit = async (n: number) => {
+      await act(async () => el.querySelector("form")!.requestSubmit());
+      await vi.waitFor(() => expect(keys).toHaveLength(n));
+    };
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.A"));
+    await submit(1); // 503: kept for A
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(2); // another text: a new key
+    expect(keys[1]).not.toBe(keys[0]);
+    await act(async () => button("Return a seat")!.click());
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(3); // after a mode switch: a new key
+    expect(keys[2]).not.toBe(keys[1]);
+    status = 201;
+    await submit(4); // the same text again: the same key
+    expect(keys[3]).toBe(keys[2]);
+    await vi.waitFor(() => expect(el.textContent).toContain("valid until"));
+    expires = null;
+    await act(async () => paste(el, "request", "lfreq1.B"));
+    await submit(5); // after a success: a new key, even for the same text
+    expect(keys[4]).not.toBe(keys[3]);
+    await vi.waitFor(() => expect(el.textContent).toContain("with no expiry"));
+    expect(revoke).toHaveBeenCalledWith("blob:lic"); // the first file's URL, once replaced
+  });
+
+  it("a network failure reads as a generic error; the toggles and upload wait for the request; the hint describes the field", async () => {
+    let fail!: (e: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn((req: Request) =>
+      req.method === "GET" ? Promise.resolve(json({ items: [] })) : new Promise<Response>((_, reject) => (fail = reject))));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    const area = el.querySelector<HTMLTextAreaElement>('textarea[name="request"]')!;
+    expect(document.getElementById(area.getAttribute("aria-describedby")!)?.textContent).toContain("It contains the license key");
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(button("Return a seat")!.disabled).toBe(true));
+    expect(el.querySelector<HTMLInputElement>('input[type="file"]')!.disabled).toBe(true);
+    await act(async () => fail(new TypeError("Failed to fetch")));
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("Something went wrong. Try again."));
+    expect(area.getAttribute("aria-invalid")).toBe("true");
+    expect(button("Return a seat")!.disabled).toBe(false);
+  });
+
+  it("says why a request was refused", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) =>
+      req.method === "GET" ? json({ items: [] }) : json({ type: "about:blank", title: "x", status: 409, code: "offline_not_allowed", request_id: "r" }, 409)));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("This license's plan doesn't allow offline use."));
+  });
+
+  it("reads an uploaded file, refuses one too large, and names another license's returned seat", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) =>
+      req.method === "GET" ? json({ items: [] }) : json({ id: "act_9", license_id: "lic_other", fingerprint: "sha256:" + "b".repeat(64), fp_source: "machine-id",
+        binding: "machine", mode: "offline", hostname: null, app_version: null, sdk_version: null, first_seen_at: "", last_seen_at: "", deactivated_at: "2026-11-09T12:00:00Z", created_at: "" })));
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Return a seat")!.click());
+    const pick = async (f: File) => {
+      const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, "files", { value: [f], configurable: true });
+      await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    };
+    await pick(new File(["x".repeat(9000)], "big.log"));
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("That file is too large to be a request or receipt."));
+    expect(el.querySelector<HTMLTextAreaElement>('textarea[name="receipt"]')!.value).toBe(""); // not read
+    await pick(new File([" lfrcpt1.c\n"], "r.txt"));
+    await vi.waitFor(() => expect(el.querySelector<HTMLTextAreaElement>('textarea[name="receipt"]')!.value).toBe("lfrcpt1.c"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.textContent).toContain("returned, on another license (lic_other)"));
+  });
+
+  it("isn't offered without license:write", async () => {
+    const { button } = await render(<LicenseDialog tenant="acme" license={license} manage={false} names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect([button("Offline activation"), button("Return a seat")]).toEqual([undefined, undefined]);
+  });
+});
+
 it("describes the expiry: a date, perpetual, or from first activation", () => {
   expect(expiryText({ expires_at: null, expiry_basis: "from_issue" })).toBe("Never (perpetual)");
   expect(expiryText({ expires_at: null, expiry_basis: "from_first_activation" })).toBe("Counted from first activation");

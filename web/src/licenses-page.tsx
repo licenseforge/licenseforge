@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, fieldErrors, onAuthError } from "@/api/client";
 import { allCustomers, allProducts, parseRefs, productPlansQuery, refsBody } from "@/api/catalog";
 import {
@@ -9,6 +9,7 @@ import {
   canManageActivations,
   canManageLicenses,
   changeLicense,
+  createOfflineActivation,
   deactivateActivation,
   issueLicense,
   type License,
@@ -19,6 +20,7 @@ import {
   type LicenseStatus,
   licensesQuery,
   resetRehosts,
+  returnOfflineSeat,
 } from "@/api/licenses";
 import { tenantsQuery } from "@/api/tenants";
 import type { Membership } from "@/api/tokens";
@@ -199,6 +201,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
       )}
       {/* keyed by status: a status change (e.g. revoked meanwhile) drops an open confirmation and its error */}
       <Machines key={l.status} tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
+      {manage && <Offline tenant={tenant} license={l} />}
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
         <div role="group" aria-label={t(`licenses.confirm.${confirm}`)} className="mt-4 rounded-md border p-3 text-sm">
@@ -297,6 +300,110 @@ function Machines({ tenant, license: l, manage, onChanged }: { tenant: string; l
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * Offline activation and seat return (ADR-0043), activation:offline
+ * (managers and up). The request holds the license key: it lives in this
+ * component's state only (no query or mutation cache) and is cleared once
+ * answered. The file is offered as a download.
+ */
+function Offline({ tenant, license: l }: { tenant: string; license: License }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<"activate" | "return" | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [tooLarge, setTooLarge] = useState(false);
+  const [file, setFile] = useState<{ url: string; expires: string | null } | null>(null);
+  const [returned, setReturned] = useState<string | null>(null);
+  // The key belongs to one text: a retry of the same text reuses it, any
+  // other text gets a new one (the server would answer key_reused).
+  const key = useRef({ text: "", key: crypto.randomUUID() });
+  useEffect(() => () => { if (file) URL.revokeObjectURL(file.url); }, [file]);
+  const open = (k: typeof kind) => {
+    setKind(k);
+    setText("");
+    setError(null);
+    setTooLarge(false);
+    setReturned(null);
+    setFile(null);
+    key.current = { text: "", key: crypto.randomUUID() };
+  };
+  async function upload(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setTooLarge(f.size > 8192);
+    if (f.size > 8192) return;
+    setText((await f.text()).trim());
+  }
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setTooLarge(false);
+    try {
+      if (kind === "activate") {
+        const body = text.trim();
+        if (key.current.text !== body) key.current = { text: body, key: crypto.randomUUID() };
+        const r = await createOfflineActivation(tenant, body, key.current.key);
+        setFile({ url: URL.createObjectURL(new Blob([r.license_file], { type: "application/octet-stream" })), expires: r.expires_at });
+      } else {
+        const a = await returnOfflineSeat(tenant, text.trim());
+        const name = a.hostname ?? a.fingerprint.slice(0, 12);
+        setReturned(a.license_id === l.id ? t("offline.returned", { name }) : t("offline.returnedOther", { name, license: a.license_id }));
+      }
+      setText("");
+      key.current = { text: "", key: crypto.randomUUID() }; // the next request is a new one
+      await qc.invalidateQueries({ queryKey: ["activations", tenant] }); // the request may be another license's
+      await qc.invalidateQueries({ queryKey: ["licenses", tenant] });
+    } catch (err) {
+      onAuthError(err);
+      setError(err);
+      if (!keepIdempotencyKey(err)) key.current = { text: "", key: crypto.randomUUID() };
+    } finally {
+      setBusy(false);
+    }
+  }
+  const field = kind === "activate" ? "request" : "receipt";
+  return (
+    <section aria-labelledby="offline-title" className="mt-4">
+      <h3 id="offline-title" className="font-semibold">{t("offline.title")}</h3>
+      <p className="mt-1 text-xs text-muted-foreground">{t("offline.intro")}</p>
+      <div className="mt-2 flex gap-2">
+        <Button variant={kind === "activate" ? "default" : "ghost"} aria-pressed={kind === "activate"} disabled={busy} onClick={() => open("activate")}>{t("offline.activate")}</Button>
+        <Button variant={kind === "return" ? "default" : "ghost"} aria-pressed={kind === "return"} disabled={busy} onClick={() => open("return")}>{t("offline.return")}</Button>
+      </div>
+      {kind && (
+        <form onSubmit={submit} className="mt-2 space-y-2 text-sm">
+          <label className="block">
+            <span className="font-medium">{t(`offline.${field}`)}</span>
+            <textarea name={field} required rows={4} className={`${input} font-mono text-xs`} value={text} onChange={(e) => { setText(e.target.value); setTooLarge(false); }}
+              spellCheck={false} autoComplete="off" aria-describedby="offline-hint" aria-invalid={error !== null || tooLarge} />
+            <span id="offline-hint" className="mt-1 block text-xs text-muted-foreground">{t(`offline.${field}Hint`)}</span>
+          </label>
+          <label className="block text-xs">
+            {t("offline.upload")} <input type="file" disabled={busy} onChange={upload} />
+          </label>
+          {tooLarge && <p role="alert" className="font-medium">{t("offline.tooLarge")}</p>}
+          {error !== null && <p role="alert" className="font-medium">{errorText(error)}</p>}
+          <div className="flex justify-end">
+            <Button type="submit" disabled={busy || text.trim() === ""}>{t(kind === "activate" ? "offline.submitActivate" : "offline.submitReturn")}</Button>
+          </div>
+        </form>
+      )}
+      <div role="status" className="mt-2 text-sm">
+        {file && (
+          <p>
+            {file.expires ? t("offline.fileReady", { date: date.format(new Date(file.expires)) }) : t("offline.filePerpetual")}{" "}
+            <a className="underline" href={file.url} download="license.lic">{t("offline.download")}</a>
+          </p>
+        )}
+        {returned && <p>{returned}</p>}
+      </div>
     </section>
   );
 }
