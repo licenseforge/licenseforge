@@ -175,11 +175,22 @@ func (s Service) Session(ctx context.Context, cookie string) (*ent.User, Session
 	return u, info, nil
 }
 
-// EndSession ends the session (logout). Ending an unknown session is not an
-// error.
-func (s Service) EndSession(ctx context.Context, cookie string) error {
-	return s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = $1`, sessionHash(cookie))
-		return err
+// EndSession ends the session (logout) and returns its ID, "" if there was
+// none (ending an unknown session is not an error).
+func (s Service) EndSession(ctx context.Context, cookie string) (string, error) {
+	var id string
+	err := s.DB.WithIdentity(ctx, "", func(tx *ent.Tx) error {
+		rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE token_hash = $1 RETURNING id`, sessionHash(cookie))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		if rows.Next() {
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
 	})
+	return id, err
 }

@@ -281,3 +281,26 @@ func TestDisabledBeforeSessionIsRefused(t *testing.T) {
 		t.Errorf("platform chain: %+v", es)
 	}
 }
+
+// A logout that can't be recorded still ends the session, and says so (500).
+func TestLogoutEndsTheSessionWithoutAudit(t *testing.T) {
+	f := setup(t)
+	q := f.start(t)
+	if code := f.finish(t, q, q.Get("state"), nil); code != http.StatusSeeOther {
+		t.Fatalf("login: %d", code)
+	}
+	cookie := f.session(t)
+	before := countSessions(t)
+	owner(t, `ALTER TABLE audit_events DROP CONSTRAINT test_refuse`,
+		`ALTER TABLE audit_events ADD CONSTRAINT test_refuse CHECK (false) NOT VALID`)
+	req, _ := http.NewRequest("POST", f.app.URL+"/auth/logout", nil)
+	req.Header.Set(CSRFHeader, CSRFToken(cookie))
+	resp, err := f.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError || countSessions(t) != before-1 || f.session(t) != "" {
+		t.Errorf("logout without audit: %d, sessions %d of %d, cookie %q", resp.StatusCode, countSessions(t), before, f.session(t))
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
 
 func mustURL(t *testing.T, s string) *url.URL {
@@ -83,9 +85,19 @@ func TestSessionAndLogout(t *testing.T) {
 		t.Errorf("own origin behind a proxy refused by the origin check: %d %s", resp.StatusCode, why)
 	}
 	cookie := f.session(t)
+	_, info, err := f.ids.Session(t.Context(), cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := f.head(t)
 	// No Fetch metadata and no Origin: a non-browser client with the token.
 	if resp, _ := do("POST", "/auth/logout", map[string]string{CSRFHeader: token}); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout: %d", resp.StatusCode)
+	}
+	// Recorded on the platform chain (AU-2): who, which session, from where.
+	if es := f.entries(t, head); len(es) != 1 || es[0].Action != "user.logout" || es[0].ActorID == nil || es[0].ObjectID == nil ||
+		*es[0].ObjectID != info.ID || es[0].Outcome != auditevent.OutcomeSuccess || es[0].SourceIP == nil {
+		t.Errorf("logout entries %+v", es)
 	}
 	if _, _, err := f.ids.Session(t.Context(), cookie); err == nil {
 		t.Error("session alive after logout")

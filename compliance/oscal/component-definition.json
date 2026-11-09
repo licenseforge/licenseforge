@@ -337,7 +337,7 @@
               {
                 "uuid": "74627718-5e8c-5d06-a842-f12117e54a3b",
                 "control-id": "au-2",
-                "description": "Logged today: api_token.create and api_token.revoke, and license.offline_file, with success, failure and denied outcomes. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token) and platform_admin.bootstrap. The audit log design covers admin actions, logins, token use, key operations and platform-admin actions (ADR-0021, ADR-0027).",
+                "description": "Every state change and its refusals (success, failure, denied) on the tenant's chain: members (member.update, member.remove), invitations (create, revoke, accept), API tokens (create, revoke), signing keys (signing_key.create, promote, discard), the tenant MFA policy, the catalog (product, feature, plan: create, update, archive), customers, licenses (issue, suspend, reinstate, revoke, key_reveal, rehosts_reset, offline_file) and activations (create, deactivate, offline, offline_return). On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token), user.logout, platform_admin.bootstrap, tenant.create, tenant.owner_invitation, session refusals on the platform routes (session.platform_denied, session.mfa_required), and audit retention and checkpoints (ADR-0021, ADR-0027).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -364,9 +364,29 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
                     "rel": "reference",
                     "text": "TestLoginBootstrapsAndRecords"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/session_test.go",
+                    "rel": "reference",
+                    "text": "TestSessionAndLogout"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/weblogin/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestLogoutEndsTheSessionWithoutAudit"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/signing/audit_test.go",
+                    "rel": "reference",
+                    "text": "TestKeyOperationsAreAudited"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/members/members_test.go",
+                    "rel": "reference",
+                    "text": "TestUpdate"
                   }
                 ],
-                "remarks": "Not logged yet: logouts, login failures before a verified ID token (logged only: anyone can cause them), signing key operations, member and platform-admin grants and removals (Roadmap v0.1: audit log; member/invitation/token HTTP handlers)."
+                "remarks": "Not audited: login failures before a verified ID token (logged only: anyone can cause them), session expiry (idle and absolute timeouts end sessions without an entry), and platform-admin grants and removals beyond the bootstrap, which have no API and are made in SQL by the operator (ADR-0031). Online lease refreshes and re-activations of a known machine are metrics, not entries (ADR-0034)."
               },
               {
                 "uuid": "f23fe45c-968e-5a4a-8454-6ea41630f923",
@@ -571,7 +591,7 @@
                     "text": "TestRecordRefusesStaleSnapshot"
                   }
                 ],
-                "remarks": "Same coverage gaps as AU-2."
+                "remarks": "The same exceptions as AU-2 (pre-token login failures, session expiry, SQL-made platform-admin grants)."
               },
               {
                 "uuid": "74e36684-a47a-5b56-b0c4-0a14ddd664bd",
