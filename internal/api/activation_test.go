@@ -1035,7 +1035,30 @@ func TestCreateOfflineActivation(t *testing.T) {
 	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(onlineFP), licenseAuth(other.Key)); r.code != 200 {
 		t.Fatalf("activate: %d %s", r.code, r.raw)
 	}
-	a.do(t, "POST", p, reqFor(online.Key, newFP()), admin).problem(t, 409, "offline_not_allowed")
+	// An idempotent refusal is stored, replayed, and audited once.
+	refusals := func() int {
+		var n int
+		if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) (err error) {
+			n, err = tx.AuditEvent.Query().Where(auditevent.Action("activation.offline"), auditevent.OutcomeEQ(auditevent.OutcomeFailure)).Count(ctx)
+			return
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before, rk, rb := refusals(), header("Idempotency-Key", "air-refused"), reqFor(online.Key, newFP())
+	a.do(t, "POST", p, rb, admin, rk).problem(t, 409, "offline_not_allowed")
+	a.do(t, "POST", p, rb, admin, rk).problem(t, 409, "offline_not_allowed")
+	if n := refusals() - before; n != 1 {
+		t.Errorf("refusal stored and replayed: %d audited", n)
+	}
+	wrong, err := licensefile.EncodeRequest(licensefile.Request{Tenant: a.b.ID, Product: "db", Key: is.Key,
+		Binding: licensefile.Binding{Type: licensefile.BindMachine, Fingerprint: newFP()}, FPSource: "machine-id", Nonce: make([]byte, 16), Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, _ := json.Marshal(map[string]string{"request": wrong})
+	a.do(t, "POST", p, string(wb), admin).problem(t, 400, "invalid_request")
 	a.do(t, "POST", p, reqFor(other.Key, onlineFP), admin).problem(t, 409, "online_seat")
 	a.do(t, "POST", p, reqFor(is.Key, newFP()), admin).problem(t, 409, "activation_limit_reached")
 	a.do(t, "POST", p, `{"request":"lfreq1.e30"}`, admin).problem(t, 400, "invalid_request")

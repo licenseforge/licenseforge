@@ -12,6 +12,7 @@ import (
 
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/licensekey"
+	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/activation"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
@@ -341,7 +342,7 @@ func TestOfflineTxAndRecheck(t *testing.T) {
 			text string
 			want error
 		}{
-			"allowed":      {manager(f.a), text, nil},
+			"no seat out":  {manager(f.a), text, ErrNotActivated}, // nothing issued for it yet
 			"support":      {support, text, authz.ErrDenied},
 			"out of scope": {scoped, text, ErrNotFound},
 			"unknown key":  {manager(f.a), f.offlineReq(t, licensekey.New(), fp(), nil), ErrNotFound},
@@ -355,5 +356,72 @@ func TestOfflineTxAndRecheck(t *testing.T) {
 	})
 	if len(f.activations(t, is.License.ID)) != 0 {
 		t.Error("RecheckOffline took a seat")
+	}
+	recheck := func(text string) error {
+		var err error
+		f.tx(t, f.a, func(tx *ent.Tx) error { err = f.s.RecheckOffline(ctx, tx, manager(f.a), text); return nil })
+		return err
+	}
+	// With the file out: allowed; once the seat is returned or the license
+	// revoked, a replay no longer hands the stored file out.
+	got, err := f.s.Offline(ctx, manager(f.a), text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recheck(text); err != nil {
+		t.Errorf("seat out: %v", err)
+	}
+	if _, err := f.s.DeactivateByID(ctx, manager(f.a), is.License.ID, got.ActivationID); err != nil {
+		t.Fatal(err)
+	}
+	if err := recheck(text); !errors.Is(err, ErrNotActivated) {
+		t.Errorf("seat returned: %v", err)
+	}
+	revoked := f.issue(t, "offline")
+	rtext := f.offlineReq(t, revoked.Key, fp(), nil)
+	if _, err := f.s.Offline(ctx, manager(f.a), rtext); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lic.Revoke(ctx, manager(f.a), revoked.License.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := recheck(rtext); !errors.Is(err, ErrRevoked) {
+		t.Errorf("revoked: %v", err)
+	}
+	if got.FileSHA256 == "" {
+		t.Error("lease without its file hash")
+	}
+}
+
+// noKeys is a signer whose key lookup fails: an outage after the seat is
+// taken, not a refusal.
+type noKeys struct{}
+
+func (noKeys) Active(context.Context, string) (string, error) { return "", signing.ErrNotFound }
+func (noKeys) Public(context.Context, string, string) (signing.PublicKey, error) {
+	return signing.PublicKey{}, signing.ErrNotFound
+}
+func (noKeys) Sign(context.Context, string, string, []byte) ([]byte, error) {
+	return nil, signing.ErrNotFound
+}
+
+// An outage inside OfflineTx is never a matchable refusal: the idempotency
+// store would commit it as a 4xx, with the seat taken and no file or entry.
+func TestOfflineTxOutageIsNotARefusal(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "offline")
+	s := f.s
+	s.Issuer.Keys = noKeys{}
+	before := len(f.events(t))
+	err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		_, err := s.OfflineTx(ctx, tx, manager(f.a), f.offlineReq(t, is.Key, fp(), nil))
+		return err
+	})
+	if err == nil || errors.Is(err, signing.ErrNotFound) {
+		t.Errorf("outage: %v", err)
+	}
+	if len(f.events(t)) != before || len(f.activations(t, is.License.ID)) != 0 {
+		t.Error("an outage was recorded or kept the seat")
 	}
 }

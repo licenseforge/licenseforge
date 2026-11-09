@@ -704,14 +704,18 @@ export interface paths {
          *     (license format spec, Offline activation); it carries the license
          *     key, so treat it like the key. Needs activation:offline on the
          *     license's product; an unknown key or a license outside the caller's
-         *     scope answers 404. The license must be usable and its plan must allow
-         *     offline use (`offline_not_allowed`, 409). Takes or reuses the
+         *     scope answers 404. The license must be usable (403
+         *     `license_suspended`, `license_revoked`, `license_expired`; no grace)
+         *     and its plan must allow offline use (`offline_not_allowed`, 409). Takes or reuses the
          *     machine's seat (seat limits and moves as online, ADR-0034); a machine
          *     activated online answers `online_seat` (409) until it deactivates.
          *     The file's `exp` is the license's expiry, capped at now +
          *     `max_offline_seconds`; renewal is a new request from that machine.
          *     Audited with the request's hash, never its content. With
-         *     Idempotency-Key, a retry within 24 hours gets the first answer.
+         *     Idempotency-Key, a retry within 24 hours gets the first answer once
+         *     the caller's rights, the license and the seat are checked again: a
+         *     license revoked since, or a seat returned since (`not_activated`,
+         *     404), gets no file.
          */
         post: operations["createOfflineActivation"];
         delete?: never;

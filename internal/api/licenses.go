@@ -14,7 +14,6 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/license"
 	"licenseforge.io/licenseforge/internal/store/ids"
-	"licenseforge.io/licenseforge/sdk/go/licensefile"
 )
 
 func principal(ctx context.Context) authz.Principal {
@@ -208,7 +207,9 @@ func (s *server) idempotent(ctx context.Context, p authz.Principal, key, op stri
 
 // CreateOfflineActivation answers an offline activation request with a
 // license file bound to that machine (ADR-0043); idempotent with
-// Idempotency-Key, like IssueLicense.
+// Idempotency-Key, like IssueLicense. A replay isn't audited again: it
+// re-delivers the file recorded at issue, to the same credential, after
+// RecheckOffline (license still issuable, seat still out).
 func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateOfflineActivationRequestObject) (apigen.CreateOfflineActivationResponseObject, error) {
 	p := principal(ctx)
 	text := req.Body.Request
@@ -239,8 +240,7 @@ func (s *server) CreateOfflineActivation(ctx context.Context, req apigen.CreateO
 }
 
 func offlineView(l activations.Lease) (apigen.OfflineActivation, error) {
-	h, err := licensefile.FileSHA256(l.File)
-	return apigen.OfflineActivation{LicenseFile: l.File, ActivationId: l.ActivationID, Kid: l.KID, FileSha256: h, ExpiresAt: l.Claims.Expires}, err
+	return apigen.OfflineActivation{LicenseFile: l.File, ActivationId: l.ActivationID, Kid: l.KID, FileSha256: l.FileSHA256, ExpiresAt: l.Claims.Expires}, nil
 }
 
 func (o outcome) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
