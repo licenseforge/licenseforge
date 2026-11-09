@@ -12,6 +12,9 @@ Pods meet the Pod Security Standard **restricted**.
    **Upgrading from a release before audit retention (ADR-0036):** create the
    group role first, as a database admin, or the migration Job stops with an
    error: `CREATE ROLE licenseforge_retention NOLOGIN;`
+   **Every database URL must verify the server** (`sslmode=verify-full`, or
+   `verify-ca` with `sslrootcert`) unless the host is local: otherwise the
+   migration Job, the server and audit retention refuse to start (SC-8).
 2. Two Secrets, created by you or by External Secrets (never in values):
 
    ```sh
@@ -82,6 +85,7 @@ Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal
 ## Notes
 
 - **A private CA** (internal or enterprise PKI) for the OIDC provider or the database: put the CA's PEM in a Secret and set `extraCA.secretName` (and `extraCA.key`, `ca.crt` by default). The server, the migration Job and the audit-prune CronJob trust it in addition to the image's bundle; a SIEM sink with its own `caSecret` trusts only that. Restart the pods after changing the Secret.
+- **A development cluster** whose database has no TLS: set `databaseAllowPlaintext: true` (the server, the migration Job and the audit-prune CronJob then accept any database URL, and the server logs a warning at every start). Never in production.
 - **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
 
 - **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only

@@ -77,6 +77,14 @@ capabilities:
 {{ printf "- name: SSL_CERT_DIR\n  value: /etc/licenseforge/extra-ca" | indent (index $ 1) }}
 {{- end }}
 {{- end -}}
+{{/* LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT for databaseAllowPlaintext: development
+clusters only (the server otherwise refuses database URLs that don't verify
+the server, unless local). */}}
+{{- define "licenseforge.dbPlaintextEnv" -}}
+{{- $root := index . 0 }}{{- if $root.Values.databaseAllowPlaintext }}
+{{ printf "- name: LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT\n  value: \"true\"" | indent (index $ 1) }}
+{{- end }}
+{{- end -}}
 {{- define "licenseforge.extraCAMounts" -}}
 {{- $root := index . 0 }}{{- with ($root.Values.extraCA | default dict).secretName }}
 {{ printf "volumeMounts:\n  - {name: extra-ca, mountPath: /etc/licenseforge/extra-ca, readOnly: true}" | indent (index $ 1) }}

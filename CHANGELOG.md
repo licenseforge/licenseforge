@@ -3,6 +3,10 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Security
+- **Database connections must verify the server** (ADR-0024, SC-8): the server, `licenseforge migrate`, `audit prune` and the `tenant` commands refuse to start with a database URL that doesn't verify the server's certificate (`sslmode=disable`, `allow`, `prefer` (the driver's default), `require`, or `verify-ca` without `sslrootcert`) unless every host is `localhost`, a loopback address or a Unix socket. Use `sslmode=verify-full` (or `verify-ca` with `sslrootcert`). Every database TLS connection is TLS 1.2+. `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true` (Helm `databaseAllowPlaintext`, rendered on the server, migration and retention) lifts the check for development clusters (any other value is an error; the server warns at every start); the e2e environment sets it. **Upgrade note:** a deployment whose URLs don't verify the server (to a non-local host) won't start until they do; the Helm migration Job fails first, while the old pods keep serving.
+- Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
+
 ### Added
 - `PlatformTenant.has_members` in the platform API (one query per page): whether anyone has joined the tenant. The platform Tenants screen offers "New owner invite" only for tenants without members, the only ones it works for (ADR-0042).
 - Dashboard: "New owner invite" on each row of the platform Tenants screen (ADR-0042, amended): an owner email, then the new invite link shown once; a tenant that already has an owner says so. The create dialog and this one share the link view.

@@ -10,6 +10,7 @@
 //	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
 //	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
 //	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, 365 to 36,500 days; unset = keep everything
+//	LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT  true: database URLs need not verify the server (development only; SC-8)
 //	LICENSEFORGE_MASTER_KEYS            keyring (ADR-0025)
 //	LICENSEFORGE_ADDR                   listen address, default :8080
 //	LICENSEFORGE_METRICS_ADDR           Prometheus /metrics, default :9090; never on LICENSEFORGE_ADDR
@@ -169,6 +170,7 @@ func main() {
 // tenants' audit_retention_days, and LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
 // (unset: keep everything) for the platform chain. Run it as the CronJob.
 func prune(ctx context.Context, log *slog.Logger) error {
+	warnPlaintextDatabase(log)
 	dsn, err := mustEnv("LICENSEFORGE_RETENTION_DATABASE_URL")
 	if err != nil {
 		return err
@@ -258,7 +260,16 @@ func tenantInviteOwner(ctx context.Context, args []string, out io.Writer) error 
 	return err
 }
 
+// warnPlaintextDatabase says, at every start, when the database TLS check is
+// off (LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT): it must never be in production.
+func warnPlaintextDatabase(log *slog.Logger) {
+	if ok, _ := store.PlaintextAllowed(); ok { // a bad value fails when the database is opened
+		log.Warn("database TLS check is off (LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true): development clusters only")
+	}
+}
+
 func migrate(ctx context.Context, log *slog.Logger) error {
+	warnPlaintextDatabase(log)
 	dsn, err := mustEnv("LICENSEFORGE_OWNER_DATABASE_URL")
 	if err != nil {
 		return err
@@ -273,6 +284,7 @@ func migrate(ctx context.Context, log *slog.Logger) error {
 // serve runs the server on ln, and /metrics alone on mln, until ctx is done.
 // It closes both.
 func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
+	warnPlaintextDatabase(log)
 	defer func() { _ = ln.Close(); _ = mln.Close() }()
 	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
 		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")

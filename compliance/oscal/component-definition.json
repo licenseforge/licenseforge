@@ -1212,7 +1212,7 @@
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
                 "control-id": "sc-8",
-                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Database TLS is set by the operator in the connection strings (the chart README uses sslmode=verify-full).",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention, the tenant CLI commands) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1231,11 +1231,25 @@
                     "text": "TestNewRefusesInsecureURLs"
                   },
                   {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/dbtls.go",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/dbtls_test.go",
+                    "rel": "reference",
+                    "text": "TestDatabaseTLS"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/dbtls_test.go",
+                    "rel": "reference",
+                    "text": "TestClientTLSPolicy"
+                  },
+                  {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/README.md",
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh. The server doesn't enforce database TLS: pgx defaults to sslmode=prefer, which falls back to plaintext and doesn't verify the server; set sslmode=verify-full in every database URL. FIPS-only TLS suites and TLS 1.2+ are planned (Roadmap v0.1: FIPS-only TLS suites in FIPS mode; TLS 1.2+ everywhere)."
+                "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh, whose TLS settings are the operator's (TLS 1.2+). LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true (Helm databaseAllowPlaintext) lifts the database check for development clusters."
               },
               {
                 "uuid": "8be7d414-abfc-58f2-a5b9-0138338d1542",
