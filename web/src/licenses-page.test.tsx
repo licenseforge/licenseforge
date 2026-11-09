@@ -163,6 +163,92 @@ describe("LicenseDialog", () => {
   });
 });
 
+describe("offline (ADR-0043)", () => {
+  const paste = (el: HTMLElement, name: string, value: string) => {
+    const f = el.querySelector<HTMLTextAreaElement>(`textarea[name="${name}"]`)!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(f, value);
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const file = "-----BEGIN LICENSEFORGE LICENSE-----\nlf1.x\n-----END LICENSEFORGE LICENSE-----\n";
+
+  it("turns a request into a downloadable file, retrying with the same Idempotency-Key, and keeps the request nowhere", async () => {
+    const posts: { path: string; key: string | null; body: unknown }[] = [];
+    let attempt = 0;
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:lic"), revokeObjectURL: vi.fn() }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        posts.push({ path: new URL(req.url).pathname, key: req.headers.get("Idempotency-Key"), body: await req.json() });
+        return ++attempt === 1
+          ? json({ type: "about:blank", title: "x", status: 503, code: "internal", request_id: "r" }, 503)
+          : json({ license_file: file, activation_id: "act_1", kid: "k1", file_sha256: "0".repeat(64), expires_at: "2027-01-01T00:00:00Z" }, 201);
+      }),
+    );
+    const { el, qc, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "  lfreq1.SECRETREQUEST\n"));
+    await act(async () => el.querySelector("form")!.requestSubmit()); // 503
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
+    await act(async () => el.querySelector("form")!.requestSubmit()); // retry: 201
+    await vi.waitFor(() => expect(el.querySelector<HTMLAnchorElement>('a[download="license.lic"]')?.href).toBe("blob:lic"));
+    expect(posts.map((p) => p.path)).toEqual(["/api/v1/tenants/acme/activation-requests", "/api/v1/tenants/acme/activation-requests"]);
+    expect(posts[0]!.body).toEqual({ request: "lfreq1.SECRETREQUEST" });
+    expect(posts[0]!.key).toBeTruthy();
+    expect(posts[1]!.key).toBe(posts[0]!.key);
+    const kept = JSON.stringify([
+      el.innerHTML,
+      qc.getQueryCache().getAll().map((q) => q.state),
+      qc.getMutationCache().getAll().map((m) => m.state),
+    ]);
+    expect(kept).not.toContain("SECRETREQUEST");
+  });
+
+  it("a refused request gets a new key on the next attempt", async () => {
+    const keys: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        keys.push(req.headers.get("Idempotency-Key"));
+        return json({ type: "about:blank", title: "x", status: 409, code: "offline_not_allowed", detail: "no", request_id: "r" }, 409);
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Offline activation")!.click());
+    await act(async () => paste(el, "request", "lfreq1.a"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(keys).toHaveLength(2));
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("returns a seat on a receipt", async () => {
+    const posts: { path: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        posts.push({ path: new URL(req.url).pathname, body: await req.json() });
+        return json({ id: "act_1", license_id: "lic_1", fingerprint: "sha256:" + "a".repeat(64), fp_source: "machine-id", binding: "machine", mode: "offline",
+          hostname: "air-1", app_version: null, sdk_version: null, first_seen_at: "", last_seen_at: "", deactivated_at: "2026-11-09T12:00:00Z", created_at: "" });
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await act(async () => button("Return a seat")!.click());
+    await act(async () => paste(el, "receipt", " lfrcpt1.b\r\n"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(el.textContent).toContain("Seat of air-1 returned."));
+    expect(posts).toEqual([{ path: "/api/v1/tenants/acme/deactivation-receipts", body: { receipt: "lfrcpt1.b" } }]);
+  });
+
+  it("isn't offered without license:write", async () => {
+    const { button } = await render(<LicenseDialog tenant="acme" license={license} manage={false} names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect([button("Offline activation"), button("Return a seat")]).toEqual([undefined, undefined]);
+  });
+});
+
 it("describes the expiry: a date, perpetual, or from first activation", () => {
   expect(expiryText({ expires_at: null, expiry_basis: "from_issue" })).toBe("Never (perpetual)");
   expect(expiryText({ expires_at: null, expiry_basis: "from_first_activation" })).toBe("Counted from first activation");
