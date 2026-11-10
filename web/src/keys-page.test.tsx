@@ -83,6 +83,7 @@ it("shows viewers the keys and the trusted key set, without controls", async () 
   const row = (kid: string) => [...el.querySelectorAll("tbody tr")].find((r) => r.textContent!.includes(kid))!;
   expect(row("sk_discarded").textContent).toContain("never signed");
   expect(row("sk_old").textContent).not.toContain("never signed");
+  expect(el.textContent).toContain("when it's the active key, first generate a new key and promote it");
   const set = JSON.parse(el.querySelector("pre#json")!.textContent!);
   expect(set.map((k: { kid: string }) => k.kid)).toEqual(["sk_pending", "sk_active", "sk_old"]);
   for (const b of ["Generate key", "Promote", "Discard"]) expect(button(el, b)).toBeUndefined();
