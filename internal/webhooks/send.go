@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// errBadSecret: a signing secret isn't a Standard Webhooks secret (or none).
+var errBadSecret = errors.New("webhooks: malformed or missing signing secret")
+
 // Signature is the Standard Webhooks v1 webhook-signature header value:
 // "v1," + base64 HMAC-SHA256 over "id.timestamp.body", one per secret,
 // space-separated (current and, during a rotation, previous).
@@ -26,7 +29,7 @@ func Signature(id string, ts int64, body []byte, secrets ...string) (string, err
 	for _, s := range secrets {
 		key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, "whsec_"))
 		if err != nil || !strings.HasPrefix(s, "whsec_") || len(key) == 0 {
-			return "", errors.New("webhooks: malformed signing secret")
+			return "", errBadSecret
 		}
 		m := hmac.New(sha256.New, key)
 		m.Write([]byte(id + "." + strconv.FormatInt(ts, 10) + "."))
@@ -34,7 +37,7 @@ func Signature(id string, ts int64, body []byte, secrets ...string) (string, err
 		sigs = append(sigs, "v1,"+base64.StdEncoding.EncodeToString(m.Sum(nil)))
 	}
 	if len(sigs) == 0 {
-		return "", errors.New("webhooks: no signing secret")
+		return "", errBadSecret
 	}
 	return strings.Join(sigs, " "), nil
 }

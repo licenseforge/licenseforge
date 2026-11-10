@@ -1,7 +1,10 @@
 package webhooks
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -14,8 +17,10 @@ import (
 	"time"
 
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
 // receiver is a webhook receiver for tests: it answers with status (or
@@ -56,8 +61,28 @@ func setupDispatch(t *testing.T) dispatchFixture {
 	recv := &receiver{status: http.StatusNoContent}
 	srv := httptest.NewTLSServer(recv)
 	t.Cleanup(srv.Close)
-	d := NewDispatcher(f.db, f.s.Keys, testClient(srv, 5*time.Second), slog.New(slog.DiscardHandler))
-	return dispatchFixture{fixture: f, ctx: f.as(f.a, f.ownerA, authz.Owner), d: d, srv: srv, recv: recv}
+	d := NewDispatcher(f.db, f.s.Keys, testClient(srv, 15*time.Second), slog.New(slog.DiscardHandler))
+	df := dispatchFixture{fixture: f, ctx: f.as(f.a, f.ownerA, authz.Owner), d: d, srv: srv, recv: recv}
+	// The dispatcher claims any tenant's due endpoint: other tests' endpoints
+	// (same database) are taken out of its way, before and after.
+	isolate := func() {
+		df.platformExec(t, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'test isolation', updated_at = now() WHERE enabled`)
+	}
+	isolate()
+	t.Cleanup(isolate)
+	return df
+}
+
+// waitFor polls cond for up to 10 s.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for range 1000 {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 func (f dispatchFixture) endpoint(t *testing.T, events ...string) Created {
@@ -220,9 +245,7 @@ func TestResultOvertaken(t *testing.T) {
 	f.recv.status, f.recv.hold = http.StatusInternalServerError, hold
 	done := make(chan error, 1)
 	go func() { _, err := f.d.Once(f.ctx); done <- err }()
-	for f.recv.count() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
 	skipped, err := f.s.SkipToNow(f.ctx, c.ID)
 	close(hold)
 	if err != nil {
@@ -231,8 +254,8 @@ func TestResultOvertaken(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if s, a, _, _ := f.cursor(t, c.ID); s != skipped.Seq || a != 0 || len(f.deliveries(t, c.ID)) != 0 {
-		t.Errorf("an overtaken result was written: %d/%d %v", s, a, f.deliveries(t, c.ID))
+	if s, a, _, holder := f.cursor(t, c.ID); s != skipped.Seq || a != 0 || len(f.deliveries(t, c.ID)) != 0 || holder != nil {
+		t.Errorf("an overtaken result was written, or its lease kept: %d/%d %v %v", s, a, f.deliveries(t, c.ID), holder)
 	}
 }
 
@@ -294,8 +317,14 @@ func TestPayload(t *testing.T) {
 		t.Errorf("payload\n got %s\nwant %s", b, want)
 	}
 	l := &ent.AuditEvent{Action: "license.suspend", ObjectID: &obj, OccurredAt: at, Details: `{"from":"active","to":"suspended","product_id":"p","customer_id":"c","plan_slug":"pro","plan_id":"pln","expires_at":null}`}
-	if b, _ := Payload("license.suspended", l); !strings.Contains(string(b), `"status":"suspended"`) || strings.Contains(string(b), "from") {
+	if b, _ := Payload("license.suspended", l); string(b) != `{"data":{"customer_id":"c","expires_at":null,"license_id":"act_1","plan":"pro","product_id":"p","status":"suspended"},"timestamp":"2026-11-10T12:00:00Z","type":"license.suspended"}` {
 		t.Errorf("license payload %s", b)
+	}
+	// An entry without a field (recorded before it was added) leaves it out:
+	// a missing expires_at mustn't read as "never expires".
+	bare := &ent.AuditEvent{Action: "license.revoke", ObjectID: &obj, OccurredAt: at, Details: `{"to":"revoked","product_id":"p"}`}
+	if b, _ := Payload("license.revoked", bare); strings.Contains(string(b), "expires_at") || strings.Contains(string(b), "customer_id") {
+		t.Errorf("absent fields included: %s", b)
 	}
 	if _, err := Payload("bogus", l); err == nil {
 		t.Error("unknown event type")
@@ -307,15 +336,14 @@ func TestPayload(t *testing.T) {
 func TestResultAfterReenable(t *testing.T) {
 	f := setupDispatch(t)
 	c := f.endpoint(t, "license.issued")
-	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
-	f.platformExec(t, `UPDATE webhook_cursors SET attempts = 3 WHERE endpoint_id = $1`, c.ID)
+	seq := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	// Retrying this event already (the claim won't move the cursor).
+	f.platformExec(t, `UPDATE webhook_cursors SET seq = $2, attempts = 3 WHERE endpoint_id = $1`, c.ID, seq-1)
 	hold := make(chan struct{})
 	f.recv.status, f.recv.hold = http.StatusInternalServerError, hold
 	done := make(chan error, 1)
 	go func() { _, err := f.d.Once(f.ctx); done <- err }()
-	for f.recv.count() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
 	if _, err := f.s.Disable(f.ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -369,15 +397,311 @@ func TestConcurrentClaimsCapped(t *testing.T) {
 	hold := make(chan struct{})
 	f.recv.hold = hold
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	returned := 0
 	for range 4 {
 		d := NewDispatcher(f.db, f.s.Keys, f.d.Client, f.d.Log)
-		wg.Go(func() { _, _ = d.Once(f.ctx) })
+		wg.Go(func() {
+			_, _ = d.Once(f.ctx)
+			mu.Lock()
+			returned++
+			mu.Unlock()
+		})
 	}
-	time.Sleep(time.Second) // every claim has run or is in its send
+	// Two send and wait; the other two find the cap and return.
+	waitFor(t, "two sends and two refused claims", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return f.recv.count() == 2 && returned == 2
+	})
 	got := f.recv.count()
 	close(hold)
 	wg.Wait()
 	if got != 2 {
 		t.Errorf("%d sends in flight for one tenant, want 2", got)
+	}
+}
+
+// A receiver slower than the write's own deadline still gets its result
+// recorded (the write's deadline starts after the send).
+func TestSlowReceiver(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	seq := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	hold := make(chan struct{})
+	f.recv.hold = hold
+	go func() { time.Sleep(11 * time.Second); close(hold) }()
+	f.once(t)
+	if s, a, _, holder := f.cursor(t, c.ID); s != seq || a != 0 || holder != nil {
+		t.Errorf("after a slow success: %d/%d/%v", s, a, holder)
+	}
+}
+
+// An event committing between the head read and the scan isn't passed.
+func TestEventDuringClaim(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, nil) // makes it due; not an event for it
+	var seq int64
+	testHookClaim = func() { seq = f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails) }
+	t.Cleanup(func() { testHookClaim = nil })
+	f.once(t)
+	testHookClaim = nil
+	if f.recv.count() == 0 {
+		f.once(t) // not seen this round: the next one sends it
+	}
+	if s, _, _, _ := f.cursor(t, c.ID); f.recv.count() != 1 || s != seq {
+		t.Errorf("an event committed during the claim: %d sends, cursor %d, event %d", f.recv.count(), s, seq)
+	}
+}
+
+// A lease taken over by another replica (this one stalled past it): the
+// stale send's result isn't written.
+func TestStaleHolder(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	hold := make(chan struct{})
+	f.recv.status, f.recv.hold = http.StatusInternalServerError, hold
+	done := make(chan error, 1)
+	go func() { _, err := f.d.Once(f.ctx); done <- err }()
+	waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
+	f.platformExec(t, `UPDATE webhook_cursors SET claimed_by = 'other/replica', claimed_until = now() + interval '1 minute' WHERE endpoint_id = $1`, c.ID)
+	close(hold)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, a, _, holder := f.cursor(t, c.ID); a != 0 || holder == nil || *holder != "other/replica" || len(f.deliveries(t, c.ID)) != 0 {
+		t.Errorf("a stale holder wrote: attempts %d, holder %v, %v", a, holder, f.deliveries(t, c.ID))
+	}
+}
+
+// Unreadable URL or secret: an invalid ciphertext disables; a key this
+// replica lacks backs off without disabling; a malformed secret disables.
+func TestUnreadable(t *testing.T) {
+	f := setupDispatch(t)
+	wrongRow, err := f.s.Keys.Encrypt([]byte("https://x.example/"), secretsBinding(f.a, "whe_aaaaaaaaaaaaaaaaaaaaaaaaaa", "webhook_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := f.endpoint(t, "license.issued")
+	f.platformExecOwner(t, `UPDATE webhook_endpoints SET url_ciphertext = $2 WHERE id = $1`, c.ID, []byte(wrongRow))
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.once(t)
+	if e, _ := f.s.Get(f.ctx, c.ID); e.Enabled || e.DisabledReason != ReasonURL {
+		t.Errorf("invalid URL ciphertext: %+v", e)
+	}
+	// Another replica's key (a rolling keyring change): back off, stay enabled.
+	other := otherKeyring(t)
+	g := f.endpoint(t, "license.issued")
+	lost, _ := other.Encrypt([]byte("whsec_x"), secretsBinding(f.a, g.ID, "webhook_secret"))
+	f.platformExecOwner(t, `UPDATE webhook_endpoints SET secret_ciphertext = $2 WHERE id = $1`, g.ID, []byte(lost))
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	if _, err := f.d.Once(f.ctx); err == nil {
+		t.Error("an unknown key wasn't reported")
+	}
+	e, _ := f.s.Get(f.ctx, g.ID)
+	if !e.Enabled || e.NextAttemptAt == nil || time.Until(*e.NextAttemptAt) < 4*time.Minute || f.recv.count() != 0 {
+		t.Errorf("unknown key: %+v, %d sends", e, f.recv.count())
+	}
+	if _, _, _, holder := f.cursor(t, g.ID); holder != nil {
+		t.Error("lease kept after backing off")
+	}
+	// A secret that decrypts but isn't a Standard Webhooks secret.
+	h := f.endpoint(t, "license.issued")
+	bad, _ := f.s.Keys.Encrypt([]byte("not-a-secret"), secretsBinding(f.a, h.ID, "webhook_secret"))
+	f.platformExecOwner(t, `UPDATE webhook_endpoints SET secret_ciphertext = $2 WHERE id = $1`, h.ID, []byte(bad))
+	f.platformExec(t, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'x' WHERE id = $1`, g.ID)
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.once(t)
+	if e, _ := f.s.Get(f.ctx, h.ID); e.Enabled || e.DisabledReason != ReasonSecret {
+		t.Errorf("malformed secret: %+v", e)
+	}
+}
+
+// A verdict from a send doesn't overwrite what changed meanwhile: a user's
+// disable, or a new URL.
+func TestVerdictPinnedToEndpoint(t *testing.T) {
+	f := setupDispatch(t)
+	for name, change := range map[string]func(id string){
+		"user disable": func(id string) {
+			if _, err := f.s.Disable(f.ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"new URL": func(id string) {
+			u := f.srv.URL + "/new"
+			if _, err := f.s.Update(f.ctx, id, &u, nil); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		c := f.endpoint(t, "license.issued")
+		f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+		hold := make(chan struct{})
+		f.recv.mu.Lock()
+		f.recv.status, f.recv.hold, f.recv.got = http.StatusGone, hold, nil
+		f.recv.mu.Unlock()
+		done := make(chan error, 1)
+		go func() { _, err := f.d.Once(f.ctx); done <- err }()
+		waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
+		change(c.ID)
+		close(hold)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		e, _ := f.s.Get(f.ctx, c.ID)
+		if e.DisabledReason == ReasonGone {
+			t.Errorf("%s: overwritten by the send's 410: %+v", name, e)
+		}
+		f.platformExec(t, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'done', updated_at = now() WHERE id = $1`, c.ID)
+	}
+}
+
+// A cancelled send (shutting down) frees the lease without an attempt; an
+// expired previous secret doesn't sign.
+func TestCancelAndExpiredPrevious(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	if _, _, err := f.s.RotateSecret(f.ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.platformExecOwner(t, `UPDATE webhook_endpoints SET previous_secret_until = now() - interval '1 minute' WHERE id = $1`, c.ID)
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	hold := make(chan struct{})
+	f.recv.hold = hold
+	ctx, cancel := context.WithCancel(f.ctx)
+	done := make(chan error, 1)
+	go func() { _, err := f.d.Once(ctx); done <- err }()
+	waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
+	if sig := f.recv.got[0].Header.Get("webhook-signature"); strings.Count(sig, "v1,") != 1 {
+		t.Errorf("an expired previous secret signed: %q", sig)
+	}
+	cancel()
+	close(hold)
+	if err := <-done; err == nil {
+		t.Error("a cancelled send reported no error")
+	}
+	if _, a, _, holder := f.cursor(t, c.ID); a != 0 || holder != nil || len(f.deliveries(t, c.ID)) != 0 {
+		t.Errorf("after a cancel: attempts %d, holder %v, %v", a, holder, f.deliveries(t, c.ID))
+	}
+}
+
+// Moving past a held-back event (its type unsubscribed) starts the next
+// event's retries afresh.
+func TestMoveResetsRetries(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.platformExec(t, `UPDATE webhook_cursors SET attempts = 5 WHERE endpoint_id = $1`, c.ID)
+	if _, err := f.s.Update(f.ctx, c.ID, nil, []string{"license.revoked"}); err != nil {
+		t.Fatal(err)
+	}
+	f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, map[string]any{"to": "revoked"})
+	f.recv.status = http.StatusInternalServerError
+	f.once(t)
+	if d := f.deliveries(t, c.ID); len(d) != 1 || d[0] != "failure http 500 #1" {
+		t.Errorf("deliveries %v", d)
+	}
+}
+
+// Entries pruned after the cursor: it moves to the cut, audited.
+func TestPrunedSkip(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	old := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	owner := sqlOpen(t, env.OwnerURL)
+	if _, err := owner.Exec(`UPDATE audit_events SET occurred_at = now() - interval '400 days' WHERE tenant_id = $1 AND seq <= $2`, f.a, old); err != nil {
+		t.Fatal(err)
+	}
+	next := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	ret := sqlOpen(t, env.RetentionURL)
+	if _, err := ret.Exec(`INSERT INTO audit_anchors (id, tenant_id, seq, hash, cut_at) SELECT $3, tenant_id, seq, hash, now()
+		FROM audit_events WHERE tenant_id = $1 AND seq = $2`, f.a, old, ids.AuditAnchor()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ret.Exec(`DELETE FROM audit_events WHERE tenant_id = $1 AND seq <= $2`, f.a, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`UPDATE webhook_cursors SET seq = 0 WHERE endpoint_id = $1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.once(t)
+	ev := f.events(t, f.a, "webhook.pruned_skip")
+	var d map[string]any
+	if len(ev) != 1 || json.Unmarshal([]byte(ev[0].Details), &d) != nil || d["from_seq"] != float64(0) || d["to_seq"] != float64(old) {
+		t.Fatalf("pruned skip audited as %v", ev)
+	}
+	if s, _, _, _ := f.cursor(t, c.ID); s < old {
+		t.Errorf("cursor %d below the cut %d", s, old)
+	}
+	if f.recv.count() == 0 {
+		f.once(t)
+	}
+	if s, _, _, _ := f.cursor(t, c.ID); s != next {
+		t.Errorf("cursor %d after the cut, want %d", s, next)
+	}
+}
+
+func TestRetryDelay(t *testing.T) {
+	for i := range 200 {
+		n := i%len(schedule) + 1
+		d := retryDelay(n, 0)
+		if base := schedule[n-1]; d < base*9/10 || d > base*11/10 {
+			t.Fatalf("failure %d: %v, base %v", n, d, base)
+		}
+	}
+	if d := retryDelay(1, time.Hour); d != time.Hour {
+		t.Errorf("Retry-After not a floor: %v", d)
+	}
+	if d := retryDelay(7, time.Minute); d < 9*time.Hour {
+		t.Errorf("Retry-After shortened the schedule: %v", d)
+	}
+}
+
+func secretsBinding(tenant, row, purpose string) secrets.Binding {
+	return secrets.Binding{Purpose: secrets.Purpose(purpose), TenantID: tenant, RowID: row}
+}
+
+func otherKeyring(t *testing.T) *secrets.Keyring {
+	t.Helper()
+	kr, err := secrets.ParseKeyring("k9=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kr
+}
+
+func sqlOpen(t *testing.T, url string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// platformExecOwner changes what neither serving pool may (test setup).
+func (f dispatchFixture) platformExecOwner(t *testing.T, q string, args ...any) {
+	t.Helper()
+	if _, err := sqlOpen(t, env.OwnerURL).Exec(q, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Disabled while the claim runs (after its candidate query): not sent.
+func TestDisabledDuringClaim(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	testHookClaim = func() {
+		f.platformExec(t, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'during claim', updated_at = now() WHERE id = $1`, c.ID)
+	}
+	t.Cleanup(func() { testHookClaim = nil })
+	f.once(t)
+	testHookClaim = nil
+	if f.recv.count() != 0 {
+		t.Error("sent to an endpoint disabled during the claim")
 	}
 }

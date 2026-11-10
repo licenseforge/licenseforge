@@ -42,6 +42,9 @@ const (
 	maxLeasesPerTn = 2
 )
 
+// testHookClaim runs in claim between the head read and the event scan.
+var testHookClaim func()
+
 // Dispatcher delivers webhooks from one replica.
 type Dispatcher struct {
 	DB      *store.DB
@@ -65,6 +68,8 @@ type claim struct {
 	event                          *ent.AuditEvent
 	eventType                      string
 	urlC, secretC, previousC       []byte
+	holder                         string    // this claim's lease holder: replica and a per-claim token
+	updatedAt                      time.Time // the endpoint as claimed: a disable from this send is pinned to it
 	claimedAt                      time.Time
 }
 
@@ -76,35 +81,61 @@ func (d *Dispatcher) Once(ctx context.Context) (bool, error) {
 	if err != nil || c == nil {
 		return worked, err
 	}
-	// The result is written even if ctx ends meanwhile, briefly.
-	done, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
+	// Writes after the claim run even if ctx ends meanwhile, briefly; each
+	// gets its own deadline, started when it's needed.
+	after := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	}
 	url, err := d.decrypt(secrets.PurposeWebhookURL, c, c.urlC)
 	if err != nil {
-		return true, d.disable(done, c, ReasonURL)
+		return true, d.unreadable(after, c, err, ReasonURL)
 	}
-	secs := make([]string, 0, 2)
 	cur, err := d.decrypt(secrets.PurposeWebhookSecret, c, c.secretC)
 	if err != nil {
-		return true, d.disable(done, c, ReasonSecret)
+		return true, d.unreadable(after, c, err, ReasonSecret)
 	}
-	secs = append(secs, cur)
+	secs := []string{cur}
 	if c.previousC != nil {
 		if prev, err := d.decrypt(secrets.PurposeWebhookPrevious, c, c.previousC); err == nil {
 			secs = append(secs, prev)
 		}
 	}
 	body, err := Payload(c.eventType, c.event)
-	if err != nil {
-		return true, errors.Join(err, d.release(done, c))
+	if err != nil { // can't happen for entries EventType maps; back off, don't spin
+		w, cancel := after()
+		defer cancel()
+		return true, errors.Join(err, d.backoff(w, c))
 	}
 	sendCtx, stop := context.WithDeadline(ctx, c.claimedAt.Add(d.Lease/2))
 	a, err := Send(sendCtx, d.Client, url, c.event.ID, time.Now(), body, secs...)
 	stop()
-	if err != nil { // cancelled (shutting down): no attempt
-		return true, errors.Join(err, d.release(done, c))
+	w, cancel := after() // after the send: a slow receiver doesn't eat the write's time
+	defer cancel()
+	switch {
+	case errors.Is(err, context.Canceled): // shutting down: no attempt
+		return true, errors.Join(err, d.release(w, c))
+	case errors.Is(err, errBadSecret):
+		return true, d.disable(w, c, ReasonSecret)
+	case err != nil: // the stored URL isn't one Send accepts
+		return true, d.disable(w, c, ReasonURL)
 	}
-	return true, d.result(done, c, a)
+	return true, d.result(w, c, a)
+}
+
+// unreadable handles a URL or secret that doesn't decrypt. Only a
+// ciphertext that is invalid for this keyring (ErrDecrypt) disables: a key
+// this replica doesn't have yet (a rolling keyring change) or an empty
+// keyring is this replica's problem, so it backs off and logs.
+func (d *Dispatcher) unreadable(after func() (context.Context, context.CancelFunc), c *claim, err error, reason string) error {
+	w, cancel := after()
+	defer cancel()
+	if errors.Is(err, secrets.ErrDecrypt) {
+		return d.disable(w, c, reason)
+	}
+	if d.Log != nil {
+		d.Log.Error("webhook delivery: can't decrypt with this replica's keyring", "endpoint", c.endpointID, "err", err)
+	}
+	return errors.Join(err, d.backoff(w, c))
 }
 
 func (d *Dispatcher) decrypt(p secrets.Purpose, c *claim, ct []byte) (string, error) {
@@ -117,7 +148,7 @@ func (d *Dispatcher) decrypt(p secrets.Purpose, c *claim, ct []byte) (string, er
 func (d *Dispatcher) claim(ctx context.Context) (out *claim, worked bool, err error) {
 	start := time.Now()
 	err = d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
-		c := &claim{claimedAt: start}
+		c := &claim{claimedAt: start, holder: d.replica + "/" + crand.Text()[:8]}
 		var events []string
 		var eventsJSON string
 		found, err := scan(ctx, tx, `SELECT c.id, c.tenant_id, c.endpoint_id, c.seq, c.attempts, e.events::text
@@ -162,15 +193,27 @@ func (d *Dispatcher) claim(ctx context.Context) (out *claim, worked bool, err er
 			}
 			c.seq = anchor
 		}
+		// The head first: per-chain seq commits in order, so if nothing it
+		// subscribes to follows the cursor, every entry up to head was seen
+		// (an entry committing after the head read is above it).
+		var head int64
+		if _, err := scan(ctx, tx, `SELECT COALESCE(max(seq), 0) FROM audit_events WHERE tenant_id = $1`, []any{c.tenantID}, &head); err != nil {
+			return err
+		}
+		if testHookClaim != nil {
+			testHookClaim()
+		}
 		next, err := nextEvent(ctx, tx, c.tenantID, c.seq, events)
 		if err != nil {
 			return err
 		}
-		if next == 0 { // nothing it subscribes to: pass everything so far
-			var head int64
-			if _, err := scan(ctx, tx, `SELECT COALESCE(max(seq), 0) FROM audit_events WHERE tenant_id = $1`, []any{c.tenantID}, &head); err != nil {
-				return err
-			}
+		// A retention cut committed meanwhile: leave it to the next round,
+		// which records it.
+		var anchor2 int64
+		if _, err := scan(ctx, tx, `SELECT COALESCE(max(seq), 0) FROM audit_anchors WHERE tenant_id = $1`, []any{c.tenantID}, &anchor2); err != nil || anchor2 != anchor {
+			return err
+		}
+		if next == 0 { // nothing it subscribes to: pass everything up to head
 			return move(ctx, tx, c, head)
 		}
 		if next-1 > c.seq {
@@ -179,23 +222,26 @@ func (d *Dispatcher) claim(ctx context.Context) (out *claim, worked bool, err er
 			}
 			c.seq = next - 1
 		}
+		var enabled bool
+		var current bool // the previous secret still signs (within PreviousSecretTTL)
+		// The endpoint as it is now (a new statement): a disable that
+		// committed during the claim query is seen.
+		if _, err := scan(ctx, tx, `SELECT enabled, updated_at, url_ciphertext, secret_ciphertext, previous_secret_ciphertext,
+			COALESCE(previous_secret_until > clock_timestamp(), false) FROM webhook_endpoints WHERE id = $1`,
+			[]any{c.endpointID}, &enabled, &c.updatedAt, &c.urlC, &c.secretC, &c.previousC, &current); err != nil || !enabled {
+			return err
+		}
+		if !current {
+			c.previousC = nil
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = $2, claimed_until = clock_timestamp() + make_interval(secs => $3)
-			WHERE id = $1`, c.cursorID, d.replica, d.Lease.Seconds()); err != nil {
+			WHERE id = $1`, c.cursorID, c.holder, d.Lease.Seconds()); err != nil {
 			return err
 		}
 		if c.event, err = tx.AuditEvent.Query().Where(auditevent.TenantID(c.tenantID), auditevent.Seq(next)).Only(ctx); err != nil {
 			return err
 		}
 		c.eventType = EventType(c.event.Action, c.event.Details)
-		var current bool // the previous secret still signs (within PreviousSecretTTL)
-		if _, err := scan(ctx, tx, `SELECT url_ciphertext, secret_ciphertext, previous_secret_ciphertext,
-			COALESCE(previous_secret_until > clock_timestamp(), false) FROM webhook_endpoints WHERE id = $1`,
-			[]any{c.endpointID}, &c.urlC, &c.secretC, &c.previousC, &current); err != nil {
-			return err
-		}
-		if !current {
-			c.previousC = nil
-		}
 		out = c
 		return nil
 	})
@@ -205,9 +251,11 @@ func (d *Dispatcher) claim(ctx context.Context) (out *claim, worked bool, err er
 	return out, worked, nil
 }
 
-// move sets the cursor's seq forward (never back: the policy refuses).
+// move sets the cursor's seq forward (never back: the policy refuses) with
+// a fresh retry state: what follows is another event.
 func move(ctx context.Context, tx *ent.Tx, c *claim, seq int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET seq = $2 WHERE id = $1`, c.cursorID, seq)
+	_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET seq = $2, attempts = 0, next_attempt_at = NULL WHERE id = $1`, c.cursorID, seq)
+	c.attempts = 0
 	return err
 }
 
@@ -226,7 +274,7 @@ func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
 		disable := ""
 		if a.OK() {
 			res, err = tx.ExecContext(ctx, `UPDATE webhook_cursors SET seq = $5, attempts = 0, next_attempt_at = NULL, claimed_by = NULL, claimed_until = NULL
-				WHERE `+pinned, c.cursorID, d.replica, c.seq, c.attempts, c.event.Seq)
+				WHERE `+pinned, c.cursorID, c.holder, c.seq, c.attempts, c.event.Seq)
 		} else {
 			if a.Category == "http" && a.Status == http.StatusGone {
 				disable = ReasonGone
@@ -235,13 +283,15 @@ func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
 			}
 			res, err = tx.ExecContext(ctx, `UPDATE webhook_cursors SET attempts = attempts + 1,
 				next_attempt_at = clock_timestamp() + make_interval(secs => $5), claimed_by = NULL, claimed_until = NULL
-				WHERE `+pinned, c.cursorID, d.replica, c.seq, c.attempts, retryDelay(failed, a.RetryAfter).Seconds())
+				WHERE `+pinned, c.cursorID, c.holder, c.seq, c.attempts, retryDelay(failed, a.RetryAfter).Seconds())
 		}
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
-			return err // overtaken (a skip, re-enable or delete, or the lease ran out): nothing to record
+			// Overtaken (a skip, re-enable or delete, or the lease ran out):
+			// nothing to record; free the lease if it is still this claim's.
+			return errors.Join(err, freeLease(ctx, tx, c))
 		}
 		outcome := "failure"
 		if a.OK() {
@@ -276,7 +326,7 @@ func retryDelay(failed int, retryAfter time.Duration) time.Duration {
 func (d *Dispatcher) disable(ctx context.Context, c *claim, reason string) error {
 	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL WHERE `+pinned,
-			c.cursorID, d.replica, c.seq, c.attempts)
+			c.cursorID, c.holder, c.seq, c.attempts)
 		if err != nil {
 			return err
 		}
@@ -290,8 +340,10 @@ func (d *Dispatcher) disable(ctx context.Context, c *claim, reason string) error
 // disableTx disables an enabled endpoint (never overwriting a user's
 // disable) and audits it on the tenant's chain.
 func disableTx(ctx context.Context, tx *ent.Tx, c *claim, reason string) error {
+	// Only the endpoint as claimed: a user's disable, or a URL or secret
+	// changed during the send, isn't overwritten by this send's verdict.
 	res, err := tx.ExecContext(ctx, `UPDATE webhook_endpoints SET enabled = false, disabled_reason = $2, updated_at = clock_timestamp()
-		WHERE id = $1 AND enabled`, c.endpointID, reason)
+		WHERE id = $1 AND enabled AND updated_at = $3`, c.endpointID, reason, c.updatedAt)
 	if err != nil {
 		return err
 	}
@@ -306,11 +358,28 @@ func disableTx(ctx context.Context, tx *ent.Tx, c *claim, reason string) error {
 
 // release frees the claim without recording an attempt.
 func (d *Dispatcher) release(ctx context.Context, c *claim) error {
+	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error { return freeLease(ctx, tx, c) })
+}
+
+// backoffPause is how long a claim that couldn't be attempted waits.
+const backoffPause = 5 * time.Minute
+
+// backoff frees the claim and makes the endpoint wait: a problem that isn't
+// the receiver's (this replica's keyring) mustn't make it spin.
+func (d *Dispatcher) backoff(ctx context.Context, c *claim) error {
 	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL WHERE `+pinned,
-			c.cursorID, d.replica, c.seq, c.attempts)
+		_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL,
+			next_attempt_at = clock_timestamp() + make_interval(secs => $5) WHERE `+pinned,
+			c.cursorID, c.holder, c.seq, c.attempts, backoffPause.Seconds())
 		return err
 	})
+}
+
+// freeLease frees the lease if this claim still holds it.
+func freeLease(ctx context.Context, tx *ent.Tx, c *claim) error {
+	_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL WHERE id = $1 AND claimed_by = $2`,
+		c.cursorID, c.holder)
+	return err
 }
 
 // scan runs a one-row query; false if there was no row.
@@ -351,6 +420,14 @@ func Payload(eventType string, e *ent.AuditEvent) ([]byte, error) {
 			"customer_id": d["customer_id"], "fingerprint": d["fingerprint"], "binding": d["binding"], "mode": d["mode"]}
 	default:
 		return nil, fmt.Errorf("webhooks: no payload for %q", eventType)
+	}
+	for k, v := range data { // absent from the entry (older entries): leave it out rather than say null
+		if v == nil && k != "expires_at" {
+			delete(data, k)
+		}
+	}
+	if _, ok := d["expires_at"]; !ok {
+		delete(data, "expires_at") // null means "never expires": only when the entry says so
 	}
 	return json.Marshal(map[string]any{"type": eventType, "timestamp": e.OccurredAt.UTC().Format(time.RFC3339Nano), "data": data})
 }
