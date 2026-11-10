@@ -8,7 +8,7 @@
 # bundle is always built here from the lockfile. engine-strict (.npmrc) fails
 # the build if this Node doesn't match web/package.json's engines; keep the
 # tag equal to web/.nvmrc. ignore-scripts (.npmrc): no install scripts run.
-FROM --platform=$BUILDPLATFORM docker.io/library/node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci
