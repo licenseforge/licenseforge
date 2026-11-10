@@ -35,6 +35,14 @@ async function open(scopeAll: boolean, summaryCustomers = scopeAll) {
         return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role: "manager", all_products: scopeAll, product_ids: scopeAll ? [] : ["prd_1"] }] });
       if (u.pathname.endsWith("/summary"))
         return json({ licenses: { active: 3, suspended: 1, revoked: 0 }, ...(summaryCustomers ? { customers: { active: 1, seen_this_month: 7, month_start: "2026-11-01T00:00:00Z" } } : {}) });
+      if (u.pathname.endsWith("/metrics/daily")) {
+        asked.push(u.search);
+        return json({ days: [
+          { date: "2026-11-08", licenses_issued: 2, activations: 0, deactivations: 0 },
+          { date: "2026-11-09", licenses_issued: 0, activations: 0, deactivations: 0 },
+          { date: "2026-11-10", licenses_issued: 1, activations: 1200, deactivations: 1 },
+        ] });
+      }
       if (u.pathname.endsWith("/licenses")) return json({ items: [license(1, "active"), license(2, "suspended")] }); // the newest
       if (u.pathname.endsWith("/customers/cus_1")) return json({ id: "cus_1", name: "Globex", email: null, external_refs: {}, archived_at: null, created_at: "" });
       if (u.pathname.endsWith("/products/prd_1")) return json({ id: "prd_1", slug: "db", name: "DB Server", created_at: "" });
@@ -91,4 +99,24 @@ it("looks customers up only when the summary includes them, whatever the caller'
   expect(tile("Customers")).toBeUndefined();
   expect(tile("Active in November 2026")).toBeUndefined();
   expect(asked.some((p) => p.includes("/customers"))).toBe(false);
+});
+
+it("charts the last 30 days per series, with totals, a tooltip per day and a table", async () => {
+  const { el, asked } = await open(false);
+  await vi.waitFor(() => expect(el.querySelectorAll("figure")).toHaveLength(3));
+  expect(asked).toContain("?days=30");
+  const figs = [...el.querySelectorAll("figure")];
+  expect(figs.map((f) => f.querySelector("figcaption")?.textContent)).toEqual([
+    "Licenses issued · 3 in 3 days", "Machines activated · 1,200 in 3 days", "Machines deactivated · 1 in 3 days",
+  ]);
+  expect(figs[0]!.querySelector("svg")?.getAttribute("aria-label")).toBe("Licenses issued: 3 in 3 days");
+  // A tooltip per day, empty days included; a column only where the count isn't zero.
+  expect([...figs[0]!.querySelectorAll("title")].map((n) => n.textContent)).toEqual(["Nov 8: 2", "Nov 9: 0", "Nov 10: 1"]);
+  expect(figs[0]!.querySelectorAll("path")).toHaveLength(2);
+  expect(figs[1]!.querySelectorAll("path")).toHaveLength(1);
+  // Heights are relative to the series' own peak: the tallest column reaches the top.
+  const tops = [...figs[0]!.querySelectorAll("path")].map((n) => n.getAttribute("d")!.match(/^M[\d.]+,80 V([\d.]+)/)![1]);
+  expect(tops.map(Number)).toEqual([80 - 76 + 4, 80 - 38 + 4]); // top of the column + its 4px rounded end
+  const rows = [...el.querySelectorAll("details tbody tr")].map((r) => [...r.children].map((c) => c.textContent));
+  expect(rows).toEqual([["Nov 8", "2", "0", "0"], ["Nov 9", "0", "0", "0"], ["Nov 10", "1", "1,200", "1"]]);
 });
