@@ -44,8 +44,8 @@ func ParseKeySet(data []byte) (KeySet, error) {
 	ks := make(KeySet, 0, len(raw))
 	for i, e := range raw {
 		m, err := object(e, false)
-		if err != nil {
-			return bad("key %d: %v", i, err)
+		if err != nil { // not object()'s text: it echoes field names
+			return bad("key %d: not an object with unique, exact-case field names", i)
 		}
 		if len(m) != 3 {
 			return bad("key %d needs exactly kid, alg and public_key", i)
