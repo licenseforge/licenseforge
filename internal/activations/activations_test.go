@@ -416,6 +416,9 @@ func TestRefusals(t *testing.T) {
 	if _, err := f.s.Activate(ctx, k8s(f.req(cluster.Key, fp()))); err != nil {
 		t.Errorf("cluster: %v", err)
 	}
+	if es := f.events(t); !payload(es[len(es)-1].Details, cluster.License, "online") || !strings.Contains(es[len(es)-1].Details, `"binding":"cluster"`) {
+		t.Errorf("cluster activation details %s", es[len(es)-1].Details)
+	}
 
 	// An activated machine loses its lease when the license is suspended,
 	// gets it back when reinstated, and loses it for good when revoked.
