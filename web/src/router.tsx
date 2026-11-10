@@ -13,6 +13,7 @@ import { LicensesPage } from "@/licenses-page";
 import { inviteWaiting } from "@/invite";
 import { MembersPage } from "@/members-page";
 import { TokensPage } from "@/tokens-page";
+import { WebhooksPage } from "@/webhooks-page";
 import { SecurityPage } from "@/security-page";
 import { PlatformPage } from "@/platform-page";
 
@@ -50,6 +51,7 @@ const indexRoute = createRoute({
 const tenantRoute = createRoute({ getParentRoute: () => appRoute, path: "t/$slug", component: TenantLayout });
 const overviewRoute = createRoute({ getParentRoute: () => tenantRoute, path: "/", component: Overview });
 const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/api-tokens", component: TokensPage });
+const webhooksRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/webhooks", component: WebhooksPage });
 const membersRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/members", component: MembersPage });
 const auditRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/audit", component: AuditPage });
 const securityRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/security", component: SecurityPage });
@@ -63,7 +65,7 @@ const platformRoute = createRoute({ getParentRoute: () => appRoute, path: "platf
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
-  appRoute.addChildren([indexRoute, platformRoute, tenantRoute.addChildren([overviewRoute, productsRoute, productRoute, customersRoute, licensesRoute, tokensRoute, membersRoute, auditRoute, securityRoute])]),
+  appRoute.addChildren([indexRoute, platformRoute, tenantRoute.addChildren([overviewRoute, productsRoute, productRoute, customersRoute, licensesRoute, tokensRoute, webhooksRoute, membersRoute, auditRoute, securityRoute])]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
