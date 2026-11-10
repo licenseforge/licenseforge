@@ -149,7 +149,7 @@ func TestWorkloadsAreRestricted(t *testing.T) {
 			case "Pod":
 				ps = o.Spec.podSpec
 			default:
-				if len(o.Spec.podSpec.Containers) > 0 { // a bare Pod's spec is the pod spec
+				if len(o.Spec.Containers) > 0 { // a bare Pod's spec is the pod spec
 					t.Errorf("%s: %s/%s has containers the test doesn't check", name, o.Kind, o.Metadata.Name)
 				}
 				continue
