@@ -26,8 +26,8 @@ Rules:
 The server (signing), agent and Go SDK (verification) share the license format code. Keeping them together means a format change, its spec, its test vectors and both sides land in one PR. The Go SDK is still a **separate Go module**, so vendors importing it pull none of the server's dependencies.
 
 > [!NOTE]
-> **Amended 2026-11-10**: the TypeScript SDK lives in the main repo
-> `sdk/ts`, not `licenseforge-node`. A format change touches the spec, the vectors and every SDK at once (#181: weak keys, in the spec, Go and TypeScript in one PR), and the TypeScript CI reads the vectors in place: no vector tarball pin to bump. It is still its own npm package (`@licenseforge/sdk`) with its own semver, tagged `sdk/ts/vX.Y.Z`, built and tested by its own path-filtered workflow. Add-ons with their own toolchain (the n8n node) may still get a repo of their own. Java decides with its SDK; the same reasoning applies.
+> **Amended 2026-11-10**: the TypeScript and Java SDKs live in the main repo
+> (`sdk/ts`, `sdk/java`), not in `licenseforge-node` and `licenseforge-java`. A format change touches the spec, the vectors and every SDK at once (#181: weak keys, in the spec, Go and TypeScript in one PR), and SDK CI reads the vectors in place. Each SDK is still its own package (npm `@licenseforge/sdk`, Maven `io.licenseforge:licenseforge-sdk`) with its own semver and tag prefix (`sdk/ts/vX.Y.Z`, `sdk/java/vX.Y.Z`), built, tested and released by its own path-filtered workflows. This overrides, below: the `licenseforge-java` and `licenseforge-node` rows (the main repo also publishes to npm and Maven Central); the pinned vector download (the versioned tarball stays, for SDKs outside the repo); "plus Java/Node at v0.2" and "the pinned vectors catch it" in Consequences (the in-place vectors do); and it partly adopts the rejected "one monorepo" alternative, for the SDKs only. Add-ons with their own toolchain (the n8n node, the Salesforce package) keep repos of their own.
 
 ### Go module paths (vanity imports)
 Serve `go-import` meta tags from `licenseforge.io` so import paths survive repo moves:

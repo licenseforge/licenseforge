@@ -10,7 +10,7 @@ on:
   push:
     tags: ["sdk/ts/v*"]
   pull_request:
-    paths: [sdk/ts/**, .github/workflows/sdk-ts-release.yml]
+    paths: [sdk/ts/**, LICENSE, NOTICE, .github/workflows/sdk-ts-release.yml]
 permissions: {}
 defaults:
   run:
@@ -39,7 +39,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "sdk/ts/v$v" ]; then
             echo "tag $GITHUB_REF_NAME doesn't match package.json version $v"; exit 1
           fi
-          tag=latest; case $v in *-*) tag=next ;; esac # a prerelease never becomes what `npm install` picks
+          tag=latest; case $v in *-*) tag=next ;; esac # prereleases don't move `latest` (but see the bootstrap in docs/verifying-releases.md)
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "dist-tag=$tag" >> "$GITHUB_OUTPUT"
       - run: npm ci --ignore-scripts # no install scripts; tsc and @types/node only
@@ -58,7 +58,9 @@ jobs:
           tar -tzf "$tgz" | sort > "$RUNNER_TEMP/files"
           cat "$RUNNER_TEMP/files"
           if grep -vxE 'package/(package\.json|README\.md|LICENSE|NOTICE|dist/src/[a-z]+\.(js|d\.ts))' "$RUNNER_TEMP/files"; then echo "unexpected files"; exit 1; fi
-          for f in package.json README.md LICENSE NOTICE dist/src/index.js dist/src/index.d.ts; do grep -qx "package/$f" "$RUNNER_TEMP/files" || { echo "missing $f"; exit 1; }; done
+          want="package.json README.md LICENSE NOTICE"
+          for f in src/*.ts; do b=$(basename "$f" .ts); want="$want dist/src/$b.js dist/src/$b.d.ts"; done # every module, code and types
+          for f in $want; do grep -qx "package/$f" "$RUNNER_TEMP/files" || { echo "missing $f"; exit 1; }; done
       - name: The tarball installs and imports in an empty project
         env:
           VERSION: ${{ steps.version.outputs.version }}
