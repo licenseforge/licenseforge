@@ -261,7 +261,7 @@ it("creates a test-mode tenant when asked, and marks test tenants in the list (A
   });
   await vi.waitFor(() => expect(el.textContent).toContain("Acme Sandbox"));
   const rows = [...el.querySelectorAll("tbody tr")].map((r) => r.querySelector("td")!.textContent);
-  expect(rows).toEqual(["Acme Corp", "Acme SandboxTest"]);
+  expect(rows).toEqual(["Acme Corp", "Acme Sandbox Test"]);
   await act(async () => button(el, "New tenant").click());
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
   for (const [name, v] of [["slug", "sandbox"], ["name", "Sandbox"], ["owner_email", "o@s.example"]]) {

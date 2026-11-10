@@ -207,7 +207,7 @@ const en = {
   "nav.platform": "Tenants (platform)",
   "platform.title": "Tenants",
   "platform.test": "Test mode",
-  "platform.testHelp": "For integration and CI: marked everywhere and left out of usage counts. It can't change later; create a separate live tenant to sell.",
+  "platform.testHelp": "For integration and CI: marked as a test tenant in the dashboard, and to be left out of platform usage measures such as hosted billing. It can't change later: to sell, create a separate live tenant.",
   "platform.testBadge": "Test",
   "platform.intro": "Every tenant on this install. Creating one invites its first owner; you don't become a member.",
   "platform.new": "New tenant",
