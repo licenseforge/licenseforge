@@ -77,7 +77,7 @@ npm install @licenseforge/sdk@next   # prereleases; @licenseforge/sdk once a sta
 npm audit signatures                 # in your project, after npm ci or npm install
 ```
 
-`npm audit signatures` checks the registry's signature on every installed package and the provenance attestations that are present. It doesn't fail on a package without one, and it doesn't check whose workflow made it. So check the identity yourself: the package's npm page shows the provenance; it must name `licenseforge/licenseforge`, `.github/workflows/sdk-ts-release.yml` and an `sdk/ts/v*` tag. The package's publishing access is set to refuse tokens, so a version can't be published outside that workflow. Pin the version and keep the lockfile: its `integrity` hash makes every later install the same bytes.
+`npm audit signatures` checks the registry's signature on every installed package and the provenance attestations that are present. It doesn't fail on a package without one, and it doesn't check whose workflow made it. So check the identity yourself: the package's npm page shows the provenance; it must name `licenseforge/licenseforge`, `.github/workflows/sdk-ts-release.yml` and an `sdk/ts/v*` tag. The package's publishing access refuses tokens: any other version could only come from an npm maintainer publishing interactively with 2FA, and would have no provenance, so check it. Pin the version and keep the lockfile: its `integrity` hash makes every later install the same bytes.
 
 ## Air-gapped verification
 
@@ -87,11 +87,11 @@ npm audit signatures                 # in your project, after npm ci or npm inst
 
 npm attaches a trusted publisher only to a package that exists, so the first version needs a one-time bootstrap. A real version published by hand would have no provenance, so the bootstrap publishes a placeholder instead:
 
-1. Create the npm organization `licenseforge`, with 2FA required for its members.
-2. Publish a placeholder `@licenseforge/sdk@0.0.0` (a `package.json` and a README pointing to `@next`) with a granular token that expires within a day, then run `npm deprecate @licenseforge/sdk@0.0.0 "placeholder: install @licenseforge/sdk@next"`.
-3. In the package settings, add the trusted publisher (GitHub Actions; `licenseforge/licenseforge`; workflow `sdk-ts-release.yml`; environment `npm`), and set Publishing access to "Require two-factor authentication and disallow tokens". Revoke the token.
-4. In GitHub, create the environment `npm` (a required reviewer; deployment tags `sdk/ts/v*`) and add `refs/tags/sdk/ts/v*` to the release-tag ruleset.
-5. Within two days of step 3 (npm expires an unused trusted publisher configuration), tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`.
+1. In GitHub, create the environment `npm` (a required reviewer; deployment tags `sdk/ts/v*`) and add `refs/tags/sdk/ts/v*` to the release-tag ruleset. Do this first: the trusted publisher of step 4 has a two-day window.
+2. Create the npm organization `licenseforge`, with 2FA required for its members.
+3. Publish a placeholder `@licenseforge/sdk@0.0.0` (a `package.json` and a README pointing to `@next`) from your own `npm login` session: `npm publish --access public` (a scoped package is otherwise restricted, which a free organization can't publish). No token is needed. Then `npm deprecate @licenseforge/sdk@0.0.0 "placeholder: install @licenseforge/sdk@next"`.
+4. In the package settings, add the trusted publisher (GitHub Actions; `licenseforge/licenseforge`; workflow `sdk-ts-release.yml`; environment `npm`), and set Publishing access to "Require two-factor authentication and disallow tokens".
+5. Within two days, tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`. npm expires a trusted publisher configuration that hasn't published within two days; if that happens, delete it and add it again.
 6. Check `npm dist-tag ls @licenseforge/sdk`: `next` is the alpha, and `latest` stays on the placeholder until the first stable version.
 
 ## For maintainers: a release that failed halfway
