@@ -77,6 +77,9 @@ func TestLicenseEndpoints(t *testing.T) {
 		issued.body["type"] != "trial" || issued.body["expires_at"] == nil {
 		t.Fatalf("issue: %d %s", issued.code, issued.raw)
 	}
+	if v, ok := issued.body["updates_until"]; !ok || v != nil {
+		t.Errorf("no maintenance term: updates_until %v", issued.raw)
+	}
 	id := issued.body["id"].(string)
 	// Get and list never show the key.
 	got := f.do(t, "GET", p+"/"+id, "", owner)
@@ -176,6 +179,22 @@ func TestLicenseEndpoints(t *testing.T) {
 	}
 	if got := listIDs("?customer_id="+ids.Customer(), owner); len(got) != 0 {
 		t.Errorf("unknown customer filter: %v", got)
+	}
+}
+
+// The issue answer shows the plan's maintenance and rehost terms (ADR-0045).
+func TestIssueShowsPlanTerms(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	maint := f.do(t, "POST", Prefix+"/tenants/"+f.a.Slug+"/plans", `{"product_id":"`+f.prodA+`","slug":"maint","name":"M","updates_months":12,"max_rehosts":2}`, owner)
+	m := f.do(t, "POST", p, issueBody(f.prodA, maint.body["id"].(string), c.customer), owner)
+	if m.code != 201 || m.body["max_rehosts"] != float64(2) || m.body["rehost_count"] != float64(0) || m.body["updates_until"] == nil {
+		t.Fatalf("issue on a maintenance plan: %d %s", m.code, m.raw)
+	}
+	if g := f.do(t, "GET", p+"/"+m.body["id"].(string), "", owner); g.body["updates_until"] != m.body["updates_until"] {
+		t.Errorf("get updates_until %v, issued %v", g.body["updates_until"], m.body["updates_until"])
 	}
 }
 

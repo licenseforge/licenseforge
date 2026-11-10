@@ -1165,3 +1165,45 @@ func TestTransitionRecordsExpiryAtTheChange(t *testing.T) {
 		t.Errorf("entry %s, license expires %v", e.Details, row.ExpiresAt)
 	}
 }
+
+// Maintenance counts from issue whatever the expiry basis, in whole seconds;
+// a plan without it covers every build (ADR-0045).
+func TestUpdatesUntil(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var monthly, presold, none string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		mk := func(slug string, c func(*ent.PlanCreate)) string {
+			pc := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug(slug).SetName(slug)
+			c(pc)
+			pl, err := pc.Save(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pl.ID
+		}
+		monthly = mk("maint", func(c *ent.PlanCreate) { c.SetUpdatesMonths(12) })
+		presold = mk("maint-presold", func(c *ent.PlanCreate) {
+			c.SetDurationMonths(24).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation).SetUpdatesMonths(1)
+		})
+		none = mk("no-maint", func(c *ent.PlanCreate) {})
+		return nil
+	})
+	for planID, months := range map[string]int{monthly: 12, presold: 1, none: 0} {
+		got, err := f.s.Issue(ctx, as(f.a.id, authz.Manager, all), IssueRequest{ProductID: f.a.prodP, PlanID: planID, CustomerID: f.a.customer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := f.get(t, f.a.id, got.License.ID) // as stored
+		if months == 0 {
+			if l.UpdatesUntil != nil {
+				t.Errorf("no maintenance: updates_until %v", l.UpdatesUntil)
+			}
+			continue
+		}
+		want := Expiry(l.IssuedAt, &months, nil).Truncate(time.Second)
+		if l.UpdatesUntil == nil || !l.UpdatesUntil.Equal(want) || l.UpdatesUntil.Nanosecond() != 0 {
+			t.Errorf("%d months: updates_until %v, want %v (issued %v)", months, l.UpdatesUntil, want, l.IssuedAt)
+		}
+	}
+}

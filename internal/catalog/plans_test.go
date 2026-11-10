@@ -86,6 +86,19 @@ func TestPlans(t *testing.T) {
 	if u, err := ps.Update(admin, pro.ID, PlanPatch{DurationSeconds: ptr[int64](60), Null: []string{"duration_months"}}); err != nil || u.DurationMonths != nil || *u.DurationSeconds != 60 {
 		t.Errorf("switch to seconds = %+v, %v", u, err)
 	}
+	// Maintenance (ADR-0045): set, kept by other patches, cleared by null.
+	if u, err := ps.Update(admin, pro.ID, PlanPatch{UpdatesMonths: ptr(12)}); err != nil || u.UpdatesMonths == nil || *u.UpdatesMonths != 12 {
+		t.Errorf("set updates = %+v, %v", u, err)
+	}
+	if u, err := ps.Update(admin, pro.ID, PlanPatch{Name: ptr("Pro 2")}); err != nil || u.UpdatesMonths == nil || *u.UpdatesMonths != 12 {
+		t.Errorf("updates kept = %+v, %v", u, err)
+	}
+	if _, err := ps.Update(admin, pro.ID, PlanPatch{UpdatesMonths: ptr(0)}); field(err) != "/updates_months" {
+		t.Errorf("updates 0: %v", err)
+	}
+	if u, err := ps.Update(admin, pro.ID, PlanPatch{Null: []string{"updates_months"}}); err != nil || u.UpdatesMonths != nil {
+		t.Errorf("clear updates = %+v, %v", u, err)
+	}
 	// Archive once, atomically; rights before state.
 	a, err := ps.Archive(as(f.a, authz.Admin, db.ID), trial.ID)
 	if err != nil || a.ArchivedAt == nil {
@@ -176,6 +189,8 @@ func TestPlanRefusals(t *testing.T) {
 		"lease above max":   {func(in *PlanInput) { in.LeaseSeconds = maxSeconds + 1 }, "/lease_seconds"},
 		"offline above max": {func(in *PlanInput) { in.MaxOfflineSeconds = ptr[int64](maxSeconds + 1) }, "/max_offline_seconds"},
 		"grace range":       {func(in *PlanInput) { in.GraceSeconds = 3153600001 }, "/grace_seconds"},
+		"updates zero":      {func(in *PlanInput) { in.UpdatesMonths = ptr(0) }, "/updates_months"},
+		"updates range":     {func(in *PlanInput) { in.UpdatesMonths = ptr(1201) }, "/updates_months"},
 		"site from activation": {func(in *PlanInput) {
 			in.BindType, in.ExpiryBasis = plan.BindTypeNone, plan.ExpiryBasisFromFirstActivation
 		}, "/expiry_basis"},

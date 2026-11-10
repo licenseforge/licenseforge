@@ -269,6 +269,33 @@ func (_u *PlanUpdate) AddGraceSeconds(v int64) *PlanUpdate {
 	return _u
 }
 
+// SetUpdatesMonths sets the "updates_months" field.
+func (_u *PlanUpdate) SetUpdatesMonths(v int) *PlanUpdate {
+	_u.mutation.ResetUpdatesMonths()
+	_u.mutation.SetUpdatesMonths(v)
+	return _u
+}
+
+// SetNillableUpdatesMonths sets the "updates_months" field if the given value is not nil.
+func (_u *PlanUpdate) SetNillableUpdatesMonths(v *int) *PlanUpdate {
+	if v != nil {
+		_u.SetUpdatesMonths(*v)
+	}
+	return _u
+}
+
+// AddUpdatesMonths adds value to the "updates_months" field.
+func (_u *PlanUpdate) AddUpdatesMonths(v int) *PlanUpdate {
+	_u.mutation.AddUpdatesMonths(v)
+	return _u
+}
+
+// ClearUpdatesMonths clears the value of the "updates_months" field.
+func (_u *PlanUpdate) ClearUpdatesMonths() *PlanUpdate {
+	_u.mutation.ClearUpdatesMonths()
+	return _u
+}
+
 // SetArchivedAt sets the "archived_at" field.
 func (_u *PlanUpdate) SetArchivedAt(v time.Time) *PlanUpdate {
 	_u.mutation.SetArchivedAt(v)
@@ -454,6 +481,11 @@ func (_u *PlanUpdate) check() error {
 			return &ValidationError{Name: "grace_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.grace_seconds": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.UpdatesMonths(); ok {
+		if err := plan.UpdatesMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "updates_months", err: fmt.Errorf(`ent: validator failed for field "Plan.updates_months": %w`, err)}
+		}
+	}
 	if _u.mutation.ProductCleared() && len(_u.mutation.ProductIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "Plan.product"`)
 	}
@@ -543,6 +575,15 @@ func (_u *PlanUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedGraceSeconds(); ok {
 		_spec.AddField(plan.FieldGraceSeconds, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.UpdatesMonths(); ok {
+		_spec.SetField(plan.FieldUpdatesMonths, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUpdatesMonths(); ok {
+		_spec.AddField(plan.FieldUpdatesMonths, field.TypeInt, value)
+	}
+	if _u.mutation.UpdatesMonthsCleared() {
+		_spec.ClearField(plan.FieldUpdatesMonths, field.TypeInt)
 	}
 	if value, ok := _u.mutation.ArchivedAt(); ok {
 		_spec.SetField(plan.FieldArchivedAt, field.TypeTime, value)
@@ -899,6 +940,33 @@ func (_u *PlanUpdateOne) AddGraceSeconds(v int64) *PlanUpdateOne {
 	return _u
 }
 
+// SetUpdatesMonths sets the "updates_months" field.
+func (_u *PlanUpdateOne) SetUpdatesMonths(v int) *PlanUpdateOne {
+	_u.mutation.ResetUpdatesMonths()
+	_u.mutation.SetUpdatesMonths(v)
+	return _u
+}
+
+// SetNillableUpdatesMonths sets the "updates_months" field if the given value is not nil.
+func (_u *PlanUpdateOne) SetNillableUpdatesMonths(v *int) *PlanUpdateOne {
+	if v != nil {
+		_u.SetUpdatesMonths(*v)
+	}
+	return _u
+}
+
+// AddUpdatesMonths adds value to the "updates_months" field.
+func (_u *PlanUpdateOne) AddUpdatesMonths(v int) *PlanUpdateOne {
+	_u.mutation.AddUpdatesMonths(v)
+	return _u
+}
+
+// ClearUpdatesMonths clears the value of the "updates_months" field.
+func (_u *PlanUpdateOne) ClearUpdatesMonths() *PlanUpdateOne {
+	_u.mutation.ClearUpdatesMonths()
+	return _u
+}
+
 // SetArchivedAt sets the "archived_at" field.
 func (_u *PlanUpdateOne) SetArchivedAt(v time.Time) *PlanUpdateOne {
 	_u.mutation.SetArchivedAt(v)
@@ -1097,6 +1165,11 @@ func (_u *PlanUpdateOne) check() error {
 			return &ValidationError{Name: "grace_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.grace_seconds": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.UpdatesMonths(); ok {
+		if err := plan.UpdatesMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "updates_months", err: fmt.Errorf(`ent: validator failed for field "Plan.updates_months": %w`, err)}
+		}
+	}
 	if _u.mutation.ProductCleared() && len(_u.mutation.ProductIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "Plan.product"`)
 	}
@@ -1203,6 +1276,15 @@ func (_u *PlanUpdateOne) sqlSave(ctx context.Context) (_node *Plan, err error) {
 	}
 	if value, ok := _u.mutation.AddedGraceSeconds(); ok {
 		_spec.AddField(plan.FieldGraceSeconds, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.UpdatesMonths(); ok {
+		_spec.SetField(plan.FieldUpdatesMonths, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUpdatesMonths(); ok {
+		_spec.AddField(plan.FieldUpdatesMonths, field.TypeInt, value)
+	}
+	if _u.mutation.UpdatesMonthsCleared() {
+		_spec.ClearField(plan.FieldUpdatesMonths, field.TypeInt)
 	}
 	if value, ok := _u.mutation.ArchivedAt(); ok {
 		_spec.SetField(plan.FieldArchivedAt, field.TypeTime, value)

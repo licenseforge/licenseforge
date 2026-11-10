@@ -21,7 +21,7 @@ const feature = (key: string, type: "boolean" | "limit", archived = false): Feat
 });
 const plan = (id: string, name: string): Plan => ({
   id, product_id: "prd_1", slug: id, name, duration_months: 12, duration_seconds: null, expiry_basis: "from_issue", max_activations: null,
-  max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null, grace_seconds: 0, archived_at: null, created_at: "",
+  max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null, grace_seconds: 0, updates_months: null, archived_at: null, created_at: "",
 });
 const features = [feature("sso", "boolean"), feature("max_users", "limit"), feature("legacy", "boolean", true), feature("gone", "boolean", true)];
 const plans = [plan("pln_basic", "Basic"), plan("pln_pro", "Pro")];

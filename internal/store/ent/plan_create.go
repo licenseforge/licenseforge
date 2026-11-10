@@ -215,6 +215,20 @@ func (_c *PlanCreate) SetNillableGraceSeconds(v *int64) *PlanCreate {
 	return _c
 }
 
+// SetUpdatesMonths sets the "updates_months" field.
+func (_c *PlanCreate) SetUpdatesMonths(v int) *PlanCreate {
+	_c.mutation.SetUpdatesMonths(v)
+	return _c
+}
+
+// SetNillableUpdatesMonths sets the "updates_months" field if the given value is not nil.
+func (_c *PlanCreate) SetNillableUpdatesMonths(v *int) *PlanCreate {
+	if v != nil {
+		_c.SetUpdatesMonths(*v)
+	}
+	return _c
+}
+
 // SetArchivedAt sets the "archived_at" field.
 func (_c *PlanCreate) SetArchivedAt(v time.Time) *PlanCreate {
 	_c.mutation.SetArchivedAt(v)
@@ -447,6 +461,11 @@ func (_c *PlanCreate) check() error {
 			return &ValidationError{Name: "grace_seconds", err: fmt.Errorf(`ent: validator failed for field "Plan.grace_seconds": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.UpdatesMonths(); ok {
+		if err := plan.UpdatesMonthsValidator(v); err != nil {
+			return &ValidationError{Name: "updates_months", err: fmt.Errorf(`ent: validator failed for field "Plan.updates_months": %w`, err)}
+		}
+	}
 	if v, ok := _c.mutation.ID(); ok {
 		if err := plan.IDValidator(v); err != nil {
 			return &ValidationError{Name: "id", err: fmt.Errorf(`ent: validator failed for field "Plan.id": %w`, err)}
@@ -549,6 +568,10 @@ func (_c *PlanCreate) createSpec() (*Plan, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.GraceSeconds(); ok {
 		_spec.SetField(plan.FieldGraceSeconds, field.TypeInt64, value)
 		_node.GraceSeconds = value
+	}
+	if value, ok := _c.mutation.UpdatesMonths(); ok {
+		_spec.SetField(plan.FieldUpdatesMonths, field.TypeInt, value)
+		_node.UpdatesMonths = &value
 	}
 	if value, ok := _c.mutation.ArchivedAt(); ok {
 		_spec.SetField(plan.FieldArchivedAt, field.TypeTime, value)

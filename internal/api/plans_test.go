@@ -19,7 +19,17 @@ func TestPlanEndpoints(t *testing.T) {
 		created.body["lease_seconds"] != float64(604800) || created.body["duration_months"] != float64(12) || created.body["duration_seconds"] != nil {
 		t.Fatalf("create: %d %s", created.code, created.raw)
 	}
+	if v, ok := created.body["updates_months"]; !ok || v != nil {
+		t.Errorf("updates_months absent is null: %s", created.raw)
+	}
 	id := created.body["id"].(string)
+	// Maintenance (ADR-0045): a merge patch sets and clears it.
+	if r := f.do(t, "PATCH", p+"/"+id, `{"updates_months":24}`, owner); r.code != 200 || r.body["updates_months"] != float64(24) {
+		t.Errorf("set updates_months: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, "PATCH", p+"/"+id, `{"updates_months":null}`, owner); r.code != 200 || r.body["updates_months"] != nil {
+		t.Errorf("clear updates_months: %d %s", r.code, r.raw)
+	}
 	f.do(t, "POST", p, `{"product_id":"`+f.prodA+`","slug":"pro","name":"Again"}`, owner).problem(t, 409, "conflict")
 	for body, field := range map[string]string{
 		`{"product_id":"` + ids.Product() + `","slug":"x","name":"X"}`:                                    "/product_id",

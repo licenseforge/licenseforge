@@ -326,6 +326,11 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		SetLeaseSeconds(pl.LeaseSeconds).SetNillableMaxOfflineSeconds(pl.MaxOfflineSeconds).
 		SetGraceSeconds(pl.GraceSeconds).SetEntitlements(ents).SetExternalRefs(req.ExternalRefs).
 		SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
+	// Maintenance counts from issue whatever the expiry basis (ADR-0045), in
+	// whole seconds as the claims carry it.
+	if u := Expiry(now, pl.UpdatesMonths, nil); u != nil {
+		c.SetUpdatesUntil(u.Truncate(time.Second))
+	}
 	// from_first_activation: the term starts at first activation (nil until then).
 	if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
 		c.SetNillableExpiresAt(Expiry(now, pl.DurationMonths, pl.DurationSeconds))

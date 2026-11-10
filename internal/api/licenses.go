@@ -316,7 +316,7 @@ func licenseView(l *ent.License, seats int) apigen.License {
 	}
 	v := apigen.License{Id: l.ID, ProductId: l.ProductID, PlanId: l.PlanID, PlanSlug: l.PlanSlug, CustomerId: l.CustomerID,
 		Type: apigen.LicenseType(l.Type), Status: apigen.LicenseStatus(l.Status), KeyHint: l.KeyHint,
-		ExpiryBasis: apigen.LicenseExpiryBasis(l.ExpiryBasis), ExpiresAt: utc(l.ExpiresAt), MaxActivations: l.MaxActivations, ActiveActivations: seats,
+		ExpiryBasis: apigen.LicenseExpiryBasis(l.ExpiryBasis), ExpiresAt: utc(l.ExpiresAt), UpdatesUntil: utc(l.UpdatesUntil), MaxActivations: l.MaxActivations, ActiveActivations: seats,
 		MaxRehosts: l.MaxRehosts, RehostCount: l.RehostCount,
 		ExternalRefs: l.ExternalRefs, IssuedAt: l.IssuedAt.UTC(), SuspendedAt: utc(l.SuspendedAt), RevokedAt: utc(l.RevokedAt),
 		CreatedAt: l.CreatedAt.UTC()}
@@ -337,8 +337,8 @@ func issuedView(i licenses.Issued) apigen.LicenseIssued {
 	v := licenseView(i.License, 0) // new: no activations yet
 	return apigen.LicenseIssued{Id: v.Id, ProductId: v.ProductId, PlanId: v.PlanId, PlanSlug: v.PlanSlug, CustomerId: v.CustomerId,
 		Type: apigen.LicenseIssuedType(v.Type), Status: v.Status, KeyHint: v.KeyHint,
-		ExpiryBasis: apigen.LicenseIssuedExpiryBasis(v.ExpiryBasis), ExpiresAt: v.ExpiresAt, MaxActivations: v.MaxActivations, ActiveActivations: v.ActiveActivations,
-		Entitlements: v.Entitlements, ExternalRefs: v.ExternalRefs, IssuedAt: v.IssuedAt, SuspendedAt: v.SuspendedAt,
+		ExpiryBasis: apigen.LicenseIssuedExpiryBasis(v.ExpiryBasis), ExpiresAt: v.ExpiresAt, UpdatesUntil: v.UpdatesUntil, MaxActivations: v.MaxActivations, ActiveActivations: v.ActiveActivations,
+		MaxRehosts: v.MaxRehosts, RehostCount: v.RehostCount, Entitlements: v.Entitlements, ExternalRefs: v.ExternalRefs, IssuedAt: v.IssuedAt, SuspendedAt: v.SuspendedAt,
 		RevokedAt: v.RevokedAt, CreatedAt: v.CreatedAt, Key: i.Key}
 }
 

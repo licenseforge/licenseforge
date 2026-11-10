@@ -152,6 +152,8 @@ func TestCatalogConstraintsInDatabase(t *testing.T) {
 		"grace over 100 years": {`UPDATE plans SET grace_seconds = 3153600001 WHERE id = $1`, c.plan.ID},
 		"negative max_offline": {`UPDATE plans SET max_offline_seconds = -1 WHERE id = $1`, c.plan.ID},
 		"zero max_activations": {`UPDATE plans SET max_activations = 0 WHERE id = $1`, c.plan.ID},
+		"zero updates_months":  {`UPDATE plans SET updates_months = 0 WHERE id = $1`, c.plan.ID},
+		"updates_months 1201":  {`UPDATE plans SET updates_months = 1201 WHERE id = $1`, c.plan.ID},
 		"unknown expiry basis": {`UPDATE plans SET expiry_basis = 'whenever' WHERE id = $1`, c.plan.ID},
 		"bad plan id format":   {`INSERT INTO plans (id, tenant_id, product_id, slug, name, expiry_basis, offline_allowed, lease_seconds, grace_seconds, created_at, updated_at) VALUES ('pln_x', $1, $2, 'p2', 'x', 'from_issue', false, 60, 0, $3, $3)`, c.tenant.ID, c.product.ID, now},
 	} {

@@ -1849,7 +1849,7 @@ components:
       enum: [active, suspended, revoked]
     License:
       type: object
-      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, max_activations, active_activations, max_rehosts, rehost_count, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
+      required: [id, product_id, plan_id, plan_slug, customer_id, type, status, key_hint, expiry_basis, expires_at, updates_until, max_activations, active_activations, max_rehosts, rehost_count, entitlements, external_refs, issued_at, suspended_at, revoked_at, created_at]
       properties:
         id: { type: string, example: lic_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         product_id: { type: string }
@@ -1861,6 +1861,7 @@ components:
         key_hint: { type: string, description: The key's last 6 characters, to tell keys apart. Never the key. }
         expiry_basis: { type: string, enum: [from_issue, from_first_activation] }
         expires_at: { type: string, format: date-time, nullable: true, description: Null for a perpetual license, or until first activation. }
+        updates_until: { type: string, format: date-time, nullable: true, description: "Maintenance end (ADR-0045): builds dated after it aren't covered (the SDK's updates_expired). Null covers every build. Set at issue from the plan's updates_months." }
         max_activations: { type: integer, nullable: true }
         active_activations: { type: integer, description: Seats taken now (activations not deactivated). }
         max_rehosts: { type: integer, nullable: true, description: "Seat moves allowed (ADR-0034); null is unlimited." }
@@ -1976,7 +1977,7 @@ components:
         unit: { type: string, maxLength: 40, nullable: true }
     Plan:
       type: object
-      required: [id, product_id, slug, name, duration_months, duration_seconds, expiry_basis, max_activations, max_rehosts, bind_type, offline_allowed, lease_seconds, max_offline_seconds, grace_seconds, archived_at, created_at]
+      required: [id, product_id, slug, name, duration_months, duration_seconds, expiry_basis, max_activations, max_rehosts, bind_type, offline_allowed, lease_seconds, max_offline_seconds, grace_seconds, updates_months, archived_at, created_at]
       properties:
         id: { type: string, example: pln_01jcz5b2y3c4d5e6f7g8h9j0k1 }
         product_id: { type: string }
@@ -1991,6 +1992,7 @@ components:
         lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
         max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
         grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
+        updates_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build." }
         bind_type: { type: string, enum: [none, machine, cluster], description: "What an activation binds to; none is a site license (no activations). Immutable." }
         archived_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
@@ -2017,6 +2019,7 @@ components:
         lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
         max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
         grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
+        updates_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build." }
         bind_type: { type: string, enum: [none, machine, cluster], description: "What an activation binds to; none is a site license (no activations). Immutable." }
     PlanFeatures:
       type: object
@@ -2042,6 +2045,7 @@ components:
         lease_seconds: { type: integer, format: int64, minimum: 1, maximum: 3153600000 }
         max_offline_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000, nullable: true }
         grace_seconds: { type: integer, format: int64, minimum: 0, maximum: 3153600000 }
+        updates_months: { type: integer, minimum: 1, maximum: 1200, nullable: true, description: "Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build." }
     Customer:
       type: object
       required: [id, name, email, external_refs, archived_at, created_at]

@@ -726,6 +726,7 @@ var (
 		{Name: "lease_seconds", Type: field.TypeInt64, Default: 604800},
 		{Name: "max_offline_seconds", Type: field.TypeInt64, Nullable: true},
 		{Name: "grace_seconds", Type: field.TypeInt64, Default: 0},
+		{Name: "updates_months", Type: field.TypeInt, Nullable: true},
 		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
 		{Name: "product_id", Type: field.TypeString, Size: 40, SchemaType: map[string]string{"postgres": "varchar(40)"}},
 	}
@@ -737,7 +738,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "plans_products_plans",
-				Columns:    []*schema.Column{PlansColumns[17]},
+				Columns:    []*schema.Column{PlansColumns[18]},
 				RefColumns: []*schema.Column{ProductsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -751,7 +752,7 @@ var (
 			{
 				Name:    "plan_product_id_slug",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[17], PlansColumns[4]},
+				Columns: []*schema.Column{PlansColumns[18], PlansColumns[4]},
 			},
 			{
 				Name:    "plan_tenant_id_id",
@@ -761,12 +762,12 @@ var (
 			{
 				Name:    "plan_tenant_id_product_id_id",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[1], PlansColumns[17], PlansColumns[0]},
+				Columns: []*schema.Column{PlansColumns[1], PlansColumns[18], PlansColumns[0]},
 			},
 			{
 				Name:    "plan_tenant_id_product_id_id_slug",
 				Unique:  true,
-				Columns: []*schema.Column{PlansColumns[1], PlansColumns[17], PlansColumns[0], PlansColumns[4]},
+				Columns: []*schema.Column{PlansColumns[1], PlansColumns[18], PlansColumns[0], PlansColumns[4]},
 			},
 		},
 	}
@@ -1308,6 +1309,7 @@ func init() {
 		"licenses_suspended_at":           "(status = 'suspended') = (suspended_at IS NOT NULL)",
 		"licenses_type_valid":             "(type)::text = ANY (ARRAY['dev'::text, 'trial'::text, 'paid'::text, 'community'::text])",
 		"licenses_unstarted_no_expiry":    "(expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NOT NULL OR expires_at IS NULL",
+		"licenses_updates_after_issue":    "updates_until IS NULL OR updates_until > issued_at",
 	}
 	MembershipsTable.ForeignKeys[0].RefTable = TenantsTable
 	MembershipsTable.ForeignKeys[1].RefTable = UsersTable
@@ -1340,6 +1342,7 @@ func init() {
 		"plans_site_no_activation_max": "(bind_type)::text <> 'none'::text OR max_activations IS NULL",
 		"plans_site_starts_at_issue":   "(bind_type)::text <> 'none'::text OR (expiry_basis)::text <> 'from_first_activation'::text",
 		"plans_slug_format":            "slug ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'",
+		"plans_updates_months":         "updates_months IS NULL OR (updates_months >= 1 AND updates_months <= 1200)",
 	}
 	PlanFeaturesTable.ForeignKeys[0].RefTable = FeaturesTable
 	PlanFeaturesTable.ForeignKeys[1].RefTable = PlansTable

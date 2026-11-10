@@ -40,6 +40,7 @@ func (Plan) Fields() []ent.Field {
 		field.Int64("lease_seconds").Default(7*24*3600).Range(1, maxSeconds),
 		field.Int64("max_offline_seconds").Optional().Nillable().Range(0, maxSeconds),
 		field.Int64("grace_seconds").Default(0).Range(0, maxSeconds),
+		field.Int("updates_months").Optional().Nillable().Range(1, 1200).Comment("maintenance from issue (ADR-0045); nil = every build covered"),
 		field.Time("archived_at").Optional().Nillable(),
 	}
 }
@@ -64,6 +65,7 @@ func (Plan) Annotations() []schema.Annotation {
 		"plans_site_no_activation_max": `(bind_type)::text <> 'none'::text OR max_activations IS NULL`,
 		"plans_duration_secs":          `duration_seconds IS NULL OR (duration_seconds >= 1 AND duration_seconds <= ` + maxS + `)`,
 		"plans_duration_months":        `duration_months IS NULL OR (duration_months >= 1 AND duration_months <= 1200)`,
+		"plans_updates_months":         `updates_months IS NULL OR (updates_months >= 1 AND updates_months <= 1200)`,
 		"plans_one_duration":           `num_nonnulls(duration_months, duration_seconds) <= 1`,
 		"plans_activations_rng":        `max_activations IS NULL OR (max_activations >= 1 AND max_activations <= 1000000)`,
 		"plans_rehosts_rng":            `max_rehosts IS NULL OR (max_rehosts >= 0 AND max_rehosts <= 1000000)`,
