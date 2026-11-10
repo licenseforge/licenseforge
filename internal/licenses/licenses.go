@@ -710,28 +710,32 @@ func (s Service) Daily(ctx context.Context, p authz.Principal, days int) ([]Day,
 	if days < 1 || days > MaxDays {
 		return nil, fmt.Errorf("%w: days must be 1 to %d", ErrInvalid, MaxDays)
 	}
-	if products == nil {
+	if products == nil { // a NULL array; unreachable today (a scope always names products)
 		products = []string{}
 	}
 	out := make([]Day, 0, days)
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
-		// Each series groups its rows by UTC day from the window's first
-		// midnight, using the (tenant_id, time) indexes; days without rows
+		// Each series counts its rows from the window's first midnight by UTC
+		// day. The bound is a scalar subquery so it is an index condition on
+		// the (tenant_id, time) indexes; the product filter is an EXISTS that
+		// folds away when the caller sees every product. Days without rows
 		// come from generate_series.
+		// ponytail: a product-scoped caller's EXISTS may hash every license of
+		// its products (all time); a product_id on activations if that grows.
 		rows, err := tx.QueryContext(ctx, `
 			WITH w AS (SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AS today),
 			d AS (SELECT generate_series(w.today - ($1::int - 1) * interval '1 day', w.today, interval '1 day') AS day FROM w),
 			since AS (SELECT (w.today - ($1::int - 1) * interval '1 day') AT TIME ZONE 'UTC' AS t FROM w),
 			lic AS (SELECT date_trunc('day', l.created_at AT TIME ZONE 'UTC') AS day, count(*) AS n
-				FROM licenses l, since WHERE l.tenant_id = $2 AND l.created_at >= since.t AND ($3 OR l.product_id = ANY($4))
+				FROM licenses l WHERE l.tenant_id = $2 AND l.created_at >= (SELECT t FROM since) AND ($3 OR l.product_id = ANY($4))
 				GROUP BY 1),
 			act AS (SELECT date_trunc('day', a.first_seen_at AT TIME ZONE 'UTC') AS day, count(*) AS n
-				FROM activations a JOIN licenses l ON l.id = a.license_id, since
-				WHERE a.tenant_id = $2 AND a.first_seen_at >= since.t AND ($3 OR l.product_id = ANY($4))
+				FROM activations a WHERE a.tenant_id = $2 AND a.first_seen_at >= (SELECT t FROM since)
+				AND ($3 OR EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = $2 AND l.id = a.license_id AND l.product_id = ANY($4)))
 				GROUP BY 1),
 			deact AS (SELECT date_trunc('day', a.deactivated_at AT TIME ZONE 'UTC') AS day, count(*) AS n
-				FROM activations a JOIN licenses l ON l.id = a.license_id, since
-				WHERE a.tenant_id = $2 AND a.deactivated_at >= since.t AND ($3 OR l.product_id = ANY($4))
+				FROM activations a WHERE a.tenant_id = $2 AND a.deactivated_at >= (SELECT t FROM since)
+				AND ($3 OR EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = $2 AND l.id = a.license_id AND l.product_id = ANY($4)))
 				GROUP BY 1)
 			SELECT d.day AT TIME ZONE 'UTC', coalesce(lic.n, 0), coalesce(act.n, 0), coalesce(deact.n, 0)
 			FROM d LEFT JOIN lic USING (day) LEFT JOIN act USING (day) LEFT JOIN deact USING (day)

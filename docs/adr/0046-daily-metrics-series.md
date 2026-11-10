@@ -11,7 +11,7 @@
   - `licenses_issued`: licenses created that day (`licenses.created_at`).
   - `activations`: machines activated that day, online or offline (`activations.first_seen_at`).
   - `deactivations`: machines deactivated that day (`activations.deactivated_at`), by the customer, a receipt or a support reset.
-- **Source: the domain tables**, not the audit log. The audit log is indexed by sequence, not time. Its refusals often name no product (an unknown key has none), so they can't be filtered by product scope. Indexes on `activations (tenant_id, first_seen_at)` and `(tenant_id, deactivated_at)` keep the range scan bounded.
+- **Source: the domain tables**, not the audit log. The audit log is indexed by sequence, not time. Its refusals often name no product (an unknown key has none), so they can't be filtered by product scope. Indexes on `activations (tenant_id, first_seen_at)` and `(tenant_id, deactivated_at)`, built concurrently, bound the scan to the window.
 - **Access**: `license:read`. A product-scoped caller counts only its products' licenses and those licenses' activations, under RLS. That's the same rule as `summary`'s license counts.
 - **Day boundary**: UTC, by the database clock, like `customers.month_start` ([ADR-0040 Active customer measure](0040-active-customer-measure.md)).
 - **Dashboard**: the overview shows the three series as simple bar charts, drawn as SVG with no chart library, each with a text summary (total over the window) for screen readers.

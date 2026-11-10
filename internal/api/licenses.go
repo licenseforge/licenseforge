@@ -105,7 +105,7 @@ func (s *server) GetDailyMetrics(ctx context.Context, req apigen.GetDailyMetrics
 	if req.Params.Days != nil {
 		days = *req.Params.Days
 	}
-	if days < 1 || days > licenses.MaxDays {
+	if days < 1 || days > licenses.MaxDays { // a query parameter: 400 like limit (the service's ErrInvalid would be a 422)
 		return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: fmt.Sprintf("days must be 1 to %d.", licenses.MaxDays)}
 	}
 	series, err := s.Licenses.Daily(ctx, principal(ctx), days)
