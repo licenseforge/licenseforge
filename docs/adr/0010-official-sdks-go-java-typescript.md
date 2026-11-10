@@ -20,7 +20,7 @@ Each SDK has the same surface: `verify(file)`, `activate(key)`, `refresh()`, `de
 
 ## Consequences
 - Covers the large majority of on-prem and B2B vendors.
-- **TypeScript SDK is server-side only (Node ≥ 20).** No browser build: client-side JS can be edited by anyone, so it can't enforce anything. A frontend asks its own backend for entitlements. Bun/Deno may work via `node:crypto` compatibility but aren't officially supported.
+- **TypeScript SDK is server-side only (Node ≥ 20; amended 2026-11-10: Node ≥ 22, the oldest LTS line still supported, with CI on every supported LTS line).** No browser build: client-side JS can be edited by anyone, so it can't enforce anything. A frontend asks its own backend for entitlements. Bun/Deno may work via `node:crypto` compatibility but aren't officially supported.
 - Java 15+ minimum; Java 8/11 users need BouncyCastle (document, don't support officially).
 - Gaps: other languages are covered first by the in-cluster agent's local API and an OpenFeature provider ([ADR-0012 In-cluster license agent](0012-in-cluster-license-agent.md), v0.3). A C-ABI core with .NET and Python bindings is Later. Community SDKs can certify against the test vectors.
 

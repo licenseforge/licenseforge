@@ -14,6 +14,11 @@ updates:
     ignore: # typescript-eslint supports TypeScript < 6.1 only; lift when it supports newer
       - dependency-name: typescript
         versions: [">=6.1.0"]
+  - package-ecosystem: npm
+    directory: /sdk/ts # dev dependencies only: the SDK has none at runtime
+    schedule: { interval: weekly }
+    groups:
+      sdk-ts: { patterns: ["*"] }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }

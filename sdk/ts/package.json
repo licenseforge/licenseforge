@@ -1,0 +1,20 @@
+{
+  "name": "@licenseforge/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "LicenseForge SDK for Node.js: verify lf1 license files (spec/license-format.md).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
+  "files": ["dist/src"],
+  "scripts": {
+    "build": "tsc -p .",
+    "prepack": "tsc -p .",
+    "test": "tsc -p . && node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "6.0.3"
+  }
+}
