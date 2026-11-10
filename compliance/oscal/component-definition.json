@@ -1320,6 +1320,26 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/send_test.go",
                     "rel": "reference",
                     "text": "TestSend"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/api.go",
+                    "rel": "reference",
+                    "text": "cliClient"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/api_test.go",
+                    "rel": "reference",
+                    "text": "TestAPICommand"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/api_test.go",
+                    "rel": "reference",
+                    "text": "TestCLIClientFollowsNoRedirect"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/cmd/licenseforge/offline_test.go",
+                    "rel": "reference",
+                    "text": "TestOfflineCommand"
                   }
                 ],
                 "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh, whose TLS settings are the operator's (TLS 1.2+). LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true (Helm databaseAllowPlaintext) lifts the database check for development clusters."
@@ -1532,7 +1552,7 @@
               {
                 "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
                 "control-id": "si-7",
-                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md). The SDKs (Go, TypeScript) verify license files against Ed25519 keys embedded in the build and refuse weak trusted keys (small-order points, non-canonical encodings) before the signature check, so a tampered key set can't make a forged license verify (spec, conformance vectors).",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md). The Go SDK and the TypeScript SDK (not published yet) verify license files against Ed25519 keys embedded in the build and refuse weak trusted keys (small-order points, non-canonical encodings) before the signature check, so a tampered key set can't make a forged license verify (spec, conformance vectors). Offline activation (ADR-0043): requests and deactivation receipts are unsigned but strictly parsed (canonical encoding, no unknown fields, 4 KiB limit, a bound fingerprint and a 16-byte nonce); a receipt frees a seat only when its file_sha256 is the activation's current offline file, and every request's and receipt's SHA-256 is in the audit trail.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1557,6 +1577,28 @@
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/docs/verifying-releases.md",
                     "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/go/licensefile/licensefile_test.go",
+                    "rel": "reference",
+                    "text": "TestWeakEd25519"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/spec/vectors/lf1.json",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/ts/test/vectors.test.ts",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/spec/vectors/offline.json",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/activations/receipts_test.go",
+                    "rel": "reference",
+                    "text": "TestReturnOlderFile"
                   }
                 ],
                 "remarks": "The running server doesn't verify its own integrity; that is the deployment's admission policy (e.g. verify the cosign signature before pods start)."

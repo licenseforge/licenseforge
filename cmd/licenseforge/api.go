@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 const apiUsage = `usage: licenseforge api [--data JSON|@FILE|-] [--idempotency-key KEY] METHOD PATH
@@ -23,6 +24,12 @@ const apiUsage = `usage: licenseforge api [--data JSON|@FILE|-] [--idempotency-k
 
 // maxAnswer bounds a response body (lists are paged at 200 items).
 const maxAnswer = 16 << 20
+
+// cliClient is the HTTP client of the API commands (api, offline): it
+// follows no redirect, so the token never reaches another host or path.
+func cliClient() *http.Client {
+	return &http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
 
 // usageError is a mistake in the command line or environment: exit 2.
 type usageError struct{ error }

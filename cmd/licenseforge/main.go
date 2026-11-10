@@ -147,11 +147,11 @@ func main() {
 	case "offline":
 		// stdout is the license file: errors go to stderr, never the JSON log.
 		os.Exit(offlineMain(ctx, flag.Args()[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr,
-			&http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}))
+			cliClient()))
 	case "api":
 		// stdout is the answer: errors go to stderr, never the JSON log.
 		os.Exit(apiMain(ctx, flag.Args()[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr,
-			&http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}))
+			cliClient()))
 	case "tenant create":
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // `licenseforge api METHOD PATH` (ADR-0048): one request under /api/v1 with
@@ -177,5 +178,30 @@ func TestAPICommand(t *testing.T) {
 	// Help.
 	if code, _, errOut := run("", "--help"); code != 0 || !strings.Contains(errOut, "usage: licenseforge api") {
 		t.Errorf("help: %d %q", code, errOut)
+	}
+}
+
+// The client the commands run with follows no redirect: a 302 to another
+// host is the answer, and the other host never sees the token.
+func TestCLIClientFollowsNoRedirect(t *testing.T) {
+	var hits int
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/steal", http.StatusFound)
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer lf_tok")
+	resp, err := cliClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || hits != 0 {
+		t.Fatalf("status %d, other host hit %d times", resp.StatusCode, hits)
+	}
+	if cliClient().Timeout != time.Minute {
+		t.Error("no timeout")
 	}
 }
