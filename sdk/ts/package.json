@@ -5,7 +5,7 @@
   "description": "LicenseForge SDK for Node.js: verify lf1 license files (spec/license-format.md).",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
   "files": ["dist/src"],
   "scripts": {

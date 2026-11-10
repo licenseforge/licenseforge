@@ -16,9 +16,10 @@
 | Component | Status |
 |---|---|
 | Server (API, dashboard, workers) | in progress |
-| `lf` CLI | planned (v0.2) |
+| CLI ([docs](docs/cli.md)) | `licenseforge api`, `offline` and `tenant` |
 | Go SDK ([`sdk/go`](sdk/go/README.md)) | in progress: offline verification, fingerprints, clock guard, online client |
-| Java / TypeScript SDKs | planned (v0.2) |
+| TypeScript SDK ([`sdk/ts`](sdk/ts/README.md)) | in progress: offline verification |
+| Java SDK | planned (v0.2) |
 | In-cluster agent | planned (v0.3) |
 | Helm chart | planned (v0.1) |
 
