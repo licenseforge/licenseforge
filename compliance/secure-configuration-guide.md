@@ -8,6 +8,8 @@ The server is a stateless Go binary. All state lives in PostgreSQL 17+ and in on
 
 Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server refuses to start if a required one is missing or unsafe.
 
+Every variable marked *Secret* can instead name a file: `<VARIABLE>_FILE=/path`. That's a mounted Secret, so the value isn't in the process environment (DISA Kubernetes STIG V-242415). The Helm chart does this for every secret. A trailing line break in the file is ignored. Setting both the variable and its `_FILE` form is an error, and so is an empty or unreadable file. The server also refuses the owner and retention logins given as files.
+
 | Variable | Required | Default | Security notes |
 |---|---|---|---|
 | `LICENSEFORGE_DATABASE_URL` | yes (server) | – | Tenant pool, login `licenseforge_api`. Use `sslmode=verify-full` (or `verify-ca` with `sslrootcert`): a URL that doesn't verify the server is refused unless the host is local (`localhost`, a loopback address or a Unix socket) (see [Database logins](#database-logins)). Secret |
@@ -19,7 +21,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_DRAIN` | no | `5s` | How long the server keeps serving after SIGTERM while readiness fails. The chart sets it from `drainSeconds` |
 | `LICENSEFORGE_OIDC_ISSUER` | no | unset = dashboard login off | Exactly the ID token's `iss`. Must be https (http only on localhost). Discovered at start: an unreachable provider stops the server |
 | `LICENSEFORGE_OIDC_CLIENT_ID` | with the issuer | – | Also the required audience of ID tokens |
-| `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: pass it with `secretKeyRef`, never as a literal |
+| `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: the chart takes it from `oidc.clientSecret` and mounts it as a file (`_FILE`), never a literal |
 | `LICENSEFORGE_OIDC_REDIRECT_URL` | with the issuer | – | `https://<public host>/auth/callback`. Its origin is the only trusted origin for unsafe requests (CSRF) |
 | `LICENSEFORGE_SESSION_IDLE_TIMEOUT` | no | `1h` | Dashboard session idle timeout (AC-12): at least `5m`, at most the max age. Out of bounds stops the server |
 | `LICENSEFORGE_SESSION_MAX_AGE` | no | `12h` | Dashboard session lifetime after login (AC-12, IA-11): `1h` to `24h` (the database cap) |
@@ -33,7 +35,7 @@ Read by [`cmd/licenseforge/main.go`](../cmd/licenseforge/main.go). The server re
 | `LICENSEFORGE_AUDIT_SYSLOG_SD_ID` | no | `licenseforge@32473` | RFC 5424 structured data ID, `name@PEN`. 32473 is the documentation PEN; set your own if your SIEM rules key on it |
 | `LICENSEFORGE_AUDIT_OTLP_ENDPOINT` | no | unset = no OTLP export | OTLP/HTTP logs URL with the JSON encoding, `https://…/v1/logs` (http only on loopback; ADR-0036). TLS 1.2+, verified. A batch is delivered only on a 2xx with an empty body or an OTLP JSON body rejecting no record. No HTTP proxy is used |
 | `LICENSEFORGE_AUDIT_OTLP_CA_FILE`, `_CERT_FILE`, `_KEY_FILE` | no | system roots, no client certificate | As for syslog (chart: `audit.export.otlp.caSecret`, `clientSecret`) |
-| `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: pass it with `secretKeyRef` (chart: `headersSecret`) |
+| `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: the chart takes it from `headersSecret` and mounts it as a file (`_FILE`) |
 | `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT` | no | unset = TLS required | `true` lets database URLs skip verifying the server (no TLS) to non-local hosts. Development clusters only; never in production (SC-8) |
 | `LICENSEFORGE_TRUSTED_PROXIES` | no | unset = no proxy trusted | Comma-separated CIDRs or addresses of your ingress/load balancer. Only their `X-Forwarded-For` is believed, read from the right: the client is the right-most hop that isn't a trusted proxy. List proxies only, never client networks. Prefixes broader than /8 (IPv4) or /32 (IPv6) are refused at start |
 | `LICENSEFORGE_RATE_LIMIT_ACTIVATION` | no | `1200` | Requests per client address per minute, per replica, on `/api/v1/activation/` (`0` = off). Many installs can share a customer's egress address; each license key is limited separately (60/min) |
@@ -137,7 +139,7 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 - An email counts only when the IdP sends `email_verified: true`, and invitations are accepted by verified email. A verified email is only as trustworthy as its IdP, so configure only IdPs that verify emails.
 - Sessions last 1 hour idle (activity is recorded at most once a minute) and 12 hours at most by default; set `LICENSEFORGE_SESSION_IDLE_TIMEOUT` and `LICENSEFORGE_SESSION_MAX_AGE` to your policy (for example `15m` idle). Changing them needs a restart.
 - Set `LICENSEFORGE_LOGIN_BANNER` where a system use notification is required (AC-8). Each completed login logs `login banner acknowledged` with the user and banner ID.
-- With the chart in `main`, pass the OIDC variables through `extraEnv`. `values.yaml` says `extraEnv` is not for secrets, meaning no literal secret values; give the client secret as a `valueFrom.secretKeyRef` entry. Also allow egress to the IdP ([NetworkPolicies](#networkpolicies)). Once PR #49 is merged, use its first-class `oidc.*` values instead (they add the IdP egress rule).
+- Use the chart's `oidc.*` values. The client secret comes from `oidc.clientSecret` and is mounted as a file, and the values add the IdP egress rule (`oidc.egress`; narrow `oidc.egress.to`).
 
 ## FIPS image
 
@@ -159,7 +161,7 @@ From [`values.yaml`](../deploy/helm/licenseforge/values.yaml). How the chart map
 | `migrate.enabled` | `true` | Migrations as a hook Job. Turned off, you must migrate with the owner login elsewhere, never from a serving pod |
 | `replicaCount`, `podDisruptionBudget.*`, `autoscaling.*` | 2, on, off | Availability (CP, SC-5) |
 | `drainSeconds`, `terminationGracePeriodSeconds` | 5, 30 | No dropped requests on rollout; checked at render |
-| `extraEnv` | `[]` | Non-secret settings (OIDC until `oidc.*` lands, PR #49); a secret only as `valueFrom.secretKeyRef`, never a literal. Never add `LICENSEFORGE_OWNER_DATABASE_URL` (the server would refuse to start) |
+| `extraEnv` | `[]` | Non-secret settings only. Secrets go through the chart's Secret values, which mount them as files. Never add `LICENSEFORGE_OWNER_DATABASE_URL` or its `_FILE` (the server would refuse to start) |
 | `resources` | 100m / 64Mi, limit 256Mi | Bounds a runaway pod |
 | `service.type` | `ClusterIP` | Keep it; expose through a TLS ingress, not `LoadBalancer`/`NodePort` |
 | `networkPolicy.enabled` | `true` | Keep it on (needs a CNI that enforces policies) |
