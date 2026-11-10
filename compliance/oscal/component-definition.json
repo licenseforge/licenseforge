@@ -84,7 +84,7 @@
               {
                 "uuid": "06470f03-c171-5e53-9919-2e9fbb2c82b2",
                 "control-id": "ac-3",
-                "description": "Two layers. In Go, the API token and offline-issuance services call authz.Require / authz.CanAssign, with a fixed role-to-permission map and explicit product scope (zero scope denies). In PostgreSQL, every table has forced row-level security. The tenant login sees only the rows of the tenant set for the transaction (app.tenant_id); the platform login reads all tenants, and the identity login reads identity tables across tenants. Column grants limit which fields each login may change. Webhook endpoints need a tenant-wide scope: webhook:read and webhook:write are refused to a product-scoped member, who sees none (ADR-0044).",
+                "description": "Two layers. In Go, the API token and offline-issuance services call authz.Require / authz.CanAssign, with a fixed role-to-permission map and explicit product scope (zero scope denies). In PostgreSQL, every table has forced row-level security. The tenant login sees only the rows of the tenant set for the transaction (app.tenant_id); the platform login reads all tenants, and the identity login reads identity tables across tenants. Column grants limit which fields each login may change. Webhook endpoints need a tenant-wide scope: webhook:read and webhook:write are hidden from a product-scoped member (an empty list, 404 on an endpoint) (ADR-0044).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -414,6 +414,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/dispatch_test.go",
                     "rel": "reference",
                     "text": "TestPrunedSkip"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/recovery_test.go",
+                    "rel": "reference",
+                    "text": "TestDisableEnable"
                   }
                 ],
                 "remarks": "Not audited: (1) refusals before a credential maps to the tenant's own objects, which anyone can cause: unknown or malformed API tokens, license keys and invitation tokens, invitation acceptances refused for any reason, CSRF and origin refusals, and a signed-in user asking for a tenant they don't belong to (counted in the HTTP metrics; the API also logs them); login failures before a verified ID token likewise; (2) session expiry (idle and absolute timeouts), and a session replaced by a new login; (3) session refusals beyond the first per session (recorded once, so polling can't flood the chain; a failed write is logged, not the answer); (4) changes the operator makes in SQL, which have no API yet: platform-admin grants and removals beyond the bootstrap, user suspension and erasure, customer erasure (ADR-0029, ADR-0031); (5) idempotent replays, which return the stored outcome; (6) online lease refreshes, their refusals and re-activations of a known machine: metrics, not entries (ADR-0034)."
@@ -1587,6 +1592,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/endpoints_test.go",
                     "rel": "reference",
                     "text": "TestCreateRefusals"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/store/webhooks_test.go",
+                    "rel": "reference",
+                    "text": "TestWebhookChecks"
                   }
                 ]
               },
