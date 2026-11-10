@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Node.js service, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Server-side only, Node 22 or later, with no runtime dependencies (ADR-0010).
 
-Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`, `offline.json`). Next: the online client.
+Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`, `offline.json`). Next: lease stores for Kubernetes (ConfigMap, Secret) and files.
 
 ```ts
 import { readFileSync } from "node:fs";
@@ -39,5 +39,14 @@ try {
   - `encodeReceipt` and `parseReceipt` do the same for the `lfrcpt1` deactivation receipt, and `fileSHA256(file)` is the receipt's hash of the deleted file.
   - `offlineSHA256` identifies a request or receipt, ignoring changed line endings.
   - All refuse unknown fields; the encoders check their own output.
+- Clock guard (ADR-0018): `new Guard(store, licenseKey).now()` gives the time to check licenses with. It never moves backwards and refuses a clock turned back beyond the tolerance (`ClockError` `rollback`). `observe` and `reset` raise or set the mark from verified times. Use `FileClockStore` for offline licenses; `MemoryClockStore` resets on restart.
+- Online client (ADR-0034): `await Client.create(config)`, then:
+  - `activate()` once per machine, with one idempotency key across retries;
+  - `refresh()` to renew the lease;
+  - `current()` before each license check;
+  - `run(signal, onError)` in the background, which refreshes from `refresh_after` on;
+  - `deactivate()` to free the seat.
+
+  Every lease is verified (signature, product, tenant, this machine, binding) before it is used or stored. Older leases are refused as replays. The client checks with max(local, server time) and never trusts the HTTP Date header. `OnlineError.code` carries the API's stable codes.
 
 Development: `npm ci && npm test`.

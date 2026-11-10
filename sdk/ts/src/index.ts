@@ -17,6 +17,7 @@ export {
   verify,
 } from "./licensefile.js";
 export { parseKeySet } from "./keyset.js";
+export { Client, type ClientConfig, type Lease, type LeaseStore, MIN_REFRESH_INTERVAL_MS, OnlineError, type OnlineErrorCode, SDK_VERSION } from "./online.js";
 export { ClockError, type ClockNow, type ClockStore, DEFAULT_TOLERANCE_SECONDS, FileClockStore, Guard, MemoryClockStore } from "./clock.js";
 export {
   type ActivationRequest,
