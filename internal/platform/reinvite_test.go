@@ -58,7 +58,7 @@ func TestReinviteOwner(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	slug := "lost-" + storetest.Suffix()
-	first, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, slug, "Lost Link", "typo@lost.example")
+	first, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, slug, "Lost Link", "typo@lost.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestReinviteOwner(t *testing.T) {
 		t.Errorf("platform chain: %d issued, %d refused", issued, refused)
 	}
 	// The CLI's system actor.
-	c, err := f.s.CreateTenant(ctx, Actor{}, "cli-"+storetest.Suffix(), "Via CLI", "o@cli.example")
+	c, err := f.s.CreateTenant(ctx, Actor{}, "cli-"+storetest.Suffix(), "Via CLI", "o@cli.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestReinviteOwner(t *testing.T) {
 func TestReinviteRevokesEveryPending(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "exp-"+storetest.Suffix(), "Expired", "o@exp.example")
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "exp-"+storetest.Suffix(), "Expired", "o@exp.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestReinviteRevokesEveryPending(t *testing.T) {
 func TestConcurrentReinvites(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "twice-"+storetest.Suffix(), "Twice", "o@twice.example")
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "twice-"+storetest.Suffix(), "Twice", "o@twice.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestConcurrentReinvites(t *testing.T) {
 func TestReinviteOwnerRefusals(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "ref-"+storetest.Suffix(), "Refusals", "o@ref.example")
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "ref-"+storetest.Suffix(), "Refusals", "o@ref.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestReinviteOwnerRefusals(t *testing.T) {
 func TestReinviteRacesAcceptance(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "race-"+storetest.Suffix(), "Race", "o@race.example")
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "race-"+storetest.Suffix(), "Race", "o@race.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}

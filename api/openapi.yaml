@@ -2220,9 +2220,10 @@ components:
         all_products: { type: boolean }
     MyTenant:
       type: object
-      required: [tenant_id, slug, name, role, all_products, product_ids, mfa_policy, accessible]
+      required: [tenant_id, slug, name, role, all_products, product_ids, mfa_policy, accessible, test]
       properties:
         tenant_id: { type: string, description: "Usable as {tenant} in paths." }
+        test: { type: boolean, description: "A test-mode tenant (ADR-0047): for integration and CI, left out of usage measures. Fixed at creation." }
         mfa_policy: { $ref: "#/components/schemas/MfaPolicy" }
         accessible:
           type: boolean
@@ -2259,9 +2260,10 @@ components:
         next_cursor: { type: string, description: Absent on the last page. }
     PlatformTenant:
       type: object
-      required: [id, slug, name, mfa_policy, created_at, has_members]
+      required: [id, slug, name, mfa_policy, created_at, has_members, test]
       properties:
         id: { type: string, example: tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        test: { type: boolean, description: "A test-mode tenant (ADR-0047). Fixed at creation." }
         slug: { type: string }
         name: { type: string }
         mfa_policy: { $ref: "#/components/schemas/MfaPolicy" }
@@ -2282,6 +2284,10 @@ components:
         slug: { type: string, maxLength: 63, description: "Lowercase letters and digits joined by single dashes, e.g. acme. It names the tenant in URLs and can't change." }
         name: { type: string, maxLength: 200 }
         owner_email: { type: string, maxLength: 320, description: "Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email." }
+        test:
+          type: boolean
+          default: false
+          description: "A test-mode tenant (ADR-0047): for integration and CI, marked in the dashboard and left out of usage measures. It can't change later: create a live tenant to sell."
     PlatformOwnerInvite:
       type: object
       required: [owner_email]

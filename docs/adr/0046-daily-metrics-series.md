@@ -20,7 +20,7 @@
 - **Refused activations**: no product scope (see above). Operators have Prometheus' `licenseforge_activations_total{outcome}`; the overview's "failures" tile stays a v0.3 item.
 - **Active customers per day**: ADR-0040 defines the monthly measure only.
 - **A product filter and custom ranges**: add when a vendor asks.
-- **Test mode**: when test-mode tenants or keys land (v0.2), their licenses are left out of these series.
+- **Test mode**: ~~when test-mode tenants or keys land (v0.2), their licenses are left out of these series.~~ Amended by [ADR-0047 Test-mode tenants](0047-test-mode-tenants.md) (2026-11-10): test mode is per tenant, so a test tenant's own series show its data; only usage measures across tenants leave test tenants out.
 
 ## Consequences
 - One read-only endpoint and one migration (two indexes), with no new write path or audit action.

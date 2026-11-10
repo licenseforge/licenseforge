@@ -101,6 +101,20 @@ func (_c *TenantCreate) SetNillableMfaPolicy(v *tenant.MfaPolicy) *TenantCreate 
 	return _c
 }
 
+// SetTest sets the "test" field.
+func (_c *TenantCreate) SetTest(v bool) *TenantCreate {
+	_c.mutation.SetTest(v)
+	return _c
+}
+
+// SetNillableTest sets the "test" field if the given value is not nil.
+func (_c *TenantCreate) SetNillableTest(v *bool) *TenantCreate {
+	if v != nil {
+		_c.SetTest(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *TenantCreate) SetID(v string) *TenantCreate {
 	_c.mutation.SetID(v)
@@ -357,6 +371,10 @@ func (_c *TenantCreate) defaults() {
 		v := tenant.DefaultMfaPolicy
 		_c.mutation.SetMfaPolicy(v)
 	}
+	if _, ok := _c.mutation.Test(); !ok {
+		v := tenant.DefaultTest
+		_c.mutation.SetTest(v)
+	}
 	if _, ok := _c.mutation.ID(); !ok {
 		v := tenant.DefaultID()
 		_c.mutation.SetID(v)
@@ -394,6 +412,9 @@ func (_c *TenantCreate) check() error {
 		if err := tenant.MfaPolicyValidator(v); err != nil {
 			return &ValidationError{Name: "mfa_policy", err: fmt.Errorf(`ent: validator failed for field "Tenant.mfa_policy": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.Test(); !ok {
+		return &ValidationError{Name: "test", err: errors.New(`ent: missing required field "Tenant.test"`)}
 	}
 	if v, ok := _c.mutation.ID(); ok {
 		if err := tenant.IDValidator(v); err != nil {
@@ -458,6 +479,10 @@ func (_c *TenantCreate) createSpec() (*Tenant, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MfaPolicy(); ok {
 		_spec.SetField(tenant.FieldMfaPolicy, field.TypeEnum, value)
 		_node.MfaPolicy = value
+	}
+	if value, ok := _c.mutation.Test(); ok {
+		_spec.SetField(tenant.FieldTest, field.TypeBool, value)
+		_node.Test = value
 	}
 	if nodes := _c.mutation.ProductsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{

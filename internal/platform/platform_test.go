@@ -99,7 +99,7 @@ func TestCreateTenant(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	slug := "acme-" + storetest.Suffix()
-	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, slug, "Acme Corp", "owner@acme.example")
+	c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, slug, "Acme Corp", "owner@acme.example", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +144,60 @@ func TestCreateTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The CLI's system actor.
-	if c, err := f.s.CreateTenant(ctx, Actor{}, "cli-"+storetest.Suffix(), "Via CLI", "o@cli.example"); err != nil || c.Invitation.InvitedBy != nil {
+	if c, err := f.s.CreateTenant(ctx, Actor{}, "cli-"+storetest.Suffix(), "Via CLI", "o@cli.example", false); err != nil || c.Invitation.InvitedBy != nil {
 		t.Errorf("system actor: %+v, %v", c.Invitation, err)
+	}
+}
+
+// A test-mode tenant (ADR-0047): set at creation, recorded, never changed.
+func TestCreateTestTenant(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	live, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "live-"+storetest.Suffix(), "Live", "o@live.example", false)
+	if err != nil || live.Tenant.Test {
+		t.Fatalf("live: %+v, %v", live.Tenant, err)
+	}
+	test, err := f.s.CreateTenant(ctx, Actor{}, "test-"+storetest.Suffix(), "Sandbox", "o@test.example", true)
+	if err != nil || !test.Tenant.Test {
+		t.Fatalf("test: %+v, %v", test.Tenant, err)
+	}
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		for id, want := range map[string]string{live.Tenant.ID: `"test":false`, test.Tenant.ID: `"test":true`} {
+			e, err := tx.AuditEvent.Query().Where(auditevent.TenantID(audit.PlatformTenant), auditevent.Action("tenant.create"), auditevent.ObjectID(id)).Only(ctx)
+			if err != nil {
+				return err
+			}
+			if !strings.Contains(e.Details, want) {
+				t.Errorf("tenant.create details %s, want %s", e.Details, want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Neither way, by any login: the platform pool has a restrictive policy,
+	// the serving login no grant on the column.
+	for _, tn := range []*ent.Tenant{live.Tenant, test.Tenant} {
+		err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE tenants SET test = NOT test WHERE id = $1`, tn.ID)
+			return err
+		})
+		if err == nil || !strings.Contains(err.Error(), "row-level security") {
+			t.Errorf("platform flipped %s: %v", tn.Slug, err)
+		}
+		err = f.db.WithTenant(ctx, tn.ID, func(tx *ent.Tx) error {
+			_, err := tx.ExecContext(ctx, `UPDATE tenants SET test = NOT test WHERE id = $1`, tn.ID)
+			return err
+		})
+		if err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("serving login flipped %s: %v", tn.Slug, err)
+		}
+	}
+	// Other columns still change (the policy pins only test).
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error {
+		return tx.Tenant.UpdateOneID(test.Tenant.ID).SetName("Sandbox 2").Exec(ctx)
+	}); err != nil {
+		t.Errorf("rename a test tenant: %v", err)
 	}
 }
 
@@ -153,7 +205,7 @@ func TestCreateTenantRefusals(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	taken := "taken-" + storetest.Suffix()
-	if _, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, taken, "Taken", "a@b.example"); err != nil {
+	if _, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, taken, "Taken", "a@b.example", false); err != nil {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]struct {
@@ -173,7 +225,7 @@ func TestCreateTenantRefusals(t *testing.T) {
 		"platform's slug": {Actor{UserID: f.admin}, "platform", "X", "a@b.example", ErrConflict, "/slug"},
 	} {
 		before := countTenants(t, f)
-		_, err := f.s.CreateTenant(ctx, c.actor, c.slug, c.name, c.mail)
+		_, err := f.s.CreateTenant(ctx, c.actor, c.slug, c.name, c.mail, false)
 		var inv *InvalidError
 		if !errors.Is(err, c.want) || (c.field != "" && (!errors.As(err, &inv) || inv.Field != c.field)) {
 			t.Errorf("%s: %v", name, err)
@@ -208,7 +260,7 @@ func TestTenants(t *testing.T) {
 	ctx := context.Background()
 	var made []string
 	for range 3 {
-		c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "page-"+storetest.Suffix(), "P", "p@p.example")
+		c, err := f.s.CreateTenant(ctx, Actor{UserID: f.admin}, "page-"+storetest.Suffix(), "P", "p@p.example", false)
 		if err != nil {
 			t.Fatal(err)
 		}

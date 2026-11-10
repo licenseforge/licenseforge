@@ -59,7 +59,10 @@ func (s *server) CreatePlatformTenant(ctx context.Context, req apigen.CreatePlat
 		return nil, err
 	}
 	b := req.Body
-	c, err := s.Platform.CreateTenant(ctx, platform.Actor{UserID: admin}, b.Slug, b.Name, b.OwnerEmail)
+	if len(nulls(ctx, "test")) > 0 { // optional, not nullable: null isn't "live"
+		return nil, invalid(fieldError{"/test", "must be true or false"})
+	}
+	c, err := s.Platform.CreateTenant(ctx, platform.Actor{UserID: admin}, b.Slug, b.Name, b.OwnerEmail, b.Test != nil && *b.Test)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +91,7 @@ func createdView(c platform.Created) apigen.PlatformTenantCreated {
 }
 
 func platformTenantView(t *ent.Tenant, hasMembers bool) apigen.PlatformTenant {
-	return apigen.PlatformTenant{Id: t.ID, Slug: t.Slug, Name: t.Name, MfaPolicy: apigen.MfaPolicy(t.MfaPolicy), CreatedAt: t.CreatedAt.UTC(), HasMembers: hasMembers}
+	return apigen.PlatformTenant{Id: t.ID, Slug: t.Slug, Name: t.Name, MfaPolicy: apigen.MfaPolicy(t.MfaPolicy), CreatedAt: t.CreatedAt.UTC(), HasMembers: hasMembers, Test: t.Test}
 }
 
 // platformProblem maps the platform service's refusals (ADR-0042).

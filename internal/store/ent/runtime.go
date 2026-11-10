@@ -1678,6 +1678,10 @@ func init() {
 			return nil
 		}
 	}()
+	// tenantDescTest is the schema descriptor for test field.
+	tenantDescTest := tenantFields[5].Descriptor()
+	// tenant.DefaultTest holds the default value on creation for the test field.
+	tenant.DefaultTest = tenantDescTest.Default.(bool)
 	// tenantDescID is the schema descriptor for id field.
 	tenantDescID := tenantFields[0].Descriptor()
 	// tenant.DefaultID holds the default value on creation for the id field.

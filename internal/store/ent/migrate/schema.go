@@ -997,6 +997,7 @@ var (
 		{Name: "name", Type: field.TypeString, Size: 200, SchemaType: map[string]string{"postgres": "varchar(200)"}},
 		{Name: "audit_retention_days", Type: field.TypeInt, Nullable: true},
 		{Name: "mfa_policy", Type: field.TypeEnum, Enums: []string{"none", "mfa", "phishing_resistant"}, Default: "none"},
+		{Name: "test", Type: field.TypeBool, Default: false},
 	}
 	// TenantsTable holds the schema information for the "tenants" table.
 	TenantsTable = &schema.Table{
