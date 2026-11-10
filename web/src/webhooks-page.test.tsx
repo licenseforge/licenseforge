@@ -1,0 +1,169 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { createAppRouter } from "./router";
+
+const SECRET = "whsec_TOPSECRETsigningKey000000000000000000000=";
+const ROTATED = "whsec_ROTATEDsigningKey11111111111111111111111=";
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+    this.open = false;
+  };
+});
+let root: Root | undefined;
+afterEach(() => {
+  act(() => root?.unmount());
+  root = undefined;
+  document.body.innerHTML = "";
+  vi.unstubAllGlobals();
+});
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+const hook = (over: Record<string, unknown> = {}) => ({
+  id: "whe_1",
+  url: "https://hooks.example.com:443",
+  events: ["license.issued"],
+  enabled: true,
+  disabled_reason: null,
+  created_at: "2026-11-10T00:00:00Z",
+  updated_at: "2026-11-10T00:00:00Z",
+  delivery: { seq: 40, attempts: 0, next_attempt_at: null, in_flight: false, next_seq: null },
+  ...over,
+});
+
+type Sent = { method: string; path: string; body: unknown; type: string | null };
+
+async function open(role: string, hooks: unknown[], extra?: (req: Request, u: URL) => Response | undefined) {
+  const sent: Sent[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      const u = new URL(req.url);
+      const body = req.method === "GET" || req.method === "DELETE" ? undefined : await req.clone().text().then((t) => (t ? JSON.parse(t) : undefined));
+      if (u.pathname.startsWith("/api/v1/tenants/")) sent.push({ method: req.method, path: u.pathname, body, type: req.headers.get("Content-Type") });
+      if (u.pathname === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
+      if (u.pathname === "/api/v1/me/tenants")
+        return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: true, product_ids: [], mfa_policy: "none", accessible: true }] });
+      const r = extra?.(req, u);
+      if (r) return r;
+      if (u.pathname === "/api/v1/tenants/acme/webhooks" && req.method === "GET") return json({ items: hooks });
+      return json({ items: [] });
+    }),
+  );
+  const qc = new QueryClient();
+  const el = document.createElement("div");
+  document.body.append(el);
+  root = createRoot(el);
+  const router = createAppRouter(qc, createMemoryHistory({ initialEntries: ["/t/acme/settings/webhooks"] }));
+  await act(async () =>
+    root!.render(
+      <QueryClientProvider client={qc}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  );
+  await vi.waitFor(() => expect(el.querySelector("h1")?.textContent).toBe("Webhooks"));
+  return { el, qc, sent };
+}
+
+const button = (el: HTMLElement, text: string) => [...el.querySelectorAll("button")].find((b) => b.textContent === text);
+const setValue = (i: HTMLInputElement, v: string) => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(i, v);
+  i.dispatchEvent(new Event("input", { bubbles: true }));
+};
+
+it("shows viewers the endpoints and their delivery state, without controls", async () => {
+  const { el } = await open("viewer", [hook({ delivery: { seq: 40, attempts: 3, next_attempt_at: "2026-11-10T12:00:00Z", in_flight: false, next_seq: 41 } })]);
+  await vi.waitFor(() => expect(el.textContent).toContain("https://hooks.example.com:443"));
+  expect(el.textContent).toContain("Retrying (3 failed)");
+  expect(button(el, "Deliveries")).toBeDefined();
+  for (const b of ["New endpoint", "Edit", "Disable", "Skip held event", "Rotate secret", "Delete"]) expect(button(el, b)).toBeUndefined();
+  expect([...el.querySelectorAll("nav a")].some((a) => a.textContent === "Webhooks")).toBe(true);
+});
+
+it("lets an admin skip the event held back, by its seq", async () => {
+  const { el, sent } = await open("admin", [hook({ delivery: { seq: 40, attempts: 5, next_attempt_at: null, in_flight: false, next_seq: 41 } })], (req, u) =>
+    req.method === "POST" && u.pathname.endsWith("/skip-event") ? json(hook()) : undefined,
+  );
+  await vi.waitFor(() => expect(button(el, "Skip held event")).toBeDefined());
+  await act(async () => button(el, "Skip held event")!.click());
+  expect(el.textContent).toContain("Event 41 is passed over");
+  const confirm = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Skip held event") as HTMLButtonElement;
+  await act(async () => confirm.click());
+  await vi.waitFor(() => expect(sent.find((s) => s.path.endsWith("/skip-event"))?.body).toEqual({ seq: 41 }));
+});
+
+it("edits events with a merge patch, keeping the URL when left empty", async () => {
+  const { el, sent } = await open("owner", [hook()], (req) => (req.method === "PATCH" ? json(hook({ events: ["license.issued", "license.revoked"] })) : undefined));
+  await vi.waitFor(() => expect(button(el, "Edit")).toBeDefined());
+  await act(async () => button(el, "Edit")!.click());
+  const revoked = [...el.querySelectorAll<HTMLInputElement>('dialog input[type="checkbox"]')].find((c) => c.parentElement?.textContent === "license.revoked")!;
+  await act(async () => revoked.click());
+  await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+  await vi.waitFor(() => expect(sent.some((s) => s.method === "PATCH")).toBe(true));
+  const patch = sent.find((s) => s.method === "PATCH")!;
+  expect(patch.type).toBe("application/merge-patch+json");
+  expect(patch.body).toEqual({ events: ["license.issued", "license.revoked"] });
+});
+
+it("shows a new endpoint's secret and a rotated one once, and keeps neither", async () => {
+  let created = false;
+  const { el, qc } = await open("owner", [hook()], (req, u) => {
+    if (req.method === "POST" && u.pathname === "/api/v1/tenants/acme/webhooks") {
+      created = true;
+      return json({ ...hook({ id: "whe_2" }), secret: SECRET }, 201);
+    }
+    if (req.method === "POST" && u.pathname.endsWith("/rotate-secret")) return json({ ...hook(), secret: ROTATED });
+    if (created && req.method === "GET" && u.pathname === "/api/v1/tenants/acme/webhooks") return json({ items: [hook(), hook({ id: "whe_2" })] });
+    return undefined;
+  });
+  await vi.waitFor(() => expect(button(el, "New endpoint")).toBeDefined());
+  await act(async () => button(el, "New endpoint")!.click());
+  await act(async () => setValue(el.querySelector<HTMLInputElement>('dialog input[name="url"]')!, "https://hooks.example.com/x?token=t"));
+  await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(SECRET));
+  await act(async () => button(el, "Close")!.click());
+  await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
+
+  await act(async () => button(el, "Rotate secret")!.click());
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(ROTATED));
+  await act(async () => button(el, "Close")!.click());
+  await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
+
+  const kept = JSON.stringify([
+    document.body.innerHTML,
+    qc.getQueryCache().getAll().map((q) => q.state),
+    qc.getMutationCache().getAll().map((m) => m.state),
+    { ...localStorage },
+    { ...sessionStorage },
+  ]);
+  expect(kept).not.toContain(SECRET);
+  expect(kept).not.toContain(ROTATED);
+  expect(kept).toContain("https://hooks.example.com:443");
+});
+
+it("lists deliveries in the log's own words", async () => {
+  const { el } = await open("viewer", [hook()], (_req, u) =>
+    u.pathname.endsWith("/deliveries")
+      ? json({
+          items: [
+            { id: "whd_1", seq: 41, event_id: "aud_1", event_type: "license.issued", attempt: 2, outcome: "success", error: null, status_code: 204, duration_ms: 31, attempted_at: "2026-11-10T12:00:00Z" },
+            { id: "whd_2", seq: 41, event_id: "aud_1", event_type: "license.issued", attempt: 1, outcome: "failure", error: "http 500", status_code: 500, duration_ms: 12, attempted_at: "2026-11-10T11:59:00Z" },
+          ],
+        })
+      : undefined,
+  );
+  await vi.waitFor(() => expect(button(el, "Deliveries")).toBeDefined());
+  await act(async () => button(el, "Deliveries")!.click());
+  await vi.waitFor(() => expect(el.querySelector("dialog")?.textContent).toContain("http 500"));
+  expect(el.querySelector("dialog")!.textContent).toContain("Delivered");
+  expect(el.querySelector("dialog")!.textContent).toContain("license.issued #41");
+});
