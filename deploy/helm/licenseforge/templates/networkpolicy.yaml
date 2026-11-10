@@ -1,6 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
 # Server pods: ingress on 8080, and on the metrics port from the scrapers only;
-# egress to DNS and the database only, plus the OIDC provider when login is on.
+# egress to DNS and the database, plus the OIDC provider and SIEM collectors
+# when configured, and webhook receivers on webhooks.ports while delivery is on.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -47,6 +48,21 @@ spec:
     - ports: [{port: {{ required "oidc.egress.port is required" (dig "egress" "port" nil $oidc) }}, protocol: TCP}]
       {{- /* Empty: no `to`, any destination (portable; Cilium's 0.0.0.0/0 doesn't match pods). */}}
       {{- with dig "egress" "to" list $oidc }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- $wh := .Values.webhooks | default dict }}
+    {{- if gt (int (dig "workers" 8 $wh)) 0 }}
+    {{- $ports := dig "ports" (list 443) $wh }}
+    {{- /* A rule without ports would allow every port. */}}
+    {{- if not $ports }}{{ fail "webhooks.ports must not be empty" }}{{ end }}
+    # Webhook receivers (ADR-0044). Empty `to`: any destination on these
+    # ports; the server refuses internal addresses itself.
+    - ports:
+        {{- range $ports }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+      {{- with dig "egress" "to" list $wh }}
       to: {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- end }}
