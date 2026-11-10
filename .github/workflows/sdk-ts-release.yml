@@ -1,0 +1,102 @@
+name: TypeScript SDK release
+# @licenseforge/sdk to npm from an sdk/ts/vX.Y.Z tag (ADR-0023 and ADR-0021,
+# amended 2026-11-10). `pack` builds, tests and packs the tarball with a
+# read-only token; `publish` runs only on the tag, in the protected `npm`
+# environment, builds nothing, and publishes that tarball with npm trusted
+# publishing (OIDC: no npm token exists) and npm provenance. PRs touching the
+# SDK run `pack` alone: a dry run, nothing leaves CI.
+# Verification for users: docs/verifying-releases.md.
+on:
+  push:
+    tags: ["sdk/ts/v*"]
+  pull_request:
+    paths: [sdk/ts/**, .github/workflows/sdk-ts-release.yml]
+permissions: {}
+defaults:
+  run:
+    shell: bash # -eo pipefail
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+    defaults:
+      run: { working-directory: sdk/ts }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "24", package-manager-cache: false } # release builds restore no cache
+      - name: Version from package.json; the tag must name it
+        id: version
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          echo "$v" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?' || { echo "package.json version is not X.Y.Z[-(alpha|beta|rc).N]: $v"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "sdk/ts/v$v" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match package.json version $v"; exit 1
+          fi
+          tag=latest; case $v in *-*) tag=next ;; esac # a prerelease never becomes what `npm install` picks
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$tag" >> "$GITHUB_OUTPUT"
+      - run: npm ci --ignore-scripts # no install scripts; tsc and @types/node only
+      - run: npm test
+      - name: Pack (fresh build of src, with the license)
+        run: |
+          rm -rf dist && npm run build
+          cp ../../LICENSE ../../NOTICE .
+          mkdir -p ../../out && npm pack --ignore-scripts --pack-destination ../../out
+          cd ../../out && sha256sum ./*.tgz | tee SHA256SUMS
+      - name: The tarball holds the built SDK, README, LICENSE and NOTICE, nothing else
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tgz=../../out/licenseforge-sdk-$VERSION.tgz
+          tar -tzf "$tgz" | sort > "$RUNNER_TEMP/files"
+          cat "$RUNNER_TEMP/files"
+          if grep -vxE 'package/(package\.json|README\.md|LICENSE|NOTICE|dist/src/[a-z]+\.(js|d\.ts))' "$RUNNER_TEMP/files"; then echo "unexpected files"; exit 1; fi
+          for f in package.json README.md LICENSE NOTICE dist/src/index.js dist/src/index.d.ts; do grep -qx "package/$f" "$RUNNER_TEMP/files" || { echo "missing $f"; exit 1; }; done
+      - name: The tarball installs and imports in an empty project
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tgz=$PWD/../../out/licenseforge-sdk-$VERSION.tgz
+          d=$(mktemp -d) && cd "$d"
+          echo '{"name":"smoke","private":true,"type":"module"}' > package.json
+          npm install --ignore-scripts --no-audit --no-fund "$tgz"
+          node -e '
+            import("@licenseforge/sdk").then((m) => {
+              for (const k of ["open", "verify", "parseKeySet", "LicenseError", "Client", "Guard", "compute", "parseRequest"]) if (typeof m[k] !== "function") throw new Error(k);
+              if (m.SDK_VERSION !== "ts/" + process.argv[1]) throw new Error(m.SDK_VERSION);
+              console.log("ok", m.SDK_VERSION);
+            });' "$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: sdk-ts, path: out/, if-no-files-found: error, retention-days: 7 }
+
+  publish:
+    needs: pack
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm # protected: required reviewer, sdk/ts/v* tags only
+    permissions:
+      id-token: write # npm trusted publishing and provenance (Sigstore)
+    env:
+      VERSION: ${{ needs.pack.outputs.version }}
+      DIST_TAG: ${{ needs.pack.outputs.dist-tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: sdk-ts, path: out }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "24", package-manager-cache: false }
+      - name: The tarball is the one packed
+        run: cd out && sha256sum -c SHA256SUMS
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: |
+          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)" \
+            || { echo "npm $(npm --version) has no trusted publishing"; exit 1; }
+      - name: Publish with provenance
+        run: npm publish "out/licenseforge-sdk-$VERSION.tgz" --access public --provenance --tag "$DIST_TAG"

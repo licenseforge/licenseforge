@@ -8,6 +8,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | FIPS server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z-fips` | cosign | attestation | attestation |
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
 | Server binaries, linux amd64 and arm64 | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
+| TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
 
 Images, chart and server share one version (ADR-0023). Attestations are stored with GitHub and, for images and chart, also in the registry next to the artifact.
 
@@ -66,6 +67,17 @@ gh attestation verify "licenseforge_${VERSION}_linux_amd64" --repo licenseforge/
 ```
 
 On macOS use `shasum -a 256 --ignore-missing -c SHA256SUMS`.
+
+## TypeScript SDK (npm)
+
+[`sdk-ts-release.yml`](../.github/workflows/sdk-ts-release.yml) publishes `@licenseforge/sdk` from an `sdk/ts/vX.Y.Z` tag with npm trusted publishing (the workflow's GitHub OIDC identity; no npm token exists) and npm provenance: a Sigstore-signed SLSA attestation naming the repository, the commit and the workflow that built the tarball (ADR-0021, amended).
+
+```sh
+npm install @licenseforge/sdk      # prereleases: @licenseforge/sdk@next
+npm audit signatures               # the registry signature and provenance of every installed package
+```
+
+The package's npm page shows the provenance: check it names `licenseforge/licenseforge`, `.github/workflows/sdk-ts-release.yml` and an `sdk/ts/v*` tag. Pin the version and keep the lockfile: its `integrity` hash makes every later install the same bytes.
 
 ## Air-gapped verification
 

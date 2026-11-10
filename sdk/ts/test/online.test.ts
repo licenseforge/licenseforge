@@ -4,7 +4,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { Client, ClockError, Guard, type LeaseStore, MemoryClockStore, OnlineError, type PublicKey } from "../src/index.js";
+import { Client, ClockError, Guard, type LeaseStore, MemoryClockStore, OnlineError, type PublicKey, SDK_VERSION } from "../src/index.js";
 
 // The vectors' test key (spec/vectors/lf1.json): seed and public key.
 const seed = Buffer.from("licenseforge-test-vector-seed-01");
@@ -72,7 +72,7 @@ test("activate: one verified lease, the key in a header, one idempotency key acr
     assert.equal(s.seen[0]!.path, "/api/v1/activation/tenants/tnt_acme/activate");
     assert.equal(s.seen[0]!.auth, "License LF-KEY");
     assert.ok(s.seen[0]!.idem.length >= 16 && s.seen[0]!.idem === s.seen[1]!.idem, "retries reuse one Idempotency-Key");
-    assert.deepEqual(s.seen[0]!.body, { fingerprint: fp.fingerprint, fp_source: "machine-id", sdk_version: "ts/0.0.0", hostname: "db-1", app_version: "2.0" });
+    assert.deepEqual(s.seen[0]!.body, { fingerprint: fp.fingerprint, fp_source: "machine-id", sdk_version: SDK_VERSION, hostname: "db-1", app_version: "2.0" });
     assert.equal(c.current().status, "valid");
     s.answers.push(ok(lease({ iatMs: now + 1000 })));
     await c.refresh();

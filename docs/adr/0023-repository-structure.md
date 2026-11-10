@@ -25,6 +25,10 @@ Rules:
 ### Why the Go SDK lives in the main repo
 The server (signing), agent and Go SDK (verification) share the license format code. Keeping them together means a format change, its spec, its test vectors and both sides land in one PR. The Go SDK is still a **separate Go module**, so vendors importing it pull none of the server's dependencies.
 
+> [!NOTE]
+> **Amended 2026-11-10**: the TypeScript SDK lives in the main repo
+> `sdk/ts`, not `licenseforge-node`. A format change touches the spec, the vectors and every SDK at once (#181: weak keys, in the spec, Go and TypeScript in one PR), and the TypeScript CI reads the vectors in place: no vector tarball pin to bump. It is still its own npm package (`@licenseforge/sdk`) with its own semver, tagged `sdk/ts/vX.Y.Z`, built and tested by its own path-filtered workflow. Add-ons with their own toolchain (the n8n node) may still get a repo of their own. Java decides with its SDK; the same reasoning applies.
+
 ### Go module paths (vanity imports)
 Serve `go-import` meta tags from `licenseforge.io` so import paths survive repo moves:
 - Server: `licenseforge.io/licenseforge`

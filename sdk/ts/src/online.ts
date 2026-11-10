@@ -18,7 +18,7 @@ import type { Fingerprint } from "./fingerprint.js";
 import { check, type CheckOptions, type Claims, Entitlements, type PublicKey, parseClaims, type Status, verify } from "./licensefile.js";
 
 /** Sent with activations and refreshes; kept with package.json's version. */
-export const SDK_VERSION = "ts/0.0.0";
+export const SDK_VERSION = "ts/0.1.0-alpha.1"; // = package.json version (test/version.test.ts)
 
 /** The API's stable problem codes, and the client's own conditions. */
 export type OnlineErrorCode =
