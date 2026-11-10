@@ -657,6 +657,9 @@ func secretEnv(key string) (string, error) {
 		return "", fmt.Errorf("%s_FILE: %w", key, err)
 	}
 	v := strings.TrimRight(string(b), "\r\n")
+	if strings.HasPrefix(v, "\uFEFF") { // pgx would read a URL behind it as a keyword DSN
+		return "", fmt.Errorf("%s_FILE: %s starts with a byte order mark", key, path)
+	}
 	if v == "" {
 		return "", fmt.Errorf("%s_FILE: %s is empty", key, path)
 	}

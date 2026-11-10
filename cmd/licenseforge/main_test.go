@@ -692,7 +692,7 @@ func TestSecretEnv(t *testing.T) {
 			t.Errorf("%q: %q %v", content, v, err)
 		}
 	}
-	for name, path := range map[string]string{"empty": write("empty", "\n"), "missing": filepath.Join(dir, "nope")} {
+	for name, path := range map[string]string{"empty": write("empty", "\n"), "missing": filepath.Join(dir, "nope"), "BOM": write("bom", "\ufeffpostgres://u@h/db")} {
 		t.Setenv("LF_T_FILE", path)
 		if _, err := secretEnv("LF_T"); err == nil {
 			t.Errorf("%s file: no error", name)
@@ -726,9 +726,11 @@ func TestServeWithSecretFiles(t *testing.T) {
 	}
 	for key, want := range map[string]string{"LICENSEFORGE_OWNER_DATABASE_URL": "owner login", "LICENSEFORGE_RETENTION_DATABASE_URL": "retention login"} {
 		file(key, "postgres://x@localhost/db")
-		if err := serve(context.Background(), listen(t), listen(t), quiet); err == nil || !strings.Contains(err.Error(), want) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a broken refusal would serve
+		if err := serve(ctx, listen(t), listen(t), quiet); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s_FILE: %v", key, err)
 		}
+		cancel()
 		t.Setenv(key+"_FILE", "")
 	}
 }

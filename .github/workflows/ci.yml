@@ -148,6 +148,8 @@ jobs:
           done
           grep -A3 -F 'secretName: "idp"' <<<"$d" | grep -qF -- '- {key: "client-secret", path: client-secret}' || { echo "OIDC client secret not mounted as a file"; exit 1; }
           if helm template t . $s $o --show-only templates/deployment.yaml | grep -q LICENSEFORGE_OIDC_CLIENT_SECRET; then echo "client secret without a Secret"; exit 1; fi
+          # A Secret left in the values of a feature that is off is not mounted (it may be gone).
+          if helm template t . $s --set oidc.clientSecret.secretName=idp --set audit.export.otlp.headersSecret=hdr --show-only templates/deployment.yaml | grep -qE 'oidc-secret|otlp-headers|secretName: "(idp|hdr)"'; then echo "Secret of a feature that is off mounted"; exit 1; fi
           if helm template t . $s $o --set oidc.clientSecret.secretName=idp --set oidc.clientSecret.key=null >/dev/null 2>&1; then echo "client secret without a key"; exit 1; fi
           if helm template t . $s $o --set oidc.egress=null >/dev/null 2>&1; then echo "IdP egress without a port"; exit 1; fi
           # Extra CA: mounted from the Secret's key and added to Go's roots by directory, only when

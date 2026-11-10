@@ -16,8 +16,9 @@
 {{- if $extraCA.secretName }}{{ $mounts = append $mounts (dict "name" "extra-ca" "dir" "/etc/licenseforge/extra-ca" "secret" $extraCA.secretName "key" $extraCA.key) }}{{ end }}
 {{- /* Secrets as files, not environment variables (DISA Kubernetes STIG V-242415): the server reads LICENSEFORGE_*_FILE. */}}
 {{- $mounts = append $mounts (dict "name" "secrets" "dir" "/etc/licenseforge/secrets" "secret" .Values.secrets.server "items" (list "database-url" "platform-database-url" "identity-database-url" "master-keys")) }}
-{{- with $otlp.headersSecret }}{{ $mounts = append $mounts (dict "name" "otlp-headers" "dir" "/etc/licenseforge/otlp/headers" "secret" . "items" (list "headers")) }}{{ end }}
-{{- with dig "clientSecret" "secretName" "" $oidc }}{{ $mounts = append $mounts (dict "name" "oidc-secret" "dir" "/etc/licenseforge/oidc" "secret" . "items" (list (required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc))) "as" "client-secret") }}{{ end }}
+{{- /* Only when the feature is on, like their env: a Secret left in the values of a feature turned off must not block the pods. */}}
+{{- if $otlp.endpoint }}{{ with $otlp.headersSecret }}{{ $mounts = append $mounts (dict "name" "otlp-headers" "dir" "/etc/licenseforge/otlp/headers" "secret" . "items" (list "headers")) }}{{ end }}{{ end }}
+{{- if $oidc.enabled }}{{ with dig "clientSecret" "secretName" "" $oidc }}{{ $mounts = append $mounts (dict "name" "oidc-secret" "dir" "/etc/licenseforge/oidc" "secret" . "items" (list (required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc))) "as" "client-secret") }}{{ end }}{{ end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment

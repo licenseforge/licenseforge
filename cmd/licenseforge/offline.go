@@ -151,6 +151,16 @@ func readArg(path string, in io.Reader) (string, error) {
 // segment), required when needTenant.
 func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.URL, tenant, token string, err error) {
 	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
+	if path := getenv("LICENSEFORGE_TOKEN_FILE"); path != "" { // a mounted Secret or a CI secret file
+		if token != "" {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN and LICENSEFORGE_TOKEN_FILE are both set: use one", cmd)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN_FILE: %w", cmd, err)
+		}
+		token = strings.TrimRight(string(b), "\r\n")
+	}
 	u, err = url.Parse(base)
 	// ForceQuery: a stray "?" would turn the API path into a query; dot
 	// segments in the base path could move the requests elsewhere on the host.
