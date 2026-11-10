@@ -160,9 +160,10 @@ export class MemoryClockStore implements ClockStore {
  * Keeps the state in a file, written atomically: a temp file (mode 0600) in
  * the same directory, fsync, rename, fsync of the directory. A missing file
  * is no state.
- * ponytail: no cross-process lock (Node has no flock); two processes
- * updating at once can lose one mark raise, never lower the mark, and the
- * rollback check always runs. Add a lock file if that matters.
+ * ponytail: no cross-process lock (Node has no flock, unlike the Go SDK's
+ * FileStore): two processes updating at once can lose a raise, so the mark
+ * may end at either one's value, never below what either read; the rollback
+ * check always runs. Add an O_EXCL lock file if that matters.
  */
 export class FileClockStore implements ClockStore {
   constructor(readonly path: string) {}
@@ -177,25 +178,37 @@ export class FileClockStore implements ClockStore {
   save(state: Uint8Array): void {
     const dir = dirname(this.path);
     const tmp = join(dir, `.licenseforge-clock-${process.pid}-${Math.random().toString(36).slice(2)}`);
-    let fd = openSync(tmp, "wx", 0o600);
     try {
-      writeSync(fd, state);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    try {
-      renameSync(tmp, this.path);
+      const fd = openSync(tmp, "wx", 0o600);
+      try {
+        writeSync(fd, state);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      // On Windows the rename fails while another program (antivirus,
+      // backup) has the target open: retry briefly, as the Go SDK does.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          renameSync(tmp, this.path);
+          break;
+        } catch (e) {
+          if (attempt === 4) throw e;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+        }
+      }
     } catch (e) {
-      rmSync(tmp, { force: true });
+      rmSync(tmp, { force: true }); // a failed write leaves no temp file
       throw e;
     }
+    let dfd: number | undefined;
     try {
-      fd = openSync(dir, "r"); // make the rename durable; not possible on Windows
-      fsyncSync(fd);
-      closeSync(fd);
+      dfd = openSync(dir, "r"); // make the rename durable; not possible on Windows
+      fsyncSync(dfd);
     } catch {
       // the filesystem handles it there
+    } finally {
+      if (dfd !== undefined) closeSync(dfd);
     }
   }
 }

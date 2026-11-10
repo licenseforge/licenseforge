@@ -1,6 +1,6 @@
 // The clock guard (ADR-0018): the Go SDK's clock tests, ported.
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -117,6 +117,14 @@ test("FileClockStore: written atomically, mode 0600; a missing file is no state"
   assert.throws(() => new Guard(new FileClockStore(path), "k").now(t0), rollback, "another guard reads the same file");
   writeFileSync(path, "garbage");
   assert.doesNotThrow(() => g.now(t0), "a corrupt file is no state");
+});
+
+test("FileClockStore: a failed write leaves no temp file behind", { skip: process.getuid?.() === 0 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "lf-clock-tmp-"));
+  const path = join(dir, "clock.json");
+  mkdirSync(path); // the rename onto a directory fails
+  assert.equal(new Guard(new FileClockStore(path), "k").now(t0).persisted, false);
+  assert.deepEqual(readdirSync(dir), ["clock.json"]);
 });
 
 test("FileClockStore: an unwritable directory or unreadable path doesn't lock out", { skip: process.getuid?.() === 0 }, () => {

@@ -17,7 +17,8 @@ import type { Guard } from "./clock.js";
 import type { Fingerprint } from "./fingerprint.js";
 import { check, type CheckOptions, type Claims, Entitlements, type PublicKey, parseClaims, type Status, verify } from "./licensefile.js";
 
-export const SDK_VERSION = "ts/0.1.0";
+/** Sent with activations and refreshes; kept with package.json's version. */
+export const SDK_VERSION = "ts/0.0.0";
 
 /** The API's stable problem codes, and the client's own conditions. */
 export type OnlineErrorCode =
@@ -109,8 +110,16 @@ function loopback(host: string): boolean {
   return h === "localhost" || h === "::1" || /^127(\.\d{1,3}){3}$/.test(h);
 }
 
-/** A copy, so callers can't change the cached lease. */
-const clone = (c: Claims): Claims => ({ ...c, binding: { ...c.binding }, entitlements: new Entitlements([...c.entitlements.features], new Map(c.entitlements.limits)) });
+/** A deep copy, Dates included, so callers can't change the cached lease. */
+function clone(c: Claims): Claims {
+  const d = (x: Date) => new Date(x.getTime());
+  const out: Claims = { ...c, issuedAt: d(c.issuedAt), binding: { ...c.binding }, entitlements: new Entitlements([...c.entitlements.features], new Map(c.entitlements.limits)) };
+  for (const k of ["notBefore", "expires", "refreshAfter", "updatesUntil"] as const) {
+    const v = c[k];
+    if (v) out[k] = d(v);
+  }
+  return out;
+}
 
 export class Client {
   private readonly base: URL;
@@ -141,6 +150,7 @@ export class Client {
       throw new TypeError("licenseforge online: tenantId, product, licenseKey, keys and fingerprint are required");
     }
     if (cfg.fingerprint.binding !== "machine" && cfg.fingerprint.binding !== "cluster") throw new TypeError("licenseforge online: fingerprint.binding must be machine or cluster");
+    if (cfg.timeoutMs !== undefined && !(Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0)) throw new RangeError("licenseforge online: timeoutMs must be > 0");
     this.base = u;
     this.cfg = { ...cfg, maxAttempts: cfg.maxAttempts && cfg.maxAttempts > 0 ? cfg.maxAttempts : 4, timeoutMs: cfg.timeoutMs ?? 30_000 };
   }

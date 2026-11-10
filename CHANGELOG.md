@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented; SI-7, SR-11 and SSDF PS.2/PS.3 record the signatures with their remaining gaps (the Go SDK isn't published; releases aren't immutable); SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
 
 ### Added
-- TypeScript SDK clock guard (ADR-0018): `Guard` (high-water mark, HMAC-authenticated state under a key from the license key, tolerance, `observe`, `reset`) with `MemoryClockStore` and `FileClockStore`. The file store writes atomically with mode 0600, but without a cross-process lock (Node has none): concurrent processes can lose a raise, never lower the mark.
+- TypeScript SDK clock guard (ADR-0018): `Guard` (high-water mark, HMAC-authenticated state under a key from the license key, tolerance, `observe`, `reset`) with `MemoryClockStore` and `FileClockStore`. The file store writes atomically with mode 0600 (retrying a rename briefly on Windows, and removing the temp file on failure), but without a cross-process lock (Node has none): processes updating at once can lose a raise, so the mark may end at either one's value, never below what either read.
 - TypeScript SDK online client (ADR-0034), the Go client's behaviour:
   - `activate`, `refresh`, `deactivate`, `forget`, `current` and `run`;
   - every lease verified before use or storage; older leases refused as replays; a `forget` during a call supersedes it;

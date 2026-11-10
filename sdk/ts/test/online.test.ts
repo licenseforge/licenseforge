@@ -72,7 +72,7 @@ test("activate: one verified lease, the key in a header, one idempotency key acr
     assert.equal(s.seen[0]!.path, "/api/v1/activation/tenants/tnt_acme/activate");
     assert.equal(s.seen[0]!.auth, "License LF-KEY");
     assert.ok(s.seen[0]!.idem.length >= 16 && s.seen[0]!.idem === s.seen[1]!.idem, "retries reuse one Idempotency-Key");
-    assert.deepEqual(s.seen[0]!.body, { fingerprint: fp.fingerprint, fp_source: "machine-id", sdk_version: "ts/0.1.0", hostname: "db-1", app_version: "2.0" });
+    assert.deepEqual(s.seen[0]!.body, { fingerprint: fp.fingerprint, fp_source: "machine-id", sdk_version: "ts/0.0.0", hostname: "db-1", app_version: "2.0" });
     assert.equal(c.current().status, "valid");
     s.answers.push(ok(lease({ iatMs: now + 1000 })));
     await c.refresh();
@@ -232,6 +232,10 @@ test("current checks with max(local, local + server offset); claims are copies",
     const { claims } = c.current();
     (claims.entitlements.features as string[]).push("x");
     claims.binding.fingerprint = "changed";
+    claims.expires!.setUTCFullYear(2099); // e.g. app code computing a display date
+    claims.issuedAt.setUTCFullYear(1999);
+    assert.equal(c.current().claims.expires!.getTime(), now + 3600_000 + 60_000, "the cached expiry is unchanged");
+    assert.equal(c.current().claims.issuedAt.getTime(), now + 3600_000);
     assert.equal(c.current().claims.binding.fingerprint, fp.fingerprint);
     assert.equal(c.current().claims.entitlements.hasFeature("x"), false);
   } finally {
@@ -315,5 +319,6 @@ test("create validates its config", async () => {
   ]) {
     await assert.rejects(Client.create(bad), TypeError, JSON.stringify(bad.baseURL));
   }
+  for (const timeoutMs of [0, -1, Number.NaN]) await assert.rejects(Client.create({ ...good, timeoutMs }), RangeError, String(timeoutMs));
   await Client.create({ ...good, baseURL: "http://localhost:8080/lf/" }); // loopback http is fine
 });
