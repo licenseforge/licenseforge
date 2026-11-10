@@ -58,7 +58,7 @@ func actionsFor(events []string) []string {
 // endpoint's locks however long the chain.
 func nextEvent(ctx context.Context, tx *ent.Tx, tenantID string, seq int64, events []string) (int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT seq FROM audit_events WHERE tenant_id = $1 AND seq > $2 AND outcome = 'success'
-		AND action = ANY($3) AND (action <> 'activation.offline' OR details->>'new_seat' = 'true') ORDER BY seq LIMIT 1`,
+		AND action = ANY($3) AND (action <> 'activation.offline' OR (json_typeof(details->'new_seat') = 'boolean' AND details->>'new_seat' = 'true')) ORDER BY seq LIMIT 1`,
 		tenantID, seq, pgtype.FlatArray[string](actionsFor(events)))
 	if err != nil {
 		return 0, err
