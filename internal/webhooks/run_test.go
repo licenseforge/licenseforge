@@ -69,12 +69,15 @@ func TestGauges(t *testing.T) {
 	c := f.endpoint(t, "license.issued")
 	seq := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
 	f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, nil)
-	f.platformExecOwner(t, `UPDATE audit_events SET occurred_at = now() - interval '1 hour' WHERE tenant_id = $1 AND seq = $2`, f.a, seq)
+	_ = seq
+	// Everything after the cursor (its own webhook.create entry, then two) an hour old.
+	f.platformExecOwner(t, `UPDATE audit_events SET occurred_at = now() - interval '1 hour' WHERE tenant_id = $1 AND seq > $2`, f.a, c.Seq)
+	f.platformExecOwner(t, `UPDATE audit_events SET occurred_at = now() - interval '2 hours' WHERE tenant_id = $1 AND seq = $2`, f.a, c.Seq+1) // the oldest pending
 	if err := f.d.gauges(f.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if lag, behind := testutil.ToFloat64(metrics.WebhookLag), testutil.ToFloat64(metrics.WebhookLagEvents); lag < 3500 || behind < 2 {
-		t.Errorf("lag %v s, %v entries; want about an hour and at least 2", lag, behind)
+	if lag, behind := testutil.ToFloat64(metrics.WebhookLag), testutil.ToFloat64(metrics.WebhookLagEvents); lag < 7100 || behind != 3 {
+		t.Errorf("lag %v s, %v entries; want about two hours (the oldest) and 3", lag, behind)
 	}
 	before := testutil.ToFloat64(metrics.WebhookDisabled)
 	if _, err := f.s.Disable(f.ctx, c.ID); err != nil {

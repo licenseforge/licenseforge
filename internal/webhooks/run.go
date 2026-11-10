@@ -116,8 +116,8 @@ func (d *Dispatcher) gauges(ctx context.Context) error {
 		}
 		if _, err := scan(ctx, tx, `SELECT COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - n.occurred_at)), 0)::float8, COALESCE(max(n.head - c.seq), 0)
 			FROM webhook_cursors c JOIN webhook_endpoints w ON w.id = c.endpoint_id AND w.enabled
-			CROSS JOIN LATERAL (SELECT min(e.occurred_at) AS occurred_at, max(e.seq) AS head FROM audit_events e
-				WHERE e.tenant_id = c.tenant_id AND e.seq > c.seq) n
+			CROSS JOIN LATERAL (SELECT (SELECT e.occurred_at FROM audit_events e WHERE e.tenant_id = c.tenant_id AND e.seq > c.seq ORDER BY e.seq LIMIT 1) AS occurred_at,
+				(SELECT max(e.seq) FROM audit_events e WHERE e.tenant_id = c.tenant_id AND e.seq > c.seq) AS head) n
 			WHERE n.head IS NOT NULL`, nil, &lag, &behind); err != nil {
 			return err
 		}
