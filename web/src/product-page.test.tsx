@@ -28,7 +28,7 @@ const users = { ...sso, id: "ftr_2", key: "max_users", name: "Users", type: "lim
 const pro = {
   id: "pln_1", product_id: "prd_1", slug: "pro", name: "Pro yearly", duration_months: 12, duration_seconds: null, expiry_basis: "from_issue",
   max_activations: 3, max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null,
-  grace_seconds: 0, archived_at: null, created_at: "",
+  grace_seconds: 0, updates_months: null, archived_at: null, created_at: "",
 };
 
 async function page(role: string, opts: { archived?: boolean; planPost?: () => Response | Promise<Response>; planPatch?: () => Response } = {}) {
@@ -208,14 +208,16 @@ it("edits a plan's terms, sending only what changed", async () => {
   const field = (name: string) => el.querySelector<HTMLInputElement>(`dialog [name="${name}"]`)!;
   expect([field("term").value, field("lease_seconds").value, field("max_activations").value]).toEqual(["12", "7", "3"]); // 12 months, 7 days
   const set = setter(el);
+  expect(field("updates_months").value).toBe(""); // every build
   await act(async () => {
     set("max_activations", "");
     set("lease_seconds", "2");
+    set("updates_months", "12");
   });
   await submit(el);
   await vi.waitFor(() => expect(posts).toHaveLength(1));
   expect(posts[0]!.method).toBe("PATCH");
-  expect(JSON.parse(await posts[0]!.text())).toEqual({ max_activations: null, lease_seconds: 2 * 86400 });
+  expect(JSON.parse(await posts[0]!.text())).toEqual({ max_activations: null, lease_seconds: 2 * 86400, updates_months: 12 });
   await vi.waitFor(() => expect(el.querySelector("dialog[open]")).toBeNull());
 });
 

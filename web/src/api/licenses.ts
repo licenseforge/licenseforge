@@ -33,6 +33,14 @@ export async function issueLicense(tenant: string, body: LicenseIssue, idempoten
 
 export type LicenseAction = "suspend" | "reinstate" | "revoke";
 
+/** Sets a license's maintenance end (ADR-0045); null covers every build. */
+export async function setUpdatesUntil(tenant: string, id: string, until: string | null): Promise<License> {
+  return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/updates-until", { params: { path: { tenant, id } }, body: { updates_until: until } }));
+}
+
+/** A maintenance date picked in the dashboard covers builds through the end of that day, UTC. */
+export const endOfDayUTC = (day: string) => `${day}T23:59:59Z`;
+
 export async function changeLicense(tenant: string, id: string, action: LicenseAction): Promise<License> {
   const params = { params: { path: { tenant, id } } };
   switch (action) {

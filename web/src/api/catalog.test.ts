@@ -214,6 +214,14 @@ describe("editing a plan", () => {
     const f = { ...planForm(pro), name: "Pro yearly", maxActivations: "", maxRehosts: "2", lease: "1", leaseUnit: "hours" as const, maxOffline: "30", grace: "3" };
     expect(planPatch(pro, f)).toEqual({ name: "Pro yearly", max_activations: null, max_rehosts: 2, lease_seconds: 3600, max_offline_seconds: 30 * 86400, grace_seconds: 3 * 86400 });
   });
+  it("sets and clears the maintenance term (ADR-0045)", () => {
+    const kept = { ...pro, updates_months: 12 };
+    expect(planForm(kept).maintenance).toBe("12");
+    expect(planPatch(kept, planForm(kept))).toEqual({});
+    expect(planPatch(kept, { ...planForm(kept), maintenance: "" })).toEqual({ updates_months: null });
+    expect(planPatch(pro, { ...planForm(pro), maintenance: "24" })).toEqual({ updates_months: 24 });
+    expect(() => planPatch(pro, { ...planForm(pro), maintenance: "1.5" })).toThrow("updates_months");
+  });
   it("switches the term between months and seconds, clearing the other", () => {
     expect(planPatch(pro, { ...planForm(pro), term: "14", termUnit: "days" })).toEqual({ duration_months: null, duration_seconds: 14 * 86400 });
     expect(planPatch(pro, { ...planForm(pro), term: "" })).toEqual({ duration_months: null });

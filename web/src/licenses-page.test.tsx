@@ -160,6 +160,47 @@ describe("LicenseDialog", () => {
     act(() => root?.unmount());
     r = await render(<LicenseDialog tenant="acme" license={{ ...license, status: "revoked" }} manage names={names} onClose={() => {}} onChanged={() => {}} />);
     expect([r.button("Suspend"), r.button("Revoke"), r.button("Reinstate")]).toEqual([undefined, undefined, undefined]);
+    expect(r.button("Save maintenance")).toBeUndefined();
+  });
+
+  it("renews maintenance through the end of the picked day (UTC), and clears it to cover every build", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        const body = await req.json();
+        sent.push([new URL(req.url).pathname, body]);
+        return json({ ...license, updates_until: body.updates_until });
+      }),
+    );
+    const changed = vi.fn();
+    const held = { ...license, updates_until: "2027-01-31T23:59:59Z" };
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={held} manage names={names} onClose={() => {}} onChanged={changed} />);
+    expect(el.querySelector("dl")!.textContent).toMatch(/Updates until\s*\S/);
+    expect(el.querySelector("dl")!.textContent).not.toContain("Every build"); // a date, not the default
+    const day = el.querySelector<HTMLInputElement>('input[type="date"]')!;
+    expect(day.value).toBe("2027-01-31");
+    expect(button("Save maintenance")!.disabled).toBe(true); // unchanged
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day, "2028-01-31");
+      day.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Save maintenance")!.click());
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    await act(async () => button("Cover every build")!.click());
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent).toEqual([
+      ["/api/v1/tenants/acme/licenses/lic_1/updates-until", { updates_until: "2028-01-31T23:59:59Z" }],
+      ["/api/v1/tenants/acme/licenses/lic_1/updates-until", { updates_until: null }],
+    ]);
+  });
+
+  it("says every build is covered without maintenance, and offers no controls without license:write", async () => {
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage={false} names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect(el.textContent).toContain("Every build");
+    expect(button("Save maintenance")).toBeUndefined();
+    expect(el.querySelector('input[type="date"]')).toBeNull();
   });
 });
 
