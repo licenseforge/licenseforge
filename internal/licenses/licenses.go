@@ -720,8 +720,9 @@ func (s Service) Daily(ctx context.Context, p authz.Principal, days int) ([]Day,
 		// the (tenant_id, time) indexes; the product filter is an EXISTS that
 		// folds away when the caller sees every product. Days without rows
 		// come from generate_series.
-		// ponytail: a product-scoped caller's EXISTS may hash every license of
-		// its products (all time); a product_id on activations if that grows.
+		// ponytail: for a product-scoped caller the planner may read every
+		// license of its products (all time), for the licenses series and the
+		// EXISTS; a product_id on activations if that grows.
 		rows, err := tx.QueryContext(ctx, `
 			WITH w AS (SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AS today),
 			d AS (SELECT generate_series(w.today - ($1::int - 1) * interval '1 day', w.today, interval '1 day') AS day FROM w),
