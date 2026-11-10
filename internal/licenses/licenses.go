@@ -684,6 +684,83 @@ func (s Service) Counts(ctx context.Context, p authz.Principal) (map[license.Sta
 	return out, nil
 }
 
+// Day is one UTC day of Daily's series (ADR-0046).
+type Day struct {
+	Date                                       time.Time // midnight UTC
+	LicensesIssued, Activations, Deactivations int
+}
+
+// MaxDays bounds Daily's window.
+const MaxDays = 90
+
+// Daily returns the last days UTC days ending today (by the database clock),
+// oldest first, every day present: licenses created, machines activated and
+// machines deactivated each day, in p's product scope (license:read), under
+// the tenant's RLS (ADR-0046).
+func (s Service) Daily(ctx context.Context, p authz.Principal, days int) ([]Day, error) {
+	ctx = authz.WithPrincipal(ctx, p)
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	all, products, err := authz.Products(ctx, authz.LicenseRead)
+	if err != nil {
+		return nil, err
+	}
+	if days < 1 || days > MaxDays {
+		return nil, fmt.Errorf("%w: days must be 1 to %d", ErrInvalid, MaxDays)
+	}
+	if products == nil { // a NULL array; unreachable today (a scope always names products)
+		products = []string{}
+	}
+	out := make([]Day, 0, days)
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		// Each series counts its rows from the window's first midnight by UTC
+		// day. The bound is a scalar subquery so it is an index condition on
+		// the (tenant_id, time) indexes; the product filter is an EXISTS that
+		// folds away when the caller sees every product. Days without rows
+		// come from generate_series.
+		// ponytail: for a product-scoped caller the planner may read every
+		// license of its products (all time), for the licenses series and the
+		// EXISTS; a product_id on activations if that grows.
+		rows, err := tx.QueryContext(ctx, `
+			WITH w AS (SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AS today),
+			d AS (SELECT generate_series(w.today - ($1::int - 1) * interval '1 day', w.today, interval '1 day') AS day FROM w),
+			since AS (SELECT (w.today - ($1::int - 1) * interval '1 day') AT TIME ZONE 'UTC' AS t FROM w),
+			lic AS (SELECT date_trunc('day', l.created_at AT TIME ZONE 'UTC') AS day, count(*) AS n
+				FROM licenses l WHERE l.tenant_id = $2 AND l.created_at >= (SELECT t FROM since) AND ($3 OR l.product_id = ANY($4))
+				GROUP BY 1),
+			act AS (SELECT date_trunc('day', a.first_seen_at AT TIME ZONE 'UTC') AS day, count(*) AS n
+				FROM activations a WHERE a.tenant_id = $2 AND a.first_seen_at >= (SELECT t FROM since)
+				AND ($3 OR EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = $2 AND l.id = a.license_id AND l.product_id = ANY($4)))
+				GROUP BY 1),
+			deact AS (SELECT date_trunc('day', a.deactivated_at AT TIME ZONE 'UTC') AS day, count(*) AS n
+				FROM activations a WHERE a.tenant_id = $2 AND a.deactivated_at >= (SELECT t FROM since)
+				AND ($3 OR EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = $2 AND l.id = a.license_id AND l.product_id = ANY($4)))
+				GROUP BY 1)
+			SELECT d.day AT TIME ZONE 'UTC', coalesce(lic.n, 0), coalesce(act.n, 0), coalesce(deact.n, 0)
+			FROM d LEFT JOIN lic USING (day) LEFT JOIN act USING (day) LEFT JOIN deact USING (day)
+			ORDER BY d.day`, days, tenantID, all, products)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var d Day
+			if err := rows.Scan(&d.Date, &d.LicensesIssued, &d.Activations, &d.Deactivations); err != nil {
+				return err
+			}
+			d.Date = d.Date.UTC()
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // List returns up to limit of p's tenant's licenses in p's product scope
 // (silently filtered), matching f, newest first, after (afterAt, afterID)
 // or from the start if afterID is "".

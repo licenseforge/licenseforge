@@ -1,4 +1,4 @@
-h1:MWnbY46vr1mdT/x1+2oKyJxarKSzaxuxk2lVbXThzbg=
+h1:PkR9ZAP7/YXKww9IV7XvW+UabpxUzYD/ju6a/JLd68U=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -48,3 +48,5 @@ h1:MWnbY46vr1mdT/x1+2oKyJxarKSzaxuxk2lVbXThzbg=
 20261109205924_webhooks.sql h1:YHi5ScjqWwUBJvaS9SL7jUVajXOhpnfK/j/kqtbui1M=
 20261109205925_webhooks_security.sql h1:Pvnxukku5Hs5OvYOQcEZy17VVHTeGKu4KbTZBtzgLvM=
 20261110150546_plan_updates_months.sql h1:nZinTsnWoACmkOC2z6QyOfAaGOMp7sfGgrHRyklyOc0=
+20261110193718_activations_first_seen_index.sql h1:PwLywypjeY0nuqgBdUASQLeNXIx5C0xQRXxar1ZBsic=
+20261110193719_activations_deactivated_index.sql h1:R/btRAqGkhvKwmJBUlZlrXEC1TkR0I4c1S7R1vwSaMY=

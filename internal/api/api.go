@@ -351,6 +351,7 @@ var queryParams = map[string][]string{
 	"ListActivations":       {"limit", "cursor"},
 	"ListSigningKeys":       {"limit", "cursor"},
 	"ListWebhookDeliveries": {"limit", "cursor"},
+	"GetDailyMetrics":       {"days"},
 	"RemoveMember":          {"revoke_tokens", "revoke_invitations"},
 	"UpdateMember":          {"revoke_tokens", "revoke_invitations"},
 }

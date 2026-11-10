@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"licenseforge.io/licenseforge/internal/activations"
 	"licenseforge.io/licenseforge/internal/api/apigen"
@@ -91,6 +94,28 @@ func (s *server) GetSummary(ctx context.Context, _ apigen.GetSummaryRequestObjec
 			MonthStart    time.Time `json:"month_start"`
 			SeenThisMonth int64     `json:"seen_this_month"`
 		}{int64(c.Active), c.MonthStart, int64(c.SeenThisMonth)}
+	}
+	return out, nil
+}
+
+// GetDailyMetrics answers the per-day series for the dashboard's charts
+// (ADR-0046), in the caller's product scope.
+func (s *server) GetDailyMetrics(ctx context.Context, req apigen.GetDailyMetricsRequestObject) (apigen.GetDailyMetricsResponseObject, error) {
+	days := 30
+	if req.Params.Days != nil {
+		days = *req.Params.Days
+	}
+	if days < 1 || days > licenses.MaxDays { // a query parameter: 400 like limit (the service's ErrInvalid would be a 422)
+		return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: fmt.Sprintf("days must be 1 to %d.", licenses.MaxDays)}
+	}
+	series, err := s.Licenses.Daily(ctx, principal(ctx), days)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.GetDailyMetrics200JSONResponse{Days: make([]apigen.DailyMetricsDay, len(series))}
+	for i, d := range series {
+		out.Days[i] = apigen.DailyMetricsDay{Date: openapi_types.Date{Time: d.Date}, LicensesIssued: int64(d.LicensesIssued),
+			Activations: int64(d.Activations), Deactivations: int64(d.Deactivations)}
 	}
 	return out, nil
 }

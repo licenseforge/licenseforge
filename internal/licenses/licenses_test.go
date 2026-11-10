@@ -959,6 +959,121 @@ func TestCounts(t *testing.T) {
 	}
 }
 
+// Daily: per UTC day, oldest first, every day present; licenses by
+// created_at, activations by first_seen_at and deactivated_at; in the
+// caller's product scope and tenant (ADR-0046).
+func TestDaily(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mgr := as(f.a.id, authz.Manager, all)
+	var onP []*ent.License
+	for range 3 {
+		got, err := f.s.Issue(ctx, mgr, f.req(f.a))
+		if err != nil {
+			t.Fatal(err)
+		}
+		onP = append(onP, got.License)
+	}
+	onQ, err := f.s.Issue(ctx, mgr, IssueRequest{ProductID: f.a.prodQ, PlanID: f.a.planQ.ID, CustomerID: f.a.customer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.s.Issue(ctx, as(f.b.id, authz.Manager, all), f.req(f.b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", env.OwnerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	var today time.Time
+	if err := admin.QueryRow(`SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`).Scan(&today); err != nil {
+		t.Fatal(err)
+	}
+	today = today.UTC() // AddDate in UTC: no DST
+	ago := func(days int) time.Time { return today.AddDate(0, 0, -days).Add(12 * time.Hour) }
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := admin.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE licenses SET created_at = $2 WHERE id = $1`, onP[0].ID, ago(2))
+	exec(`UPDATE licenses SET created_at = $2 WHERE id = $1`, onP[1].ID, ago(40)) // outside the window
+	exec(`UPDATE licenses SET created_at = $2 WHERE id = $1`, onP[2].ID, today)   // the first instant of today
+	exec(`UPDATE licenses SET created_at = $2 WHERE id = $1`, other.License.ID, ago(1))
+	n := 0
+	act := func(tenant, lic string, first time.Time, deact *time.Time) {
+		t.Helper()
+		n++
+		exec(`INSERT INTO activations (id, tenant_id, created_at, updated_at, fingerprint, fp_source, binding, mode, first_seen_at, last_seen_at, deactivated_at, license_id)
+			VALUES ($1, $2, $3, $3, $4, 'machine-id', 'machine', 'online', $3, $3, $5, $6)`,
+			storeids.New("act"), tenant, first, fmt.Sprintf("sha256:%064x", n), deact, lic)
+	}
+	now := ago(0)
+	act(f.a.id, onP[2].ID, ago(1), &now)          // activated yesterday, deactivated today
+	act(f.a.id, onP[2].ID, ago(5), nil)           // activated 5 days ago
+	act(f.a.id, onP[2].ID, ago(31), ptr(ago(31))) // outside a 30-day window
+	act(f.a.id, onQ.License.ID, today, nil)       // product Q, today
+	act(f.b.id, other.License.ID, ago(0), &now)   // the other tenant
+	type day = [3]int                             // licenses issued, activations, deactivations
+	for name, c := range map[string]struct {
+		p    authz.Principal
+		days int
+		want map[int]day // days ago → counts; every other day is zero
+	}{
+		"every product":                     {as(f.a.id, authz.Viewer, all), 30, map[int]day{0: {2, 1, 1}, 1: {0, 1, 0}, 2: {1, 0, 0}, 5: {0, 1, 0}}},
+		"scoped to Q":                       {as(f.a.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodQ}}), 30, map[int]day{0: {1, 1, 0}}},
+		"scoped to P":                       {as(f.a.id, authz.Support, authz.Scope{Products: []string{f.a.prodP}}), 30, map[int]day{0: {1, 0, 1}, 1: {0, 1, 0}, 2: {1, 0, 0}, 5: {0, 1, 0}}},
+		"one day":                           {as(f.a.id, authz.Viewer, all), 1, map[int]day{0: {2, 1, 1}}},
+		"90 days":                           {as(f.a.id, authz.Viewer, all), 90, map[int]day{0: {2, 1, 1}, 1: {0, 1, 0}, 2: {1, 0, 0}, 5: {0, 1, 0}, 31: {0, 1, 1}, 40: {1, 0, 0}}},
+		"other tenant":                      {as(f.b.id, authz.Viewer, all), 30, map[int]day{0: {0, 1, 1}, 1: {1, 0, 0}}},
+		"another tenant's product in scope": {as(f.b.id, authz.Viewer, authz.Scope{Products: []string{f.a.prodP}}), 30, map[int]day{}},
+	} {
+		got, err := f.s.Daily(ctx, c.p, c.days)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(got) != c.days {
+			t.Errorf("%s: %d days, want %d", name, len(got), c.days)
+			continue
+		}
+		for i, d := range got {
+			ago := c.days - 1 - i
+			if want := today.AddDate(0, 0, -ago); !d.Date.Equal(want) || d.Date.Location() != time.UTC {
+				t.Errorf("%s: day %d is %v, want %v", name, i, d.Date, want)
+			}
+			if have := (day{d.LicensesIssued, d.Activations, d.Deactivations}); have != c.want[ago] {
+				t.Errorf("%s: %d days ago: %v, want %v", name, ago, have, c.want[ago])
+			}
+		}
+	}
+	// Days are UTC whatever the session's time zone (here UTC+14).
+	far, err := store.Open(ctx, store.Logins{Tenant: env.TenantURL + "&timezone=Pacific/Kiritimati", Platform: env.PlatformURL, Identity: env.IdentityURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = far.Close() }()
+	utc, err := f.s.Daily(ctx, mgr, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (Service{DB: far, Keys: f.kr}).Daily(ctx, mgr, 30); err != nil || !reflect.DeepEqual(got, utc) {
+		t.Errorf("session in UTC+14: %v, %v; want %v", got, err, utc)
+	}
+	for _, days := range []int{0, -1, 91} {
+		if _, err := f.s.Daily(ctx, mgr, days); !errors.Is(err, ErrInvalid) {
+			t.Errorf("days=%d: %v, want ErrInvalid", days, err)
+		}
+	}
+	sdk := authz.Principal{Kind: authz.Token, ID: "tok_test", TenantID: f.a.id, Role: authz.SDK, Scope: all}
+	if _, err := f.s.Daily(ctx, sdk, 30); !errors.Is(err, authz.ErrDenied) {
+		t.Errorf("sdk token (no license:read): %v", err)
+	}
+}
+
 // No new license on an archived product (ADR-0015); existing ones can still
 // be suspended, reinstated and revoked, and listed.
 func TestArchivedProduct(t *testing.T) {
