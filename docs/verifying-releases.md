@@ -8,6 +8,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | FIPS server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z-fips` | cosign | attestation | attestation |
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
 | Server binaries, linux amd64 and arm64 | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
+| TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
 
 Images, chart and server share one version (ADR-0023). Attestations are stored with GitHub and, for images and chart, also in the registry next to the artifact.
 
@@ -67,9 +68,31 @@ gh attestation verify "licenseforge_${VERSION}_linux_amd64" --repo licenseforge/
 
 On macOS use `shasum -a 256 --ignore-missing -c SHA256SUMS`.
 
+## TypeScript SDK (npm)
+
+[`sdk-ts-release.yml`](../.github/workflows/sdk-ts-release.yml) publishes `@licenseforge/sdk` from an `sdk/ts/vX.Y.Z` tag with npm trusted publishing (the workflow's GitHub OIDC identity; no npm token exists) and npm provenance: a Sigstore-signed SLSA attestation naming the repository, the commit and the workflow that built the tarball (ADR-0021, amended).
+
+```sh
+npm install @licenseforge/sdk@next   # prereleases; @licenseforge/sdk once a stable version exists
+npm audit signatures                 # in your project, after npm ci or npm install
+```
+
+`npm audit signatures` checks the registry's signature on every installed package and the provenance attestations that are present. It doesn't fail on a package without one, and it doesn't check whose workflow made it. So check the identity yourself: the package's npm page shows the provenance; it must name `licenseforge/licenseforge`, `.github/workflows/sdk-ts-release.yml` and an `sdk/ts/v*` tag. The package's publishing access refuses tokens: any other version could only come from an npm maintainer publishing interactively with 2FA, and would have no provenance, so check it. Pin the version and keep the lockfile: its `integrity` hash makes every later install the same bytes.
+
 ## Air-gapped verification
 
 `gh attestation download oci://$IMAGE --repo licenseforge/licenseforge` (and the same for the chart or a binary) saves the attestation bundles. Verify them offline with `gh attestation verify --bundle <file> --custom-trusted-root <trusted_root.jsonl>`; get the trusted root with `gh attestation trusted-root` while online.
+
+## For maintainers: first npm release of the TypeScript SDK
+
+npm attaches a trusted publisher only to a package that exists, so the first version needs a one-time bootstrap. A real version published by hand would have no provenance, so the bootstrap publishes a placeholder instead:
+
+1. In GitHub, create the environment `npm` (a required reviewer; deployment tags `sdk/ts/v*`) and add `refs/tags/sdk/ts/v*` to the release-tag ruleset. Do this first: the trusted publisher of step 4 has a two-day window.
+2. Create the npm organization `licenseforge`, with 2FA required for its members.
+3. Publish a placeholder `@licenseforge/sdk@0.0.0` (a `package.json` and a README pointing to `@next`) from your own `npm login` session: `npm publish --access public` (a scoped package is otherwise restricted, which a free organization can't publish). No token is needed. Then `npm deprecate @licenseforge/sdk@0.0.0 "placeholder: install @licenseforge/sdk@next"`.
+4. In the package settings, add the trusted publisher (GitHub Actions; `licenseforge/licenseforge`; workflow `sdk-ts-release.yml`; environment `npm`), and set Publishing access to "Require two-factor authentication and disallow tokens".
+5. Within two days, tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`. npm expires a trusted publisher configuration that hasn't published within two days; if that happens, delete it and add it again.
+6. Check `npm dist-tag ls @licenseforge/sdk`: `next` is the alpha, and `latest` stays on the placeholder until the first stable version.
 
 ## For maintainers: a release that failed halfway
 
