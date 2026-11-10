@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { License } from "./api/licenses";
@@ -174,26 +174,59 @@ describe("LicenseDialog", () => {
         return json({ ...license, updates_until: body.updates_until });
       }),
     );
-    const changed = vi.fn();
-    const held = { ...license, updates_until: "2027-01-31T23:59:59Z" };
-    const { el, button } = await render(<LicenseDialog tenant="acme" license={held} manage names={names} onClose={() => {}} onChanged={changed} />);
-    expect(el.querySelector("dl")!.textContent).toMatch(/Updates until\s*\S/);
-    expect(el.querySelector("dl")!.textContent).not.toContain("Every build"); // a date, not the default
-    const day = el.querySelector<HTMLInputElement>('input[type="date"]')!;
-    expect(day.value).toBe("2027-01-31");
-    expect(button("Save maintenance")!.disabled).toBe(true); // unchanged
+    // A holder like the page's: onChanged replaces the license the dialog shows.
+    function Holder() {
+      const [l, setL] = useState<License>({ ...license, updates_until: "2027-01-31T00:00:00Z" });
+      return <LicenseDialog tenant="acme" license={l} manage names={names} onClose={() => {}} onChanged={setL} />;
+    }
+    const { el, button } = await render(<Holder />);
+    const row = () => el.querySelector("dl")!.textContent!;
+    const utc = (iso: string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(iso));
+    expect(row()).toContain(`${utc("2027-01-31T00:00:00Z")} (UTC)`); // the UTC day in any time zone
+    const day = () => el.querySelector<HTMLInputElement>('input[type="date"]')!;
+    expect([day().value, day().min, day().max]).toEqual(["2027-01-31", "2026-11-01", "9999-12-31"]);
+    expect(button("Save maintenance")!.disabled).toBe(true); // the same day: nothing to save, even at 00:00:00
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day, "2028-01-31");
-      day.dispatchEvent(new Event("input", { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day(), ""); // the picker emptied
+      day().dispatchEvent(new Event("input", { bubbles: true }));
     });
+    expect(button("Save maintenance")!.disabled).toBe(true); // clearing is "Cover every build", not an empty date
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day(), "2028-01-31");
+      day().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(button("Save maintenance")!.disabled).toBe(false);
     await act(async () => button("Save maintenance")!.click());
-    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    await vi.waitFor(() => expect(row()).toContain(`${utc("2028-01-31T23:59:59Z")} (UTC)`));
+    expect([day().value, button("Save maintenance")!.disabled]).toEqual(["2028-01-31", true]);
     await act(async () => button("Cover every build")!.click());
-    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    await vi.waitFor(() => expect(row()).toContain("Every build"));
+    expect([day().value, button("Cover every build"), button("Save maintenance")!.disabled]).toEqual(["", undefined, true]);
     expect(sent).toEqual([
       ["/api/v1/tenants/acme/licenses/lic_1/updates-until", { updates_until: "2028-01-31T23:59:59Z" }],
       ["/api/v1/tenants/acme/licenses/lic_1/updates-until", { updates_until: null }],
     ]);
+  });
+
+  it("shows the server's reason for a refused date on the field", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) =>
+        req.method === "GET"
+          ? json({ items: [] })
+          : json({ type: "about:blank", title: "x", status: 422, code: "validation_failed", request_id: "r", errors: [{ field: "/updates_until", message: "must be after the license's issue" }] }, 422),
+      ),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    const day = el.querySelector<HTMLInputElement>('input[type="date"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day, "2026-10-01");
+      day.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Save maintenance")!.click());
+    await vi.waitFor(() => expect(el.querySelector("#maintenance-error")?.textContent).toBe("must be after the license's issue"));
+    expect(day.getAttribute("aria-invalid")).toBe("true");
+    expect(day.getAttribute("aria-describedby")).toBe("maintenance-help maintenance-error");
   });
 
   it("says every build is covered without maintenance, and offers no controls without license:write", async () => {

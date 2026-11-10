@@ -249,7 +249,7 @@ const en = {
   "product.grace": "Grace after expiry",
   "product.graceHelp": "How long the license keeps working after it expires. 0 for none.",
   "product.maintenance": "Maintenance (months)",
-  "product.maintenanceHelp": "Builds released up to this many months after a license is issued are covered (updates_until). Empty: every build.",
+  "product.maintenanceHelp": "Builds dated up to this many months after a license's issue are covered. Empty: every build.",
   "product.unit.months": "Months",
   "product.unit.days": "Days",
   "product.unit.hours": "Hours",
