@@ -21,8 +21,9 @@ func TestParseKeySet(t *testing.T) {
 // What the spec leaves to Verify loads as given: an unknown alg, a duplicate
 // kid, a key of the wrong length (unsupported_alg / invalid_key_set there).
 func TestParseKeySetLoadsAsGiven(t *testing.T) {
-	ks, err := ParseKeySet([]byte(`[{"kid":"d","alg":"ed25519","public_key":"AAAA"},{"kid":"d","alg":"ed25519","public_key":"AAAA"},{"kid":"x","alg":"rsa","public_key":"AAAA"}]`))
-	if err != nil || len(ks) != 3 {
+	ks, err := ParseKeySet([]byte(`[{"kid":"d","alg":"ed25519","public_key":"AAAA"},{"kid":"d","alg":"ed25519","public_key":"AAAA"},{"kid":"x","alg":"rsa","public_key":"AAAA"},` +
+		`{"kid":"e","alg":"","public_key":"AAAA"},{"kid":"z","alg":"ed25519","public_key":""}]`))
+	if err != nil || len(ks) != 5 || len(ks[4].Key) != 0 {
 		t.Fatalf("got %d keys, %v", len(ks), err)
 	}
 }
@@ -38,14 +39,29 @@ func TestParseKeySetRefuses(t *testing.T) {
 		"typo in field":      `[{"kid":"a","alg":"ed25519","publicKey":"AAAA"}]`,
 		"unknown field":      `[{"kid":"a","alg":"ed25519","public_key":"AAAA","use":"sig"}]`,
 		"missing key":        `[{"kid":"a","alg":"ed25519"}]`,
-		"empty key":          `[{"kid":"a","alg":"ed25519","public_key":""}]`,
 		"missing kid":        `[{"alg":"ed25519","public_key":"AAAA"}]`,
 		"missing alg":        `[{"kid":"a","public_key":"AAAA"}]`,
-		"empty alg":          `[{"kid":"a","alg":"","public_key":"AAAA"}]`,
 		"padded":             `[{"kid":"a","alg":"ed25519","public_key":"AAA="}]`,
 		"standard alphabet":  `[{"kid":"a","alg":"ed25519","public_key":"AA+/"}]`,
 		"non-canonical bits": `[{"kid":"a","alg":"ed25519","public_key":"AB"}]`,
 		"bad kid":            `[{"kid":"a.b","alg":"ed25519","public_key":"AAAA"}]`,
+		// One file, one reading: exact-case fields, none repeated (encoding/json
+		// alone folds case, even the Kelvin sign, and keeps the last duplicate).
+		"upper-case fields":   `[{"KID":"a","ALG":"ed25519","Public_Key":"AAAA"}]`,
+		"kelvin sign":         "[{\"\u212aid\":\"a\",\"alg\":\"ed25519\",\"public_key\":\"AAAA\"}]",
+		"repeated key":        `[{"kid":"a","alg":"ed25519","public_key":"AAAA","public_key":"` + vecKey + `"}]`,
+		"case-variant repeat": `[{"kid":"a","alg":"ed25519","public_key":"AAAA","PUBLIC_KEY":"` + vecKey + `"}]`,
+		"repeated kid":        `[{"kid":"a","kid":"b","alg":"ed25519","public_key":"AAAA"}]`,
+		"null field":          `[{"kid":"a","alg":null,"public_key":"AAAA"}]`,
+		"number field":        `[{"kid":"a","alg":1,"public_key":"AAAA"}]`,
+		"null entry":          `[null]`,
+		"newline in key":      `[{"kid":"a","alg":"ed25519","public_key":"AA\nAA"}]`,
+		"CR in key":           `[{"kid":"a","alg":"ed25519","public_key":"AA\rAA"}]`,
+		"long non-canonical":  `[{"kid":"a","alg":"ed25519","public_key":"` + vecKey[:len(vecKey)-1] + `l"}]`,
+		"long padded":         `[{"kid":"a","alg":"ed25519","public_key":"` + vecKey + `="}]`,
+		"lone surrogate":      `[{"kid":"a","alg":"\ud800","public_key":"AAAA"}]`,
+		"invalid UTF-8":       "[{\"kid\":\"a\",\"alg\":\"ed\xff\",\"public_key\":\"AAAA\"}]",
+		"BOM":                 "\ufeff[{\"kid\":\"a\",\"alg\":\"ed25519\",\"public_key\":\"AAAA\"}]",
 	} {
 		if _, err := ParseKeySet([]byte(in)); !errors.Is(err, ErrInvalidKeySet) {
 			t.Errorf("%s: %v", name, err)

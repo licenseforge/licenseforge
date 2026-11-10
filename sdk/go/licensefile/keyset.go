@@ -5,27 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
+	"unicode/utf8"
 )
 
 // ParseKeySet reads a trusted key set in the license format's JSON form: an
-// array of {"kid", "alg", "public_key"} with public_key in base64url without
-// padding (as the LicenseForge dashboard shows it). As the spec says, an
-// unknown alg, a duplicate kid or a key of the wrong length load as given and
+// array of objects with exactly the fields "kid", "alg" and "public_key"
+// (case-sensitive, no duplicates), public_key in base64url without padding (as
+// the LicenseForge dashboard shows it). As the spec says, keys load as given:
+// an unknown or empty alg, a duplicate kid or a key of the wrong length
 // surface in Verify (ErrUnsupportedAlg, ErrInvalidKeySet). What can't be
-// represented, or would silently load an empty key, is ErrInvalidKeySet here:
-// malformed JSON, unknown or missing fields, a kid outside the spec's
-// pattern, non-canonical base64url, an empty set.
+// represented is ErrInvalidKeySet here: malformed JSON or UTF-8, other,
+// missing or repeated fields, a kid outside the spec's pattern, public_key
+// not canonical base64url, an empty set.
 func ParseKeySet(data []byte) (KeySet, error) {
 	bad := func(format string, a ...any) (KeySet, error) {
 		return nil, fmt.Errorf("%w: "+format, append([]any{ErrInvalidKeySet}, a...)...)
 	}
-	var raw []struct {
-		KID       *string `json:"kid"`
-		Alg       *string `json:"alg"`
-		PublicKey *string `json:"public_key"`
+	// The payload's rules (exact-case keys, no duplicates, no lone surrogates),
+	// so one file can't read as different keys to different parsers.
+	if !utf8.Valid(data) {
+		return bad("not valid UTF-8")
 	}
+	if err := checkSurrogates(data); err != nil {
+		return bad("%v", err)
+	}
+	var raw []json.RawMessage
 	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
 	if err := d.Decode(&raw); err != nil {
 		return bad("%v", err)
 	}
@@ -36,20 +42,34 @@ func ParseKeySet(data []byte) (KeySet, error) {
 		return bad("no keys")
 	}
 	ks := make(KeySet, 0, len(raw))
-	for i, k := range raw {
-		switch {
-		case k.KID == nil || k.Alg == nil || k.PublicKey == nil:
-			return bad("key %d needs kid, alg and public_key", i)
-		case !kidRE.MatchString(*k.KID):
-			return bad("key %d: kid %q isn't 1-128 of [A-Za-z0-9_:-]", i, *k.KID)
-		case *k.Alg == "":
-			return bad("key %d: empty alg", i)
+	for i, e := range raw {
+		m, err := object(e, false)
+		if err != nil {
+			return bad("key %d: %v", i, err)
 		}
-		key, err := b64.DecodeString(*k.PublicKey)
-		if err != nil || len(key) == 0 {
-			return bad("key %q: public_key must be non-empty base64url without padding", *k.KID)
+		if len(m) != 3 {
+			return bad("key %d needs exactly kid, alg and public_key", i)
 		}
-		ks = append(ks, PublicKey{KID: *k.KID, Alg: *k.Alg, Key: key})
+		var f [3]string
+		for j, name := range []string{"kid", "alg", "public_key"} {
+			v, ok := m[name]
+			if !ok {
+				return bad("key %d needs exactly kid, alg and public_key", i)
+			}
+			if f[j], err = stringValue(v, name); err != nil {
+				return bad("key %d: %v", i, err)
+			}
+		}
+		kid, alg, pub := f[0], f[1], f[2]
+		if !kidRE.MatchString(kid) {
+			return bad("key %d: kid isn't 1-128 of [A-Za-z0-9_:-]", i)
+		}
+		// Strict still skips CR and LF; the spec's base64url has none.
+		key, err := b64.DecodeString(pub)
+		if err != nil || strings.ContainsAny(pub, "\r\n") {
+			return bad("key %d: public_key isn't canonical base64url without padding", i)
+		}
+		ks = append(ks, PublicKey{KID: kid, Alg: alg, Key: key})
 	}
 	return ks, nil
 }
