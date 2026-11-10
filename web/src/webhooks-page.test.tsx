@@ -188,9 +188,11 @@ it("says what each delivery state means, and offers to skip only an event held b
     hook({ id: "whe_d", url: "https://d.example:443" }),
     hook({ id: "whe_e", url: "https://e.example:443", enabled: false, disabled_reason: "disabled by a user",
       delivery: { seq: 11, attempts: 0, next_attempt_at: null, in_flight: false, next_seq: 12 } }),
+    hook({ id: "whe_f", url: "https://f.example:443", enabled: false, disabled_reason: "deliveries failed for about 28 hours",
+      delivery: { seq: 11, attempts: 8, next_attempt_at: "2026-11-10T12:00:00Z", in_flight: false, next_seq: null } }),
   ];
   const { el } = await open("owner", rows);
-  await vi.waitFor(() => expect(el.querySelectorAll("tbody tr").length).toBe(5));
+  await vi.waitFor(() => expect(el.querySelectorAll("tbody tr").length).toBe(6));
   const row = (i: number) => el.querySelectorAll("tbody tr")[i]!;
   expect(row(0).textContent).toContain("Event 10 held back");
   expect(row(0).textContent).toContain("Disabled: deliveries failed for about 28 hours");
@@ -201,6 +203,8 @@ it("says what each delivery state means, and offers to skip only an event held b
   expect(row(2).textContent).toContain("Disabled: by a member");
   expect(row(3).textContent).toContain("Up to date");
   expect(row(4).textContent).toContain("Event 12 held back"); // disabled with one pending: held, no failures needed
+  expect(row(5).textContent).toContain("Paused"); // disabled keeps its attempts, nothing pending: not "Retrying"
+  expect(row(5).textContent).not.toContain("Retrying");
   expect(row(4).querySelector('button[aria-label="Skip held event: https://e.example:443"]')).not.toBeNull();
   // Every row's buttons say which endpoint they act on.
   expect(el.querySelector('button[aria-label="Delete: https://d.example:443"]')).not.toBeNull();
@@ -233,6 +237,12 @@ it("shows the API's field errors on the URL and events", async () => {
   );
   await vi.waitFor(() => expect(button(el, "New endpoint")).toBeDefined());
   await act(async () => button(el, "New endpoint")!.click());
+  // With no event checked there's nothing to save.
+  const boxes = [...el.querySelectorAll<HTMLInputElement>('dialog input[type="checkbox"]')].filter((c) => c.checked);
+  for (const c of boxes) await act(async () => c.click());
+  expect(button(el, "Add endpoint")!.disabled).toBe(true);
+  await act(async () => boxes[0]!.click());
+  expect(button(el, "Add endpoint")!.disabled).toBe(false);
   await act(async () => setValue(el.querySelector<HTMLInputElement>('dialog input[name="url"]')!, "http://x.example/"));
   await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
   await vi.waitFor(() => expect(el.querySelector("#url-error")?.textContent).toBe("must be https"));
@@ -255,4 +265,64 @@ it("pages through the delivery log", async () => {
   await vi.waitFor(() => expect(el.querySelectorAll("dialog tbody tr").length).toBe(2));
   expect(cursors).toEqual([null, "c1"]);
   expect(button(el, "Load more")).toBeUndefined();
+});
+
+it("keeps the rotate dialog open until the new secret arrives, whatever Esc or Cancel do", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const { el } = await open("owner", [hook()], (req, u) =>
+    req.method === "POST" && u.pathname.endsWith("/rotate-secret") ? (held.then(() => json({ ...hook(), secret: ROTATED })) as unknown as Response) : undefined,
+  );
+  await vi.waitFor(() => expect(button(el, "Rotate secret")).toBeDefined());
+  await act(async () => button(el, "Rotate secret")!.click());
+  const go = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Rotate secret") as HTMLButtonElement;
+  await act(async () => go.click());
+  await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+  const cancel = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Cancel") as HTMLButtonElement;
+  expect(cancel.disabled).toBe(true);
+  await act(async () => cancel.click());
+  expect(el.querySelector("dialog")).not.toBeNull();
+  await act(async () => release());
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(ROTATED));
+});
+
+it("keeps a new endpoint's dialog open while it is created", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const { el } = await open("owner", [], (req, u) =>
+    req.method === "POST" && u.pathname === "/api/v1/tenants/acme/webhooks" ? (held.then(() => json({ ...hook(), secret: SECRET }, 201)) as unknown as Response) : undefined,
+  );
+  await vi.waitFor(() => expect(button(el, "New endpoint")).toBeDefined());
+  await act(async () => button(el, "New endpoint")!.click());
+  await act(async () => setValue(el.querySelector<HTMLInputElement>('dialog input[name="url"]')!, "https://hooks.example.com/"));
+  await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+  await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+  expect(el.querySelector("dialog")).not.toBeNull();
+  await act(async () => release());
+  await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(SECRET));
+});
+
+it("refreshes the list after a refused confirm or edit, and offers no retry", async () => {
+  let gets = 0;
+  const { el } = await open("owner", [hook()], (req, u) => {
+    if (req.method === "GET" && u.pathname === "/api/v1/tenants/acme/webhooks") gets++;
+    if (req.method === "POST" && u.pathname.endsWith("/disable")) return json({ code: "not_found", title: "Not Found", status: 404 }, 404);
+    if (req.method === "PATCH") return json({ code: "not_found", title: "Not Found", status: 404 }, 404);
+    return undefined;
+  });
+  await vi.waitFor(() => expect(button(el, "Disable")).toBeDefined());
+  let before = gets;
+  await act(async () => button(el, "Disable")!.click());
+  const go = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Disable") as HTMLButtonElement;
+  await act(async () => go.click());
+  await vi.waitFor(() => expect(el.querySelector('dialog [role="alert"]')).not.toBeNull());
+  await vi.waitFor(() => expect(gets).toBeGreaterThan(before));
+  expect([...el.querySelectorAll("dialog button")].map((b) => b.textContent)).toEqual(["Close"]);
+  await act(async () => button(el, "Close")!.click());
+
+  before = gets;
+  await act(async () => button(el, "Edit")!.click());
+  await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+  await vi.waitFor(() => expect(el.querySelector('dialog [role="alert"]')).not.toBeNull());
+  await vi.waitFor(() => expect(gets).toBeGreaterThan(before));
 });

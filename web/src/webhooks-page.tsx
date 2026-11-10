@@ -149,9 +149,10 @@ export function WebhooksPage() {
 function deliveryText(h: Webhook) {
   const d = h.delivery;
   if (heldBack(h) && !h.enabled) return t("webhooks.delivery.held", { seq: String(d.next_seq) });
+  // Before the retry count: a disable keeps the attempts of the event it stopped on.
+  if (!h.enabled) return t("webhooks.delivery.paused"); // nothing within the look-ahead, or far behind: skip to now passes it all
   if (d.attempts > 0)
     return t("webhooks.delivery.retrying", { attempts: String(d.attempts), when: d.next_attempt_at ? when.format(new Date(d.next_attempt_at)) : "—" });
-  if (!h.enabled) return t("webhooks.delivery.paused"); // nothing within the look-ahead, or far behind: skip to now passes it all
   return d.next_seq != null || d.in_flight ? t("webhooks.delivery.pending") : t("webhooks.delivery.ok");
 }
 
@@ -205,7 +206,7 @@ export function EndpointDialog({ tenant, hook, onClose }: { tenant: string; hook
   }
   if (created) return <SecretDialog secret={created.secret} onClose={close} />;
   return (
-    <Modal title={hook ? t("webhooks.editTitle", { url: hook.url }) : t("webhooks.new")} onClose={close}>
+    <Modal title={hook ? t("webhooks.editTitle", { url: hook.url }) : t("webhooks.new")} onClose={busy ? () => {} : close}>
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
         <div className="flex flex-col gap-1 text-sm">
           <label className="flex flex-col gap-1">
@@ -248,7 +249,7 @@ export function EndpointDialog({ tenant, hook, onClose }: { tenant: string; hook
           </p>
         )}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="ghost" disabled={busy} onClick={close}>
             {t("webhooks.cancel")}
           </Button>
           <Button type="submit" disabled={busy || events.length === 0}>
@@ -412,7 +413,8 @@ function RotateDialog({ tenant, hook, onDone, onClose }: { tenant: string; hook:
   }
   if (secret) return <SecretDialog secret={secret} onClose={onClose} />;
   return (
-    <Modal title={t("webhooks.confirmTitle", { action: t("webhooks.rotate"), url: hook.url })} onClose={onClose}>
+    // No closing while the rotation is out: the server would rotate and the secret be lost.
+    <Modal title={t("webhooks.confirmTitle", { action: t("webhooks.rotate"), url: hook.url })} onClose={busy ? () => {} : onClose}>
       <p className="text-sm">{t("webhooks.confirm.rotate")}</p>
       {error != null && (
         <p role="alert" className="mt-3 text-sm font-medium">
@@ -420,7 +422,7 @@ function RotateDialog({ tenant, hook, onDone, onClose }: { tenant: string; hook:
         </p>
       )}
       <div className="mt-6 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" disabled={busy} onClick={onClose}>
           {t("webhooks.cancel")}
         </Button>
         <Button disabled={busy} onClick={() => void rotate()}>
