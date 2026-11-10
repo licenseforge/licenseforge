@@ -125,7 +125,11 @@ func TestSend(t *testing.T) {
 		}
 	})
 	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(make([]byte, 1<<20)) })
-	mux.HandleFunc("/down", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
+	mux.HandleFunc("/down", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	mux.HandleFunc("/down-bare", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
 	mux.HandleFunc("/err-after", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "60")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -166,7 +170,8 @@ func TestSend(t *testing.T) {
 		"/moved":     {Category: "redirect"},
 		"/slow":      {Category: "timeout"},
 		"/big":       {Category: "http", Status: 200},
-		"/down":      {Category: "http", Status: 503},
+		"/down":      {Category: "http", Status: 503, RetryAfter: 30 * time.Second},
+		"/down-bare": {Category: "http", Status: 503},
 		"/err-after": {Category: "http", Status: 500},
 		"/choices":   {Category: "redirect"},
 		"/headers":   {Category: "connection"},
@@ -200,6 +205,11 @@ func TestSend(t *testing.T) {
 	cancel()
 	if _, err := Send(cancelled, c, srv.URL+"/ok", "m", now, body, secret); err == nil {
 		t.Error("a cancelled send reported as an attempt")
+	}
+	short, stop := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer stop()
+	if a, err := Send(short, testClient(srv, 5*time.Second), srv.URL+"/slow", "m", now, body, secret); err != nil || a.Category != "timeout" {
+		t.Errorf("the caller's deadline: %+v, %v", a, err)
 	}
 	// No proxy from the environment.
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -80,7 +81,9 @@ func Send(ctx context.Context, c *http.Client, url, id string, now time.Time, bo
 	resp, err := c.Do(req)
 	a := Attempt{}
 	if err != nil {
-		if ctx.Err() != nil { // the caller stopped (e.g. shutting down): no attempt to record
+		// The caller stopped (shutting down): no attempt to record. A
+		// deadline that passed is a timeout like any other.
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return Attempt{}, ctx.Err()
 		}
 		a.Category = classify(err)
@@ -119,7 +122,7 @@ func classify(err error) string {
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
 		return "timeout"
 	case errors.As(err, &cv), errors.As(err, &ua), errors.As(err, &hn), errors.As(err, &ci), errors.As(err, &rh), errors.As(err, &al),
-		strings.Contains(err.Error(), "tls: "): // e.g. a protocol version below the minimum (untyped)
+		tlsText(err): // e.g. a protocol version below the minimum (untyped)
 		return "tls"
 	}
 	return "connection"
@@ -139,4 +142,15 @@ func retryAfter(v string, now time.Time) time.Duration {
 		d = t.Sub(now)
 	}
 	return max(0, min(d, MaxRetryAfter))
+}
+
+// tlsText reports an untyped crypto/tls error: the transport's own message,
+// not the URL error around it (which can quote what the server sent).
+func tlsText(err error) bool {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	m := err.Error()
+	return strings.HasPrefix(m, "tls: ") || strings.HasPrefix(m, "remote error: tls: ")
 }
