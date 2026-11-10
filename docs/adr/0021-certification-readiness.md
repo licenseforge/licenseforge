@@ -56,7 +56,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 
 ## Open verification items
 - [x] Go Cryptographic Module v1.0.0: CMVP #5247 active, EdDSA approved ([CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)).
-- [ ] Confirm Ed25519 in Bouncy Castle FIPS (Java); OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved. If missing, FIPS customers get ECDSA P-256 keys.
+- [x] Confirm Ed25519 in Bouncy Castle FIPS (Java): approved from BC-FJA 2.1 (FIPS 186-5, certificate #4943), so no P-256 keys ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md), 2026-11-10). OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved.
 - [ ] Confirm CRA obligations for open-source projects vs. commercial distributors (we are both).
 
 ## Consequences
