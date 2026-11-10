@@ -47,16 +47,9 @@ func offline(ctx context.Context, args []string, getenv func(string) string, in 
 	if *file == "" || fs.NArg() > 0 {
 		return fmt.Errorf("offline %s: --%s is required, and nothing else", op, name)
 	}
-	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || !secure(u) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("offline: LICENSEFORGE_URL must be an https URL (http only for loopback hosts) without credentials, query or fragment: the token travels with the request")
-	}
-	if tenant == "" || token == "" {
-		return errors.New("offline: LICENSEFORGE_TENANT and LICENSEFORGE_TOKEN are required")
-	}
-	if strings.ContainsAny(tenant, "/%?#\\") || tenant == "." || tenant == ".." { // one path segment: a slug or tnt_ ID
-		return fmt.Errorf("offline: LICENSEFORGE_TENANT %q is not a tenant slug or ID", tenant)
+	u, tenant, token, err := apiTarget(getenv, "offline", true)
+	if err != nil {
+		return err
 	}
 	text, err := readArg(*file, in)
 	if err != nil {
@@ -150,6 +143,25 @@ func readArg(path string, in io.Reader) (string, error) {
 	}
 	b, err := io.ReadAll(io.LimitReader(r, 64<<10)) // more than any request: refused after trimming
 	return string(b), err
+}
+
+// apiTarget reads and checks the API client's environment, shared by
+// `offline` and `api`: the base URL (https, or http to loopback; the token
+// travels with every request), the token, and the tenant (one path
+// segment), required when needTenant.
+func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.URL, tenant, token string, err error) {
+	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
+	u, err = url.Parse(base)
+	if err != nil || u.Host == "" || !secure(u) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_URL must be an https URL (http only for loopback hosts) without credentials, query or fragment: the token travels with the request", cmd)
+	}
+	if token == "" || needTenant && tenant == "" {
+		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TENANT and LICENSEFORGE_TOKEN are required", cmd)
+	}
+	if tenant != "" && (strings.ContainsAny(tenant, "/%?#\\") || tenant == "." || tenant == "..") { // one path segment: a slug or tnt_ ID
+		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TENANT %q is not a tenant slug or ID", cmd, tenant)
+	}
+	return u, tenant, token, nil
 }
 
 // secure: https, or http to a loopback host (tests, a local proxy).

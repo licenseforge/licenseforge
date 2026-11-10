@@ -108,7 +108,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n       licenseforge api METHOD PATH [--data JSON|@FILE|-]   one REST API request (ADR-0048; LICENSEFORGE_URL, _TENANT, _TOKEN)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -126,8 +126,8 @@ func main() {
 	cmd := strings.Join(flag.Args(), " ")
 	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") {
 		cmd = "tenant " + args[1] // with its own flags
-	} else if len(args) >= 1 && args[0] == "offline" {
-		cmd = "offline"
+	} else if len(args) >= 1 && (args[0] == "offline" || args[0] == "api") {
+		cmd = args[0]
 	}
 	var err error
 	switch cmd {
@@ -147,6 +147,10 @@ func main() {
 	case "offline":
 		// stdout is the license file: errors go to stderr, never the JSON log.
 		os.Exit(offlineMain(ctx, flag.Args()[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr,
+			&http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}))
+	case "api":
+		// stdout is the answer: errors go to stderr, never the JSON log.
+		os.Exit(apiMain(ctx, flag.Args()[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr,
 			&http.Client{Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}))
 	case "tenant create":
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
