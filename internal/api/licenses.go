@@ -146,6 +146,11 @@ func (s *server) RevokeLicense(ctx context.Context, req apigen.RevokeLicenseRequ
 // permission checks pass again.
 func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseRequestObject) (apigen.IssueLicenseResponseObject, error) {
 	p := principal(ctx)
+	// null isn't "every build" here (it is on updates-until): refuse it rather
+	// than silently use the plan's term.
+	if len(nulls(ctx, "updates_until")) > 0 {
+		return nil, invalid(fieldError{"/updates_until", "a date-time; omit it for the plan's term"})
+	}
 	ir := issueRequest(req.Body)
 	if req.Params.IdempotencyKey == nil {
 		got, err := s.Licenses.Issue(ctx, p, ir)

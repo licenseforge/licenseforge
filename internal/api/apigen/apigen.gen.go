@@ -1063,7 +1063,7 @@ type LicenseIssue struct {
 	ProductId string            `json:"product_id"`
 	Type      *LicenseIssueType `json:"type,omitempty"`
 
-	// UpdatesUntil Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, whole seconds (truncated). Absent: from the plan.
+	// UpdatesUntil Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, year 9999 or earlier in UTC, whole seconds (truncated). Absent: from the plan. Not nullable (null answers 422): to cover every build, clear it with updates-until after issue, or use a plan without updates_months.
 	UpdatesUntil *time.Time `json:"updates_until,omitempty"`
 }
 

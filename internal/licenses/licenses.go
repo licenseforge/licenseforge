@@ -314,14 +314,15 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 	if errors.Is(err, ErrInvalid) {
 		return refused(err)
 	}
-	updates := Expiry(now, pl.UpdatesMonths, nil)
-	if req.UpdatesUntil != nil {
-		if updates, err = validUpdatesUntil(*req.UpdatesUntil, now); err != nil {
-			return refused(err)
-		}
-	}
 	if err != nil {
 		return Issued{}, ev, err
+	}
+	updates := Expiry(now, pl.UpdatesMonths, nil)
+	if req.UpdatesUntil != nil {
+		var uerr error
+		if updates, uerr = validUpdatesUntil(*req.UpdatesUntil, now); uerr != nil {
+			return refused(uerr)
+		}
 	}
 	c := tx.License.Create().SetID(id).SetTenantID(tenantID).SetProductID(pl.ProductID).SetPlanID(pl.ID).
 		SetCustomerID(req.CustomerID).SetType(req.Type).
@@ -500,8 +501,12 @@ func (s Service) SetUpdatesUntil(ctx context.Context, p authz.Principal, license
 			return nil
 		}
 		u, err := validUpdatesUntil(*until, l.IssuedAt)
+		if err != nil {
+			return err
+		}
+		// t.args is shared with the copy change() runs: it binds $3 there.
 		t.args[0] = *u
-		return err
+		return nil
 	}
 	t.detail = func(was, row *ent.License) map[string]any {
 		return map[string]any{"previous": rfc3339(was.UpdatesUntil), "updates_until": rfc3339(row.UpdatesUntil), "product_id": row.ProductID,
@@ -591,9 +596,11 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 			return fmt.Errorf("%w: license is %s", ErrState, l.Status)
 		}
 		// Guarded and counted: ent's UpdateOneID would hide a zero-row update.
-		was, err := tx.License.Get(ctx, l.ID) // under the lock: what the entry says it changed from
-		if err != nil {
-			return err
+		var was *ent.License // under the lock: what the entry says it changed from
+		if t.detail != nil {
+			if was, err = tx.License.Get(ctx, l.ID); err != nil {
+				return err
+			}
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE licenses SET `+t.set+`, updated_at = clock_timestamp() WHERE id = $1 AND status = $2`,
 			append([]any{l.ID, l.Status}, t.args...)...)

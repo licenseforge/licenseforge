@@ -621,8 +621,11 @@ func TestTransitionRefusals(t *testing.T) {
 	} {
 		for name, op := range map[string]func(context.Context, authz.Principal, string) (Changed, error){
 			"suspend": f.s.Suspend, "reinstate": f.s.Reinstate, "revoke": f.s.Revoke,
+			// A bad value: refused for access before it is checked (ADR-0032), so
+			// a hidden license's existence or issue time doesn't leak.
 			"updates_until": func(ctx context.Context, p authz.Principal, id string) (Changed, error) {
-				return f.s.SetUpdatesUntil(ctx, p, id, nil)
+				bad := time.Unix(0, 0)
+				return f.s.SetUpdatesUntil(ctx, p, id, &bad)
 			},
 		} {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {

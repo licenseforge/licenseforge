@@ -1642,7 +1642,7 @@ export interface components {
             type?: "dev" | "trial" | "paid" | "community";
             /**
              * Format: date-time
-             * @description Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, whole seconds (truncated). Absent: from the plan.
+             * @description Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, year 9999 or earlier in UTC, whole seconds (truncated). Absent: from the plan. Not nullable (null answers 422): to cover every build, clear it with updates-until after issue, or use a plan without updates_months.
              */
             updates_until?: string;
             /** @description Per-license feature changes by feature key (an enterprise deal). */

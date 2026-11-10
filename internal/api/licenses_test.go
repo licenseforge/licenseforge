@@ -210,6 +210,10 @@ func TestLicenseUpdatesUntil(t *testing.T) {
 		t.Fatalf("issue: %d %s", issued.code, issued.raw)
 	}
 	f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"updates_until":"2001-01-01T00:00:00Z"`), owner).problem(t, 422, "validation_failed")
+	// null at issue would read as "the plan's term", the opposite of updates-until's null.
+	if r := f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"updates_until":null`), owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), "/updates_until") {
+		t.Errorf("null at issue: %v", r)
+	}
 	u := p + "/" + issued.body["id"].(string) + "/updates-until"
 	if r := f.do(t, "POST", u, `{"updates_until":"2100-06-30T00:00:00+02:00"}`, owner); r.code != 200 || r.body["updates_until"] != "2100-06-29T22:00:00Z" {
 		t.Errorf("renew: %d %s", r.code, r.raw)
