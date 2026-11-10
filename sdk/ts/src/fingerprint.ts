@@ -131,7 +131,7 @@ async function kubeSystemUID(): Promise<string> {
   }
   const host = process.env.KUBERNETES_SERVICE_HOST!;
   const port = process.env.KUBERNETES_SERVICE_PORT || "443";
-  if (!/^\d{1,5}$/.test(port) || Number(port) > 65535) throw new FingerprintError("failed", `kubernetes: KUBERNETES_SERVICE_PORT ${JSON.stringify(port)} isn't a port`);
+  if (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535) throw new FingerprintError("failed", `kubernetes: KUBERNETES_SERVICE_PORT ${JSON.stringify(port)} isn't a port`);
   return namespaceUID({ host, port: Number(port), token, ca }, [500, 2000]);
 }
 
