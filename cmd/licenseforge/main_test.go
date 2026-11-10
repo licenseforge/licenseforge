@@ -165,7 +165,8 @@ func startServe(t *testing.T) (string, string, func() error) {
 		if time.Since(start) > 30*time.Second {
 			cancel()
 			select { // don't leave it running into the next test
-			case <-errc:
+			case err := <-errc:
+				t.Logf("serve: %v", err)
 			case <-time.After(20 * time.Second):
 			}
 			t.Fatal("serve didn't start")
