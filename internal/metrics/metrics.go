@@ -104,6 +104,20 @@ var (
 		Name: "licenseforge_audit_export_lag_seconds", Help: "Age of the oldest audit entry not yet delivered to the sink.",
 	}, []string{"sink"})
 
+	// Webhooks (ADR-0044); no tenant labels.
+	WebhookDeliveries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "licenseforge_webhook_deliveries_total", Help: "Webhook delivery attempts recorded, by outcome (success, failure).",
+	}, []string{"outcome"})
+	WebhookErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "licenseforge_webhook_dispatch_errors_total", Help: "Webhook dispatch rounds that failed (database, keyring), not receiver failures.",
+	})
+	WebhookDisabled = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_webhook_endpoints_disabled", Help: "Webhook endpoints currently disabled, across tenants.",
+	})
+	WebhookLag = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_webhook_lag_seconds", Help: "Age of the oldest audit entry an enabled webhook endpoint hasn't passed yet.",
+	})
+
 	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "licenseforge_http_requests_total", Help: "HTTP requests by route pattern and status class.",
 	}, []string{"route", "code"})
@@ -117,9 +131,12 @@ func init() {
 	for _, l := range []string{"mfa", "phishing_resistant"} {
 		MFARefusals.WithLabelValues(l) // export zeros
 	}
+	WebhookDeliveries.WithLabelValues("success")
+	WebhookDeliveries.WithLabelValues("failure")
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
-	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditVerifyErrors, AuditVerifyLastFull, AuditExportFailures, AuditExportLag, requests, duration, poolCollector{},
+	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditVerifyErrors, AuditVerifyLastFull, AuditExportFailures, AuditExportLag,
+		WebhookDeliveries, WebhookErrors, WebhookDisabled, WebhookLag, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

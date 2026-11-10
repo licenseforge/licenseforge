@@ -15,6 +15,7 @@ import (
 	crand "crypto/rand"
 
 	"licenseforge.io/licenseforge/internal/audit"
+	"licenseforge.io/licenseforge/internal/metrics"
 	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/store/ent"
@@ -268,7 +269,8 @@ const pinned = `id = $1 AND claimed_by = $2 AND seq = $3 AND attempts = $4`
 // failure the retry state, and after the last failure (or a 410) the
 // endpoint is disabled. Nothing is written if the claim was overtaken.
 func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
-	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
+	recorded := ""
+	err := d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		var res interface{ RowsAffected() (int64, error) }
 		var err error
 		// Capped: a disable that missed (the endpoint changed during the send)
@@ -311,10 +313,17 @@ func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
 			return err
 		}
 		if disable != "" {
-			return disableTx(ctx, tx, c, disable)
+			if err := disableTx(ctx, tx, c, disable); err != nil {
+				return err
+			}
 		}
+		recorded = outcome
 		return nil
 	})
+	if err == nil && recorded != "" {
+		metrics.WebhookDeliveries.WithLabelValues(recorded).Inc()
+	}
+	return err
 }
 
 // retryDelay is the pause after the nth failure, with jitter (±10%), never

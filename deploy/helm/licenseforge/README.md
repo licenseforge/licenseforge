@@ -72,6 +72,10 @@ DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
 443. Rendering fails if OIDC is on without the issuer, client ID or redirect
 URL, or without a port.
 
+## Webhooks
+
+Every server pod delivers tenants' webhooks (ADR-0044); `webhooks.workers` (default 8, `0` for none) sets how many at once per pod. The server refuses internal, link-local and cloud metadata addresses whatever the NetworkPolicy allows, and connects only on `webhooks.ports` (443). The NetworkPolicy allows egress on those ports to any destination; narrow it with `webhooks.egress.to`. For a self-hosted, single-vendor install with receivers on a private network, list their ranges in `webhooks.allowCIDRs` (every tenant can then reach them; loopback, link-local and metadata addresses stay refused). On an IPv6-only cluster with an operator-chosen NAT64 prefix, add the prefix to `webhooks.denyCIDRs`.
+
 ## The first tenant
 A platform admin creates tenants on the dashboard's **Tenants** screen (`/platform`; a platform admin without tenants lands there), or with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
 

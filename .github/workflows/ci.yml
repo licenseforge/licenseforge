@@ -118,6 +118,16 @@ jobs:
           if helm template t . $s --set metrics.scrapeFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: 9090'; then echo "metrics open without scrapers"; exit 1; fi
           if helm template t . $s --show-only templates/servicemonitor.yaml >/dev/null 2>&1; then echo "ServiceMonitor while off"; exit 1; fi
           helm template t . $s --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.labels.release=kps --show-only templates/servicemonitor.yaml | grep -qF 'release: kps' || { echo "no ServiceMonitor"; exit 1; }
+          # Webhooks (ADR-0044): settings rendered; receiver egress only on the allowed ports, none with no workers; no portless rule.
+          d=$(helm template t . $s --set 'webhooks.allowCIDRs={10.0.0.0/8}' --set 'webhooks.ports={443,8443}' --show-only templates/deployment.yaml)
+          for want in 'LICENSEFORGE_WEBHOOK_WORKERS|value: "8"' 'LICENSEFORGE_WEBHOOK_PORTS|value: "443,8443"' 'LICENSEFORGE_WEBHOOK_ALLOW_CIDRS|value: "10.0.0.0/8"'; do
+            grep -A1 -F -- "- name: ${want%%|*}" <<<"$d" | grep -qF -- "${want#*|}" || { echo "webhooks Deployment: wrong ${want%%|*}"; exit 1; }
+          done
+          helm template t . $s --show-only templates/networkpolicy.yaml | grep -A3 -F 'Webhook receivers' | grep -qF -- '- {port: 443, protocol: TCP}' || { echo "no webhook egress rule"; exit 1; }
+          if helm template t . $s --set webhooks.workers=0 --show-only templates/networkpolicy.yaml | grep -qF 'Webhook receivers'; then echo "webhook egress with no workers"; exit 1; fi
+          for bad in 'webhooks.ports={}' webhooks.workers=65 'webhooks.ports[0]=0' webhooks.typo=1; do
+            if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
+          done
           # OIDC: env from values, client secret only by reference, IdP egress only when on.
           o="--set oidc.enabled=true --set oidc.issuer=https://idp.example --set oidc.clientID=lf --set oidc.redirectURL=https://lf.example/auth/callback"
           helm lint --strict . $s $o --set oidc.clientSecret.secretName=idp

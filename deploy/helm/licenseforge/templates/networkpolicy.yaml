@@ -50,6 +50,21 @@ spec:
       to: {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- end }}
+    {{- $wh := .Values.webhooks | default dict }}
+    {{- if gt (int (dig "workers" 8 $wh)) 0 }}
+    {{- $ports := dig "ports" (list 443) $wh }}
+    {{- /* A rule without ports would allow every port. */}}
+    {{- if not $ports }}{{ fail "webhooks.ports must not be empty" }}{{ end }}
+    # Webhook receivers (ADR-0044). Empty `to`: any destination on these
+    # ports; the server refuses internal addresses itself.
+    - ports:
+        {{- range $ports }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+      {{- with dig "egress" "to" list $wh }}
+      to: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
 {{- if (.Values.auditRetention | default dict).enabled }}
 ---
 # The audit retention CronJob: DNS and the database only, no ingress.

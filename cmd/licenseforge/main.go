@@ -94,6 +94,7 @@ import (
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
+	"licenseforge.io/licenseforge/internal/webhooks"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
 )
@@ -362,6 +363,12 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		}()
 	}
 
+	// Outbound webhooks (ADR-0044): every replica delivers; 0 workers turns
+	// delivery off here (another replica, or none, delivers).
+	if err := startWebhooks(ctx, db, keyring, log); err != nil {
+		return err
+	}
+
 	// Periodic chain verification (ADR-0036); one replica per interval runs it.
 	verify := auditverify.New(db, log)
 	if verify.Interval, err = envDuration("LICENSEFORGE_AUDIT_VERIFY_INTERVAL", auditverify.DefaultInterval); err != nil {
@@ -592,4 +599,32 @@ func mustEnv(key string) (string, error) {
 		return v, nil
 	}
 	return "", fmt.Errorf("%s is not set", key)
+}
+
+// startWebhooks starts the webhook dispatcher with the operator's egress
+// policy (LICENSEFORGE_WEBHOOK_*); invalid settings stop the server.
+func startWebhooks(ctx context.Context, db *store.DB, keyring *secrets.Keyring, log *slog.Logger) error {
+	workers := 8
+	if v := os.Getenv("LICENSEFORGE_WEBHOOK_WORKERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 64 {
+			return fmt.Errorf("LICENSEFORGE_WEBHOOK_WORKERS: want 0 to 64, got %q", v)
+		}
+		workers = n
+	}
+	guard, err := webhooks.ParseGuard(os.Getenv("LICENSEFORGE_WEBHOOK_ALLOW_CIDRS"), os.Getenv("LICENSEFORGE_WEBHOOK_DENY_CIDRS"),
+		os.Getenv("LICENSEFORGE_WEBHOOK_PORTS"))
+	if err != nil {
+		return err
+	}
+	if workers == 0 {
+		log.Info("LICENSEFORGE_WEBHOOK_WORKERS is 0: this replica delivers no webhooks")
+		return nil
+	}
+	if len(guard.Allow) > 0 {
+		log.Warn("webhooks may reach internal addresses (LICENSEFORGE_WEBHOOK_ALLOW_CIDRS): for single-vendor self-hosted installs", "allow", os.Getenv("LICENSEFORGE_WEBHOOK_ALLOW_CIDRS"))
+	}
+	d := webhooks.NewDispatcher(db, keyring, guard.Client(), log)
+	go d.Run(ctx, workers) // stops with ctx; a send in flight is released, the next replica sends it
+	return nil
 }
