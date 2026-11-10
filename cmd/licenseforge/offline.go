@@ -151,6 +151,18 @@ func readArg(path string, in io.Reader) (string, error) {
 // segment), required when needTenant.
 func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.URL, tenant, token string, err error) {
 	base, tenant, token := strings.TrimRight(getenv("LICENSEFORGE_URL"), "/"), getenv("LICENSEFORGE_TENANT"), getenv("LICENSEFORGE_TOKEN")
+	if path := getenv("LICENSEFORGE_TOKEN_FILE"); path != "" { // a mounted Secret or a CI secret file
+		if token != "" {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN and LICENSEFORGE_TOKEN_FILE are both set: use one", cmd)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN_FILE: %w", cmd, err)
+		}
+		if token = strings.TrimRight(string(b), "\r\n"); token == "" {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN_FILE: %s is empty", cmd, path)
+		}
+	}
 	u, err = url.Parse(base)
 	// ForceQuery: a stray "?" would turn the API path into a query; dot
 	// segments in the base path could move the requests elsewhere on the host.
@@ -163,8 +175,8 @@ func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.
 	if token == "" {
 		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN is required", cmd)
 	}
-	if strings.ContainsFunc(token, func(r rune) bool { return r < 0x21 || r == 0x7f }) { // a newline from a secret file
-		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN has whitespace or control characters", cmd)
+	if strings.ContainsFunc(token, func(r rune) bool { return r < 0x21 || r > 0x7e }) { // a newline or BOM from a secret file; tokens are ASCII
+		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN has whitespace, control or non-ASCII characters", cmd)
 	}
 	if tenant != "" && (strings.ContainsAny(tenant, "/%?#\\") || tenant == "." || tenant == "..") { // one path segment: a slug or tnt_ ID
 		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TENANT %q is not a tenant slug or ID", cmd, tenant)

@@ -37,17 +37,17 @@ spec:
               args: [audit, prune]
               securityContext: {{- include "licenseforge.containerSecurityContext" . | nindent 16 }}
               env:
-                - name: LICENSEFORGE_RETENTION_DATABASE_URL
-                  valueFrom: {secretKeyRef: {name: {{ $ret.secret | quote }}, key: retention-database-url}}
+                - name: LICENSEFORGE_RETENTION_DATABASE_URL_FILE
+                  value: /etc/licenseforge/secrets/retention-database-url
                 {{- with $ret.platformDays }}
                 - name: LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS
                   value: {{ . | int | toString | quote }}
                 {{- end }}
                 {{- include "licenseforge.extraCAEnv" (list . 16) }}
                 {{- include "licenseforge.dbPlaintextEnv" (list . 16) }}
-              {{- include "licenseforge.extraCAMounts" (list . 14) }}
+              {{- include "licenseforge.jobMounts" (list . 14) }}
               resources: {{- toYaml .Values.resources | nindent 16 }}
-          {{- include "licenseforge.extraCAVolumes" (list . 10) }}
+          {{- include "licenseforge.jobVolumes" (list . 10 $ret.secret "retention-database-url") }}
           {{- with .Values.nodeSelector }}
           nodeSelector: {{- toYaml . | nindent 12 }}
           {{- end }}

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -657,5 +658,79 @@ func TestWebhookDispatcherSettings(t *testing.T) {
 		if ok && v != "0" && start == nil {
 			t.Errorf("workers %q: nothing to start", v)
 		}
+	}
+}
+
+// Secrets from mounted files (key_FILE): read, trailing line break dropped;
+// both set, an empty file or a missing one is an error (DISA V-242415).
+func TestSecretEnv(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, v string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(v), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	t.Setenv("LF_T", "")
+	t.Setenv("LF_T_FILE", "")
+	if v, err := secretEnv("LF_T"); v != "" || err != nil {
+		t.Errorf("unset: %q %v", v, err)
+	}
+	t.Setenv("LF_T", "from-env")
+	if v, err := secretEnv("LF_T"); v != "from-env" || err != nil {
+		t.Errorf("env: %q %v", v, err)
+	}
+	t.Setenv("LF_T_FILE", write("both", "x"))
+	if _, err := secretEnv("LF_T"); err == nil || !strings.Contains(err.Error(), "both set") {
+		t.Errorf("both: %v", err)
+	}
+	t.Setenv("LF_T", "")
+	for content, want := range map[string]string{"postgres://u@h/db\n": "postgres://u@h/db", "k1=abc\r\n": "k1=abc", "  spaced \n": "  spaced "} {
+		t.Setenv("LF_T_FILE", write("f", content))
+		if v, err := secretEnv("LF_T"); v != want || err != nil {
+			t.Errorf("%q: %q %v", content, v, err)
+		}
+	}
+	for name, path := range map[string]string{"empty": write("empty", "\n"), "missing": filepath.Join(dir, "nope"), "BOM": write("bom", "\ufeffpostgres://u@h/db")} {
+		t.Setenv("LF_T_FILE", path)
+		if _, err := secretEnv("LF_T"); err == nil {
+			t.Errorf("%s file: no error", name)
+		}
+	}
+	if _, err := mustEnv("LF_T"); err == nil {
+		t.Error("mustEnv with a missing file")
+	}
+}
+
+// serve starts with every secret from files, and refuses the owner and
+// retention logins given as files too.
+func TestServeWithSecretFiles(t *testing.T) {
+	dir := t.TempDir()
+	file := func(key, v string) {
+		p := filepath.Join(dir, key)
+		if err := os.WriteFile(p, []byte(v+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(key, "")
+		t.Setenv(key+"_FILE", p)
+	}
+	setEnv(t, env.TenantURL, env.PlatformURL, testKeys)
+	file("LICENSEFORGE_DATABASE_URL", env.TenantURL)
+	file("LICENSEFORGE_PLATFORM_DATABASE_URL", env.PlatformURL)
+	file("LICENSEFORGE_IDENTITY_DATABASE_URL", env.IdentityURL)
+	file("LICENSEFORGE_MASTER_KEYS", testKeys)
+	_, _, stop := startServe(t) // fails the test if serve can't start
+	if err := stop(); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	for key, want := range map[string]string{"LICENSEFORGE_OWNER_DATABASE_URL": "owner login", "LICENSEFORGE_RETENTION_DATABASE_URL": "retention login"} {
+		file(key, "postgres://x@localhost/db")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a broken refusal would serve
+		if err := serve(ctx, listen(t), listen(t), quiet); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s_FILE: %v", key, err)
+		}
+		cancel()
+		t.Setenv(key+"_FILE", "")
 	}
 }

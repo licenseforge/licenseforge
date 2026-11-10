@@ -57,6 +57,13 @@ type container struct {
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
+	Env []struct {
+		Name      string `yaml:"name"`
+		ValueFrom struct {
+			SecretKeyRef map[string]any `yaml:"secretKeyRef"`
+		} `yaml:"valueFrom"`
+	} `yaml:"env"`
+	EnvFrom []map[string]any `yaml:"envFrom"`
 }
 
 type podSpec struct {
@@ -106,6 +113,9 @@ var renders = map[string][]string{
 	"autoscaling":    {"--set", "autoscaling.enabled=true"},
 	"no-migrate-job": {"--set", "migrate.enabled=false"},
 	"mounts":         {"--set", "extraCA.secretName=ca"}, // adds a volume and mounts
+	"every secret": {"--set", "extraCA.secretName=ca", "--set", "auditRetention.enabled=true", "--set", "auditRetention.secret=r",
+		"--set", "oidc.enabled=true", "--set", "oidc.issuer=https://idp.example", "--set", "oidc.clientID=lf", "--set", "oidc.redirectURL=https://lf.example/auth/callback", "--set", "oidc.clientSecret.secretName=oidc",
+		"--set", "audit.export.otlp.endpoint=https://otel.example:4318/v1/logs", "--set", "audit.export.otlp.headersSecret=otlp"},
 }
 
 func render(t *testing.T, extra []string) []object {
@@ -237,6 +247,16 @@ func checkPod(t *testing.T, where string, ps podSpec) {
 			if p.HostPort != 0 {
 				in("hostPort %d", p.HostPort)
 			}
+		}
+		// Secrets reach the program as mounted files (LICENSEFORGE_*_FILE),
+		// never as environment variables (DISA Kubernetes STIG V-242415).
+		for _, e := range c.Env {
+			if e.ValueFrom.SecretKeyRef != nil {
+				in("env %s from a Secret", e.Name)
+			}
+		}
+		if len(c.EnvFrom) > 0 {
+			in("envFrom")
 		}
 	}
 }

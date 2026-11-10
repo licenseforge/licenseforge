@@ -6,7 +6,7 @@ The `licenseforge` binary is also the CLI (ADR-0048). Commands that talk to a ru
 |---|---|
 | `LICENSEFORGE_URL` | The API's base URL, `https://licenses.example.com` (a base path is kept). `http` works only for loopback hosts: the token goes with every request. No credentials, query, fragment or `.`/`..` segments. |
 | `LICENSEFORGE_TENANT` | The tenant's slug, filled in for `{tenant}` in paths |
-| `LICENSEFORGE_TOKEN` | An API token (dashboard: Settings → API tokens), with the role and product scope the commands need |
+| `LICENSEFORGE_TOKEN` | An API token (dashboard: Settings → API tokens), with the role and product scope the commands need. Or `LICENSEFORGE_TOKEN_FILE`, the path of a file holding it (a mounted Secret, a CI secret file) |
 
 Keep the token in a secret manager or your CI's secrets, never in a script.
 

@@ -143,10 +143,13 @@ jobs:
           d=$(helm template t . $s $o --set oidc.clientSecret.secretName=idp --show-only templates/deployment.yaml)
           for want in 'LICENSEFORGE_OIDC_ISSUER|value: "https://idp.example"' 'LICENSEFORGE_OIDC_CLIENT_ID|value: "lf"' \
             'LICENSEFORGE_OIDC_REDIRECT_URL|value: "https://lf.example/auth/callback"' \
-            'LICENSEFORGE_OIDC_CLIENT_SECRET|valueFrom: {secretKeyRef: {name: "idp", key: "client-secret"}}'; do
+            'LICENSEFORGE_OIDC_CLIENT_SECRET_FILE|value: /etc/licenseforge/oidc/client-secret'; do
             grep -A1 -F -- "- name: ${want%%|*}" <<<"$d" | grep -qF -- "${want#*|}" || { echo "OIDC Deployment: wrong ${want%%|*}"; exit 1; }
           done
+          grep -A3 -F 'secretName: "idp"' <<<"$d" | grep -qF -- '- {key: "client-secret", path: client-secret}' || { echo "OIDC client secret not mounted as a file"; exit 1; }
           if helm template t . $s $o --show-only templates/deployment.yaml | grep -q LICENSEFORGE_OIDC_CLIENT_SECRET; then echo "client secret without a Secret"; exit 1; fi
+          # A Secret left in the values of a feature that is off is not mounted (it may be gone).
+          if helm template t . $s --set oidc.clientSecret.secretName=idp --set audit.export.otlp.headersSecret=hdr --show-only templates/deployment.yaml | grep -qE 'oidc-secret|otlp-headers|secretName: "(idp|hdr)"'; then echo "Secret of a feature that is off mounted"; exit 1; fi
           if helm template t . $s $o --set oidc.clientSecret.secretName=idp --set oidc.clientSecret.key=null >/dev/null 2>&1; then echo "client secret without a key"; exit 1; fi
           if helm template t . $s $o --set oidc.egress=null >/dev/null 2>&1; then echo "IdP egress without a port"; exit 1; fi
           # Extra CA: mounted from the Secret's key and added to Go's roots by directory, only when
@@ -166,7 +169,7 @@ jobs:
           r="--set auditRetention.enabled=true --set auditRetention.secret=pruner --set auditRetention.platformDays=730"
           helm lint --strict . $s $r
           c=$(helm template t . $s $r --show-only templates/audit-prune-cronjob.yaml)
-          for want in 'concurrencyPolicy: Forbid' 'args: [audit, prune]' '{secretKeyRef: {name: "pruner", key: retention-database-url}}' 'value: "730"' 'component: audit-prune'; do
+          for want in 'concurrencyPolicy: Forbid' 'args: [audit, prune]' 'LICENSEFORGE_RETENTION_DATABASE_URL_FILE' 'secretName: "pruner", items: [{key: "retention-database-url", path: retention-database-url}]' 'value: "730"' 'component: audit-prune'; do
             grep -qF -- "$want" <<<"$c" || { echo "audit prune CronJob: missing $want"; exit 1; }
           done
           helm template t . $s $r --show-only templates/networkpolicy.yaml | grep -qF 'name: t-licenseforge-audit-prune' || { echo "no audit prune NetworkPolicy"; exit 1; }
@@ -193,14 +196,14 @@ jobs:
           done
           n=$(helm template t . $s $y --set 'audit.export.syslog.to[0].ipBlock.cidr=203.0.113.0/24' --show-only templates/networkpolicy.yaml)
           grep -A3 -F -- '- ports: [{port: 6514, protocol: TCP}]' <<<"$n" | grep -qF 'cidr: 203.0.113.0/24' || { echo "syslog egress not narrowed"; exit 1; }
-          if helm template t . $s --set audit.export.syslog.host=siem.example --show-only templates/deployment.yaml | grep -qE 'SYSLOG_(CA|CERT|KEY)_FILE|volumes:'; then echo "syslog files without Secrets"; exit 1; fi
+          if helm template t . $s --set audit.export.syslog.host=siem.example --show-only templates/deployment.yaml | grep -qE 'SYSLOG_(CA|CERT|KEY)_FILE|name: syslog-'; then echo "syslog files without Secrets"; exit 1; fi
           # OTLP export: env, its own Secret volumes and header Secret, one egress rule.
           if helm template t . $s | grep -qE 'OTLP|otlp|port: 4318'; then echo "otlp export while off"; exit 1; fi
           ot="--set audit.export.otlp.endpoint=https://otel.example:4318/v1/logs --set audit.export.otlp.caSecret=otel-ca --set audit.export.otlp.clientSecret=otel-client --set audit.export.otlp.headersSecret=otel-headers"
           helm lint --strict . $s $ot $y
           d=$(helm template t . $s $ot $y --show-only templates/deployment.yaml)
           for want in 'value: "https://otel.example:4318/v1/logs"' 'value: /etc/licenseforge/otlp/ca/ca.crt' 'value: /etc/licenseforge/otlp/client/tls.key' \
-            '{secretKeyRef: {name: "otel-headers", key: headers}}' 'secretName: "otel-client"' 'mountPath: /etc/licenseforge/otlp/ca, readOnly: true' \
+            'value: /etc/licenseforge/otlp/headers/headers' 'secretName: "otel-headers"' 'secretName: "otel-client"' 'mountPath: /etc/licenseforge/otlp/ca, readOnly: true' \
             'mountPath: /etc/licenseforge/syslog/ca, readOnly: true'; do
             grep -qF -- "$want" <<<"$d" || { echo "otlp Deployment: missing $want"; exit 1; }
           done
