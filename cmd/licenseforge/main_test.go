@@ -148,6 +148,24 @@ func startServe(t *testing.T) (string, string, func() error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() { errc <- serve(ctx, ln, mln, quiet) }()
+	// Ready once it answers: serve opens the database before it serves, and
+	// stopping it during that is a startup error, not a clean stop.
+	for start := time.Now(); ; time.Sleep(50 * time.Millisecond) {
+		if resp, err := http.Get("http://" + ln.Addr().String() + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		select {
+		case err := <-errc:
+			cancel()
+			t.Fatalf("serve stopped while starting: %v", err)
+		default:
+		}
+		if time.Since(start) > 30*time.Second {
+			cancel()
+			t.Fatal("serve didn't start")
+		}
+	}
 	return ln.Addr().String(), mln.Addr().String(), func() error {
 		cancel()
 		select {
