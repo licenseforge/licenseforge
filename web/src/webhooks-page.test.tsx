@@ -41,7 +41,7 @@ const hook = (over: Record<string, unknown> = {}) => ({
 
 type Sent = { method: string; path: string; body: unknown; type: string | null };
 
-async function open(role: string, hooks: unknown[], extra?: (req: Request, u: URL) => Response | undefined) {
+async function open(role: string, hooks: unknown[], extra?: (req: Request, u: URL) => Response | undefined, all = true) {
   const sent: Sent[] = [];
   vi.stubGlobal(
     "fetch",
@@ -51,7 +51,7 @@ async function open(role: string, hooks: unknown[], extra?: (req: Request, u: UR
       if (u.pathname.startsWith("/api/v1/tenants/")) sent.push({ method: req.method, path: u.pathname, body, type: req.headers.get("Content-Type") });
       if (u.pathname === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (u.pathname === "/api/v1/me/tenants")
-        return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: true, product_ids: [], mfa_policy: "none", accessible: true }] });
+        return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: all, product_ids: all ? [] : ["prd_1"], mfa_policy: "none", accessible: true }] });
       const r = extra?.(req, u);
       if (r) return r;
       if (u.pathname === "/api/v1/tenants/acme/webhooks" && req.method === "GET") return json({ items: hooks });
@@ -133,7 +133,10 @@ it("shows a new endpoint's secret and a rotated one once, and keeps neither", as
   await act(async () => button(el, "Close")!.click());
   await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
 
-  await act(async () => button(el, "Rotate secret")!.click());
+  await act(async () => button(el, "Rotate secret")!.click()); // asks first
+  expect(el.querySelector("dialog")!.textContent).toContain("keeps signing for 24 hours");
+  const go = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Rotate secret") as HTMLButtonElement;
+  await act(async () => go.click());
   await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(ROTATED));
   await act(async () => button(el, "Close")!.click());
   await vi.waitFor(() => expect(el.querySelector("input[readonly]")).toBeNull());
@@ -166,4 +169,90 @@ it("lists deliveries in the log's own words", async () => {
   await vi.waitFor(() => expect(el.querySelector("dialog")?.textContent).toContain("http 500"));
   expect(el.querySelector("dialog")!.textContent).toContain("Delivered");
   expect(el.querySelector("dialog")!.textContent).toContain("license.issued #41");
+});
+
+it("tells a product-scoped member webhooks are tenant-wide, with no controls or nav link", async () => {
+  const { el } = await open("admin", [], undefined, false);
+  await vi.waitFor(() => expect(el.textContent).toContain("Webhooks are tenant-wide"));
+  expect(el.textContent).not.toContain("No webhook endpoints yet.");
+  expect(button(el, "New endpoint")).toBeUndefined();
+  expect([...el.querySelectorAll("nav a")].some((a) => a.textContent === "Webhooks")).toBe(false);
+});
+
+it("says what each delivery state means, and offers to skip only an event held back", async () => {
+  const rows = [
+    hook({ id: "whe_a", url: "https://a.example:443", enabled: false, disabled_reason: "deliveries failed for about 28 hours",
+      delivery: { seq: 9, attempts: 8, next_attempt_at: null, in_flight: false, next_seq: 10 } }),
+    hook({ id: "whe_b", url: "https://b.example:443", delivery: { seq: 9, attempts: 0, next_attempt_at: null, in_flight: false, next_seq: 10 } }),
+    hook({ id: "whe_c", url: "https://c.example:443", enabled: false, disabled_reason: "disabled by a user" }),
+    hook({ id: "whe_d", url: "https://d.example:443" }),
+    hook({ id: "whe_e", url: "https://e.example:443", enabled: false, disabled_reason: "disabled by a user",
+      delivery: { seq: 11, attempts: 0, next_attempt_at: null, in_flight: false, next_seq: 12 } }),
+  ];
+  const { el } = await open("owner", rows);
+  await vi.waitFor(() => expect(el.querySelectorAll("tbody tr").length).toBe(5));
+  const row = (i: number) => el.querySelectorAll("tbody tr")[i]!;
+  expect(row(0).textContent).toContain("Event 10 held back");
+  expect(row(0).textContent).toContain("Disabled: deliveries failed for about 28 hours");
+  expect(row(0).querySelector('button[aria-label="Skip held event: https://a.example:443"]')).not.toBeNull();
+  expect(row(1).textContent).toContain("Sending");
+  expect(row(1).textContent).not.toContain("Skip held event");
+  expect(row(2).textContent).toContain("Paused");
+  expect(row(2).textContent).toContain("Disabled: by a member");
+  expect(row(3).textContent).toContain("Up to date");
+  expect(row(4).textContent).toContain("Event 12 held back"); // disabled with one pending: held, no failures needed
+  expect(row(4).querySelector('button[aria-label="Skip held event: https://e.example:443"]')).not.toBeNull();
+  // Every row's buttons say which endpoint they act on.
+  expect(el.querySelector('button[aria-label="Delete: https://d.example:443"]')).not.toBeNull();
+});
+
+it("refreshes the list after a refused enable, and deletes with confirmation", async () => {
+  let gets = 0;
+  const { el, sent } = await open("owner", [hook({ enabled: false, disabled_reason: "disabled by a user" })], (req, u) => {
+    if (req.method === "GET" && u.pathname === "/api/v1/tenants/acme/webhooks") gets++;
+    if (req.method === "POST" && u.pathname.endsWith("/enable")) return json({ code: "invalid_state", title: "Conflict", status: 409 }, 409);
+    if (req.method === "DELETE") return new Response(null, { status: 204 });
+    return undefined;
+  });
+  await vi.waitFor(() => expect(button(el, "Enable")).toBeDefined());
+  const before = gets;
+  await act(async () => button(el, "Enable")!.click());
+  await vi.waitFor(() => expect(el.querySelector('[role="alert"]')).not.toBeNull());
+  await vi.waitFor(() => expect(gets).toBeGreaterThan(before));
+  await act(async () => button(el, "Delete")!.click());
+  const del = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Delete") as HTMLButtonElement;
+  await act(async () => del.click());
+  await vi.waitFor(() => expect(sent.some((x) => x.method === "DELETE" && x.path === "/api/v1/tenants/acme/webhooks/whe_1")).toBe(true));
+});
+
+it("shows the API's field errors on the URL and events", async () => {
+  const { el } = await open("owner", [], (req) =>
+    req.method === "POST"
+      ? json({ code: "validation_failed", title: "Unprocessable", status: 422, errors: [{ field: "/url", message: "must be https" }, { field: "/events", message: "unknown event" }] }, 422)
+      : undefined,
+  );
+  await vi.waitFor(() => expect(button(el, "New endpoint")).toBeDefined());
+  await act(async () => button(el, "New endpoint")!.click());
+  await act(async () => setValue(el.querySelector<HTMLInputElement>('dialog input[name="url"]')!, "http://x.example/"));
+  await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
+  await vi.waitFor(() => expect(el.querySelector("#url-error")?.textContent).toBe("must be https"));
+  expect(el.querySelector("#events-error")?.textContent).toBe("unknown event");
+  expect(el.querySelector('dialog input[name="url"]')!.getAttribute("aria-invalid")).toBe("true");
+});
+
+it("pages through the delivery log", async () => {
+  const d = (id: string) => ({ id, seq: 1, event_id: "aud_1", event_type: "license.issued", attempt: 1, outcome: "success", error: null, status_code: 204, duration_ms: 5, attempted_at: "2026-11-10T12:00:00Z" });
+  const cursors: (string | null)[] = [];
+  const { el } = await open("viewer", [hook()], (_req, u) => {
+    if (!u.pathname.endsWith("/deliveries")) return undefined;
+    cursors.push(u.searchParams.get("cursor"));
+    return u.searchParams.get("cursor") ? json({ items: [d("whd_2")] }) : json({ items: [d("whd_1")], next_cursor: "c1" });
+  });
+  await vi.waitFor(() => expect(button(el, "Deliveries")).toBeDefined());
+  await act(async () => button(el, "Deliveries")!.click());
+  await vi.waitFor(() => expect(button(el, "Load more")).toBeDefined());
+  await act(async () => button(el, "Load more")!.click());
+  await vi.waitFor(() => expect(el.querySelectorAll("dialog tbody tr").length).toBe(2));
+  expect(cursors).toEqual([null, "c1"]);
+  expect(button(el, "Load more")).toBeUndefined();
 });

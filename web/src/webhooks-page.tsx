@@ -37,26 +37,18 @@ export function WebhooksPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Webhook | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [secret, setSecret] = useState<WebhookCreated | null>(null); // a rotated secret, shown once
+  const [rotating, setRotating] = useState<Webhook | null>(null);
   const [log, setLog] = useState<Webhook | null>(null);
-  const enable = useMutation({ mutationFn: (h: Webhook) => webhookAction(slug, h.id, "enable"), onSuccess: refresh, onError: onAuthError });
-  // Not a useMutation: its result (the secret) would stay in the mutation cache.
-  const [rotating, setRotating] = useState(false);
-  const [rotateError, setRotateError] = useState<unknown>(null);
-  async function rotate(h: Webhook) {
-    setRotating(true);
-    setRotateError(null);
-    try {
-      setSecret(await rotateWebhookSecret(slug, h.id));
-      void refresh();
-    } catch (err) {
+  const enable = useMutation({
+    mutationFn: (h: Webhook) => webhookAction(slug, h.id, "enable"),
+    onSuccess: refresh,
+    onError: (err) => {
       onAuthError(err);
-      setRotateError(err);
-    } finally {
-      setRotating(false);
-    }
-  }
+      void refresh(); // a 409 or 404: show the current state
+    },
+  });
   const hooks = list.data?.items ?? [];
+  const caller = tenants.find((tn) => tn.slug === slug);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -71,12 +63,13 @@ export function WebhooksPage() {
           {errorText(list.error)}
         </p>
       )}
-      {(enable.isError || rotateError != null) && (
+      {caller && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("webhooks.scoped")}</p>}
+      {enable.isError && (
         <p role="alert" className="mt-4">
-          {errorText(enable.error ?? rotateError)}
+          {errorText(enable.error)}
         </p>
       )}
-      {list.isSuccess && hooks.length === 0 && <p className="mt-6 text-muted-foreground">{t("webhooks.empty")}</p>}
+      {list.isSuccess && hooks.length === 0 && (!caller || caller.scope.all) && <p className="mt-6 text-muted-foreground">{t("webhooks.empty")}</p>}
       {hooks.length > 0 && (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -88,7 +81,7 @@ export function WebhooksPage() {
                   </th>
                 ))}
                 <th scope="col" className="px-2 py-2">
-                  <span className="sr-only">{t("webhooks.edit")}</span>
+                  <span className="sr-only">{t("webhooks.col.actions")}</span>
                 </th>
               </tr>
             </thead>
@@ -98,40 +91,40 @@ export function WebhooksPage() {
                   <td className="px-2 py-2 font-mono text-xs">{h.url}</td>
                   <td className="px-2 py-2">{h.events.join(", ")}</td>
                   <td className="px-2 py-2">
-                    {h.enabled ? t("webhooks.status.enabled") : t("webhooks.status.disabled", { reason: h.disabled_reason ?? "" })}
+                    {h.enabled ? t("webhooks.status.enabled") : t("webhooks.status.disabled", { reason: reasonText(h.disabled_reason) })}
                   </td>
                   <td className="px-2 py-2">{deliveryText(h)}</td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap justify-end gap-1">
-                      <Button variant="ghost" onClick={() => setLog(h)}>
+                      <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.deliveries"), url: h.url })} onClick={() => setLog(h)}>
                         {t("webhooks.deliveries")}
                       </Button>
                       {manage && (
                         <>
-                          <Button variant="ghost" onClick={() => setEditing(h)}>
+                          <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.edit"), url: h.url })} onClick={() => setEditing(h)}>
                             {t("webhooks.edit")}
                           </Button>
                           {h.enabled ? (
-                            <Button variant="ghost" onClick={() => setConfirm({ hook: h, action: "disable" })}>
+                            <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.disable"), url: h.url })} onClick={() => setConfirm({ hook: h, action: "disable" })}>
                               {t("webhooks.disable")}
                             </Button>
                           ) : (
-                            <Button variant="ghost" disabled={enable.isPending} onClick={() => enable.mutate(h)}>
+                            <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.enable"), url: h.url })} disabled={enable.isPending} onClick={() => enable.mutate(h)}>
                               {t("webhooks.enable")}
                             </Button>
                           )}
                           {heldBack(h) && (
-                            <Button variant="ghost" onClick={() => setConfirm({ hook: h, action: "skipEvent" })}>
+                            <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.skipEvent"), url: h.url })} onClick={() => setConfirm({ hook: h, action: "skipEvent" })}>
                               {t("webhooks.skipEvent")}
                             </Button>
                           )}
-                          <Button variant="ghost" onClick={() => setConfirm({ hook: h, action: "skip-to-now" })}>
+                          <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.skipToNow"), url: h.url })} onClick={() => setConfirm({ hook: h, action: "skip-to-now" })}>
                             {t("webhooks.skipToNow")}
                           </Button>
-                          <Button variant="ghost" disabled={rotating} onClick={() => void rotate(h)}>
+                          <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.rotate"), url: h.url })} onClick={() => setRotating(h)}>
                             {t("webhooks.rotate")}
                           </Button>
-                          <Button variant="ghost" onClick={() => setConfirm({ hook: h, action: "delete" })}>
+                          <Button variant="ghost" aria-label={t("webhooks.for", { action: t("webhooks.delete"), url: h.url })} onClick={() => setConfirm({ hook: h, action: "delete" })}>
                             {t("webhooks.delete")}
                           </Button>
                         </>
@@ -146,7 +139,7 @@ export function WebhooksPage() {
       )}
       {creating && <EndpointDialog tenant={slug} onClose={() => setCreating(false)} />}
       {editing && <EndpointDialog tenant={slug} hook={editing} onClose={() => setEditing(null)} />}
-      {secret && <SecretDialog secret={secret.secret} onClose={() => setSecret(null)} />}
+      {rotating && <RotateDialog tenant={slug} hook={rotating} onDone={refresh} onClose={() => setRotating(null)} />}
       {confirm && <ConfirmDialog tenant={slug} confirm={confirm} onDone={refresh} onClose={() => setConfirm(null)} />}
       {log && <DeliveriesDialog tenant={slug} hook={log} onClose={() => setLog(null)} />}
     </>
@@ -158,7 +151,22 @@ function deliveryText(h: Webhook) {
   if (heldBack(h) && !h.enabled) return t("webhooks.delivery.held", { seq: String(d.next_seq) });
   if (d.attempts > 0)
     return t("webhooks.delivery.retrying", { attempts: String(d.attempts), when: d.next_attempt_at ? when.format(new Date(d.next_attempt_at)) : "—" });
+  if (!h.enabled) return t("webhooks.delivery.paused"); // nothing within the look-ahead, or far behind: skip to now passes it all
   return d.next_seq != null || d.in_flight ? t("webhooks.delivery.pending") : t("webhooks.delivery.ok");
+}
+
+const reasons: Record<string, string> = {
+  "disabled by a user": "webhooks.reason.user",
+  "deliveries failed for about 28 hours": "webhooks.reason.failing",
+  "the receiver answered 410 Gone": "webhooks.reason.gone",
+  "the signing secret can't be read: rotate it": "webhooks.reason.secret",
+  "the URL can't be read: update it": "webhooks.reason.url",
+};
+
+/** The server's fixed reasons, translated; anything else as given. */
+function reasonText(reason: string | null | undefined) {
+  const key = reason ? reasons[reason] : undefined;
+  return key ? t(key as Parameters<typeof t>[0]) : (reason ?? "");
 }
 
 /** Create (no hook) or edit an endpoint; a new endpoint's secret is shown once, from component state. */
@@ -190,6 +198,7 @@ export function EndpointDialog({ tenant, hook, onClose }: { tenant: string; hook
     } catch (err) {
       onAuthError(err);
       setError(err);
+      void qc.invalidateQueries({ queryKey: webhooksQuery(tenant).queryKey }); // deleted elsewhere, say
     } finally {
       setBusy(false);
     }
@@ -242,7 +251,7 @@ export function EndpointDialog({ tenant, hook, onClose }: { tenant: string; hook
           <Button type="button" variant="ghost" onClick={close}>
             {t("webhooks.cancel")}
           </Button>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy || events.length === 0}>
             {hook ? t("webhooks.save") : t("webhooks.create")}
           </Button>
         </div>
@@ -309,7 +318,7 @@ function ConfirmDialog({ tenant, confirm, onDone, onClose }: { tenant: string; c
     },
     onError: async (err) => {
       onAuthError(err);
-      await onDone(); // a 409 means the state moved: show the current one
+      await onDone(); // the state moved (409) or it's gone (404): show the current one
     },
   });
   const label = ({ disable: "webhooks.disable", "skip-to-now": "webhooks.skipToNow", skipEvent: "webhooks.skipEvent", delete: "webhooks.delete" } as const)[action];
@@ -323,11 +332,14 @@ function ConfirmDialog({ tenant, confirm, onDone, onClose }: { tenant: string; c
       )}
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>
-          {t("webhooks.cancel")}
+          {run.isError ? t("webhooks.close") : t("webhooks.cancel")}
         </Button>
-        <Button disabled={run.isPending} onClick={() => run.mutate()}>
-          {t(label)}
-        </Button>
+        {/* After a refusal the list shows the current state: start again from it. */}
+        {!run.isError && (
+          <Button disabled={run.isPending} onClick={() => run.mutate()}>
+            {t(label)}
+          </Button>
+        )}
       </div>
     </Modal>
   );
@@ -360,7 +372,7 @@ function DeliveriesDialog({ tenant, hook, onClose }: { tenant: string; hook: Web
                 </td>
                 <td className="px-2 py-1">{d.attempt}</td>
                 <td className="px-2 py-1">{d.outcome === "success" ? t("webhooks.result.success") : d.error}</td>
-                <td className="px-2 py-1">{d.duration_ms} ms</td>
+                <td className="px-2 py-1">{t("webhooks.ms", { ms: String(d.duration_ms) })}</td>
               </tr>
             ))}
           </tbody>
@@ -374,6 +386,45 @@ function DeliveriesDialog({ tenant, hook, onClose }: { tenant: string; hook: Web
       <div className="mt-4 flex justify-end">
         <Button variant="ghost" onClick={onClose}>
           {t("webhooks.close")}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Confirms a rotation, then shows the new secret once (component state, not a mutation: it'd stay in the cache). */
+function RotateDialog({ tenant, hook, onDone, onClose }: { tenant: string; hook: Webhook; onDone: () => Promise<void>; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  async function rotate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setSecret((await rotateWebhookSecret(tenant, hook.id)).secret);
+    } catch (err) {
+      onAuthError(err);
+      setError(err);
+    } finally {
+      setBusy(false);
+      void onDone();
+    }
+  }
+  if (secret) return <SecretDialog secret={secret} onClose={onClose} />;
+  return (
+    <Modal title={t("webhooks.confirmTitle", { action: t("webhooks.rotate"), url: hook.url })} onClose={onClose}>
+      <p className="text-sm">{t("webhooks.confirm.rotate")}</p>
+      {error != null && (
+        <p role="alert" className="mt-3 text-sm font-medium">
+          {errorText(error)}
+        </p>
+      )}
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          {t("webhooks.cancel")}
+        </Button>
+        <Button disabled={busy} onClick={() => void rotate()}>
+          {t("webhooks.rotate")}
         </Button>
       </div>
     </Modal>
