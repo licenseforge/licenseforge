@@ -152,14 +152,14 @@ type Created struct {
 	Revoked    int // ReinviteOwner: earlier pending owner invitations revoked
 }
 
-// CreateTenant creates a tenant and an owner invitation (every product,
+// CreateTenant creates a tenant, test mode or live for good (ADR-0047), and an owner invitation (every product,
 // invitations.DefaultTTL) for ownerEmail in one transaction (ADR-0042). The
 // actor, unless the system, must be an enabled platform admin, rechecked in
 // the transaction; then the values are checked. tenant.create goes on the
 // platform chain, invitation.create (never the email, ADR-0029) is the new
 // tenant's first entry. The actor doesn't join the tenant. Refusals are
 // audited on the platform chain.
-func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEmail string) (Created, error) {
+func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEmail string, test bool) (Created, error) {
 	ev := a.event("tenant.create", "tenant")
 	var c Created
 	err := s.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
@@ -176,7 +176,7 @@ func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEma
 			return err
 		}
 		var err error
-		c.Tenant, err = tx.Tenant.Create().SetSlug(slug).SetName(name).Save(ctx)
+		c.Tenant, err = tx.Tenant.Create().SetSlug(slug).SetName(name).SetTest(test).Save(ctx)
 		if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.Code == "23505" { // the only unique value: the slug ("platform" included)
 			return &InvalidError{Field: "/slug", Message: "already used by another tenant", Conflict: true}
 		}
@@ -184,7 +184,7 @@ func (s Service) CreateTenant(ctx context.Context, a Actor, slug, name, ownerEma
 			return err
 		}
 		ev.ObjectID, ev.Outcome = c.Tenant.ID, auditevent.OutcomeSuccess
-		ev.Details["slug"] = slug
+		ev.Details["slug"], ev.Details["test"] = slug, test
 		if _, err := audit.Record(ctx, tx, audit.PlatformTenant, ev); err != nil {
 			return err
 		}

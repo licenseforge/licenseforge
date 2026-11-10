@@ -27,6 +27,8 @@ const (
 	FieldAuditRetentionDays = "audit_retention_days"
 	// FieldMfaPolicy holds the string denoting the mfa_policy field in the database.
 	FieldMfaPolicy = "mfa_policy"
+	// FieldTest holds the string denoting the test field in the database.
+	FieldTest = "test"
 	// EdgeProducts holds the string denoting the products edge name in mutations.
 	EdgeProducts = "products"
 	// EdgeCustomers holds the string denoting the customers edge name in mutations.
@@ -157,6 +159,7 @@ var Columns = []string{
 	FieldName,
 	FieldAuditRetentionDays,
 	FieldMfaPolicy,
+	FieldTest,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -180,6 +183,8 @@ var (
 	SlugValidator func(string) error
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultTest holds the default value on creation for the "test" field.
+	DefaultTest bool
 	// DefaultID holds the default value on creation for the "id" field.
 	DefaultID func() string
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
@@ -249,6 +254,11 @@ func ByAuditRetentionDays(opts ...sql.OrderTermOption) OrderOption {
 // ByMfaPolicy orders the results by the mfa_policy field.
 func ByMfaPolicy(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMfaPolicy, opts...).ToFunc()
+}
+
+// ByTest orders the results by the test field.
+func ByTest(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTest, opts...).ToFunc()
 }
 
 // ByProductsCount orders the results by products count.

@@ -29,6 +29,8 @@ type Tenant struct {
 	AuditRetentionDays *int `json:"audit_retention_days,omitempty"`
 	// MfaPolicy holds the value of the "mfa_policy" field.
 	MfaPolicy tenant.MfaPolicy `json:"mfa_policy,omitempty"`
+	// Test holds the value of the "test" field.
+	Test bool `json:"test,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the TenantQuery when eager-loading is set.
 	Edges        TenantEdges `json:"edges"`
@@ -190,6 +192,8 @@ func (*Tenant) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case tenant.FieldTest:
+			values[i] = new(sql.NullBool)
 		case tenant.FieldAuditRetentionDays:
 			values[i] = new(sql.NullInt64)
 		case tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy:
@@ -253,6 +257,12 @@ func (_m *Tenant) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field mfa_policy", values[i])
 			} else if value.Valid {
 				_m.MfaPolicy = tenant.MfaPolicy(value.String)
+			}
+		case tenant.FieldTest:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field test", values[i])
+			} else if value.Valid {
+				_m.Test = value.Bool
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -374,6 +384,9 @@ func (_m *Tenant) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("mfa_policy=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MfaPolicy))
+	builder.WriteString(", ")
+	builder.WriteString("test=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Test))
 	builder.WriteByte(')')
 	return builder.String()
 }

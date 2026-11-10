@@ -20620,6 +20620,7 @@ type TenantMutation struct {
 	audit_retention_days        *int
 	addaudit_retention_days     *int
 	mfa_policy                  *tenant.MfaPolicy
+	test                        *bool
 	clearedFields               map[string]struct{}
 	products                    map[string]struct{}
 	removedproducts             map[string]struct{}
@@ -21017,6 +21018,42 @@ func (m *TenantMutation) OldMfaPolicy(ctx context.Context) (v tenant.MfaPolicy, 
 // ResetMfaPolicy resets all changes to the "mfa_policy" field.
 func (m *TenantMutation) ResetMfaPolicy() {
 	m.mfa_policy = nil
+}
+
+// SetTest sets the "test" field.
+func (m *TenantMutation) SetTest(b bool) {
+	m.test = &b
+}
+
+// Test returns the value of the "test" field in the mutation.
+func (m *TenantMutation) Test() (r bool, exists bool) {
+	v := m.test
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTest returns the old "test" field's value of the Tenant entity.
+// If the Tenant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TenantMutation) OldTest(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTest is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTest requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTest: %w", err)
+	}
+	return oldValue.Test, nil
+}
+
+// ResetTest resets all changes to the "test" field.
+func (m *TenantMutation) ResetTest() {
+	m.test = nil
 }
 
 // AddProductIDs adds the "products" edge to the Product entity by ids.
@@ -21755,7 +21792,7 @@ func (m *TenantMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TenantMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 7)
 	if m.created_at != nil {
 		fields = append(fields, tenant.FieldCreatedAt)
 	}
@@ -21773,6 +21810,9 @@ func (m *TenantMutation) Fields() []string {
 	}
 	if m.mfa_policy != nil {
 		fields = append(fields, tenant.FieldMfaPolicy)
+	}
+	if m.test != nil {
+		fields = append(fields, tenant.FieldTest)
 	}
 	return fields
 }
@@ -21794,6 +21834,8 @@ func (m *TenantMutation) Field(name string) (ent.Value, bool) {
 		return m.AuditRetentionDays()
 	case tenant.FieldMfaPolicy:
 		return m.MfaPolicy()
+	case tenant.FieldTest:
+		return m.Test()
 	}
 	return nil, false
 }
@@ -21815,6 +21857,8 @@ func (m *TenantMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldAuditRetentionDays(ctx)
 	case tenant.FieldMfaPolicy:
 		return m.OldMfaPolicy(ctx)
+	case tenant.FieldTest:
+		return m.OldTest(ctx)
 	}
 	return nil, fmt.Errorf("unknown Tenant field %s", name)
 }
@@ -21865,6 +21909,13 @@ func (m *TenantMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMfaPolicy(v)
+		return nil
+	case tenant.FieldTest:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTest(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)
@@ -21956,6 +22007,9 @@ func (m *TenantMutation) ResetField(name string) error {
 		return nil
 	case tenant.FieldMfaPolicy:
 		m.ResetMfaPolicy()
+		return nil
+	case tenant.FieldTest:
+		m.ResetTest()
 		return nil
 	}
 	return fmt.Errorf("unknown Tenant field %s", name)

@@ -131,6 +131,7 @@ type TenantMembership struct {
 	ScopeAll                         bool
 	Products                         []string        // the scope when not ScopeAll
 	MFAPolicy                        authz.Assurance // the tenant's (ADR-0038)
+	Test                             bool            // a test-mode tenant (ADR-0047)
 }
 
 // Memberships lists the tenants userID belongs to, sorted by slug. Call it
@@ -145,7 +146,7 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 		ms, err := tx.Membership.Query().Where(membership.UserID(userID), membership.TenantIDNEQ(audit.PlatformTenant)).
 			Order(membership.ByTenantField(tenant.FieldSlug)).Limit(MaxMemberships).
 			WithTenant(func(q *ent.TenantQuery) {
-				q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy)
+				q.Select(tenant.FieldID, tenant.FieldSlug, tenant.FieldName, tenant.FieldMfaPolicy, tenant.FieldTest)
 			}).
 			WithProducts(func(q *ent.MembershipProductQuery) { q.Order(membershipproduct.ByProductID()) }).All(ctx)
 		if err != nil {
@@ -156,7 +157,7 @@ func (s Service) Memberships(ctx context.Context, userID string) ([]TenantMember
 				continue
 			}
 			tm := TenantMembership{TenantID: m.TenantID, TenantSlug: m.Edges.Tenant.Slug,
-				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll, MFAPolicy: authz.Assurance(m.Edges.Tenant.MfaPolicy)}
+				TenantName: m.Edges.Tenant.Name, Role: m.Role, ScopeAll: m.ScopeAll, MFAPolicy: authz.Assurance(m.Edges.Tenant.MfaPolicy), Test: m.Edges.Tenant.Test}
 			for _, p := range m.Edges.Products {
 				tm.Products = append(tm.Products, p.ProductID)
 			}
