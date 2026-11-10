@@ -347,9 +347,9 @@ func TestSendCantOutliveTheLease(t *testing.T) {
 	if _, err := x.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Once = %v, want the send's deadline", err)
 	}
-	// The deadline counts from the claim, before the send: at most half the
-	// lease after the send started, however slow the machine (no wall-clock
-	// bound on the claim and release around it).
+	// The send gets at most half the lease, however slow the machine (no
+	// wall-clock bound on the claim and release around it). The deadline is
+	// set from the claim (export.go), so it is no later than this.
 	if deadline.IsZero() || deadline.After(called.Add(x.Lease/2)) {
 		t.Errorf("the send's deadline is %v after it started, want at most %v", deadline.Sub(called), x.Lease/2)
 	}
