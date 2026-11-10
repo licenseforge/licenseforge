@@ -84,7 +84,7 @@ func (s *server) ListMyTenants(ctx context.Context, _ apigen.ListMyTenantsReques
 		page.Items = append(page.Items, apigen.MyTenant{
 			TenantId: m.TenantID, Slug: m.TenantSlug, Name: m.TenantName, Role: apigen.MemberRole(m.Role),
 			AllProducts: m.ScopeAll, ProductIds: append([]string{}, m.Products...),
-			MfaPolicy: apigen.MfaPolicy(m.MFAPolicy), Accessible: p.Assurance.Meets(m.MFAPolicy),
+			MfaPolicy: apigen.MfaPolicy(m.MFAPolicy), Accessible: p.Assurance.Meets(m.MFAPolicy), Test: m.Test,
 		})
 	}
 	return page, nil

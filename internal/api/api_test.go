@@ -932,7 +932,7 @@ func TestMyTenants(t *testing.T) {
 	f.srv.APIHost = ""
 
 	want := map[string]any{"tenant_id": f.a.ID, "slug": f.a.Slug, "name": f.a.Name, "role": "owner", "all_products": true, "product_ids": []any{},
-		"mfa_policy": "none", "accessible": true}
+		"mfa_policy": "none", "accessible": true, "test": false}
 	if got := items(f.do(t, "GET", path, "", f.session(t, f.ownerA, false))); !reflect.DeepEqual(got, []map[string]any{want}) {
 		t.Errorf("owner of a: %v", got)
 	}

@@ -211,6 +211,7 @@ func tenantCreate(ctx context.Context, args []string, out io.Writer) error {
 	slug := fs.String("slug", "", "the tenant's slug: lowercase letters and digits joined by dashes (required)")
 	name := fs.String("name", "", "the tenant's name (required)")
 	owner := fs.String("owner-email", "", "the first owner's email: they sign in with it, verified, and accept (required)")
+	test := fs.Bool("test", false, "a test-mode tenant, for integration and CI (ADR-0047); it can't change later")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -226,12 +227,16 @@ func tenantCreate(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	c, err := platform.Service{DB: db}.CreateTenant(ctx, platform.Actor{}, *slug, *name, *owner)
+	c, err := platform.Service{DB: db}.CreateTenant(ctx, platform.Actor{}, *slug, *name, *owner, *test)
 	if err != nil {
 		return fmt.Errorf("tenant create: %w", err)
 	}
-	_, err = fmt.Fprintf(out, "tenant %s (%s) created\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
-		c.Tenant.Slug, c.Tenant.ID, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
+	mode := ""
+	if c.Tenant.Test {
+		mode = " in test mode"
+	}
+	_, err = fmt.Fprintf(out, "tenant %s (%s) created%s\ninvite for %s, valid until %s, shown once:\n  /invite#token=%s\n",
+		c.Tenant.Slug, c.Tenant.ID, mode, c.Invitation.Email, c.Invitation.ExpiresAt.UTC().Format(time.RFC3339), c.Token)
 	return err
 }
 

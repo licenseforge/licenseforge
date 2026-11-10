@@ -1238,6 +1238,9 @@ type MyTenant struct {
 
 	// TenantId Usable as {tenant} in paths.
 	TenantId string `json:"tenant_id"`
+
+	// Test A test-mode tenant (ADR-0047): for integration and CI, left out of usage measures. Fixed at creation.
+	Test bool `json:"test"`
 }
 
 // MyTenantPage defines model for MyTenantPage.
@@ -1411,6 +1414,9 @@ type PlatformTenant struct {
 	MfaPolicy MfaPolicy `json:"mfa_policy"`
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
+
+	// Test A test-mode tenant (ADR-0047). Fixed at creation.
+	Test bool `json:"test"`
 }
 
 // PlatformTenantCreate defines model for PlatformTenantCreate.
@@ -1422,6 +1428,9 @@ type PlatformTenantCreate struct {
 
 	// Slug Lowercase letters and digits joined by single dashes, e.g. acme. It names the tenant in URLs and can't change.
 	Slug string `json:"slug"`
+
+	// Test A test-mode tenant (ADR-0047): for integration and CI, marked in the dashboard and left out of usage measures. It can't change later: create a live tenant to sell.
+	Test *bool `json:"test,omitempty"`
 }
 
 // PlatformTenantCreated defines model for PlatformTenantCreated.

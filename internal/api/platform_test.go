@@ -127,6 +127,52 @@ func TestPlatformTenants(t *testing.T) {
 }
 
 // The platform MFA policy gates every platform request (ADR-0038).
+// A test-mode tenant (ADR-0047): asked for at creation (default live),
+// shown to the platform admin and in the owner's tenant switcher.
+func TestPlatformTestTenant(t *testing.T) {
+	f := setup(t)
+	as := f.session(t, f.platformAdmin(t), true)
+	p := Prefix + "/platform/tenants"
+	slug := func(p string) string { return p + "-" + strings.ToLower(ids.New("x")[2:10]) }
+	sandbox, live := slug("sandbox"), slug("live")
+	r := f.do(t, "POST", p, fmt.Sprintf(`{"slug":%q,"name":"Sandbox","owner_email":"sandbox.owner@example.com","test":true}`, sandbox), as)
+	if r.code != 201 || r.body["tenant"].(map[string]any)["test"] != true {
+		t.Fatalf("create test: %d %s", r.code, r.raw)
+	}
+	token := r.body["invitation"].(map[string]any)["token"]
+	for body := range map[string]bool{
+		fmt.Sprintf(`{"slug":%q,"name":"Live","owner_email":"a@b.example"}`, live):                   true,
+		fmt.Sprintf(`{"slug":%q,"name":"Live","owner_email":"a@b.example","test":false}`, live+"-2"): true,
+	} {
+		if r := f.do(t, "POST", p, body, as); r.code != 201 || r.body["tenant"].(map[string]any)["test"] != false {
+			t.Errorf("create live %s: %d %s", body, r.code, r.raw)
+		}
+	}
+	list := f.do(t, "GET", p+"?limit=200", "", as)
+	for _, it := range list.body["items"].([]any) {
+		tn := it.(map[string]any)
+		if want := tn["slug"] == sandbox; tn["test"] != want {
+			t.Errorf("listed %v", tn)
+		}
+	}
+	owner := f.newUser(t, "sandbox.owner@example.com")
+	if r := f.do(t, "POST", Prefix+"/invitations/accept", fmt.Sprintf(`{"token":%q}`, token), f.session(t, owner, true)); r.code != 200 {
+		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	mine := f.do(t, "GET", Prefix+"/me/tenants", "", f.session(t, owner, false))
+	if items, _ := mine.body["items"].([]any); mine.code != 200 || len(items) != 1 || items[0].(map[string]any)["test"] != true {
+		t.Errorf("/me/tenants: %d %s", mine.code, mine.raw)
+	}
+	if r := f.do(t, "GET", Prefix+"/me/tenants", "", f.session(t, f.ownerA, false)); r.body["items"].([]any)[0].(map[string]any)["test"] != false {
+		t.Errorf("a live tenant in /me/tenants: %s", r.raw)
+	}
+	// Optional, not nullable; a boolean.
+	if r := f.do(t, "POST", p, fmt.Sprintf(`{"slug":%q,"name":"X","owner_email":"a@b.example","test":null}`, slug("null")), as).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), "/test") {
+		t.Errorf("null: %v", r)
+	}
+	f.do(t, "POST", p, fmt.Sprintf(`{"slug":%q,"name":"X","owner_email":"a@b.example","test":"yes"}`, slug("str")), as).problem(t, 400, "invalid_request")
+}
+
 func TestPlatformMFAPolicy(t *testing.T) {
 	f := setup(t)
 	admin := f.platformAdmin(t)

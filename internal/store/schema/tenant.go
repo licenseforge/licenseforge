@@ -25,6 +25,9 @@ func (Tenant) Fields() []ent.Field {
 		field.Int("audit_retention_days").Optional().Nillable(),
 		// The assurance a session needs to act in the tenant (ADR-0038).
 		field.Enum("mfa_policy").Values(assuranceLevels...).Default("none"),
+		// Test mode (ADR-0047): set at creation, never changed (a restrictive
+		// policy for the platform pool; no grant to the serving login).
+		field.Bool("test").Default(false).Immutable(),
 	}
 }
 

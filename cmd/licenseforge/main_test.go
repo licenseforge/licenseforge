@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
+	"licenseforge.io/licenseforge/internal/store/ent/tenant"
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"log/slog"
 	"net"
@@ -548,6 +549,26 @@ func TestTenantCreate(t *testing.T) {
 	mem, err := d.AcceptInvitation(ctx, m[3], uid, func(*ent.Tx, *ent.Membership) error { return nil })
 	if err != nil || mem.TenantID != m[2] || mem.Role != membership.RoleOwner {
 		t.Fatalf("accept: %+v, %v", mem, err)
+	}
+	// --test makes a test-mode tenant (ADR-0047), and says so.
+	var tout bytes.Buffer
+	if err := tenantCreate(ctx, []string{"--slug", slug + "-t", "--name", "Sandbox", "--owner-email", "t@example.com", "--test"}, &tout); err != nil ||
+		!strings.Contains(tout.String(), " created in test mode\n") {
+		t.Fatalf("--test: %v\n%s", err, tout.String())
+	}
+	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
+		for s, want := range map[string]bool{slug: false, slug + "-t": true} {
+			tn, err := tx.Tenant.Query().Where(tenant.Slug(s)).Only(ctx)
+			if err != nil {
+				return err
+			}
+			if tn.Test != want {
+				t.Errorf("%s: test = %v", s, tn.Test)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	// Refused: a taken slug, a missing flag, a stray argument, no platform login.
 	if err := tenantCreate(ctx, []string{"--slug", slug, "--name", "Again", "--owner-email", "a@b.example"}, io.Discard); err == nil || !strings.Contains(err.Error(), "already used") {

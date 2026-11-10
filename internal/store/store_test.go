@@ -384,6 +384,8 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"tenant_settings": `UPDATE licenseforge_app ((id)::text = app_tenant_id()) ((id)::text = app_tenant_id())`, // ADR-0036/0038: own row; columns by grant (retention, mfa_policy)
 			"retention_read":  `SELECT licenseforge_retention true`,
 			"identity_read":   `SELECT licenseforge_identity ((id)::text <> 'tnt_platformaaaaaaaaaaaaaaaaaa'::text)`,
+			// ADR-0047: test mode is fixed at creation, for the platform pool too.
+			"test_fixed (restrictive)": `UPDATE licenseforge_platform true (EXISTS ( SELECT 1 FROM tenants o WHERE (((o.id)::text = (tenants.id)::text) AND (o.test = tenants.test))))`,
 		},
 		"audit_export_cursors": { // ADR-0036
 			"start_at_zero (restrictive)":    `INSERT licenseforge_platform (seq = 0)`,

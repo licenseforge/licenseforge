@@ -90,6 +90,11 @@ func AuditRetentionDays(v int) predicate.Tenant {
 	return predicate.Tenant(sql.FieldEQ(FieldAuditRetentionDays, v))
 }
 
+// Test applies equality check predicate on the "test" field. It's identical to TestEQ.
+func Test(v bool) predicate.Tenant {
+	return predicate.Tenant(sql.FieldEQ(FieldTest, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Tenant {
 	return predicate.Tenant(sql.FieldEQ(FieldCreatedAt, v))
@@ -368,6 +373,16 @@ func MfaPolicyIn(vs ...MfaPolicy) predicate.Tenant {
 // MfaPolicyNotIn applies the NotIn predicate on the "mfa_policy" field.
 func MfaPolicyNotIn(vs ...MfaPolicy) predicate.Tenant {
 	return predicate.Tenant(sql.FieldNotIn(FieldMfaPolicy, vs...))
+}
+
+// TestEQ applies the EQ predicate on the "test" field.
+func TestEQ(v bool) predicate.Tenant {
+	return predicate.Tenant(sql.FieldEQ(FieldTest, v))
+}
+
+// TestNEQ applies the NEQ predicate on the "test" field.
+func TestNEQ(v bool) predicate.Tenant {
+	return predicate.Tenant(sql.FieldNEQ(FieldTest, v))
 }
 
 // HasProducts applies the HasEdge predicate on the "products" edge.
