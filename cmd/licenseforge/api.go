@@ -21,6 +21,9 @@ const apiUsage = `usage: licenseforge api [--data JSON|@FILE|-] [--idempotency-k
   summary on stderr), 2 usage, 3 the API couldn't be reached.
   e.g. licenseforge api GET '/tenants/{tenant}/licenses?limit=50'`
 
+// maxAnswer bounds a response body (lists are paged at 200 items).
+const maxAnswer = 16 << 20
+
 // usageError is a mistake in the command line or environment: exit 2.
 type usageError struct{ error }
 
@@ -102,6 +105,9 @@ func apiRequest(ctx context.Context, args []string, getenv func(string) string, 
 		}
 	}
 	if *idem != "" {
+		if strings.ContainsFunc(*idem, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return 2, usageError{errors.New("--idempotency-key has control characters")}
+		}
 		req.Header.Set("Idempotency-Key", *idem)
 	}
 	resp, err := client.Do(req)
@@ -109,9 +115,12 @@ func apiRequest(ctx context.Context, args []string, getenv func(string) string, 
 		return 3, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
 	if err != nil {
 		return 3, err
+	}
+	if len(raw) > maxAnswer { // never print a cut answer as if it were whole
+		return 3, fmt.Errorf("the answer is over %d bytes", maxAnswer)
 	}
 	if len(raw) > 0 {
 		if _, err := out.Write(append(bytes.TrimRight(raw, "\n"), '\n')); err != nil {
@@ -154,14 +163,18 @@ func apiURL(base *url.URL, path, tenant string) (string, error) {
 		return "", fmt.Errorf("PATH %q: fill in the {placeholders}", path)
 	}
 	for _, seg := range strings.Split(p, "/") {
-		if s, err := url.PathUnescape(seg); err != nil || s == "." || s == ".." || strings.Contains(s, "/") {
+		s, err := url.PathUnescape(seg)
+		if err != nil {
+			return "", fmt.Errorf("PATH %q: a bad %%-escape", path)
+		}
+		if s == "." || s == ".." || strings.Contains(s, "/") {
 			return "", fmt.Errorf("PATH %q: no . or .. segments", path)
 		}
 	}
 	if _, err := url.ParseQuery(query); err != nil {
 		return "", fmt.Errorf("PATH %q: %w", path, err)
 	}
-	target := strings.TrimRight(base.String(), "/") + "/api/v1" + p
+	target := base.JoinPath("api/v1").String() + p
 	if query != "" {
 		target += "?" + query
 	}

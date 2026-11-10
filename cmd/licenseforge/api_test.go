@@ -28,6 +28,12 @@ func TestAPICommand(t *testing.T) {
 			_, _ = io.WriteString(w, `{"status":404,"code":"not_found","detail":"No such license.","request_id":"REQ1"}`)
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/huge"):
+			_, _ = w.Write(bytes.Repeat([]byte("a"), maxAnswer+1))
+		case strings.HasSuffix(r.URL.Path, "/proxy"):
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = io.WriteString(w, "<html>bad gateway</html>")
 		case strings.HasSuffix(r.URL.Path, "/moved"):
 			http.Redirect(w, r, "https://elsewhere.example/", http.StatusFound)
 		default:
@@ -79,6 +85,14 @@ func TestAPICommand(t *testing.T) {
 	if code, _, errOut := run("", "GET", "/moved"); code != 1 || !strings.Contains(errOut, "302") {
 		t.Errorf("redirect: %d %q", code, errOut)
 	}
+	// Not the API's problem (a proxy's HTML): exit 1 with the status.
+	if code, out, errOut := run("", "GET", "/proxy"); code != 1 || !strings.Contains(out, "bad gateway") || !strings.Contains(errOut, "502 Bad Gateway") {
+		t.Errorf("proxy: %d %q %q", code, out, errOut)
+	}
+	// An answer over the limit is never printed cut as if whole: exit 3.
+	if code, out, errOut := run("", "GET", "/huge"); code != 3 || out != "" || !strings.Contains(errOut, "over") {
+		t.Errorf("huge: %d %d bytes %q", code, len(out), errOut)
+	}
 	// Usage errors, before any request: exit 2.
 	got = nil
 	for _, args := range [][]string{
@@ -97,6 +111,11 @@ func TestAPICommand(t *testing.T) {
 		{"POST", "/x", "--data", `{not json`},         // not JSON
 		{"POST", "/x", "--data", "@" + dir + "/nope"}, // no such file
 		{"GET", "/me/tenants", "extra"},
+		{"GET", "/a/%zz"},                           // a bad escape
+		{"GET", "/a b"},                             // a space
+		{"GET", "/a\\b"},                            // a backslash
+		{"POST", "/x", "--idempotency-key", "k\n1"}, // a header value with a newline
+
 	} {
 		if code, _, errOut := run("", args...); code != 2 || errOut == "" {
 			t.Errorf("%v: %d %q", args, code, errOut)
@@ -107,7 +126,10 @@ func TestAPICommand(t *testing.T) {
 	}
 	// The environment: https only (http for loopback), a token; the tenant
 	// only when the path names it.
-	for k, v := range map[string]string{"LICENSEFORGE_URL": "http://api.example", "LICENSEFORGE_TOKEN": ""} {
+	for k, v := range map[string]string{
+		"LICENSEFORGE_URL":   "http://api.example",
+		"LICENSEFORGE_TOKEN": "",
+	} {
 		old := env[k]
 		env[k] = v
 		if code, _, errOut := run("", "GET", "/me/tenants"); code != 2 || !strings.Contains(errOut, "LICENSEFORGE_") {
@@ -115,6 +137,31 @@ func TestAPICommand(t *testing.T) {
 		}
 		env[k] = old
 	}
+	// A base URL whose path would move the request: a stray "?" (the API
+	// path would become a query), dot segments; a token read with its newline.
+	for k, v := range map[string]string{
+		"LICENSEFORGE_URL":   srv.URL + "?",
+		"LICENSEFORGE_TOKEN": "lf_tok\n",
+	} {
+		old := env[k]
+		env[k] = v
+		if code, _, errOut := run("", "GET", "/me/tenants"); code != 2 || !strings.Contains(errOut, k) {
+			t.Errorf("%s=%q: %d %q", k, v, code, errOut)
+		}
+		env[k] = old
+	}
+	for _, base := range []string{srv.URL + "/a/..", srv.URL + "/%2e%2e/x"} {
+		env["LICENSEFORGE_URL"] = base
+		if code, _, _ := run("", "GET", "/me/tenants"); code != 2 {
+			t.Errorf("base %s: %d", base, code)
+		}
+	}
+	env["LICENSEFORGE_URL"] = srv.URL + "/lf/" // a base path is kept
+	got = nil
+	if code, _, _ := run("", "GET", "/me/tenants"); code != 0 || len(got) != 1 || got[0].uri != "/lf/api/v1/me/tenants" {
+		t.Errorf("base path: %d %+v", code, got)
+	}
+	env["LICENSEFORGE_URL"] = srv.URL
 	env["LICENSEFORGE_TENANT"] = ""
 	if code, _, _ := run("", "GET", "/me/tenants"); code != 0 {
 		t.Errorf("no tenant, no {tenant}: %d", code)
