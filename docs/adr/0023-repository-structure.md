@@ -14,7 +14,7 @@ Rules:
 ### Repos (GitHub org [`licenseforge`](https://github.com/licenseforge))
 | Repo | Contents | Publishes | From |
 |---|---|---|---|
-| `licenseforge` | Server, `lf` CLI, agent, **Go SDK** + Go add-ons (nested modules), dashboard (`web/`), Helm chart, OpenAPI, license spec + conformance vectors, docs | Container images (ghcr.io, signed), Helm chart (OCI), CLI binaries, Go modules, conformance-vector tarball | v0.1 |
+| `licenseforge` | Server, `lf` CLI (now `licenseforge` subcommands: [ADR-0048 Admin CLI via the REST API](0048-admin-cli-via-the-rest-api.md)), agent, **Go SDK** + Go add-ons (nested modules), dashboard (`web/`), Helm chart, OpenAPI, license spec + conformance vectors, docs | Container images (ghcr.io, signed), Helm chart (OCI), CLI binaries, Go modules, conformance-vector tarball | v0.1 |
 | `licenseforge-java` | Java SDK + add-ons (Maven multi-module) | Maven Central | v0.2 |
 | `licenseforge-node` | TypeScript SDK + add-ons + n8n node (pnpm workspace) | npm | v0.2 |
 | `licenseforge-salesforce` | SFDX unlocked package (metadata only), Flow recipe | Salesforce package versions | v0.3 recipe / v0.4 package |
