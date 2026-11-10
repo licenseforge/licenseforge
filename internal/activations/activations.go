@@ -163,6 +163,7 @@ func (s Service) grant(ctx context.Context, tx *ent.Tx, req Request, activate bo
 		return g, err
 	}
 	g.ev.Details = map[string]any{"license_id": l.ID, "fingerprint": req.Fingerprint, "fp_source": string(req.Source)}
+	licenseDetails(g.ev.Details, l, "online")
 	now, err := licenses.DBNow(ctx, tx)
 	if err != nil {
 		return g, err
@@ -410,6 +411,7 @@ func (s Service) Deactivate(ctx context.Context, req Request) error {
 			return err
 		}
 		ev.Details = map[string]any{"license_id": l.ID, "fingerprint": req.Fingerprint}
+		licenseDetails(ev.Details, l, "online") // only online seats are deactivated here
 		act, err := tx.Activation.Query().Where(activation.LicenseID(l.ID), activation.Fingerprint(req.Fingerprint), activation.DeactivatedAtIsNil()).Only(ctx)
 		if ent.IsNotFound(err) {
 			return ErrNotActivated
@@ -614,4 +616,14 @@ func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, e
 		return errors.Join(err, rerr)
 	}
 	return err
+}
+
+// licenseDetails adds what a webhook payload needs (ADR-0044) to an
+// activation entry's details: a snapshot of the license's product, customer
+// and binding, and the seat's mode when known ("" leaves it out).
+func licenseDetails(d map[string]any, l *ent.License, mode string) {
+	d["product_id"], d["customer_id"], d["binding"] = l.ProductID, l.CustomerID, string(l.BindType)
+	if mode != "" {
+		d["mode"] = mode
+	}
 }

@@ -562,7 +562,10 @@ func TestStateMachine(t *testing.T) {
 		} else {
 			status = st.want
 			if err != nil || l.Status != st.want || e.Outcome != auditevent.OutcomeSuccess ||
-				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want {
+				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want ||
+				// what a webhook payload needs (ADR-0044)
+				!strings.Contains(e.Details, `"customer_id":"`+row.CustomerID+`"`) || !strings.Contains(e.Details, `"plan_slug":"`+row.PlanSlug+`"`) ||
+				!strings.Contains(e.Details, `"expires_at":`) {
 				t.Errorf("%s: err %v, license %v, event %+v", st.name, err, l, e)
 			}
 		}

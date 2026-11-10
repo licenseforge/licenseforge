@@ -56,9 +56,13 @@ func TestReturn(t *testing.T) {
 	if err != nil || got.ID != file.ActivationID || got.DeactivatedAt == nil {
 		t.Fatalf("Return = %+v, %v", got, err)
 	}
+	if es := f.offlineEvents(t, "activation.offline"); !payload(es[len(es)-1].Details, is.License, "offline") || !strings.Contains(es[len(es)-1].Details, `"new_seat":true`) {
+		t.Errorf("offline activation details %s", es[len(es)-1].Details)
+	}
 	es := f.offlineEvents(t, "activation.offline_return")
 	if len(es) != 1 || es[0].Outcome != auditevent.OutcomeSuccess || *es[0].ObjectID != got.ID || *es[0].ActorID != "usr_test" ||
-		!strings.Contains(es[0].Details, licensefile.OfflineSHA256(text)) || !strings.Contains(es[0].Details, file.FileSHA256) {
+		!strings.Contains(es[0].Details, licensefile.OfflineSHA256(text)) || !strings.Contains(es[0].Details, file.FileSHA256) ||
+		!payload(es[0].Details, is.License, "offline") {
 		t.Errorf("events %+v", es)
 	}
 	// The seat is free: another machine can take it.

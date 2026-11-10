@@ -188,6 +188,7 @@ func (s Service) resolve(ctx context.Context, tx *ent.Tx, tenantID, text string,
 		return nil, nil, err
 	}
 	ev.Details["license_id"], ev.Details["product_id"] = l.ID, l.ProductID
+	licenseDetails(ev.Details, l, "offline")
 	ev.Details["fingerprint"], ev.Details["fp_source"] = r.Binding.Fingerprint, r.FPSource
 	if authz.Require(ctx, authz.ActivationRead, l.ProductID) != nil {
 		return nil, nil, errHidden

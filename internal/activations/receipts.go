@@ -94,6 +94,7 @@ func (s Service) ret(ctx context.Context, tx *ent.Tx, tenantID, text string, ev 
 		return nil, err
 	}
 	ev.Details["license_id"], ev.Details["product_id"], ev.Details["fingerprint"], ev.Details["file_sha256"] = l.ID, l.ProductID, r.Fingerprint, r.FileSHA256
+	licenseDetails(ev.Details, l, "offline")
 	if authz.Require(ctx, authz.ActivationRead, l.ProductID) != nil {
 		return nil, errHidden
 	}
