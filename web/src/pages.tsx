@@ -1,3 +1,4 @@
+import { canReadKeys } from "@/api/keys";
 import { canReadWebhooks } from "@/api/webhooks";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useParams } from "@tanstack/react-router";
@@ -107,6 +108,11 @@ export function TenantLayout() {
         {canReadWebhooks(caller) && (
           <Link to="/t/$slug/settings/webhooks" params={{ slug }} className={link}>
             {t("nav.webhooks")}
+          </Link>
+        )}
+        {canReadKeys(caller) && (
+          <Link to="/t/$slug/settings/signing-keys" params={{ slug }} className={link}>
+            {t("nav.keys")}
           </Link>
         )}
         {caller?.role === "owner" && (
