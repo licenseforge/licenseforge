@@ -11,6 +11,7 @@ import {
   changeLicense,
   createOfflineActivation,
   deactivateActivation,
+  endOfDayUTC,
   issueLicense,
   type License,
   type LicenseAction,
@@ -21,6 +22,7 @@ import {
   licensesQuery,
   resetRehosts,
   returnOfflineSeat,
+  setUpdatesUntil,
 } from "@/api/licenses";
 import { tenantsQuery } from "@/api/tenants";
 import type { Membership } from "@/api/tokens";
@@ -29,6 +31,8 @@ import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+// Maintenance days are picked and shown in UTC, as the server stores them.
+const utcDay = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2";
 const statuses: LicenseStatus[] = ["active", "suspended", "revoked"];
@@ -175,6 +179,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
         {row(t("licenses.col.plan"), `${l.plan_slug} (${t(`licenses.type.${l.type}`)})`)}
         {row(t("tokens.col.status"), t(`licenses.status.${l.status}`))}
         {row(t("tokens.col.expires"), expiryText(l))}
+        {row(t("licenses.updatesUntil"), l.updates_until ? t("licenses.utcDate", { date: utcDay.format(new Date(l.updates_until)) }) : t("licenses.allBuilds"))}
         {row(t("licenses.maxActivations"), l.max_activations === null ? t("licenses.unlimited") : String(l.max_activations))}
         {row(t("licenses.issued"), date.format(new Date(l.issued_at)))}
         {l.suspended_at && row(t("licenses.suspendedAt"), date.format(new Date(l.suspended_at)))}
@@ -201,6 +206,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
       )}
       {/* keyed by status: a status change (e.g. revoked meanwhile) drops an open confirmation and its error */}
       <Machines key={l.status} tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
+      {manage && l.status !== "revoked" && <Maintenance key={l.updates_until ?? ""} tenant={tenant} license={l} onChanged={onChanged} />}
       {manage && <Offline tenant={tenant} license={l} />}
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
@@ -224,6 +230,42 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Renews, corrects or clears a license's maintenance end (ADR-0045); license:write, so the same controls as suspend. */
+function Maintenance({ tenant, license: l, onChanged }: { tenant: string; license: License; onChanged: (l: License) => void }) {
+  const qc = useQueryClient();
+  const held = l.updates_until?.slice(0, 10) ?? ""; // the UTC day (the API answers in UTC)
+  const [day, setDay] = useState(held);
+  const save = useMutation({
+    mutationFn: (until: string | null) => setUpdatesUntil(tenant, l.id, until),
+    onSuccess: async (updated) => {
+      await qc.invalidateQueries({ queryKey: ["licenses", tenant] });
+      onChanged(updated);
+    },
+  });
+  return (
+    <section aria-labelledby="maintenance-title" className="mt-4 text-sm">
+      <h3 id="maintenance-title" className="font-semibold">{t("licenses.maintenance")}</h3>
+      <p id="maintenance-help" className="mt-1 text-xs text-muted-foreground">{t("licenses.maintenanceHelp")}</p>
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          {t("licenses.maintenanceDate")}
+          <input type="date" className={input} value={day} min={l.issued_at.slice(0, 10)} max="9999-12-31" onChange={(e) => setDay(e.target.value)}
+            aria-invalid={save.isError && !!fieldErrors(save.error).updates_until} aria-describedby={save.isError ? "maintenance-help maintenance-error" : "maintenance-help"} />
+        </label>
+        <Button variant="ghost" disabled={save.isPending || day === "" || day === held} onClick={() => save.mutate(endOfDayUTC(day))}>
+          {t("licenses.maintenanceSave")}
+        </Button>
+        {l.updates_until && (
+          <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate(null)}>{t("licenses.maintenanceClear")}</Button>
+        )}
+      </div>
+      {save.isError && (
+        <p id="maintenance-error" role="alert" className="mt-2 font-medium">{fieldErrors(save.error).updates_until ?? errorText(save.error)}</p>
+      )}
+    </section>
   );
 }
 

@@ -125,6 +125,7 @@ export type PlanForm = {
   lease: string; leaseUnit: DurationUnit;
   maxOffline: string; maxOfflineUnit: DurationUnit;
   grace: string; graceUnit: DurationUnit;
+  maintenance: string; // months; empty: every build covered
 };
 
 /** The form for a plan as it is. */
@@ -137,7 +138,7 @@ export function planForm(p: Plan): PlanForm {
     name: p.name, term: term.n, termUnit: term.unit, expiryBasis: p.expiry_basis,
     maxActivations: p.max_activations == null ? "" : String(p.max_activations), maxRehosts: p.max_rehosts == null ? "" : String(p.max_rehosts),
     offlineAllowed: p.offline_allowed, lease: lease.n, leaseUnit: lease.unit, maxOffline: offline.n, maxOfflineUnit: offline.unit,
-    grace: grace.n, graceUnit: grace.unit,
+    grace: grace.n, graceUnit: grace.unit, maintenance: p.updates_months == null ? "" : String(p.updates_months),
   };
 }
 
@@ -177,6 +178,8 @@ export function planPatch(before: Plan, f: PlanForm): PlanPatch {
   if (offline !== before.max_offline_seconds) patch.max_offline_seconds = offline;
   const grace = whole("grace_seconds", f.grace, durationUnits[f.graceUnit]);
   if (grace !== before.grace_seconds) patch.grace_seconds = grace;
+  const maintenance = optional("updates_months", f.maintenance);
+  if (maintenance !== before.updates_months) patch.updates_months = maintenance;
   return patch;
 }
 

@@ -373,6 +373,7 @@ function PlanEditDialog({ tenant, product, plan, onClose }: { tenant: string; pr
         onChange={(maxOffline, u) => set({ maxOffline, maxOfflineUnit: u as DurationUnit })} />
       <DurationField label={t("product.grace")} name="grace_seconds" value={f.grace} unit={f.graceUnit} units={secondUnits} error={fields.grace_seconds} help={t("product.graceHelp")}
         onChange={(grace, u) => set({ grace, graceUnit: u as DurationUnit })} />
+      <Field label={t("product.maintenance")} name="updates_months" inputMode="numeric" value={f.maintenance} onChange={(e) => set({ maintenance: e.target.value })} error={fields.updates_months} help={t("product.maintenanceHelp")} />
       <p className="text-xs text-muted-foreground">{t("product.editPlanNote")}</p>
     </FormDialog>
   );
