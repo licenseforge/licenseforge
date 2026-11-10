@@ -11,7 +11,7 @@ A tenant already isolates almost everything a sandbox needs: its own signing key
 - **Test mode is a property of the tenant**: a `test` boolean, set when the tenant is created and **never changed**.
   - A live tenant can't turn test, which would hide its usage from billing ([ADR-0016 Hosted pricing model](0016-hosted-pricing-model.md)).
   - A test tenant can't go live, which would mix test licenses and keys with sold ones. To go live, create a live tenant.
-  - The database enforces this: no UPDATE grant on the column.
+  - The database enforces this: the serving login has no UPDATE grant on the column, and a restrictive policy (`test_fixed`) holds the platform pool, which can update the table.
 - **Created by a platform admin**, like any tenant ([ADR-0042 Platform tenant onboarding](0042-platform-tenant-onboarding.md)): `"test": true` in `POST /platform/tenants`, and `licenseforge tenant create --test`. The default is live.
 - **Visible everywhere the tenant is**: `test` in `/me/tenants` and the platform tenant list.
   - The dashboard shows a persistent "Test mode" banner in a test tenant, and marks it in the tenant switcher and on the platform page.
