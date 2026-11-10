@@ -705,3 +705,39 @@ func TestDisabledDuringClaim(t *testing.T) {
 		t.Error("sent to an endpoint disabled during the claim")
 	}
 }
+
+// The URL changed during the last retry: that send's disable misses (pinned
+// to the endpoint as claimed), the count stays at its maximum, and the
+// next failure disables; never past the bound.
+func TestLastRetryAfterChange(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	seq := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.platformExec(t, `UPDATE webhook_cursors SET seq = $2, attempts = 7 WHERE endpoint_id = $1`, c.ID, seq-1)
+	hold := make(chan struct{})
+	f.recv.status, f.recv.hold = http.StatusBadGateway, hold
+	done := make(chan error, 1)
+	go func() { _, err := f.d.Once(f.ctx); done <- err }()
+	waitFor(t, "the send", func() bool { return f.recv.count() > 0 })
+	u := f.srv.URL + "/fixed"
+	if _, err := f.s.Update(f.ctx, c.ID, &u, nil); err != nil {
+		t.Fatal(err)
+	}
+	close(hold)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := f.s.Get(f.ctx, c.ID); !e.Enabled || e.Attempts != 8 {
+		t.Fatalf("after the missed disable: %+v", e)
+	}
+	f.recv.mu.Lock()
+	f.recv.hold = nil
+	f.recv.mu.Unlock()
+	f.platformExec(t, `UPDATE webhook_cursors SET next_attempt_at = now() WHERE endpoint_id = $1`, c.ID)
+	if _, err := f.d.Once(f.ctx); err != nil {
+		t.Fatalf("the next failure: %v", err)
+	}
+	if e, _ := f.s.Get(f.ctx, c.ID); e.Enabled || e.DisabledReason != ReasonFailing || e.Attempts != 8 {
+		t.Errorf("after the next failure: %+v", e)
+	}
+}

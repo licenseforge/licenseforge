@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	crand "crypto/rand"
@@ -270,7 +271,9 @@ func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
 	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
 		var res interface{ RowsAffected() (int64, error) }
 		var err error
-		failed := c.attempts + 1
+		// Capped: a disable that missed (the endpoint changed during the send)
+		// leaves the count at the maximum, and the next failure disables.
+		failed := min(c.attempts+1, schema.WebhookMaxAttempts)
 		disable := ""
 		if a.OK() {
 			res, err = tx.ExecContext(ctx, `UPDATE webhook_cursors SET seq = $5, attempts = 0, next_attempt_at = NULL, claimed_by = NULL, claimed_until = NULL
@@ -281,7 +284,7 @@ func (d *Dispatcher) result(ctx context.Context, c *claim, a Attempt) error {
 			} else if failed >= schema.WebhookMaxAttempts {
 				disable = ReasonFailing
 			}
-			res, err = tx.ExecContext(ctx, `UPDATE webhook_cursors SET attempts = attempts + 1,
+			res, err = tx.ExecContext(ctx, `UPDATE webhook_cursors SET attempts = LEAST(attempts + 1, `+strconv.Itoa(schema.WebhookMaxAttempts)+`),
 				next_attempt_at = clock_timestamp() + make_interval(secs => $5), claimed_by = NULL, claimed_until = NULL
 				WHERE `+pinned, c.cursorID, c.holder, c.seq, c.attempts, retryDelay(failed, a.RetryAfter).Seconds())
 		}
@@ -331,7 +334,7 @@ func (d *Dispatcher) disable(ctx context.Context, c *claim, reason string) error
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
-			return err
+			return errors.Join(err, freeLease(ctx, tx, c))
 		}
 		return disableTx(ctx, tx, c, reason)
 	})
@@ -368,10 +371,16 @@ const backoffPause = 5 * time.Minute
 // the receiver's (this replica's keyring) mustn't make it spin.
 func (d *Dispatcher) backoff(ctx context.Context, c *claim) error {
 	return d.DB.WithPlatform(ctx, func(tx *ent.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL,
+		res, err := tx.ExecContext(ctx, `UPDATE webhook_cursors SET claimed_by = NULL, claimed_until = NULL,
 			next_attempt_at = clock_timestamp() + make_interval(secs => $5) WHERE `+pinned,
 			c.cursorID, c.holder, c.seq, c.attempts, backoffPause.Seconds())
-		return err
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return errors.Join(err, freeLease(ctx, tx, c))
+		}
+		return nil
 	})
 }
 
