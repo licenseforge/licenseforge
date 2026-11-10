@@ -124,7 +124,8 @@ func setEnv(t *testing.T, tenant, platform, keys string) {
 		"AUDIT_OTLP_ENDPOINT", "AUDIT_OTLP_CA_FILE", "AUDIT_OTLP_CERT_FILE", "AUDIT_OTLP_KEY_FILE", "AUDIT_OTLP_HEADERS",
 		"AUDIT_SYSLOG_ADDR", "AUDIT_SYSLOG_CA_FILE", "AUDIT_SYSLOG_CERT_FILE", "AUDIT_SYSLOG_KEY_FILE", "AUDIT_SYSLOG_SERVER_NAME", "AUDIT_SYSLOG_SD_ID",
 		"TRUSTED_PROXIES", "RATE_LIMIT_ACTIVATION", "RATE_LIMIT_MANAGEMENT", "RATE_LIMIT_LOGIN",
-		"AUDIT_VERIFY_INTERVAL", "AUDIT_VERIFY_FULL_INTERVAL"} {
+		"AUDIT_VERIFY_INTERVAL", "AUDIT_VERIFY_FULL_INTERVAL",
+		"WEBHOOK_WORKERS", "WEBHOOK_ALLOW_CIDRS", "WEBHOOK_DENY_CIDRS", "WEBHOOK_PORTS"} {
 		t.Setenv("LICENSEFORGE_"+k, "")
 	}
 }
@@ -271,6 +272,9 @@ func TestServeRefuses(t *testing.T) {
 		"bad rate limit":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_RATE_LIMIT_MANAGEMENT"},
 		"bad verify interval":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_INTERVAL"},
 		"no full verify":         {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL"},
+		"bad webhook workers":    {env.TenantURL, env.PlatformURL, testKeys, "", "LICENSEFORGE_WEBHOOK_WORKERS"},
+		"bad webhook CIDR":       {env.TenantURL, env.PlatformURL, testKeys, "", "webhooks: CIDR"},
+		"bad webhook port":       {env.TenantURL, env.PlatformURL, testKeys, "", "webhooks: port"},
 	} {
 		setEnv(t, c.tenant, c.platform, c.keys)
 		t.Setenv("LICENSEFORGE_OWNER_DATABASE_URL", c.owner)
@@ -283,6 +287,12 @@ func TestServeRefuses(t *testing.T) {
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", "")
 		case "platform as identity":
 			t.Setenv("LICENSEFORGE_IDENTITY_DATABASE_URL", env.PlatformURL)
+		case "bad webhook workers":
+			t.Setenv("LICENSEFORGE_WEBHOOK_WORKERS", "100")
+		case "bad webhook CIDR":
+			t.Setenv("LICENSEFORGE_WEBHOOK_ALLOW_CIDRS", "10.0.0.0/33")
+		case "bad webhook port":
+			t.Setenv("LICENSEFORGE_WEBHOOK_PORTS", "443,0")
 		case "OTLP over plain http":
 			t.Setenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT", "http://otel.example:4318/v1/logs")
 		case "syslog without port":
@@ -581,5 +591,23 @@ func TestTenantInviteOwner(t *testing.T) {
 	t.Setenv("LICENSEFORGE_PLATFORM_DATABASE_URL", env.TenantURL)
 	if err := tenantInviteOwner(ctx, []string{"--tenant", slug, "--owner-email", "a@b.example"}, io.Discard); err == nil {
 		t.Error("ran on the tenant login")
+	}
+}
+
+// Webhook settings: 0 workers starts nothing; out-of-range counts are refused.
+func TestWebhookDispatcherSettings(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	for v, ok := range map[string]bool{"": true, "0": true, "8": true, "64": true, "-1": false, "65": false, "x": false} {
+		t.Setenv("LICENSEFORGE_WEBHOOK_WORKERS", v)
+		start, err := webhookDispatcher(nil, nil, log)
+		if (err == nil) != ok {
+			t.Errorf("workers %q: %v", v, err)
+		}
+		if v == "0" && start != nil {
+			t.Error("0 workers starts a dispatcher")
+		}
+		if ok && v != "0" && start == nil {
+			t.Errorf("workers %q: nothing to start", v)
+		}
 	}
 }

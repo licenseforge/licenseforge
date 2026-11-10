@@ -72,6 +72,20 @@ spec:
               value: {{ printf "%dm" (int (dig "intervalMinutes" 15 (.Values.auditVerify | default dict))) | quote }}
             - name: LICENSEFORGE_AUDIT_VERIFY_FULL_INTERVAL
               value: {{ printf "%dh" (int (dig "fullIntervalHours" 168 (.Values.auditVerify | default dict))) | quote }}
+            # Outbound webhooks (ADR-0044).
+            {{- $wh := .Values.webhooks | default dict }}
+            - name: LICENSEFORGE_WEBHOOK_WORKERS
+              value: {{ dig "workers" 8 $wh | int | toString | quote }}
+            - name: LICENSEFORGE_WEBHOOK_PORTS
+              value: {{ join "," (dig "ports" (list 443) $wh) | quote }}
+            {{- with dig "allowCIDRs" list $wh }}
+            - name: LICENSEFORGE_WEBHOOK_ALLOW_CIDRS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with dig "denyCIDRs" list $wh }}
+            - name: LICENSEFORGE_WEBHOOK_DENY_CIDRS
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- if $extraCA.secretName }}
             # Go reads the image's bundle file and every file in these directories.
             - name: SSL_CERT_DIR

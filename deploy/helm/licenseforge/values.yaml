@@ -161,6 +161,20 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
+# Outbound webhooks (ADR-0044): every replica delivers.
+webhooks:
+  workers: 8          # delivery goroutines per pod; 0: this release delivers none
+  # Self-hosted, single-vendor installs only: private ranges webhooks may
+  # reach (the server refuses them otherwise). Loopback, link-local and cloud
+  # metadata addresses stay refused. Applies to every tenant.
+  allowCIDRs: []
+  denyCIDRs: []       # more refused ranges, e.g. an operator-chosen NAT64 prefix
+  ports: [443]        # receiver ports allowed (by the server and the NetworkPolicy)
+  # NetworkPolicy egress to receivers on those ports. Empty `to`: any
+  # destination (the server's own checks refuse internal addresses).
+  egress:
+    to: []
+
 networkPolicy:
   enabled: true
   # Who may reach the server on 8080. Empty: any pod in any namespace (an
