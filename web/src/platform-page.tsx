@@ -44,7 +44,15 @@ export function PlatformPage() {
             <tbody>
               {rows.map((tn) => (
                 <tr key={tn.id} className="border-b">
-                  <td className={`${td} font-medium`}>{tn.name}</td>
+                  <td className={`${td} font-medium`}>
+                    {tn.name}
+                    {tn.test && (
+                      <>
+                        {" "}
+                        <span className="ml-2 rounded border border-dashed px-1 text-xs font-normal">{t("platform.testBadge")}</span>
+                      </>
+                    )}
+                  </td>
                   <td className={`${td} font-mono text-xs`}>{tn.slug}</td>
                   <td className={td}>{mfaLabel(tn.mfa_policy)}</td>
                   <td className={td}>{date.format(new Date(tn.created_at))}</td>
@@ -101,7 +109,7 @@ function CreateTenantDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       // Not a useMutation: its result (the link token) would stay in the mutation cache.
-      const c = await createPlatformTenant(String(f.get("slug") ?? "").trim(), String(f.get("name") ?? "").trim(), String(f.get("owner_email") ?? "").trim());
+      const c = await createPlatformTenant(String(f.get("slug") ?? "").trim(), String(f.get("name") ?? "").trim(), String(f.get("owner_email") ?? "").trim(), f.get("test") === "on");
       setCreated(c);
       void qc.invalidateQueries({ queryKey: platformTenantsQuery.queryKey });
     } catch (err) {
@@ -132,6 +140,13 @@ function CreateTenantDialog({ onClose }: { onClose: () => void }) {
         <Field label={t("products.col.slug")} name="slug" required maxLength={63} pattern="[a-z0-9]+(-[a-z0-9]+)*" error={fields.slug} help={t("platform.slugHelp")} />
         <Field label={t("tokens.col.name")} name="name" required maxLength={200} error={fields.name} />
         <Field label={t("platform.ownerEmail")} name="owner_email" type="email" required maxLength={320} error={fields.owner_email} help={t("platform.ownerHelp")} />
+        <div className="text-sm">
+          <label className="flex items-center gap-2 font-medium">
+            <input type="checkbox" name="test" className="size-4" aria-describedby="test-help" />
+            {t("platform.test")}
+          </label>
+          <p id="test-help" className="ml-6 text-muted-foreground">{t("platform.testHelp")}</p>
+        </div>
         {error != null && <PlatformError error={error} className="text-sm font-medium" />}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={close} disabled={busy}>

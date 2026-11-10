@@ -18,7 +18,7 @@ it("loads the user's tenants with role and scope", async () => {
   const f = serve(200, {
     items: [
       { tenant_id: "tnt_1", slug: "acme", name: "Acme", role: "owner", all_products: true, product_ids: [], mfa_policy: "none", accessible: true },
-      { tenant_id: "tnt_2", slug: "beta", name: "Beta", role: "admin", all_products: false, product_ids: ["prd_1"], mfa_policy: "phishing_resistant", accessible: false },
+      { tenant_id: "tnt_2", slug: "beta", name: "Beta", role: "admin", all_products: false, product_ids: ["prd_1"], mfa_policy: "phishing_resistant", accessible: false, test: true },
     ],
   });
   const ts = await listTenants();
@@ -27,8 +27,8 @@ it("loads the user's tenants with role and scope", async () => {
   expect(req.url).toBe(`${window.location.origin}/api/v1/me/tenants`);
   expect(req.credentials).toBe("same-origin");
   expect(ts).toEqual([
-    { id: "tnt_1", slug: "acme", name: "Acme", role: "owner", scope: { all: true, products: [] }, mfaPolicy: "none", accessible: true },
-    { id: "tnt_2", slug: "beta", name: "Beta", role: "admin", scope: { all: false, products: ["prd_1"] }, mfaPolicy: "phishing_resistant", accessible: false },
+    { id: "tnt_1", slug: "acme", name: "Acme", role: "owner", scope: { all: true, products: [] }, mfaPolicy: "none", accessible: true, test: false },
+    { id: "tnt_2", slug: "beta", name: "Beta", role: "admin", scope: { all: false, products: ["prd_1"] }, mfaPolicy: "phishing_resistant", accessible: false, test: true },
   ]);
   // The role and scope checks read it: a product-scoped admin can't manage tokens.
   expect(ts.map(canManageTokens)).toEqual([true, false]);

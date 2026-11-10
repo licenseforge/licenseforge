@@ -67,12 +67,19 @@ export function TenantLayout() {
   const { data: tenants } = useQuery(tenantsQuery);
   const caller = tenants?.find((tn) => tn.slug === slug);
   const link = "rounded-md px-2 py-1 text-sm hover:bg-accent [&.active]:font-semibold [&.active]:underline";
+  // A test-mode tenant (ADR-0047), on every page: what it is and isn't for.
+  const banner = caller?.test && (
+    <aside aria-label={t("tenant.testBanner")} className="mb-6 rounded-md border-2 border-dashed border-foreground px-4 py-2 text-sm">
+      <strong>{t("tenant.testBanner")}</strong> {t("tenant.testBannerBody")}
+    </aside>
+  );
   // The session doesn't meet the tenant's MFA policy (ADR-0038): every
   // tenant route would answer 403, so say why and offer the step-up.
   if (caller && !caller.accessible && caller.mfaPolicy !== "none") {
     const strong = caller.mfaPolicy === "phishing_resistant";
     return (
       <section aria-labelledby="mfa-title" className="mx-auto max-w-xl">
+        {banner}
         <h1 id="mfa-title" className="text-2xl font-semibold">{t("mfa.title", { name: caller.name })}</h1>
         <p className="mt-2">{t(strong ? "mfa.bodyPhishingResistant" : "mfa.body")}</p>
         <p className="mt-6">
@@ -86,6 +93,7 @@ export function TenantLayout() {
   }
   return (
     <>
+      {banner}
       <nav aria-label={t("app.name")} className="mb-6 flex gap-2">
         <Link to="/t/$slug" params={{ slug }} activeOptions={{ exact: true }} className={link}>
           {t("nav.overview")}

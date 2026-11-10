@@ -51,3 +51,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0045](0045-maintenance-entitlement-updates-until.md) | Maintenance entitlement updates_until | accepted |
 | [ADR-0046](0046-daily-metrics-series.md) | Daily metrics series | accepted |
 | [ADR-0047](0047-test-mode-tenants.md) | Test-mode tenants | accepted |
+| [ADR-0048](0048-admin-cli-via-the-rest-api.md) | Admin CLI via the REST API | accepted |

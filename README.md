@@ -27,6 +27,7 @@
 - [Architecture Decision Records](docs/adr/README.md)
 - [License file format (`lf1`)](spec/license-format.md)
 - [Go SDK](sdk/go/README.md)
+- [Command line](docs/cli.md): `licenseforge api`, `offline` and `tenant`
 - [Verifying a release](docs/verifying-releases.md): signatures, SBOMs and SLSA provenance of images, chart and binaries
 
 ## Contributing
