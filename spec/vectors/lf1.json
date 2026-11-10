@@ -164,6 +164,11 @@
       "expect": "invalid_key_set"
     },
     {
+      "name": "invalid_key_set_weak_key_before_signature_length",
+      "license": "lf1.test:weak-identity.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "invalid_key_set"
+    },
+    {
       "name": "bad_signature_payload_tampered",
       "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLXh4IiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
       "expect": "bad_signature"

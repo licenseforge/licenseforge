@@ -107,8 +107,8 @@ test("weak ed25519 keys: every small-order and non-canonical encoding, and no or
   }
   for (const k of weak) assert.equal(weakEd25519(k), true, Buffer.from(k).toString("hex"));
   const strong = [
-    "ebffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 2
-    "0200000000000000000000000000000000000000000000000000000000000000", // y = 2
+    "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 3: a full-order point
+    "0300000000000000000000000000000000000000000000000000000000000000", // y = 3: a full-order point
     "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9", // the vectors' test key
   ].map(hex);
   for (const k of strong) assert.equal(weakEd25519(k), false, Buffer.from(k).toString("hex"));

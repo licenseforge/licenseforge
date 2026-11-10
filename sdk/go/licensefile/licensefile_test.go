@@ -148,6 +148,7 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "invalid_key_set_noncanonical_small_key", License: join("lf1", "test:weak-noncanonical-small", parts[2], parts[3]), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_noncanonical_large_key", License: join("lf1", "test:weak-noncanonical-large", parts[2], parts[3]), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_order_8_key", License: join("lf1", "test:weak-order-8", parts[2], parts[3]), Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_weak_key_before_signature_length", License: join("lf1", "test:weak-identity", parts[2], shortSig), Expect: "invalid_key_set"},
 			{Name: "bad_signature_payload_tampered", License: join(parts[0], parts[1], otherPayload, parts[3]), Expect: "bad_signature"},
 			{Name: "bad_signature_kid_swapped", License: join(parts[0], "test:other", parts[2], parts[3]), Expect: "bad_signature"},
 			{Name: "unknown_key", License: sign("test:missing", payload), Expect: "unknown_key"},
@@ -314,8 +315,8 @@ func TestWeakEd25519(t *testing.T) {
 		}
 	}
 	strong := [][]byte{ed25519.NewKeyFromSeed(testSeed).Public().(ed25519.PublicKey),
-		weakKey("ebffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), // y = p-2: canonical
-		weakKey("0200000000000000000000000000000000000000000000000000000000000000")} // y = 2: canonical, not small
+		weakKey("eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), // y = p-3: a full-order point
+		weakKey("0300000000000000000000000000000000000000000000000000000000000000")} // y = 3: a full-order point
 	for i := range 64 {
 		seed := bytes.Repeat([]byte{byte(i)}, 32)
 		strong = append(strong, ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
