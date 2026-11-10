@@ -54,6 +54,7 @@ const tenantRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "t/$slug",
   loader: ({ context }) => context.queryClient.ensureQueryData(tenantsQuery),
+  errorComponent: ErrorPage, // inside the app shell: the header and sign-out stay
   component: TenantLayout,
 });
 const overviewRoute = createRoute({ getParentRoute: () => tenantRoute, path: "/", component: Overview });

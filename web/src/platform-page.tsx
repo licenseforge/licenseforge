@@ -46,8 +46,12 @@ export function PlatformPage() {
                 <tr key={tn.id} className="border-b">
                   <td className={`${td} font-medium`}>
                     {tn.name}
-                    {tn.test && " "}
-                    {tn.test && <span className="ml-2 rounded border border-dashed px-1 text-xs font-normal">{t("platform.testBadge")}</span>}
+                    {tn.test && (
+                      <>
+                        {" "}
+                        <span className="ml-2 rounded border border-dashed px-1 text-xs font-normal">{t("platform.testBadge")}</span>
+                      </>
+                    )}
                   </td>
                   <td className={`${td} font-mono text-xs`}>{tn.slug}</td>
                   <td className={td}>{mfaLabel(tn.mfa_policy)}</td>
