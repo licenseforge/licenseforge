@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -620,6 +621,9 @@ func TestTransitionRefusals(t *testing.T) {
 	} {
 		for name, op := range map[string]func(context.Context, authz.Principal, string) (Changed, error){
 			"suspend": f.s.Suspend, "reinstate": f.s.Reinstate, "revoke": f.s.Revoke,
+			"updates_until": func(ctx context.Context, p authz.Principal, id string) (Changed, error) {
+				return f.s.SetUpdatesUntil(ctx, p, id, nil)
+			},
 		} {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				if _, err := op(ctx, tc.p, tc.id); !errors.Is(err, tc.want) {
@@ -1205,5 +1209,127 @@ func TestUpdatesUntil(t *testing.T) {
 		if l.UpdatesUntil == nil || !l.UpdatesUntil.Equal(want) || l.UpdatesUntil.Nanosecond() != 0 {
 			t.Errorf("%d months: updates_until %v, want %v (issued %v)", months, l.UpdatesUntil, want, l.IssuedAt)
 		}
+	}
+}
+
+// Maintenance is renewed or corrected like a status change (ADR-0045):
+// values after the rights and before the state, whole seconds, audited
+// with the previous value; a revoked license keeps it.
+func TestSetUpdatesUntil(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	m := as(f.a.id, authz.Manager, all)
+	got, err := f.s.Issue(ctx, m, f.req(f.a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := got.License
+	until := l.IssuedAt.Add(400*24*time.Hour + 1500*time.Millisecond)
+	c, err := f.s.SetUpdatesUntil(ctx, m, l.ID, &until)
+	if err != nil || c.UpdatesUntil == nil || !c.UpdatesUntil.Equal(until.Truncate(time.Second)) {
+		t.Fatalf("set = %v, %v", c.UpdatesUntil, err)
+	}
+	if s := f.get(t, f.a.id, l.ID); s.UpdatesUntil == nil || !s.UpdatesUntil.Equal(until.Truncate(time.Second)) {
+		t.Errorf("stored %v", s.UpdatesUntil)
+	}
+	e := f.lastEvent(t, f.a.id)
+	if d := details(t, e); e.Action != "license.updates_until" || e.Outcome != auditevent.OutcomeSuccess || d["previous"] != nil ||
+		d["updates_until"] != until.UTC().Truncate(time.Second).Format(time.RFC3339Nano) || d["product_id"] != f.a.prodP {
+		t.Errorf("event %+v", e)
+	}
+	// Cleared: every build covered; the entry names what it was.
+	if c, err := f.s.SetUpdatesUntil(ctx, m, l.ID, nil); err != nil || c.UpdatesUntil != nil {
+		t.Fatalf("clear = %v, %v", c.UpdatesUntil, err)
+	}
+	if d := details(t, f.lastEvent(t, f.a.id)); d["previous"] == nil || d["updates_until"] != nil {
+		t.Errorf("clear event %+v", d)
+	}
+	for name, v := range map[string]time.Time{
+		"at issue":           l.IssuedAt,
+		"issue second":       l.IssuedAt.Truncate(time.Second), // at or before issue once truncated
+		"before issue":       l.IssuedAt.Add(-time.Hour),
+		"past year 9999 UTC": time.Date(9999, 12, 31, 23, 0, 0, 0, time.FixedZone("", -5*3600)),
+	} {
+		var inv *InvalidError
+		if _, err := f.s.SetUpdatesUntil(ctx, m, l.ID, &v); !errors.As(err, &inv) || inv.Field != "/updates_until" {
+			t.Errorf("%s: %v", name, err)
+		}
+		if e := f.lastEvent(t, f.a.id); e.Outcome != auditevent.OutcomeFailure || e.Action != "license.updates_until" {
+			t.Errorf("%s: event %+v", name, e)
+		}
+	}
+	// A suspended license can be renewed; a revoked one can't, and a bad
+	// value is refused as a value first (ADR-0032).
+	if _, err := f.s.Suspend(ctx, m, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetUpdatesUntil(ctx, m, l.ID, &until); err != nil {
+		t.Errorf("suspended: %v", err)
+	}
+	if _, err := f.s.Revoke(ctx, m, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetUpdatesUntil(ctx, m, l.ID, nil); !errors.Is(err, ErrState) {
+		t.Errorf("revoked: %v", err)
+	}
+	past := l.IssuedAt.Add(-time.Hour)
+	if _, err := f.s.SetUpdatesUntil(ctx, m, l.ID, &past); !errors.Is(err, ErrInvalid) {
+		t.Errorf("revoked, bad value: %v", err)
+	}
+	if s := f.get(t, f.a.id, l.ID); s.UpdatesUntil == nil || !s.UpdatesUntil.Equal(until.Truncate(time.Second)) {
+		t.Errorf("revoked license changed: %v", s.UpdatesUntil)
+	}
+}
+
+// An explicit maintenance end at issue replaces the plan's term (ADR-0045).
+func TestIssueUpdatesUntil(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	m := as(f.a.id, authz.Manager, all)
+	until := time.Now().Add(1000*24*time.Hour + 300*time.Millisecond)
+	req := f.req(f.a)
+	req.UpdatesUntil = &until
+	got, err := f.s.Issue(ctx, m, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := f.get(t, f.a.id, got.License.ID); s.UpdatesUntil == nil || !s.UpdatesUntil.Equal(until.Truncate(time.Second)) {
+		t.Errorf("stored %v, want %v", s.UpdatesUntil, until.Truncate(time.Second))
+	}
+	if d := details(t, f.lastEvent(t, f.a.id)); d["updates_until"] != until.UTC().Truncate(time.Second).Format(time.RFC3339Nano) {
+		t.Errorf("issue event %+v", d)
+	}
+	before, _ := f.count(t, f.a.id)
+	past := time.Now().Add(-time.Minute)
+	req.UpdatesUntil = &past
+	var inv *InvalidError
+	if _, err := f.s.Issue(ctx, m, req); !errors.As(err, &inv) || inv.Field != "/updates_until" {
+		t.Errorf("past: %v", err)
+	}
+	if after, _ := f.count(t, f.a.id); after != before {
+		t.Errorf("refused issue stored a license")
+	}
+}
+
+func details(t *testing.T, e *ent.AuditEvent) map[string]any {
+	t.Helper()
+	var d map[string]any
+	if err := json.Unmarshal([]byte(e.Details), &d); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// Exactly at issue is refused (the CHECK's strict "after"); a second later passes.
+func TestValidUpdatesUntil(t *testing.T) {
+	issued := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	if _, err := validUpdatesUntil(issued, issued); !errors.Is(err, ErrInvalid) {
+		t.Errorf("at issue: %v", err)
+	}
+	if u, err := validUpdatesUntil(issued.Add(time.Second+time.Millisecond), issued); err != nil || !u.Equal(issued.Add(time.Second)) {
+		t.Errorf("a second later: %v, %v", u, err)
+	}
+	if _, err := validUpdatesUntil(time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC), issued); err != nil {
+		t.Errorf("year 9999: %v", err)
 	}
 }

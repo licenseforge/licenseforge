@@ -112,6 +112,18 @@ func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRe
 	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
+func (s *server) SetLicenseUpdatesUntil(ctx context.Context, req apigen.SetLicenseUpdatesUntilRequestObject) (apigen.SetLicenseUpdatesUntilResponseObject, error) {
+	// Required, nullable: absent must not read as null (every build covered).
+	if req.Body.UpdatesUntil == nil && len(nulls(ctx, "updates_until")) == 0 {
+		return nil, invalid(fieldError{"/updates_until", "required: a date-time, or null for every build"})
+	}
+	c, err := s.Licenses.SetUpdatesUntil(ctx, principal(ctx), req.Id, req.Body.UpdatesUntil)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetLicenseUpdatesUntil200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
+}
+
 func (s *server) ReinstateLicense(ctx context.Context, req apigen.ReinstateLicenseRequestObject) (apigen.ReinstateLicenseResponseObject, error) {
 	c, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
 	if err != nil {
@@ -272,7 +284,7 @@ func (o outcome) VisitIssueLicenseResponse(w http.ResponseWriter) error {
 }
 
 func issueRequest(b *apigen.IssueLicenseJSONRequestBody) licenses.IssueRequest {
-	r := licenses.IssueRequest{ProductID: b.ProductId, PlanID: b.PlanId, CustomerID: b.CustomerId}
+	r := licenses.IssueRequest{ProductID: b.ProductId, PlanID: b.PlanId, CustomerID: b.CustomerId, UpdatesUntil: b.UpdatesUntil}
 	if b.Type != nil {
 		r.Type = license.Type(*b.Type)
 	}

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -196,6 +197,38 @@ func TestIssueShowsPlanTerms(t *testing.T) {
 	if g := f.do(t, "GET", p+"/"+m.body["id"].(string), "", owner); g.body["updates_until"] != m.body["updates_until"] {
 		t.Errorf("get updates_until %v, issued %v", g.body["updates_until"], m.body["updates_until"])
 	}
+}
+
+// Maintenance can be set at issue and renewed or cleared later (ADR-0045).
+func TestLicenseUpdatesUntil(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	p := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	issued := f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"updates_until":"2099-01-02T03:04:05.678Z"`), owner)
+	if issued.code != 201 || issued.body["updates_until"] != "2099-01-02T03:04:05Z" {
+		t.Fatalf("issue: %d %s", issued.code, issued.raw)
+	}
+	f.do(t, "POST", p, issueBody(f.prodA, c.planP, c.customer, `,"updates_until":"2001-01-01T00:00:00Z"`), owner).problem(t, 422, "validation_failed")
+	u := p + "/" + issued.body["id"].(string) + "/updates-until"
+	if r := f.do(t, "POST", u, `{"updates_until":"2100-06-30T00:00:00+02:00"}`, owner); r.code != 200 || r.body["updates_until"] != "2100-06-29T22:00:00Z" {
+		t.Errorf("renew: %d %s", r.code, r.raw)
+	}
+	// Absent isn't null: it'd silently cover every build.
+	if r := f.do(t, "POST", u, `{}`, owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), "/updates_until") {
+		t.Errorf("absent: %v", r)
+	}
+	f.do(t, "POST", u, `{"updates_until":"2001-01-01T00:00:00Z"}`, owner).problem(t, 422, "validation_failed")
+	f.do(t, "POST", u, `{"updates_until":null}`, f.session(t, f.viewerA, true)).problem(t, 403, "forbidden")
+	if r := f.do(t, "POST", u, `{"updates_until":null}`, owner); r.code != 200 || r.body["updates_until"] != nil {
+		t.Errorf("clear: %d %s", r.code, r.raw)
+	}
+	if g := f.do(t, "GET", p+"/"+issued.body["id"].(string), "", owner); g.body["updates_until"] != nil {
+		t.Errorf("get after clear: %s", g.raw)
+	}
+	f.do(t, "POST", p+"/"+issued.body["id"].(string)+"/revoke", "", owner)
+	f.do(t, "POST", u, `{"updates_until":null}`, owner).problem(t, 409, "invalid_state")
+	f.do(t, "POST", p+"/"+ids.License()+"/updates-until", `{"updates_until":null}`, owner).problem(t, 404, "not_found")
 }
 
 func TestIssueLicenseIdempotency(t *testing.T) {

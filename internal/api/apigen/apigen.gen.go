@@ -1062,6 +1062,9 @@ type LicenseIssue struct {
 	PlanId    string            `json:"plan_id"`
 	ProductId string            `json:"product_id"`
 	Type      *LicenseIssueType `json:"type,omitempty"`
+
+	// UpdatesUntil Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, whole seconds (truncated). Absent: from the plan.
+	UpdatesUntil *time.Time `json:"updates_until,omitempty"`
 }
 
 // LicenseIssueType defines model for LicenseIssue.Type.
@@ -1822,6 +1825,11 @@ type ListActivationsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// SetLicenseUpdatesUntilJSONBody defines parameters for SetLicenseUpdatesUntil.
+type SetLicenseUpdatesUntilJSONBody struct {
+	UpdatesUntil *time.Time `json:"updates_until"`
+}
+
 // ListMembersParams defines parameters for ListMembers.
 type ListMembersParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1931,6 +1939,9 @@ type CreateInvitationJSONRequestBody = InvitationCreate
 
 // IssueLicenseJSONRequestBody defines body for IssueLicense for application/json ContentType.
 type IssueLicenseJSONRequestBody = LicenseIssue
+
+// SetLicenseUpdatesUntilJSONRequestBody defines body for SetLicenseUpdatesUntil for application/json ContentType.
+type SetLicenseUpdatesUntilJSONRequestBody SetLicenseUpdatesUntilJSONBody
 
 // UpdateMemberApplicationMergePatchPlusJSONRequestBody defines body for UpdateMember for application/merge-patch+json ContentType.
 type UpdateMemberApplicationMergePatchPlusJSONRequestBody = MemberPatch
@@ -2072,6 +2083,9 @@ type ServerInterface interface {
 	// SuspendLicense Suspend an active license.
 	// (POST /tenants/{tenant}/licenses/{id}/suspend)
 	SuspendLicense(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// SetLicenseUpdatesUntil Set a license's maintenance end (renew or correct it).
+	// (POST /tenants/{tenant}/licenses/{id}/updates-until)
+	SetLicenseUpdatesUntil(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListMembersParams)
@@ -3632,6 +3646,41 @@ func (siw *ServerInterfaceWrapper) SuspendLicense(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// SetLicenseUpdatesUntil operation middleware
+func (siw *ServerInterfaceWrapper) SetLicenseUpdatesUntil(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetLicenseUpdatesUntil(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMembers operation middleware
 func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Request) {
 
@@ -4992,6 +5041,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.IssueLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/updates-until", wrapper.SetLicenseUpdatesUntil)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
@@ -10327,6 +10377,169 @@ func (response SuspendLicense409ApplicationProblemPlusJSONResponse) VisitSuspend
 	return err
 }
 
+type SetLicenseUpdatesUntilRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+	Body   *SetLicenseUpdatesUntilJSONRequestBody
+}
+
+type SetLicenseUpdatesUntilResponseObject interface {
+	VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error
+}
+
+type SetLicenseUpdatesUntil200JSONResponse License
+
+func (response SetLicenseUpdatesUntil200JSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SetLicenseUpdatesUntil400ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseUpdatesUntil401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseUpdatesUntil401ResponseHeaders
+}
+
+func (response SetLicenseUpdatesUntil401ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseUpdatesUntil403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseUpdatesUntil403ResponseHeaders
+}
+
+func (response SetLicenseUpdatesUntil403ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseUpdatesUntil404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseUpdatesUntil404ResponseHeaders
+}
+
+func (response SetLicenseUpdatesUntil404ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseUpdatesUntil409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseUpdatesUntil409ResponseHeaders
+}
+
+func (response SetLicenseUpdatesUntil409ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseUpdatesUntil422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseUpdatesUntil422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseUpdatesUntil422ResponseHeaders
+}
+
+func (response SetLicenseUpdatesUntil422ApplicationProblemPlusJSONResponse) VisitSetLicenseUpdatesUntilResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMembersRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListMembersParams
@@ -14652,6 +14865,9 @@ type StrictServerInterface interface {
 	// SuspendLicense Suspend an active license.
 	// (POST /tenants/{tenant}/licenses/{id}/suspend)
 	SuspendLicense(ctx context.Context, request SuspendLicenseRequestObject) (SuspendLicenseResponseObject, error)
+	// SetLicenseUpdatesUntil Set a license's maintenance end (renew or correct it).
+	// (POST /tenants/{tenant}/licenses/{id}/updates-until)
+	SetLicenseUpdatesUntil(ctx context.Context, request SetLicenseUpdatesUntilRequestObject) (SetLicenseUpdatesUntilResponseObject, error)
 	// ListMembers List the tenant's members, newest first.
 	// (GET /tenants/{tenant}/members)
 	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
@@ -15873,6 +16089,40 @@ func (sh *strictHandler) SuspendLicense(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SuspendLicenseResponseObject); ok {
 		if err := validResponse.VisitSuspendLicenseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetLicenseUpdatesUntil operation middleware
+func (sh *strictHandler) SetLicenseUpdatesUntil(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request SetLicenseUpdatesUntilRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	var body SetLicenseUpdatesUntilJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetLicenseUpdatesUntil(ctx, request.(SetLicenseUpdatesUntilRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetLicenseUpdatesUntil")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetLicenseUpdatesUntilResponseObject); ok {
+		if err := validResponse.VisitSetLicenseUpdatesUntilResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
