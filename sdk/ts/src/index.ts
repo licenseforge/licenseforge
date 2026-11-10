@@ -16,3 +16,4 @@ export {
   UNLIMITED,
   verify,
 } from "./licensefile.js";
+export { parseKeySet } from "./keyset.js";

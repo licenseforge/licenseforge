@@ -25,6 +25,13 @@ const numberRE = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
  * no unpaired surrogate escapes, no control characters in strings.
  */
 export function parseObject(text: string): Map<string, Value> {
+  const v = parseValue(text);
+  if (v.kind !== "object") throw new JSONError("expected a JSON object");
+  return v.entries;
+}
+
+/** Parses text as exactly one JSON value under the same rules as parseObject. */
+export function parseValue(text: string): Value {
   let i = 0;
   const fail = (msg: string): never => {
     throw new JSONError(`${msg} at offset ${i}`);
@@ -154,10 +161,8 @@ export function parseObject(text: string): Map<string, Value> {
     i += m[0].length;
     return { kind: "number", token: m[0] };
   };
-  ws();
-  if (text[i] !== "{") fail("expected a JSON object");
   const top = value(1);
   ws();
-  if (i !== text.length) fail("trailing data after the object");
-  return (top as { kind: "object"; entries: Map<string, Value> }).entries;
+  if (i !== text.length) fail("trailing data after the value");
+  return top;
 }
