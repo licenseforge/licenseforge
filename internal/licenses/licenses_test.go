@@ -565,7 +565,8 @@ func TestStateMachine(t *testing.T) {
 				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want ||
 				// what a webhook payload needs (ADR-0044)
 				!strings.Contains(e.Details, `"customer_id":"`+row.CustomerID+`"`) || !strings.Contains(e.Details, `"plan_slug":"`+row.PlanSlug+`"`) ||
-				!strings.Contains(e.Details, `"plan_id":"`+row.PlanID+`"`) || !strings.Contains(e.Details, expiresJSON(row.ExpiresAt)) {
+				!strings.Contains(e.Details, `"plan_id":"`+row.PlanID+`"`) || !strings.Contains(e.Details, expiresJSON(row.ExpiresAt)) ||
+				!strings.Contains(e.Details, `"product_id":"`+row.ProductID+`"`) {
 				t.Errorf("%s: err %v, license %v, event %+v", st.name, err, l, e)
 			}
 		}
