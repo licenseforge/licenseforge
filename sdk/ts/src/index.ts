@@ -17,3 +17,14 @@ export {
   verify,
 } from "./licensefile.js";
 export { parseKeySet } from "./keyset.js";
+export {
+  compute,
+  ENV_OVERRIDE,
+  type Fingerprint,
+  FingerprintError,
+  type FingerprintEnv,
+  type FingerprintOptions,
+  type FingerprintSource,
+  forLicense,
+  hash,
+} from "./fingerprint.js";

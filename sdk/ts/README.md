@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Node.js service, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Server-side only, Node 22 or later, with no runtime dependencies (ADR-0010).
 
-Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`). Next: fingerprints, offline requests and receipts, and the online client.
+Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`). Next: offline requests and receipts, and the online client.
 
 ```ts
 import { readFileSync } from "node:fs";
@@ -27,5 +27,12 @@ try {
 - `parseClaims(payload)` applies the strict encoding rules. `check(claims, options)` runs the claim checks in the spec's order.
 - `open` does all three. `LicenseError.code` is the spec's class.
 - `Entitlements`: `hasFeature(key)`, `limit(key)` (`UNLIMITED` is -1, absent is 0) and `allows(key, total)`.
+- `compute(tenant, product, options)` / `forLicense(claims, options)` give this machine's fingerprint (ADR-0017), for a bound license's `fingerprint` check option. The sources, first match wins:
+  1. your `override` function;
+  2. `LICENSEFORGE_FINGERPRINT`, only if you set `allowEnvOverride`;
+  3. Kubernetes, the `kube-system` namespace UID (the pod's service account needs `get` on that namespace);
+  4. the OS machine ID: `/etc/machine-id` (refused on tmpfs, and in containers unless the host's file is mounted in), `MachineGuid` or `IOPlatformUUID`.
+
+  A `FingerprintError` says why there is none: `no_fingerprint`, `transient` (retry), `invalid` or `failed`. On Windows the ID is read with `%SystemRoot%\System32\reg.exe`; whoever controls the app's environment controls that path (as with `NODE_OPTIONS`).
 
 Development: `npm ci && npm test`.
