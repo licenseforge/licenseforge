@@ -10,6 +10,7 @@
   "files": ["dist/src"],
   "scripts": {
     "build": "tsc -p .",
+    "prepack": "tsc -p .",
     "test": "tsc -p . && node --test dist/test/*.test.js"
   },
   "devDependencies": {

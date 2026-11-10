@@ -51,8 +51,15 @@ export function b64url(s: string): Uint8Array | null {
 
 /** Removes the BOM, armor and whitespace (SP, HT, CR, LF only), returning the bare token. */
 function unarmor(input: string): string {
-  let s = input.startsWith("﻿") ? input.slice(1) : input;
-  s = s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+  let s = input.startsWith("\uFEFF") ? input.slice(1) : input;
+  // Loops, not /\s+$/: a trailing-anchored regex backtracks quadratically on
+  // a long interior run of whitespace (unsigned input, up to 64 KiB).
+  const ws = (c: string | undefined) => c === " " || c === "\t" || c === "\r" || c === "\n";
+  let a = 0;
+  let z = s.length;
+  while (a < z && ws(s[a])) a++;
+  while (z > a && ws(s[z - 1])) z--;
+  s = s.slice(a, z);
   if (s.startsWith(BEGIN)) {
     if (!s.endsWith(END) || s.length < BEGIN.length + END.length) fail("malformed", "missing end armor");
     s = s.slice(BEGIN.length, s.length - END.length);
@@ -290,7 +297,10 @@ export const DEFAULT_CLOCK_TOLERANCE_SECONDS = 24 * 3600;
 
 /** Applies the spec's claim checks in order: a usable license's status, or a LicenseError. */
 export function check(c: Claims, o: CheckOptions): Status {
-  if (!(o.now instanceof Date) || Number.isNaN(o.now.getTime())) throw new TypeError("licenseforge: now must be a valid Date");
+  const validDate = (d: unknown) => d instanceof Date && !Number.isNaN(d.getTime());
+  if (!validDate(o.now)) throw new TypeError("licenseforge: now must be a valid Date");
+  // An invalid build date would compare false and skip updates_until: fail closed.
+  if (o.buildDate !== undefined && !validDate(o.buildDate)) throw new TypeError("licenseforge: buildDate must be a valid Date");
   const tol = o.clockToleranceSeconds ?? DEFAULT_CLOCK_TOLERANCE_SECONDS;
   if (!Number.isFinite(tol) || tol < 0) throw new RangeError("licenseforge: clockToleranceSeconds must be ≥ 0");
   const now = o.now.getTime();

@@ -8,7 +8,9 @@ Status: in progress, not published yet. It passes the shared conformance vectors
 import { open, LicenseError, type PublicKey } from "@licenseforge/sdk";
 
 // Your tenant's public keys, from the dashboard (Settings → Signing keys).
-const keys: PublicKey[] = [{ kid: "acme:2026-11", alg: "ed25519", key: Buffer.from("…", "base64url") }];
+// The key is its exact 32 bytes; a loader for the dashboard's JSON key set
+// (strict base64url) comes next.
+const keys: PublicKey[] = [{ kid: "acme:2026-11", alg: "ed25519", key: new Uint8Array([/* 32 bytes */]) }];
 
 try {
   const { claims, status } = open(licenseText, keys, { now: new Date(), product: "acme-db", fingerprint });

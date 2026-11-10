@@ -2,7 +2,7 @@
 // the entitlement lookups and the check options.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { check, Entitlements, LicenseError, parseClaims, UNLIMITED } from "../src/index.js";
+import { check, Entitlements, LicenseError, parseClaims, UNLIMITED, verify } from "../src/index.js";
 import { parseTime } from "../src/licensefile.js";
 
 const base = { v: 1, lid: "lic_1", product: "p", iat: "2026-11-01T00:00:00Z" };
@@ -30,7 +30,7 @@ test("strict JSON: control characters, escapes and number forms in payloads", ()
     ["plus sign", ok.replace('"v":1', '"v":+1')],
     ["trailing comma", ok.replace("}", ",}")],
     ["single quotes", ok.replace('"lic_1"', "'lic_1'")],
-    ["BOM before the object", "﻿" + ok],
+    ["BOM before the object", "\uFEFF" + ok],
     ["NUL in tenant", JSON.stringify({ ...base, tenant: "t\u0000x" })],
   ] as const) {
     assert.equal(code(() => claims(text)), "malformed", name);
@@ -75,4 +75,12 @@ test("check options: now is required, tolerance must be ≥ 0, 0 is strict", () 
   assert.throws(() => check(c, { now, product: "p", clockToleranceSeconds: -1 }), RangeError);
   assert.throws(() => check(c, { now: new Date(Number.NaN), product: "p" }), TypeError);
   assert.throws(() => check(c, { now: "2026-11-01" as unknown as Date, product: "p" }), TypeError);
+  assert.throws(() => check(c, { now, product: "p", buildDate: new Date("garbage") }), TypeError, "an invalid build date fails closed");
+});
+
+test("envelope: a long run of whitespace inside unsigned input is cheap", () => {
+  const input = "a" + " \t\r\n".repeat(16000) + "a"; // 64,002 bytes, under the limit
+  const start = performance.now();
+  assert.throws(() => verify(input, []), (e) => e instanceof LicenseError && e.code === "malformed");
+  assert.ok(performance.now() - start < 100, `took ${performance.now() - start} ms`);
 });
