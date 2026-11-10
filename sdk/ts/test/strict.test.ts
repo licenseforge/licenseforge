@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { check, Entitlements, LicenseError, parseClaims, UNLIMITED, verify } from "../src/index.js";
-import { parseTime } from "../src/licensefile.js";
+import { parseTime, weakEd25519 } from "../src/licensefile.js";
 
 const base = { v: 1, lid: "lic_1", product: "p", iat: "2026-11-01T00:00:00Z" };
 const claims = (json: string) => parseClaims(new TextEncoder().encode(json));
@@ -83,4 +83,33 @@ test("envelope: a long run of whitespace inside unsigned input is cheap", () => 
   const start = performance.now();
   assert.throws(() => verify(input, []), (e) => e instanceof LicenseError && e.code === "malformed");
   assert.ok(performance.now() - start < 100, `took ${performance.now() - start} ms`);
+});
+
+test("weak ed25519 keys: every small-order and non-canonical encoding, and no ordinary key", () => {
+  const hex = (h: string) => new Uint8Array(Buffer.from(h, "hex"));
+  const weak = [
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "0100000000000000000000000000000000000000000000000000000000000080", // negative zero
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  ].map(hex);
+  for (let k = 0; k < 19; k++) {
+    const b = new Uint8Array(32).fill(0xff);
+    b[0] = 0xed + k;
+    b[31] = 0x7f;
+    weak.push(b, Uint8Array.from([...b.subarray(0, 31), 0xff])); // y = p + k, either sign
+  }
+  for (const k of weak) assert.equal(weakEd25519(k), true, Buffer.from(k).toString("hex"));
+  const strong = [
+    "ebffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 2
+    "0200000000000000000000000000000000000000000000000000000000000000", // y = 2
+    "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9", // the vectors' test key
+  ].map(hex);
+  for (const k of strong) assert.equal(weakEd25519(k), false, Buffer.from(k).toString("hex"));
 });

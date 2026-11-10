@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/fips140"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -119,6 +120,12 @@ func buildVectors(t *testing.T) vectorFile {
 			{KID: "test:dup", Alg: AlgEd25519, PublicKey: pub},
 			{KID: "test:dup", Alg: AlgEd25519, PublicKey: pub},
 			{KID: "test:short", Alg: AlgEd25519, PublicKey: b64.EncodeToString(priv.Public().(ed25519.PublicKey)[:31])},
+			// Weak keys (spec): small-order points and non-canonical encodings.
+			{KID: "test:weak-identity", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("0100000000000000000000000000000000000000000000000000000000000000"))},
+			{KID: "test:weak-negative-zero", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("0100000000000000000000000000000000000000000000000000000000000080"))},
+			{KID: "test:weak-noncanonical-small", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"))},
+			{KID: "test:weak-noncanonical-large", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("f0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"))},
+			{KID: "test:weak-order-8", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"))},
 		},
 		Cases: []vectorCase{
 			{Name: "valid_armored", License: beginArmor + "\n" + tok + "\n" + endArmor + "\n", Expect: "valid", KID: "test:2026-11", Payload: payload},
@@ -133,6 +140,14 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "malformed_wins_over_unknown_key", License: join(mp[0], mp[1], mp[2], mp[3]+"=="), Expect: "malformed"},
 			{Name: "invalid_key_set_duplicate_kid", License: sign("test:dup", payload), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_short_key", License: sign("test:short", payload), Expect: "invalid_key_set"},
+			// With the identity as public key, R = identity and S = 0 verifies for
+			// any message in cofactorless Ed25519 (crypto/ed25519): a forgery the
+			// key set must refuse before the signature check.
+			{Name: "invalid_key_set_small_order_forgery", License: join("lf1", "test:weak-identity", parts[2], b64.EncodeToString(append(weakKey("0100000000000000000000000000000000000000000000000000000000000000"), make([]byte, 32)...))), Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_negative_zero_key", License: join("lf1", "test:weak-negative-zero", parts[2], parts[3]), Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_noncanonical_small_key", License: join("lf1", "test:weak-noncanonical-small", parts[2], parts[3]), Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_noncanonical_large_key", License: join("lf1", "test:weak-noncanonical-large", parts[2], parts[3]), Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_order_8_key", License: join("lf1", "test:weak-order-8", parts[2], parts[3]), Expect: "invalid_key_set"},
 			{Name: "bad_signature_payload_tampered", License: join(parts[0], parts[1], otherPayload, parts[3]), Expect: "bad_signature"},
 			{Name: "bad_signature_kid_swapped", License: join(parts[0], "test:other", parts[2], parts[3]), Expect: "bad_signature"},
 			{Name: "unknown_key", License: sign("test:missing", payload), Expect: "unknown_key"},
@@ -267,5 +282,47 @@ func TestSignLimits(t *testing.T) {
 func TestFIPSModeWhenRequested(t *testing.T) {
 	if v := os.Getenv("GOFIPS140"); v != "" && v != "off" && !fips140.Enabled() {
 		t.Fatalf("GOFIPS140=%s but FIPS 140-3 mode is not enabled", v)
+	}
+}
+
+func weakKey(h string) []byte {
+	b, err := hex.DecodeString(h)
+	if err != nil || len(b) != 32 {
+		panic(h)
+	}
+	return b
+}
+
+// Every weak encoding is refused, and ordinary keys aren't (spec: weak keys).
+func TestWeakEd25519(t *testing.T) {
+	var weak [][]byte
+	for _, h := range smallOrder {
+		weak = append(weak, weakKey(h))
+	}
+	// y = p+k for k = 0..18 (every value at or above p), with either sign bit.
+	for k := range 19 {
+		b := bytes.Repeat([]byte{0xff}, 32)
+		b[0], b[31] = byte(0xed+k), 0x7f
+		weak = append(weak, b, append(append([]byte{}, b[:31]...), 0xff))
+	}
+	// Negative zero: x = 0 (y = 1 or y = p-1) with the sign bit set.
+	weak = append(weak, weakKey("0100000000000000000000000000000000000000000000000000000000000080"),
+		weakKey("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"))
+	for _, k := range weak {
+		if !weakEd25519(k) {
+			t.Errorf("%x: not refused", k)
+		}
+	}
+	strong := [][]byte{ed25519.NewKeyFromSeed(testSeed).Public().(ed25519.PublicKey),
+		weakKey("ebffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), // y = p-2: canonical
+		weakKey("0200000000000000000000000000000000000000000000000000000000000000")} // y = 2: canonical, not small
+	for i := range 64 {
+		seed := bytes.Repeat([]byte{byte(i)}, 32)
+		strong = append(strong, ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	}
+	for _, k := range strong {
+		if weakEd25519(k) {
+			t.Errorf("%x: refused", k)
+		}
 	}
 }
