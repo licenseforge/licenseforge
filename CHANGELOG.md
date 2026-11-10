@@ -16,6 +16,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented; SI-7, SR-11 and SSDF PS.2/PS.3 record the signatures with their remaining gaps (the Go SDK isn't published; releases aren't immutable); SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
 
 ### Added
+- TypeScript SDK clock guard (ADR-0018): `Guard` (high-water mark, HMAC-authenticated state under a key from the license key, tolerance, `observe`, `reset`) with `MemoryClockStore` and `FileClockStore`. The file store writes atomically with mode 0600 (retrying a rename briefly on Windows, and removing the temp file on failure), but without a cross-process lock (Node has none): processes updating at once can lose a raise, so the mark may end at either one's value, never below what either read.
+- TypeScript SDK online client (ADR-0034), the Go client's behaviour:
+  - `activate`, `refresh`, `deactivate`, `forget`, `current` and `run`;
+  - every lease verified before use or storage; older leases refused as replays; a `forget` during a call supersedes it;
+  - problem codes taken only from 4xx `application/problem+json` answers; retries for network errors, 429, 5xx and `idempotency_in_progress`, honouring Retry-After (capped at 10 minutes); no redirects;
+  - server-time offset, clock-guard reset, and `run`'s refresh scheduling with jitter, backoff and wake bounds.
 - TypeScript SDK offline formats (ADR-0043): `encodeRequest`/`parseRequest` (`lfreq1`), `encodeReceipt`/`parseReceipt` (`lfrcpt1`), `fileSHA256` and `offlineSHA256`, with the Go SDK's rules (no unknown fields, a bound fingerprint, `kubernetes` exactly for a cluster binding, a 16-byte nonce, the request size limit). The encoders sort keys as Go does and check their own output. Passes `offline.json`, including its `file_hashes`.
 - TypeScript SDK fingerprints (ADR-0017): `hash`, `compute` and `forLicense`, with the same sources, order and rules as the Go SDK.
   - Sources: the vendor override, the `LICENSEFORGE_FINGERPRINT` environment variable only when allowed, Kubernetes (the `kube-system` namespace UID, with transient errors retried and RBAC or certificate errors failing at once), and the OS machine ID.
