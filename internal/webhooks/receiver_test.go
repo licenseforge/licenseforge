@@ -18,7 +18,8 @@ import (
 func verify(secret string, h http.Header, body []byte, now time.Time) bool {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, "whsec_"))
 	ts, terr := strconv.ParseInt(h.Get("webhook-timestamp"), 10, 64)
-	if err != nil || terr != nil || math.Abs(now.Sub(time.Unix(ts, 0)).Seconds()) > 300 {
+	// An empty key (an unset secret) would accept anyone's signature.
+	if err != nil || len(key) == 0 || terr != nil || math.Abs(now.Sub(time.Unix(ts, 0)).Seconds()) > 300 {
 		return false
 	}
 	m := hmac.New(sha256.New, key)
@@ -53,10 +54,24 @@ func TestReceiverSnippet(t *testing.T) {
 			t.Errorf("%s refused", name)
 		}
 	}
+	// An empty secret accepts nothing, not even a signature made with an empty
+	// key. HMAC pads keys with zeros to the block size, so 64 zero bytes sign
+	// like an empty key, and FIPS-only mode allows them.
+	m := hmac.New(sha256.New, make([]byte, 64))
+	m.Write([]byte("aud_1." + strconv.FormatInt(now.Unix(), 10) + "."))
+	m.Write(body)
+	forged := h.Clone()
+	forged.Set("webhook-signature", "v1,"+base64.StdEncoding.EncodeToString(m.Sum(nil)))
+	for _, s := range []string{"", "whsec_"} {
+		if verify(s, forged, body, now) {
+			t.Errorf("secret %q accepted a forged signature", s)
+		}
+	}
 	for name, ok := range map[string]bool{
 		"another secret":   verify(newSecret(), h, body, now),
 		"changed body":     verify(cur, h, []byte(`{"type":"license.revoked"}`), now),
 		"replayed later":   verify(cur, h, body, now.Add(6*time.Minute)),
+		"from the future":  verify(cur, h, body, now.Add(-6*time.Minute)),
 		"malformed secret": verify("whsec_!!", h, body, now),
 	} {
 		if ok {
