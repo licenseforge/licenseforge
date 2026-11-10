@@ -120,7 +120,7 @@ func TestSend(t *testing.T) {
 	mux.HandleFunc("/target", func(w http.ResponseWriter, _ *http.Request) { hits.Add(1) })
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 		select {
-		case <-time.After(2 * time.Second):
+		case <-time.After(5 * time.Second): // far above the 300ms client; srv.Close waits for it
 		case <-r.Context().Done():
 		}
 	})
@@ -150,7 +150,9 @@ func TestSend(t *testing.T) {
 	})
 	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
-	c := testClient(srv, time.Second)
+	// Generous for every answer that isn't a timeout: a loaded machine
+	// (CI, -race) can take a second for a TLS handshake or the 1 MiB body.
+	c := testClient(srv, 10*time.Second)
 	ctx := context.Background()
 	now := time.Unix(1614265330, 0)
 	secret := "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
@@ -168,7 +170,6 @@ func TestSend(t *testing.T) {
 		"/gone":      {Category: "http", Status: 410},
 		"/busy":      {Category: "http", Status: 429, RetryAfter: 2 * time.Minute},
 		"/moved":     {Category: "redirect"},
-		"/slow":      {Category: "timeout"},
 		"/big":       {Category: "http", Status: 200},
 		"/down":      {Category: "http", Status: 503, RetryAfter: 30 * time.Second},
 		"/down-bare": {Category: "http", Status: 503},
@@ -182,11 +183,14 @@ func TestSend(t *testing.T) {
 			t.Errorf("%s: %+v, %v", path, a, err)
 		}
 	}
+	if a, err := Send(ctx, testClient(srv, 300*time.Millisecond), srv.URL+"/slow", "msg_1", now, body, secret); err != nil || a.Category != "timeout" {
+		t.Errorf("/slow: %+v, %v", a, err)
+	}
 	if hits.Load() != 0 {
 		t.Error("a redirect was followed")
 	}
 	// An untrusted certificate is tls; the real guard refuses loopback.
-	if a, _ := Send(ctx, client(func(string, string, syscall.RawConn) error { return nil }, nil, time.Second), srv.URL+"/ok", "m", now, body, secret); a.Category != "tls" {
+	if a, _ := Send(ctx, client(func(string, string, syscall.RawConn) error { return nil }, nil, 10*time.Second), srv.URL+"/ok", "m", now, body, secret); a.Category != "tls" {
 		t.Errorf("untrusted certificate: %+v", a)
 	}
 	if a, _ := Send(ctx, Guard{}.Client(), srv.URL+"/ok", "m", now, body, secret); a.Category != "connection" {
@@ -214,7 +218,7 @@ func TestSend(t *testing.T) {
 	// No proxy from the environment.
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
-	if a, err := Send(ctx, testClient(srv, time.Second), srv.URL+"/ok", "m", now, body, secret); err != nil || !a.OK() {
+	if a, err := Send(ctx, testClient(srv, 10*time.Second), srv.URL+"/ok", "m", now, body, secret); err != nil || !a.OK() {
 		t.Errorf("went through the environment's proxy: %+v, %v", a, err)
 	}
 }
@@ -234,7 +238,7 @@ func TestSendOldTLS(t *testing.T) {
 	srv.TLS = &tls.Config{MaxVersion: tls.VersionTLS11}
 	srv.StartTLS()
 	defer srv.Close()
-	if a, err := Send(context.Background(), testClient(srv, time.Second), srv.URL, "m", time.Now(), nil, "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"); err != nil || a.Category != "tls" {
+	if a, err := Send(context.Background(), testClient(srv, 10*time.Second), srv.URL, "m", time.Now(), nil, "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"); err != nil || a.Category != "tls" {
 		t.Errorf("TLS 1.1 server: %+v, %v", a, err)
 	}
 }
