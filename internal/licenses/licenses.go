@@ -353,7 +353,7 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		}
 	}
 	ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug,
-		"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": rfc3339(row.ExpiresAt), "overrides": overrides}
+		"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": rfc3339(row.ExpiresAt), "updates_until": rfc3339(row.UpdatesUntil), "overrides": overrides}
 	if _, err := audit.Record(ctx, tx, tenantID, ev); err != nil {
 		return Issued{}, ev, err
 	}

@@ -1205,5 +1205,9 @@ func TestUpdatesUntil(t *testing.T) {
 		if l.UpdatesUntil == nil || !l.UpdatesUntil.Equal(want) || l.UpdatesUntil.Nanosecond() != 0 {
 			t.Errorf("%d months: updates_until %v, want %v (issued %v)", months, l.UpdatesUntil, want, l.IssuedAt)
 		}
+		// The issue entry records it: the start of its audit trail.
+		if e := f.lastEvent(t, f.a.id); !strings.Contains(e.Details, `"updates_until":"`+want.UTC().Format(time.RFC3339Nano)+`"`) {
+			t.Errorf("%d months: issue entry %s", months, e.Details)
+		}
 	}
 }
