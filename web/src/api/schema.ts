@@ -2001,6 +2001,8 @@ export interface components {
         MyTenant: {
             /** @description Usable as {tenant} in paths. */
             tenant_id: string;
+            /** @description A test-mode tenant (ADR-0047): for integration and CI, left out of usage measures. Fixed at creation. */
+            test: boolean;
             mfa_policy: components["schemas"]["MfaPolicy"];
             /** @description Whether this session meets the tenant's MFA policy (ADR-0038). If not, the tenant's routes answer 403 mfa_required with a step-up URL. */
             accessible: boolean;
@@ -2029,6 +2031,8 @@ export interface components {
         PlatformTenant: {
             /** @example tnt_01jcz5b2y3c4d5e6f7g8h9j0k1 */
             id: string;
+            /** @description A test-mode tenant (ADR-0047). Fixed at creation. */
+            test: boolean;
             slug: string;
             name: string;
             mfa_policy: components["schemas"]["MfaPolicy"];
@@ -2047,6 +2051,11 @@ export interface components {
             name: string;
             /** @description Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email. */
             owner_email: string;
+            /**
+             * @description A test-mode tenant (ADR-0047): for integration and CI, marked in the dashboard and left out of usage measures. It can't change later: create a live tenant to sell.
+             * @default false
+             */
+            test?: boolean;
         };
         PlatformOwnerInvite: {
             /** @description Who becomes the tenant's first owner by accepting the invitation, signed in with this verified email. */
