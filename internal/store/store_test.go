@@ -821,7 +821,7 @@ func archivables() []archivable {
 				SELECT $1::text, $2::text, product_id, $3::text, 'x', 'boolean', now(), now() FROM features WHERE key = $3::text AND tenant_id = $2::text
 				ON CONFLICT (product_id, key) DO UPDATE SET archived_at = NULL`},
 		{"plans", []string{"name", "duration_months", "duration_seconds", "expiry_basis", "max_activations", "max_rehosts",
-			"offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds", "archived_at", "updated_at"},
+			"offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds", "updates_months", "archived_at", "updated_at"},
 			func(ctx context.Context, tx *ent.Tx, tenant, key string) (string, error) {
 				p, err := product(ctx, tx, tenant, "p-"+strings.ReplaceAll(key, "_", "-"))
 				if err != nil {

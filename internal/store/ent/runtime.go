@@ -1276,6 +1276,10 @@ func init() {
 	plan.DefaultGraceSeconds = planDescGraceSeconds.Default.(int64)
 	// plan.GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
 	plan.GraceSecondsValidator = planDescGraceSeconds.Validators[0].(func(int64) error)
+	// planDescUpdatesMonths is the schema descriptor for updates_months field.
+	planDescUpdatesMonths := planFields[14].Descriptor()
+	// plan.UpdatesMonthsValidator is a validator for the "updates_months" field. It is called by the builders before save.
+	plan.UpdatesMonthsValidator = planDescUpdatesMonths.Validators[0].(func(int) error)
 	// planDescID is the schema descriptor for id field.
 	planDescID := planFields[0].Descriptor()
 	// plan.DefaultID holds the default value on creation for the id field.

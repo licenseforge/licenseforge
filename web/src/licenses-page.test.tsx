@@ -37,13 +37,13 @@ const names = {
 };
 const plan = (id: string, name: string, archived = false) => ({
   id, product_id: "prd_1", slug: id.replace("pln_", ""), name, duration_months: 12, duration_seconds: null, expiry_basis: "from_issue", max_activations: 3,
-  max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null, grace_seconds: 0,
+  max_rehosts: null, bind_type: "machine", offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null, grace_seconds: 0, updates_months: null,
   archived_at: archived ? "2026-11-01T00:00:00Z" : null, created_at: "",
 });
 const plansOf = (req: Request) => (new URL(req.url).pathname.endsWith("/plans") ? json({ items: [plan("pln_1", "Pro"), plan("pln_old", "Legacy", true)] }) : null);
 const license: License = {
   id: "lic_1", product_id: "prd_1", plan_id: "pln_1", plan_slug: "pro", customer_id: "cus_1", type: "paid", status: "active",
-  key_hint: "ABC123", expiry_basis: "from_issue", expires_at: null, max_activations: 3, active_activations: 0, max_rehosts: null, rehost_count: 0,
+  key_hint: "ABC123", expiry_basis: "from_issue", expires_at: null, updates_until: null, max_activations: 3, active_activations: 0, max_rehosts: null, rehost_count: 0,
   entitlements: { features: ["sso"], limits: { seats: 10, nodes: -1 } }, external_refs: {},
   issued_at: "2026-11-01T00:00:00Z", suspended_at: null, revoked_at: null, created_at: "2026-11-01T00:00:00Z",
 };

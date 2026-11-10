@@ -47,6 +47,8 @@ const (
 	FieldMaxOfflineSeconds = "max_offline_seconds"
 	// FieldGraceSeconds holds the string denoting the grace_seconds field in the database.
 	FieldGraceSeconds = "grace_seconds"
+	// FieldUpdatesMonths holds the string denoting the updates_months field in the database.
+	FieldUpdatesMonths = "updates_months"
 	// FieldArchivedAt holds the string denoting the archived_at field in the database.
 	FieldArchivedAt = "archived_at"
 	// EdgeProduct holds the string denoting the product edge name in mutations.
@@ -99,6 +101,7 @@ var Columns = []string{
 	FieldLeaseSeconds,
 	FieldMaxOfflineSeconds,
 	FieldGraceSeconds,
+	FieldUpdatesMonths,
 	FieldArchivedAt,
 }
 
@@ -147,6 +150,8 @@ var (
 	DefaultGraceSeconds int64
 	// GraceSecondsValidator is a validator for the "grace_seconds" field. It is called by the builders before save.
 	GraceSecondsValidator func(int64) error
+	// UpdatesMonthsValidator is a validator for the "updates_months" field. It is called by the builders before save.
+	UpdatesMonthsValidator func(int) error
 	// DefaultID holds the default value on creation for the "id" field.
 	DefaultID func() string
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
@@ -292,6 +297,11 @@ func ByMaxOfflineSeconds(opts ...sql.OrderTermOption) OrderOption {
 // ByGraceSeconds orders the results by the grace_seconds field.
 func ByGraceSeconds(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGraceSeconds, opts...).ToFunc()
+}
+
+// ByUpdatesMonths orders the results by the updates_months field.
+func ByUpdatesMonths(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpdatesMonths, opts...).ToFunc()
 }
 
 // ByArchivedAt orders the results by the archived_at field.

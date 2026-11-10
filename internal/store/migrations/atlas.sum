@@ -1,4 +1,4 @@
-h1:1PL+kY9ADVyQzcXEMFH+Ug3d1tCdWdsF0xqSwbj04+E=
+h1:MWnbY46vr1mdT/x1+2oKyJxarKSzaxuxk2lVbXThzbg=
 20261102191308_init.sql h1:6Pgws2SXWTmTj6MyizTnk6VipANCaLkFuvsSUuJXMDY=
 20261102191359_security.sql h1:+KhGvdV+eEdBDdTKn8yo9VZ/mSSTksT7HdPVQa7KdO0=
 20261102202549_catalog.sql h1:a4YteKKAqx70myXH8szNEFy9xZotzGm4wmWSMQ3NtlY=
@@ -47,3 +47,4 @@ h1:1PL+kY9ADVyQzcXEMFH+Ug3d1tCdWdsF0xqSwbj04+E=
 20261108213721_offline_activation_security.sql h1:rxUwN+tPlnI4x3HNFJf9CmHCD0hPC+9p8E1UC2/n6Yk=
 20261109205924_webhooks.sql h1:YHi5ScjqWwUBJvaS9SL7jUVajXOhpnfK/j/kqtbui1M=
 20261109205925_webhooks_security.sql h1:Pvnxukku5Hs5OvYOQcEZy17VVHTeGKu4KbTZBtzgLvM=
+20261110150546_plan_updates_months.sql h1:nZinTsnWoACmkOC2z6QyOfAaGOMp7sfGgrHRyklyOc0=

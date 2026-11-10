@@ -1033,6 +1033,9 @@ type License struct {
 	Status      LicenseStatus `json:"status"`
 	SuspendedAt *time.Time    `json:"suspended_at"`
 	Type        LicenseType   `json:"type"`
+
+	// UpdatesUntil Maintenance end (ADR-0045): builds dated after it aren't covered (the SDK's updates_expired). Null covers every build. Set at issue from the plan's updates_months.
+	UpdatesUntil *time.Time `json:"updates_until"`
 }
 
 // LicenseExpiryBasis defines model for License.ExpiryBasis.
@@ -1105,6 +1108,9 @@ type LicenseIssued struct {
 	Status      LicenseStatus     `json:"status"`
 	SuspendedAt *time.Time        `json:"suspended_at"`
 	Type        LicenseIssuedType `json:"type"`
+
+	// UpdatesUntil Maintenance end (ADR-0045): builds dated after it aren't covered (the SDK's updates_expired). Null covers every build. Set at issue from the plan's updates_months.
+	UpdatesUntil *time.Time `json:"updates_until"`
 }
 
 // LicenseIssuedExpiryBasis defines model for LicenseIssued.ExpiryBasis.
@@ -1268,6 +1274,9 @@ type Plan struct {
 
 	// Slug Copied into licenses. Immutable.
 	Slug string `json:"slug"`
+
+	// UpdatesMonths Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build.
+	UpdatesMonths *int `json:"updates_months"`
 }
 
 // PlanBindType What an activation binds to; none is a site license (no activations). Immutable.
@@ -1300,6 +1309,9 @@ type PlanCreate struct {
 	OfflineAllowed *bool  `json:"offline_allowed,omitempty"`
 	ProductId      string `json:"product_id"`
 	Slug           string `json:"slug"`
+
+	// UpdatesMonths Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build.
+	UpdatesMonths *int `json:"updates_months,omitempty"`
 }
 
 // PlanCreateBindType What an activation binds to; none is a site license (no activations). Immutable.
@@ -1345,6 +1357,9 @@ type PlanPatch struct {
 	MaxRehosts     *int    `json:"max_rehosts,omitempty"`
 	Name           *string `json:"name,omitempty"`
 	OfflineAllowed *bool   `json:"offline_allowed,omitempty"`
+
+	// UpdatesMonths Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build.
+	UpdatesMonths *int `json:"updates_months,omitempty"`
 }
 
 // PlanPatchExpiryBasis defines model for PlanPatch.ExpiryBasis.

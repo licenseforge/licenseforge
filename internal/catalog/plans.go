@@ -41,6 +41,7 @@ type Terms struct {
 	LeaseSeconds      int64
 	MaxOfflineSeconds *int64
 	GraceSeconds      int64
+	UpdatesMonths     *int // maintenance from issue (ADR-0045); nil: every build covered
 }
 
 // PlanInput is a new plan.
@@ -55,6 +56,7 @@ type PlanInput struct {
 type PlanPatch struct {
 	Name                                       *string
 	DurationMonths, MaxActivations, MaxRehosts *int
+	UpdatesMonths                              *int
 	DurationSeconds, MaxOfflineSeconds         *int64
 	ExpiryBasis                                *plan.ExpiryBasis
 	OfflineAllowed                             *bool
@@ -177,7 +179,7 @@ func (s Plans) Create(ctx context.Context, in PlanInput) (*ent.Plan, error) {
 			SetNillableDurationMonths(t.DurationMonths).SetNillableDurationSeconds(t.DurationSeconds).SetExpiryBasis(t.ExpiryBasis).
 			SetNillableMaxActivations(t.MaxActivations).SetNillableMaxRehosts(t.MaxRehosts).SetBindType(t.BindType).
 			SetOfflineAllowed(t.OfflineAllowed).SetLeaseSeconds(t.LeaseSeconds).SetNillableMaxOfflineSeconds(t.MaxOfflineSeconds).
-			SetGraceSeconds(t.GraceSeconds).Save(ctx)
+			SetGraceSeconds(t.GraceSeconds).SetNillableUpdatesMonths(t.UpdatesMonths).Save(ctx)
 		var pe *pgconn.PgError
 		if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "plan_product_id_slug" {
 			return &InvalidError{Field: "/slug", Message: "already used by a plan of this product", Conflict: true}
@@ -204,14 +206,15 @@ func (s Plans) Create(ctx context.Context, in PlanInput) (*ent.Plan, error) {
 func (s Plans) Update(ctx context.Context, id string, patch PlanPatch) (*ent.Plan, error) {
 	return s.change(ctx, "plan.update", id, func(tx *ent.Tx, p *ent.Plan) (*ent.Plan, map[string]any, error) {
 		for _, n := range patch.Null {
-			if !slices.Contains([]string{"duration_months", "duration_seconds", "max_activations", "max_rehosts", "max_offline_seconds"}, n) {
+			if !slices.Contains([]string{"duration_months", "duration_seconds", "max_activations", "max_rehosts", "max_offline_seconds", "updates_months"}, n) {
 				return nil, nil, &InvalidError{Field: "/" + n, Message: "can't be null"}
 			}
 		}
 		name := p.Name
 		t := Terms{DurationMonths: p.DurationMonths, DurationSeconds: p.DurationSeconds, ExpiryBasis: p.ExpiryBasis,
 			MaxActivations: p.MaxActivations, MaxRehosts: p.MaxRehosts, BindType: p.BindType, OfflineAllowed: p.OfflineAllowed,
-			LeaseSeconds: p.LeaseSeconds, MaxOfflineSeconds: p.MaxOfflineSeconds, GraceSeconds: p.GraceSeconds}
+			LeaseSeconds: p.LeaseSeconds, MaxOfflineSeconds: p.MaxOfflineSeconds, GraceSeconds: p.GraceSeconds,
+			UpdatesMonths: p.UpdatesMonths}
 		var changed []string
 		set := func(field string, given bool, apply func()) {
 			if given {
@@ -230,6 +233,7 @@ func (s Plans) Update(ctx context.Context, id string, patch PlanPatch) (*ent.Pla
 		set("lease_seconds", patch.LeaseSeconds != nil, func() { t.LeaseSeconds = *patch.LeaseSeconds })
 		set("max_offline_seconds", patch.MaxOfflineSeconds != nil || null("max_offline_seconds"), func() { t.MaxOfflineSeconds = patch.MaxOfflineSeconds })
 		set("grace_seconds", patch.GraceSeconds != nil, func() { t.GraceSeconds = *patch.GraceSeconds })
+		set("updates_months", patch.UpdatesMonths != nil || null("updates_months"), func() { t.UpdatesMonths = patch.UpdatesMonths })
 		if err := validName(name); err != nil {
 			return nil, nil, err
 		}
@@ -239,7 +243,8 @@ func (s Plans) Update(ctx context.Context, id string, patch PlanPatch) (*ent.Pla
 		u := tx.Plan.UpdateOne(p).SetName(name).SetExpiryBasis(t.ExpiryBasis).SetOfflineAllowed(t.OfflineAllowed).
 			SetLeaseSeconds(t.LeaseSeconds).SetGraceSeconds(t.GraceSeconds).
 			SetNillableDurationMonths(t.DurationMonths).SetNillableDurationSeconds(t.DurationSeconds).
-			SetNillableMaxActivations(t.MaxActivations).SetNillableMaxRehosts(t.MaxRehosts).SetNillableMaxOfflineSeconds(t.MaxOfflineSeconds)
+			SetNillableMaxActivations(t.MaxActivations).SetNillableMaxRehosts(t.MaxRehosts).SetNillableMaxOfflineSeconds(t.MaxOfflineSeconds).
+			SetNillableUpdatesMonths(t.UpdatesMonths)
 		// SetNillable leaves a column as is for nil: clear the unset terms.
 		if t.DurationMonths == nil {
 			u.ClearDurationMonths()
@@ -255,6 +260,9 @@ func (s Plans) Update(ctx context.Context, id string, patch PlanPatch) (*ent.Pla
 		}
 		if t.MaxOfflineSeconds == nil {
 			u.ClearMaxOfflineSeconds()
+		}
+		if t.UpdatesMonths == nil {
+			u.ClearUpdatesMonths()
 		}
 		p, err := u.Save(ctx)
 		return p, map[string]any{"changed": changed}, err
@@ -337,6 +345,8 @@ func validTerms(t Terms) error {
 		return bad("/max_offline_seconds", "0 to 3153600000, or null")
 	case t.GraceSeconds < 0 || t.GraceSeconds > maxSeconds:
 		return bad("/grace_seconds", "0 to 3153600000")
+	case t.UpdatesMonths != nil && (*t.UpdatesMonths < 1 || *t.UpdatesMonths > 1200):
+		return bad("/updates_months", "1 to 1200, or null for every build")
 	case t.BindType == plan.BindTypeNone && t.ExpiryBasis == plan.ExpiryBasisFromFirstActivation:
 		return bad("/expiry_basis", "a site license (bind_type none) has no activation to start from")
 	case t.BindType == plan.BindTypeNone && t.MaxActivations != nil:

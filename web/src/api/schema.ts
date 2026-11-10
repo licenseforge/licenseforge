@@ -1572,6 +1572,11 @@ export interface components {
              * @description Null for a perpetual license
              */
             expires_at: string | null;
+            /**
+             * Format: date-time
+             * @description Maintenance end (ADR-0045): builds dated after it aren't covered (the SDK's updates_expired). Null covers every build. Set at issue from the plan's updates_months.
+             */
+            updates_until: string | null;
             max_activations: number | null;
             /** @description Seats taken now (activations not deactivated). */
             active_activations: number;
@@ -1722,6 +1727,8 @@ export interface components {
             max_offline_seconds: number | null;
             /** Format: int64 */
             grace_seconds: number;
+            /** @description Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build. */
+            updates_months: number | null;
             /**
              * @description What an activation binds to; none is a site license (no activations). Immutable.
              * @enum {string}
@@ -1762,6 +1769,8 @@ export interface components {
             max_offline_seconds?: number | null;
             /** Format: int64 */
             grace_seconds?: number;
+            /** @description Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build. */
+            updates_months?: number | null;
             /**
              * @description What an activation binds to; none is a site license (no activations). Immutable.
              * @enum {string}
@@ -1811,6 +1820,8 @@ export interface components {
             max_offline_seconds?: number | null;
             /** Format: int64 */
             grace_seconds?: number;
+            /** @description Maintenance (ADR-0045): a license issued on this plan covers builds dated up to this many calendar months after its issue (its updates_until). Null covers every build. */
+            updates_months?: number | null;
         };
         Customer: {
             /** @example cus_01jcz5b2y3c4d5e6f7g8h9j0k1 */

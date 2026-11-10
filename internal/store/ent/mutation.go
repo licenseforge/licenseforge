@@ -14595,6 +14595,8 @@ type PlanMutation struct {
 	addmax_offline_seconds *int64
 	grace_seconds          *int64
 	addgrace_seconds       *int64
+	updates_months         *int
+	addupdates_months      *int
 	archived_at            *time.Time
 	clearedFields          map[string]struct{}
 	product                *string
@@ -15500,6 +15502,76 @@ func (m *PlanMutation) ResetGraceSeconds() {
 	m.addgrace_seconds = nil
 }
 
+// SetUpdatesMonths sets the "updates_months" field.
+func (m *PlanMutation) SetUpdatesMonths(i int) {
+	m.updates_months = &i
+	m.addupdates_months = nil
+}
+
+// UpdatesMonths returns the value of the "updates_months" field in the mutation.
+func (m *PlanMutation) UpdatesMonths() (r int, exists bool) {
+	v := m.updates_months
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatesMonths returns the old "updates_months" field's value of the Plan entity.
+// If the Plan object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PlanMutation) OldUpdatesMonths(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatesMonths is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatesMonths requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatesMonths: %w", err)
+	}
+	return oldValue.UpdatesMonths, nil
+}
+
+// AddUpdatesMonths adds i to the "updates_months" field.
+func (m *PlanMutation) AddUpdatesMonths(i int) {
+	if m.addupdates_months != nil {
+		*m.addupdates_months += i
+	} else {
+		m.addupdates_months = &i
+	}
+}
+
+// AddedUpdatesMonths returns the value that was added to the "updates_months" field in this mutation.
+func (m *PlanMutation) AddedUpdatesMonths() (r int, exists bool) {
+	v := m.addupdates_months
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearUpdatesMonths clears the value of the "updates_months" field.
+func (m *PlanMutation) ClearUpdatesMonths() {
+	m.updates_months = nil
+	m.addupdates_months = nil
+	m.clearedFields[plan.FieldUpdatesMonths] = struct{}{}
+}
+
+// UpdatesMonthsCleared returns if the "updates_months" field was cleared in this mutation.
+func (m *PlanMutation) UpdatesMonthsCleared() bool {
+	_, ok := m.clearedFields[plan.FieldUpdatesMonths]
+	return ok
+}
+
+// ResetUpdatesMonths resets all changes to the "updates_months" field.
+func (m *PlanMutation) ResetUpdatesMonths() {
+	m.updates_months = nil
+	m.addupdates_months = nil
+	delete(m.clearedFields, plan.FieldUpdatesMonths)
+}
+
 // SetArchivedAt sets the "archived_at" field.
 func (m *PlanMutation) SetArchivedAt(t time.Time) {
 	m.archived_at = &t
@@ -15718,7 +15790,7 @@ func (m *PlanMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PlanMutation) Fields() []string {
-	fields := make([]string, 0, 17)
+	fields := make([]string, 0, 18)
 	if m.tenant_id != nil {
 		fields = append(fields, plan.FieldTenantID)
 	}
@@ -15767,6 +15839,9 @@ func (m *PlanMutation) Fields() []string {
 	if m.grace_seconds != nil {
 		fields = append(fields, plan.FieldGraceSeconds)
 	}
+	if m.updates_months != nil {
+		fields = append(fields, plan.FieldUpdatesMonths)
+	}
 	if m.archived_at != nil {
 		fields = append(fields, plan.FieldArchivedAt)
 	}
@@ -15810,6 +15885,8 @@ func (m *PlanMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxOfflineSeconds()
 	case plan.FieldGraceSeconds:
 		return m.GraceSeconds()
+	case plan.FieldUpdatesMonths:
+		return m.UpdatesMonths()
 	case plan.FieldArchivedAt:
 		return m.ArchivedAt()
 	}
@@ -15853,6 +15930,8 @@ func (m *PlanMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldMaxOfflineSeconds(ctx)
 	case plan.FieldGraceSeconds:
 		return m.OldGraceSeconds(ctx)
+	case plan.FieldUpdatesMonths:
+		return m.OldUpdatesMonths(ctx)
 	case plan.FieldArchivedAt:
 		return m.OldArchivedAt(ctx)
 	}
@@ -15976,6 +16055,13 @@ func (m *PlanMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetGraceSeconds(v)
 		return nil
+	case plan.FieldUpdatesMonths:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatesMonths(v)
+		return nil
 	case plan.FieldArchivedAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -16012,6 +16098,9 @@ func (m *PlanMutation) AddedFields() []string {
 	if m.addgrace_seconds != nil {
 		fields = append(fields, plan.FieldGraceSeconds)
 	}
+	if m.addupdates_months != nil {
+		fields = append(fields, plan.FieldUpdatesMonths)
+	}
 	return fields
 }
 
@@ -16034,6 +16123,8 @@ func (m *PlanMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedMaxOfflineSeconds()
 	case plan.FieldGraceSeconds:
 		return m.AddedGraceSeconds()
+	case plan.FieldUpdatesMonths:
+		return m.AddedUpdatesMonths()
 	}
 	return nil, false
 }
@@ -16092,6 +16183,13 @@ func (m *PlanMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddGraceSeconds(v)
 		return nil
+	case plan.FieldUpdatesMonths:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUpdatesMonths(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Plan numeric field %s", name)
 }
@@ -16114,6 +16212,9 @@ func (m *PlanMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(plan.FieldMaxOfflineSeconds) {
 		fields = append(fields, plan.FieldMaxOfflineSeconds)
+	}
+	if m.FieldCleared(plan.FieldUpdatesMonths) {
+		fields = append(fields, plan.FieldUpdatesMonths)
 	}
 	if m.FieldCleared(plan.FieldArchivedAt) {
 		fields = append(fields, plan.FieldArchivedAt)
@@ -16146,6 +16247,9 @@ func (m *PlanMutation) ClearField(name string) error {
 		return nil
 	case plan.FieldMaxOfflineSeconds:
 		m.ClearMaxOfflineSeconds()
+		return nil
+	case plan.FieldUpdatesMonths:
+		m.ClearUpdatesMonths()
 		return nil
 	case plan.FieldArchivedAt:
 		m.ClearArchivedAt()
@@ -16205,6 +16309,9 @@ func (m *PlanMutation) ResetField(name string) error {
 		return nil
 	case plan.FieldGraceSeconds:
 		m.ResetGraceSeconds()
+		return nil
+	case plan.FieldUpdatesMonths:
+		m.ResetUpdatesMonths()
 		return nil
 	case plan.FieldArchivedAt:
 		m.ResetArchivedAt()

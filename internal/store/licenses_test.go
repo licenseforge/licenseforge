@@ -276,6 +276,7 @@ func TestLicenseConstraintsInDatabase(t *testing.T) {
 		"limit above 2^53-1":                 {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": 9007199254740992}}' WHERE id = $1`, l.license.ID},
 		"limit null":                         {`UPDATE licenses SET entitlements = '{"features": [], "limits": {"n": null}}' WHERE id = $1`, l.license.ID},
 		"expires before issue":               {`UPDATE licenses SET expires_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
+		"updates until at issue":             {`UPDATE licenses SET updates_until = issued_at WHERE id = $1`, l.license.ID},
 		"activated before issue":             {`UPDATE licenses SET first_activated_at = issued_at - interval '1 day' WHERE id = $1`, l.license.ID},
 		"perpetual with expiry":              {`UPDATE licenses SET duration_months = NULL, expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},
 		"unstarted with expiry":              {`UPDATE licenses SET expiry_basis = 'from_first_activation', expires_at = issued_at + interval '1 day' WHERE id = $1`, l.license.ID},

@@ -43,7 +43,7 @@ func (s *server) CreatePlan(ctx context.Context, req apigen.CreatePlanRequestObj
 	// Defaults (spec: PlanCreate).
 	t := catalog.Terms{ExpiryBasis: plan.ExpiryBasisFromIssue, BindType: plan.BindTypeMachine, LeaseSeconds: 7 * 24 * 3600,
 		DurationMonths: b.DurationMonths, DurationSeconds: b.DurationSeconds, MaxActivations: b.MaxActivations,
-		MaxRehosts: b.MaxRehosts, MaxOfflineSeconds: b.MaxOfflineSeconds}
+		MaxRehosts: b.MaxRehosts, MaxOfflineSeconds: b.MaxOfflineSeconds, UpdatesMonths: b.UpdatesMonths}
 	if b.ExpiryBasis != nil {
 		t.ExpiryBasis = plan.ExpiryBasis(*b.ExpiryBasis)
 	}
@@ -78,9 +78,9 @@ func (s *server) UpdatePlan(ctx context.Context, req apigen.UpdatePlanRequestObj
 	b := req.Body
 	patch := catalog.PlanPatch{Name: b.Name, DurationMonths: b.DurationMonths, DurationSeconds: b.DurationSeconds,
 		MaxActivations: b.MaxActivations, MaxRehosts: b.MaxRehosts, MaxOfflineSeconds: b.MaxOfflineSeconds,
-		OfflineAllowed: b.OfflineAllowed, LeaseSeconds: b.LeaseSeconds, GraceSeconds: b.GraceSeconds,
+		OfflineAllowed: b.OfflineAllowed, LeaseSeconds: b.LeaseSeconds, GraceSeconds: b.GraceSeconds, UpdatesMonths: b.UpdatesMonths,
 		Null: nulls(ctx, "name", "duration_months", "duration_seconds", "expiry_basis", "max_activations", "max_rehosts",
-			"offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds")}
+			"offline_allowed", "lease_seconds", "max_offline_seconds", "grace_seconds", "updates_months")}
 	if b.ExpiryBasis != nil {
 		e := plan.ExpiryBasis(*b.ExpiryBasis)
 		patch.ExpiryBasis = &e
@@ -105,7 +105,7 @@ func planView(p *ent.Plan) apigen.Plan {
 		DurationMonths: p.DurationMonths, DurationSeconds: p.DurationSeconds, ExpiryBasis: apigen.PlanExpiryBasis(p.ExpiryBasis),
 		MaxActivations: p.MaxActivations, MaxRehosts: p.MaxRehosts, BindType: apigen.PlanBindType(p.BindType),
 		OfflineAllowed: p.OfflineAllowed, LeaseSeconds: p.LeaseSeconds, MaxOfflineSeconds: p.MaxOfflineSeconds,
-		GraceSeconds: p.GraceSeconds, CreatedAt: p.CreatedAt.UTC()}
+		GraceSeconds: p.GraceSeconds, UpdatesMonths: p.UpdatesMonths, CreatedAt: p.CreatedAt.UTC()}
 	if p.ArchivedAt != nil {
 		t := p.ArchivedAt.UTC()
 		v.ArchivedAt = &t

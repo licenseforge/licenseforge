@@ -197,7 +197,7 @@ describe("editing a plan", () => {
   const pro = {
     id: "pln_1", product_id: "prd_1", slug: "pro", name: "Pro", duration_months: 12, duration_seconds: null, expiry_basis: "from_issue" as const,
     max_activations: 3, max_rehosts: null, bind_type: "machine" as const, offline_allowed: false, lease_seconds: 604800, max_offline_seconds: null,
-    grace_seconds: 0, archived_at: null, created_at: "",
+    grace_seconds: 0, updates_months: null, archived_at: null, created_at: "",
   };
   it("shows durations in the largest exact unit", () => {
     expect([splitDuration(604800), splitDuration(5400), splitDuration(90), splitDuration(7)]).toEqual([

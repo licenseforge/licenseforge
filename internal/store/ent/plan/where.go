@@ -135,6 +135,11 @@ func GraceSeconds(v int64) predicate.Plan {
 	return predicate.Plan(sql.FieldEQ(FieldGraceSeconds, v))
 }
 
+// UpdatesMonths applies equality check predicate on the "updates_months" field. It's identical to UpdatesMonthsEQ.
+func UpdatesMonths(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldEQ(FieldUpdatesMonths, v))
+}
+
 // ArchivedAt applies equality check predicate on the "archived_at" field. It's identical to ArchivedAtEQ.
 func ArchivedAt(v time.Time) predicate.Plan {
 	return predicate.Plan(sql.FieldEQ(FieldArchivedAt, v))
@@ -858,6 +863,56 @@ func GraceSecondsLT(v int64) predicate.Plan {
 // GraceSecondsLTE applies the LTE predicate on the "grace_seconds" field.
 func GraceSecondsLTE(v int64) predicate.Plan {
 	return predicate.Plan(sql.FieldLTE(FieldGraceSeconds, v))
+}
+
+// UpdatesMonthsEQ applies the EQ predicate on the "updates_months" field.
+func UpdatesMonthsEQ(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldEQ(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsNEQ applies the NEQ predicate on the "updates_months" field.
+func UpdatesMonthsNEQ(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldNEQ(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsIn applies the In predicate on the "updates_months" field.
+func UpdatesMonthsIn(vs ...int) predicate.Plan {
+	return predicate.Plan(sql.FieldIn(FieldUpdatesMonths, vs...))
+}
+
+// UpdatesMonthsNotIn applies the NotIn predicate on the "updates_months" field.
+func UpdatesMonthsNotIn(vs ...int) predicate.Plan {
+	return predicate.Plan(sql.FieldNotIn(FieldUpdatesMonths, vs...))
+}
+
+// UpdatesMonthsGT applies the GT predicate on the "updates_months" field.
+func UpdatesMonthsGT(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldGT(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsGTE applies the GTE predicate on the "updates_months" field.
+func UpdatesMonthsGTE(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldGTE(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsLT applies the LT predicate on the "updates_months" field.
+func UpdatesMonthsLT(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldLT(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsLTE applies the LTE predicate on the "updates_months" field.
+func UpdatesMonthsLTE(v int) predicate.Plan {
+	return predicate.Plan(sql.FieldLTE(FieldUpdatesMonths, v))
+}
+
+// UpdatesMonthsIsNil applies the IsNil predicate on the "updates_months" field.
+func UpdatesMonthsIsNil() predicate.Plan {
+	return predicate.Plan(sql.FieldIsNull(FieldUpdatesMonths))
+}
+
+// UpdatesMonthsNotNil applies the NotNil predicate on the "updates_months" field.
+func UpdatesMonthsNotNil() predicate.Plan {
+	return predicate.Plan(sql.FieldNotNull(FieldUpdatesMonths))
 }
 
 // ArchivedAtEQ applies the EQ predicate on the "archived_at" field.

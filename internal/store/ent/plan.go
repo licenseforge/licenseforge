@@ -50,6 +50,8 @@ type Plan struct {
 	MaxOfflineSeconds *int64 `json:"max_offline_seconds,omitempty"`
 	// GraceSeconds holds the value of the "grace_seconds" field.
 	GraceSeconds int64 `json:"grace_seconds,omitempty"`
+	// maintenance from issue (ADR-0045); nil = every build covered
+	UpdatesMonths *int `json:"updates_months,omitempty"`
 	// ArchivedAt holds the value of the "archived_at" field.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -107,7 +109,7 @@ func (*Plan) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case plan.FieldOfflineAllowed:
 			values[i] = new(sql.NullBool)
-		case plan.FieldDurationMonths, plan.FieldDurationSeconds, plan.FieldMaxActivations, plan.FieldMaxRehosts, plan.FieldLeaseSeconds, plan.FieldMaxOfflineSeconds, plan.FieldGraceSeconds:
+		case plan.FieldDurationMonths, plan.FieldDurationSeconds, plan.FieldMaxActivations, plan.FieldMaxRehosts, plan.FieldLeaseSeconds, plan.FieldMaxOfflineSeconds, plan.FieldGraceSeconds, plan.FieldUpdatesMonths:
 			values[i] = new(sql.NullInt64)
 		case plan.FieldID, plan.FieldTenantID, plan.FieldProductID, plan.FieldSlug, plan.FieldName, plan.FieldExpiryBasis, plan.FieldBindType:
 			values[i] = new(sql.NullString)
@@ -235,6 +237,13 @@ func (_m *Plan) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.GraceSeconds = value.Int64
 			}
+		case plan.FieldUpdatesMonths:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field updates_months", values[i])
+			} else if value.Valid {
+				_m.UpdatesMonths = new(int)
+				*_m.UpdatesMonths = int(value.Int64)
+			}
 		case plan.FieldArchivedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field archived_at", values[i])
@@ -350,6 +359,11 @@ func (_m *Plan) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("grace_seconds=")
 	builder.WriteString(fmt.Sprintf("%v", _m.GraceSeconds))
+	builder.WriteString(", ")
+	if v := _m.UpdatesMonths; v != nil {
+		builder.WriteString("updates_months=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	if v := _m.ArchivedAt; v != nil {
 		builder.WriteString("archived_at=")

@@ -119,6 +119,7 @@ func (License) Annotations() []schema.Annotation {
 		"licenses_bind_valid":   enumCheck("bind_type", bindPolicies),
 		// Expiry semantics.
 		"licenses_expiry_after_issue":    `expires_at IS NULL OR expires_at > issued_at`,
+		"licenses_updates_after_issue":   `updates_until IS NULL OR updates_until > issued_at`,
 		"licenses_activated_after_issue": `first_activated_at IS NULL OR first_activated_at >= issued_at`,
 		"licenses_perpetual_no_expiry":   `num_nonnulls(duration_months, duration_seconds) > 0 OR expires_at IS NULL`,
 		"licenses_unstarted_no_expiry":   `(expiry_basis)::text <> 'from_first_activation'::text OR first_activated_at IS NOT NULL OR expires_at IS NULL`,

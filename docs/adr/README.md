@@ -48,3 +48,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0042](0042-platform-tenant-onboarding.md) | Platform tenant onboarding | accepted |
 | [ADR-0043](0043-offline-activation-and-deactivation-receipts.md) | Offline activation and deactivation receipts | accepted |
 | [ADR-0044](0044-outbound-webhooks.md) | Outbound webhooks | accepted |
+| [ADR-0045](0045-maintenance-entitlement-updates-until.md) | Maintenance entitlement updates_until | accepted |
