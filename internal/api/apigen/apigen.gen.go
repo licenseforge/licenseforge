@@ -1642,7 +1642,7 @@ type WebhookDeliveryState struct {
 	// NextAttemptAt When it is tried again; null: as soon as it's due.
 	NextAttemptAt *time.Time `json:"next_attempt_at"`
 
-	// NextSeq The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending.
+	// NextSeq The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending within the next 10,000 audit entries (an endpoint far behind: use skip-to-now).
 	NextSeq *int64 `json:"next_seq"`
 
 	// Seq The last audit entry passed (events after it are pending).

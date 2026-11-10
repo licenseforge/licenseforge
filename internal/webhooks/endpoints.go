@@ -88,7 +88,8 @@ type Endpoint struct {
 	NextAttemptAt *time.Time
 	InFlight      bool
 	// NextSeq is the next event it will send (the one held back while it
-	// retries: what SkipEvent takes); 0 if none is pending.
+	// retries: what SkipEvent takes); 0 if none is pending within the next
+	// nextSeqWithin entries.
 	NextSeq int64
 }
 
@@ -255,9 +256,14 @@ func current(ctx context.Context, tx *ent.Tx, tenantID string, e *Endpoint) erro
 		return err
 	}
 	var err error
-	e.NextSeq, err = nextEvent(ctx, tx, tenantID, e.Seq, e.Events)
+	e.NextSeq, err = nextEventWithin(ctx, tx, tenantID, e.Seq, e.Events, nextSeqWithin)
 	return err
 }
+
+// nextSeqWithin bounds the look-ahead for NextSeq: an event held back sits
+// right after the cursor (the dispatcher moves it there), so this only cuts
+// the scan for an endpoint far behind (disabled while its chain grew).
+const nextSeqWithin = 10000
 
 // state fills e's delivery state from its cursor (explicit columns: the
 // tenant pool can't read the lease holder).

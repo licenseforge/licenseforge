@@ -578,8 +578,9 @@ func TestCancelAndExpiredPrevious(t *testing.T) {
 		t.Errorf("an expired previous secret signed: %q", sig)
 	}
 	cancel()
+	err := <-done // the cancelled send returns while the receiver still holds it
 	close(hold)
-	if err := <-done; err == nil {
+	if err == nil {
 		t.Error("a cancelled send reported no error")
 	}
 	if _, a, _, holder := f.cursor(t, c.ID); a != 0 || holder != nil || len(f.deliveries(t, c.ID)) != 0 {

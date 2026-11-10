@@ -2279,7 +2279,7 @@ components:
         attempts: { type: integer, description: "Failed attempts of the next event (0 to 8)." }
         next_attempt_at: { type: string, format: date-time, nullable: true, description: "When it is tried again; null: as soon as it's due." }
         in_flight: { type: boolean, description: A send is in progress. }
-        next_seq: { type: integer, format: int64, nullable: true, description: "The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending." }
+        next_seq: { type: integer, format: int64, nullable: true, description: "The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending within the next 10,000 audit entries (an endpoint far behind: use skip-to-now)." }
     WebhookList:
       type: object
       required: [items]

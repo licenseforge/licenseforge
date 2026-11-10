@@ -2037,7 +2037,7 @@ export interface components {
             in_flight: boolean;
             /**
              * Format: int64
-             * @description The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending.
+             * @description The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending within the next 10,000 audit entries (an endpoint far behind: use skip-to-now).
              */
             next_seq: number | null;
         };

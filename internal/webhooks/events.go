@@ -57,9 +57,15 @@ func actionsFor(events []string) []string {
 // indexed query (EventType's rules in SQL), so it is cheap under the
 // endpoint's locks however long the chain.
 func nextEvent(ctx context.Context, tx *ent.Tx, tenantID string, seq int64, events []string) (int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT seq FROM audit_events WHERE tenant_id = $1 AND seq > $2 AND outcome = 'success'
+	return nextEventWithin(ctx, tx, tenantID, seq, events, 0)
+}
+
+// nextEventWithin is nextEvent looking at most within entries after seq (0:
+// no bound): what a read shows, cheaply even for an endpoint far behind.
+func nextEventWithin(ctx context.Context, tx *ent.Tx, tenantID string, seq int64, events []string, within int64) (int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT seq FROM audit_events WHERE tenant_id = $1 AND seq > $2 AND ($4 = 0 OR seq <= $2 + $4) AND outcome = 'success'
 		AND action = ANY($3) AND (action <> 'activation.offline' OR (json_typeof(details->'new_seat') = 'boolean' AND details->>'new_seat' = 'true')) ORDER BY seq LIMIT 1`,
-		tenantID, seq, pgtype.FlatArray[string](actionsFor(events)))
+		tenantID, seq, pgtype.FlatArray[string](actionsFor(events)), within)
 	if err != nil {
 		return 0, err
 	}

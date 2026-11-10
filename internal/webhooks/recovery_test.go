@@ -199,3 +199,27 @@ func TestSkipNothingPending(t *testing.T) {
 		t.Errorf("retry state reset by a refused skip: %d", e.Attempts)
 	}
 }
+
+// The look-ahead bound: an event further than within entries ahead isn't
+// seen (0: no bound).
+func TestNextEventWithin(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	base := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	rev := f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, nil) // base+2
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		for within, want := range map[int64]int64{1: 0, 2: rev, 0: rev} {
+			got, err := nextEventWithin(ctx, tx, f.a, base, []string{"license.revoked"}, within)
+			if err != nil {
+				return err
+			}
+			if got != want {
+				t.Errorf("within %d: %d, want %d", within, got, want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
