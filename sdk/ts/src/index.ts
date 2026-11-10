@@ -1,4 +1,4 @@
-// LicenseForge SDK for Node.js (ADR-0010): server-side, Node 20+, no
+// LicenseForge SDK for Node.js (ADR-0010): server-side, Node 22+, no
 // runtime dependencies. spec/license-format.md is the reference.
 export {
   check,

@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 ### Security
+- **TypeScript SDK releases** (`@licenseforge/sdk` on npm, tag `sdk/ts/vX.Y.Z`): `sdk-ts-release.yml` builds and tests the tarball with a read-only token, checks its contents and installs it in an empty project, then publishes it from the protected `npm` environment with npm trusted publishing (no npm token) and provenance. Prereleases go to the `next` dist-tag. The first version is `0.1.0-alpha.1`; `SDK_VERSION` follows `package.json` (tested). See [verifying releases](docs/verifying-releases.md).
 - **Secrets as files, not environment variables** (DISA Kubernetes STIG V-242415).
   - **Server:** every secret setting (the database URLs, master keys, OIDC client secret, OTLP headers) can be read from the file `<VARIABLE>_FILE` names. Setting both forms, or giving an empty or unreadable file, is an error, and the server refuses the owner and retention logins given as files too.
   - **Chart:** the server, the migration Job and the retention CronJob now get their Secrets as read-only mounted files, not `secretKeyRef` env. The chart test fails on any secret env value or `envFrom`, and the hardening guide's known deviation is gone.
