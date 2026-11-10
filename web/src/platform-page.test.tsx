@@ -61,7 +61,7 @@ it("lists tenants, creates one and shows the owner's invite link once", async ()
   }
   await act(async () => el.querySelector("form")!.requestSubmit());
   await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toContain(`/invite#token=${TOKEN}`));
-  expect(body).toEqual({ slug: "globex", name: "Globex", owner_email: "o@globex.example" });
+  expect(body).toEqual({ slug: "globex", name: "Globex", owner_email: "o@globex.example", test: false }); // live unless asked
   expect(el.textContent).toContain("o@globex.example");
 
   await act(async () => button(el, "Close").click());
@@ -248,4 +248,33 @@ it("offers a new owner invite only for tenants nobody has joined yet", async () 
   expect(el.querySelector('button[aria-label="New owner invite for Acme Corp (acme)"]')).not.toBeNull();
   expect(el.querySelector('button[aria-label="New owner invite for Busy Co (busy)"]')).toBeNull();
   act(() => root.unmount());
+});
+
+it("creates a test-mode tenant when asked, and marks test tenants in the list (ADR-0047)", async () => {
+  let body: unknown;
+  const { el } = await render(async (req) => {
+    if (req.method === "POST") {
+      body = await req.json();
+      return json({ tenant: { ...tenant, id: "tnt_2", slug: "sandbox", name: "Sandbox", test: true }, invitation: { id: "inv_1", email: "o@s.example", role: "owner", expires_at: "2026-11-15T00:00:00Z", token: TOKEN } }, 201);
+    }
+    return json({ items: [{ ...tenant, test: false }, { ...tenant, id: "tnt_3", slug: "acme-test", name: "Acme Sandbox", test: true }] });
+  });
+  await vi.waitFor(() => expect(el.textContent).toContain("Acme Sandbox"));
+  const rows = [...el.querySelectorAll("tbody tr")].map((r) => r.querySelector("td")!.textContent);
+  expect(rows).toEqual(["Acme Corp", "Acme Sandbox Test"]);
+  await act(async () => button(el, "New tenant").click());
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  for (const [name, v] of [["slug", "sandbox"], ["name", "Sandbox"], ["owner_email", "o@s.example"]]) {
+    const input = el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+    await act(async () => {
+      setValue.call(input, v);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  const box = el.querySelector<HTMLInputElement>('input[name="test"]')!;
+  expect(box.labels?.[0]?.textContent).toBe("Test mode");
+  expect(document.getElementById(box.getAttribute("aria-describedby")!)?.textContent).toContain("can't change later");
+  await act(async () => box.click());
+  await act(async () => el.querySelector("form")!.requestSubmit());
+  await vi.waitFor(() => expect(body).toEqual({ slug: "sandbox", name: "Sandbox", owner_email: "o@s.example", test: true }));
 });

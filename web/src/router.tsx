@@ -49,7 +49,14 @@ const indexRoute = createRoute({
 });
 
 // Tenant in the URL (ADR-0020): /t/{slug}/..., so links are shareable.
-const tenantRoute = createRoute({ getParentRoute: () => appRoute, path: "t/$slug", component: TenantLayout });
+// The tenants load first: the layout's MFA gate and test-mode banner depend on them.
+const tenantRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "t/$slug",
+  loader: ({ context }) => context.queryClient.ensureQueryData(tenantsQuery),
+  errorComponent: ErrorPage, // inside the app shell: the header and sign-out stay
+  component: TenantLayout,
+});
 const overviewRoute = createRoute({ getParentRoute: () => tenantRoute, path: "/", component: Overview });
 const tokensRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/api-tokens", component: TokensPage });
 const webhooksRoute = createRoute({ getParentRoute: () => tenantRoute, path: "settings/webhooks", component: WebhooksPage });
