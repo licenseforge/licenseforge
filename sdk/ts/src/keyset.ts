@@ -23,6 +23,7 @@ export function parseKeySet(data: string | Uint8Array): PublicKey[] {
     if (!data.isWellFormed()) bad("not valid Unicode (an unpaired surrogate)");
     text = data;
   } else {
+    if (!(data instanceof Uint8Array)) throw new TypeError("licenseforge: parseKeySet takes a string or a Uint8Array");
     try {
       text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
     } catch {

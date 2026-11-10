@@ -61,6 +61,10 @@ test("what can't be represented, or reads differently elsewhere, is invalid_key_
   }
 });
 
+test("a wrong argument type is a TypeError, not a key set error", () => {
+  for (const v of [[91, 93], {}, 1, null]) assert.throws(() => parseKeySet(v as unknown as string), TypeError, JSON.stringify(v));
+});
+
 test("error messages don't echo the file's field names or values", () => {
   for (const input of [`[{"kid":"a","alg":"ed25519","s3cr3t_field":"AAAA"}]`, `[{"kid":"a","alg":"ed25519","public_key":"AAAA","s3cr3t":1,"s3cr3t":2}]`]) {
     assert.throws(() => parseKeySet(input), (e) => e instanceof LicenseError && !e.message.includes("s3cr3t"), input);
