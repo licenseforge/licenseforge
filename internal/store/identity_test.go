@@ -605,6 +605,10 @@ func TestIdentityGrants(t *testing.T) {
 		{AppRole, "tenants", "id", "UPDATE", false},
 		{IdentityRole, "tenants", "mfa_policy", "UPDATE", false},
 		{IdentityRole, "tenants", "mfa_policy", "SELECT", true}, // the session check compares it
+		// ADR-0047: test mode is shown in the switcher and never changed.
+		{IdentityRole, "tenants", "test", "SELECT", true},
+		{IdentityRole, "tenants", "test", "UPDATE", false},
+		{AppRole, "tenants", "test", "UPDATE", false},
 		{IdentityRole, "sessions", "assurance", "INSERT", true},
 		{IdentityRole, "sessions", "amr", "INSERT", true},
 		{IdentityRole, "sessions", "assurance", "UPDATE", false},
@@ -782,7 +786,7 @@ func TestSessionAndTenantGrantsPinned(t *testing.T) {
 	for _, tc := range []struct{ role, table, priv, want string }{
 		{AppRole, "tenants", "UPDATE", "audit_retention_days,mfa_policy,updated_at"},
 		{IdentityRole, "tenants", "UPDATE", ""},
-		{PlatformRole, "tenants", "UPDATE", "audit_retention_days,created_at,id,mfa_policy,name,slug,updated_at"},
+		{PlatformRole, "tenants", "UPDATE", "audit_retention_days,created_at,id,mfa_policy,name,slug,test,updated_at"}, // test: held by test_fixed (ADR-0047)
 		{IdentityRole, "sessions", "UPDATE", "last_seen_at"},
 		{AppRole, "sessions", "UPDATE", ""},
 		{PlatformRole, "sessions", "UPDATE", ""},
