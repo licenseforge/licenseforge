@@ -28,6 +28,10 @@ Each SDK has the same surface: `verify(file)`, `activate(key)`, `refresh()`, `de
 > **Amended 2026-11-02**
 > After Licensing competitor feature gaps: no new native SDKs before v0.4; the agent closes the server-side language gap.
 
+> [!NOTE]
+> **Amended 2026-11-10**
+> Java FIPS mode: the SDK verifies through the validated Bouncy Castle FIPS Java jar, BC-FJA 2.1.1 (certificate #4943, Ed25519 approved under FIPS 186-5), or a later version once a CMVP certificate lists it; the SDK documents the exact validated version ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md)).
+
 ## Alternatives considered
 - **One C core + bindings**: single implementation, but FFI/packaging pain on every platform.
 - **Generate SDKs from OpenAPI**: fine for the admin API later, doesn't cover offline verification, which is the critical part.
