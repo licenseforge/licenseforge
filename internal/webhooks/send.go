@@ -68,6 +68,9 @@ func Send(ctx context.Context, c *http.Client, url, id string, now time.Time, bo
 	if err != nil {
 		return Attempt{}, err
 	}
+	if req.URL.Scheme != "https" {
+		return Attempt{}, errors.New("webhooks: endpoint URL must be https")
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "LicenseForge-Webhooks/1")
 	req.Header.Set("webhook-id", id)
@@ -77,13 +80,21 @@ func Send(ctx context.Context, c *http.Client, url, id string, now time.Time, bo
 	resp, err := c.Do(req)
 	a := Attempt{}
 	if err != nil {
-		a.Category, a.Duration = classify(err), time.Since(start)
+		if ctx.Err() != nil { // the caller stopped (e.g. shutting down): no attempt to record
+			return Attempt{}, ctx.Err()
+		}
+		a.Category = classify(err)
+		if a.Category != "connection" { // a blocked destination fails at once: its duration would tell
+			a.Duration = time.Since(start)
+		}
 		return a, nil
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponse))
 	_ = resp.Body.Close()
 	a.Duration = time.Since(start)
 	switch {
+	case resp.StatusCode < 100 || resp.StatusCode > 599: // not HTTP as the delivery log records it
+		a.Category, a.Duration = "connection", 0
 	case resp.StatusCode >= 300 && resp.StatusCode <= 399:
 		a.Category = "redirect"
 	default:
@@ -107,7 +118,8 @@ func classify(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
 		return "timeout"
-	case errors.As(err, &cv), errors.As(err, &ua), errors.As(err, &hn), errors.As(err, &ci), errors.As(err, &rh), errors.As(err, &al):
+	case errors.As(err, &cv), errors.As(err, &ua), errors.As(err, &hn), errors.As(err, &ci), errors.As(err, &rh), errors.As(err, &al),
+		strings.Contains(err.Error(), "tls: "): // e.g. a protocol version below the minimum (untyped)
 		return "tls"
 	}
 	return "connection"
@@ -116,8 +128,13 @@ func classify(err error) string {
 // retryAfter parses a Retry-After header: seconds or an HTTP date.
 func retryAfter(v string, now time.Time) time.Duration {
 	var d time.Duration
-	if s, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && s >= 0 {
-		d = time.Duration(min(s, int(MaxRetryAfter/time.Second))) * time.Second
+	v = strings.TrimSpace(v)
+	if v != "" && strings.Trim(v, "0123456789") == "" { // delay-seconds: 1*DIGIT
+		s, err := strconv.ParseUint(v, 10, 64)
+		if err != nil || s > uint64(MaxRetryAfter/time.Second) {
+			return MaxRetryAfter
+		}
+		d = time.Duration(s) * time.Second
 	} else if t, err := http.ParseTime(v); err == nil {
 		d = t.Sub(now)
 	}

@@ -18,35 +18,36 @@ import (
 // tries (each resolved candidate, on every attempt) is checked in the
 // dialer's Control, after DNS, so DNS rebinding doesn't help.
 
-// special are the ranges the IANA IPv4 and IPv6 Special-Purpose Address
-// Registries mark not globally reachable, plus IPv6 forms that embed an
-// IPv4 address in a way that can't be checked (refused outright). The
-// operator's allowlist can lift these, except for always.
+// special are the IPv4 ranges the IANA Special-Purpose Address Registry
+// marks not globally reachable, and the not-globally-reachable IPv6 ranges
+// inside global unicast (2000::/3); every other IPv6 address (ULA,
+// link-local, multicast, IPv4-mapped and -compatible, the local-use NAT64
+// block, translated and unallocated forms, future registry additions) is
+// special too (see isSpecial). The operator's allowlist can lift these,
+// except for always.
 var special = prefixes(
-	// IPv4
 	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
 	"192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15",
 	"198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-	// IPv6
-	"::/96",                      // unspecified, loopback, IPv4-compatible
-	"64:ff9b:1::/48",             // local-use NAT64: where the IPv4 sits is the operator's choice (RFC 8215)
-	"100::/64",                   // discard
-	"2001::/23",                  // IETF protocol assignments, Teredo (2001::/32) and benchmarking among them
-	"2001:db8::/32", "3fff::/20", // documentation
-	"2002::/16", // 6to4
-	"5f00::/16", // SRv6 SIDs
-	"fc00::/7",  // unique local
-	"fe80::/10", // link-local
-	"fec0::/10", // site-local (deprecated)
-	"ff00::/8",  // multicast
+	"2001::/23",     // IETF protocol assignments, Teredo (2001::/32) and benchmarking among them
+	"2001:db8::/32", // documentation
+	"2002::/16",     // 6to4
+	"3fff::/20",     // documentation
 )
 
+var globalUnicast6 = netip.MustParsePrefix("2000::/3")
+
+func isSpecial(a netip.Addr) bool {
+	return inAny(special, a) || (a.Is6() && !globalUnicast6.Contains(a))
+}
+
 // always are refused even when allowlisted: this host, link-local, and the
-// cloud platforms' metadata and host addresses (some of which sit in ranges
-// an operator may allowlist, or are globally routable).
+// cloud platforms' metadata and service addresses (some of which sit in
+// ranges an operator may allowlist, or are globally routable).
 var always = prefixes(
 	"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "::/128", "::1/128", "fe80::/10",
-	"fd00:ec2::254/128",  // AWS metadata (IPv6, in ULA space)
+	"fd00:ec2::/32",      // AWS services: IMDS (::254), EKS Pod Identity (::23), DNS, NTP
+	"fd20:ce::/32",       // Google Cloud metadata server (fd20:ce::254)
 	"100.100.100.200/32", // Alibaba metadata (in CGNAT space)
 	"192.0.0.192/32",     // Oracle metadata
 	"168.63.129.16/32",   // Azure WireServer and host DNS (globally routable)
@@ -90,6 +91,11 @@ func ParseGuard(allow, deny, ports string) (Guard, error) {
 			if err != nil {
 				return Guard{}, fmt.Errorf("webhooks: CIDR %q: %w", c, err)
 			}
+			// A 4in6 prefix (::ffff:a.b.c.d/n) names IPv4 addresses, which
+			// Allowed checks unmapped: store it as the IPv4 prefix it is.
+			if p.Addr().Is4In6() && p.Bits() >= 96 {
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
 			*f.dst = append(*f.dst, p.Masked())
 		}
 	}
@@ -111,15 +117,18 @@ func (g Guard) Allowed(a netip.Addr) bool {
 	if a.Zone() != "" {
 		return false
 	}
+	orig := a
 	a = a.Unmap()
 	if nat64.Contains(a) {
 		b := a.As16()
 		a = netip.AddrFrom4([4]byte(b[12:]))
 	}
+	// Refusals match the address as dialled and as decoded: a deny of the
+	// NAT64 prefix itself holds.
 	switch {
-	case inAny(always, a), inAny(g.Deny, a):
+	case inAny(always, a), inAny(always, orig), inAny(g.Deny, a), inAny(g.Deny, orig):
 		return false
-	case inAny(special, a):
+	case isSpecial(a):
 		return inAny(g.Allow, a)
 	}
 	return true

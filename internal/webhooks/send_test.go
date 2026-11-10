@@ -46,7 +46,10 @@ func TestGuardAllowed(t *testing.T) {
 		"100.64.1.1":      true,  // CGNAT, allowlisted ...
 		"100.100.100.200": false, // ... but Alibaba metadata stays refused
 		"fd00:ec2::254":   false, // AWS IPv6 metadata stays refused in an allowlisted range
-		"fd00:ec2::5":     true,
+		"fd00:ec2::5":     false, // AWS service range, always
+		"fd00:ec2::23":    false, // EKS Pod Identity
+		"fd20:ce::254":    false, // Google Cloud metadata
+		"fd00:1::1":       false, // other ULA, not allowlisted here
 		"168.63.129.16":   false, // Azure, globally routable
 		"192.0.0.192":     false, "198.18.0.1": false, "240.0.0.1": false, "224.0.0.1": false, "255.255.255.255": false,
 		"203.0.114.9":          false, // operator deny
@@ -65,6 +68,10 @@ func TestGuardAllowed(t *testing.T) {
 		"fc00::1":              false, "fe80::1": false, "ff02::1": false, "fec0::1": false,
 		"2001:67c:2e8::1": false, // operator deny (IPv6)
 		"fe80::1%eth0":    false,
+		"100:0:0:1::1":    false, // dummy IPv6 prefix (outside 2000::/3)
+		"::ffff:0:a00:5":  false, // SIIT translated form
+		"64:ff9b:2::1":    false,
+		"4000::1":         false, // unallocated
 	} {
 		if got := g.Allowed(netip.MustParseAddr(addr)); got != want {
 			t.Errorf("%s: %v, want %v", addr, got, want)
@@ -118,6 +125,25 @@ func TestSend(t *testing.T) {
 		}
 	})
 	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(make([]byte, 1<<20)) })
+	mux.HandleFunc("/down", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
+	mux.HandleFunc("/err-after", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/choices", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMultipleChoices) })
+	mux.HandleFunc("/headers", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Big", strings.Repeat("a", 100<<10))
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/odd", func(w http.ResponseWriter, _ *http.Request) {
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		_, _ = buf.WriteString("HTTP/1.1 999 Odd\r\nContent-Length: 0\r\n\r\n")
+		_ = buf.Flush()
+		_ = conn.Close()
+	})
 	srv := httptest.NewTLSServer(mux)
 	defer srv.Close()
 	c := testClient(srv, time.Second)
@@ -134,12 +160,17 @@ func TestSend(t *testing.T) {
 		t.Errorf("headers %v", got)
 	}
 	for path, want := range map[string]Attempt{
-		"/fail":  {Category: "http", Status: 500},
-		"/gone":  {Category: "http", Status: 410},
-		"/busy":  {Category: "http", Status: 429, RetryAfter: 2 * time.Minute},
-		"/moved": {Category: "redirect"},
-		"/slow":  {Category: "timeout"},
-		"/big":   {Category: "http", Status: 200},
+		"/fail":      {Category: "http", Status: 500},
+		"/gone":      {Category: "http", Status: 410},
+		"/busy":      {Category: "http", Status: 429, RetryAfter: 2 * time.Minute},
+		"/moved":     {Category: "redirect"},
+		"/slow":      {Category: "timeout"},
+		"/big":       {Category: "http", Status: 200},
+		"/down":      {Category: "http", Status: 503},
+		"/err-after": {Category: "http", Status: 500},
+		"/choices":   {Category: "redirect"},
+		"/headers":   {Category: "connection"},
+		"/odd":       {Category: "connection"},
 	} {
 		a, err := Send(ctx, c, srv.URL+path, "msg_1", now, body, secret)
 		if err != nil || a.Category != want.Category || a.Status != want.Status || a.RetryAfter != want.RetryAfter || (a.OK() != (want.Status == 200)) {
@@ -159,6 +190,43 @@ func TestSend(t *testing.T) {
 	if _, err := Send(ctx, c, srv.URL+"/ok", "m", now, body, "bad"); err == nil {
 		t.Error("bad secret sent")
 	}
+	if a, _ := Send(ctx, Guard{}.Client(), srv.URL+"/ok", "m", now, body, secret); a.Duration != 0 {
+		t.Errorf("a refused connection reports its duration: %v", a.Duration)
+	}
+	if _, err := Send(ctx, c, strings.Replace(srv.URL, "https://", "http://", 1)+"/ok", "m", now, body, secret); err == nil {
+		t.Error("plain http sent")
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := Send(cancelled, c, srv.URL+"/ok", "m", now, body, secret); err == nil {
+		t.Error("a cancelled send reported as an attempt")
+	}
+	// No proxy from the environment.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	if a, err := Send(ctx, testClient(srv, time.Second), srv.URL+"/ok", "m", now, body, secret); err != nil || !a.OK() {
+		t.Errorf("went through the environment's proxy: %+v, %v", a, err)
+	}
+}
+
+// The delivery client's settings that a loopback test server can't show:
+// no proxy from the environment (Go never proxies loopback), TLS 1.2+.
+func TestClientSettings(t *testing.T) {
+	tr := Guard{}.Client().Transport.(*http.Transport)
+	if tr.Proxy != nil || tr.TLSClientConfig.MinVersion < tls.VersionTLS12 || tr.DialContext == nil {
+		t.Errorf("transport: proxy set %v, TLS min %x", tr.Proxy != nil, tr.TLSClientConfig.MinVersion)
+	}
+}
+
+// Servers below TLS 1.2 are refused.
+func TestSendOldTLS(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.TLS = &tls.Config{MaxVersion: tls.VersionTLS11}
+	srv.StartTLS()
+	defer srv.Close()
+	if a, err := Send(context.Background(), testClient(srv, time.Second), srv.URL, "m", time.Now(), nil, "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"); err != nil || a.Category != "tls" {
+		t.Errorf("TLS 1.1 server: %+v, %v", a, err)
+	}
 }
 
 func TestRetryAfter(t *testing.T) {
@@ -166,6 +234,8 @@ func TestRetryAfter(t *testing.T) {
 	for v, want := range map[string]time.Duration{
 		"120": 2 * time.Minute, "0": 0, "-5": 0, "": 0, "soon": 0,
 		"99999999":                      MaxRetryAfter,
+		"99999999999999999999999":       MaxRetryAfter,
+		"+60":                           0,
 		"Tue, 10 Nov 2026 12:05:00 GMT": 5 * time.Minute,
 		"Tue, 10 Nov 2026 11:00:00 GMT": 0,
 		"Wed, 11 Nov 2026 12:00:00 GMT": MaxRetryAfter,
@@ -173,5 +243,49 @@ func TestRetryAfter(t *testing.T) {
 		if got := retryAfter(v, now); got != want {
 			t.Errorf("%q: %v, want %v", v, got, want)
 		}
+	}
+}
+
+// One address per special range is refused by default; this host, link-local
+// and metadata stay refused when everything is allowlisted; the deny list
+// holds for NAT64 and IPv4-mapped forms; configured ports and prefixes.
+func TestGuardRules(t *testing.T) {
+	for _, a := range []string{"0.1.2.3", "10.1.1.1", "100.64.0.1", "127.0.0.2", "169.254.1.1", "172.31.1.1", "192.0.0.8", "192.0.2.1",
+		"192.88.99.1", "192.168.0.1", "198.19.0.1", "198.51.100.1", "203.0.113.1", "239.1.1.1", "250.0.0.1",
+		"::2", "::ffff:10.0.0.1", "64:ff9b:1::1", "100::1", "2001:2::1", "2001:db8::1", "2002::1", "3fff::1", "5f00::1", "fd12::1", "fe80::2", "fec0::1", "ff05::1"} {
+		if (Guard{}).Allowed(netip.MustParseAddr(a)) {
+			t.Errorf("%s allowed by default", a)
+		}
+	}
+	all, err := ParseGuard("0.0.0.0/0,::/0", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []string{"0.0.0.0", "127.0.0.1", "169.254.169.254", "169.254.170.23", "::", "::1", "fe80::1", "fd00:ec2::254", "fd20:ce::254",
+		"100.100.100.200", "192.0.0.192", "168.63.129.16", "64:ff9b::7f00:1", "::ffff:127.0.0.1"} {
+		if all.Allowed(netip.MustParseAddr(a)) {
+			t.Errorf("%s allowed with everything allowlisted", a)
+		}
+	}
+	if !all.Allowed(netip.MustParseAddr("10.0.0.1")) || !all.Allowed(netip.MustParseAddr("fd12::1")) {
+		t.Error("allowlist doesn't lift special ranges")
+	}
+	deny, err := ParseGuard("", "64:ff9b::/96, ::ffff:93.184.216.0/120", "8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []string{"64:ff9b::808:808", "93.184.216.34", "::ffff:93.184.216.34"} { // 8.8.8.8 via NAT64: only the NAT64 deny matches
+		if deny.Allowed(netip.MustParseAddr(a)) {
+			t.Errorf("%s allowed past the deny list", a)
+		}
+	}
+	if !deny.Allowed(netip.MustParseAddr("8.8.8.8")) {
+		t.Error("8.8.8.8 refused")
+	}
+	if deny.control("tcp", "93.184.217.1:443", nil) == nil || deny.control("tcp", "93.184.217.1:8443", nil) != nil {
+		t.Error("configured ports not applied")
+	}
+	if g, _ := ParseGuard("10.20.3.4/16", "", ""); g.Allow[0].String() != "10.20.0.0/16" {
+		t.Errorf("prefix stored as %s", g.Allow[0])
 	}
 }
