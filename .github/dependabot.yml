@@ -19,6 +19,9 @@ updates:
     schedule: { interval: weekly }
     groups:
       sdk-ts: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: / # the Dockerfile's digest-pinned base images
+    schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
