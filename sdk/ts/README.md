@@ -33,6 +33,6 @@ try {
   3. Kubernetes, the `kube-system` namespace UID (the pod's service account needs `get` on that namespace);
   4. the OS machine ID: `/etc/machine-id` (refused on tmpfs, and in containers unless the host's file is mounted in), `MachineGuid` or `IOPlatformUUID`.
 
-  A `FingerprintError` says why there is none: `no_fingerprint`, `transient` (retry), `invalid` or `failed`.
+  A `FingerprintError` says why there is none: `no_fingerprint`, `transient` (retry), `invalid` or `failed`. On Windows the ID is read with `%SystemRoot%\System32\reg.exe`; whoever controls the app's environment controls that path (as with `NODE_OPTIONS`).
 
 Development: `npm ci && npm test`.

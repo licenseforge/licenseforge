@@ -102,6 +102,8 @@ export async function compute(tenant: string, product: string, opts: Fingerprint
   }
   if (opts.allowEnvOverride) {
     const raw = trim(env.getenv(ENV_OVERRIDE) ?? "");
+    // Node decodes invalid UTF-8 in the environment as U+FFFD: refused, as Go refuses invalid UTF-8.
+    if (raw.includes("\uFFFD")) throw new FingerprintError("invalid", `${ENV_OVERRIDE} isn't valid UTF-8`);
     if (raw !== "") return result(raw, "env");
   }
   if (env.getenv("KUBERNETES_SERVICE_HOST")) return result(await env.kubernetes(), "kubernetes", "cluster");
@@ -129,6 +131,7 @@ async function kubeSystemUID(): Promise<string> {
   }
   const host = process.env.KUBERNETES_SERVICE_HOST!;
   const port = process.env.KUBERNETES_SERVICE_PORT || "443";
+  if (!/^\d{1,5}$/.test(port) || Number(port) > 65535) throw new FingerprintError("failed", `kubernetes: KUBERNETES_SERVICE_PORT ${JSON.stringify(port)} isn't a port`);
   return namespaceUID({ host, port: Number(port), token, ca }, [500, 2000]);
 }
 
@@ -137,13 +140,27 @@ const certErrors = new Set([
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
   "UNABLE_TO_GET_ISSUER_CERT",
   "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+  "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
   "SELF_SIGNED_CERT_IN_CHAIN",
   "DEPTH_ZERO_SELF_SIGNED_CERT",
   "CERT_HAS_EXPIRED",
   "CERT_NOT_YET_VALID",
   "CERT_UNTRUSTED",
+  "CERT_REJECTED",
+  "CERT_REVOKED",
+  "CERT_SIGNATURE_FAILURE",
+  "CERT_CHAIN_TOO_LONG",
+  "PATH_LENGTH_EXCEEDED",
+  "INVALID_CA",
+  "INVALID_PURPOSE",
+  "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+  "ERROR_IN_CERT_NOT_AFTER_FIELD",
   "ERR_TLS_CERT_ALTNAME_INVALID",
 ]);
+
+/** The whole request, body included (a socket timeout alone resets on every byte). */
+const REQUEST_MS = 5000;
 
 /** Fetches the UID, retrying transient failures (network, timeout, 429, 5xx) after each backoff (ms). */
 export async function namespaceUID(target: { host: string; port: number; token: string; ca: Buffer }, backoff: number[]): Promise<string> {
@@ -159,17 +176,31 @@ export async function namespaceUID(target: { host: string; port: number; token: 
 type Attempt = { ok: true; uid: string } | { ok: false; permanent: boolean; detail: string };
 
 function getNamespaceUID(t: { host: string; port: number; token: string; ca: Buffer }): Promise<Attempt> {
-  return new Promise((resolve) => {
-    const req = request(
-      { host: t.host, port: t.port, path: "/api/v1/namespaces/kube-system", method: "GET", ca: t.ca, minVersion: "TLSv1.2", headers: { Authorization: `Bearer ${t.token}` }, timeout: 5000 },
+  return new Promise((done) => {
+    let settled = false;
+    const resolve = (a: Attempt) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      done(a);
+    };
+    const deadline = setTimeout(() => {
+      resolve({ ok: false, permanent: false, detail: `no answer within ${REQUEST_MS} ms` });
+      req?.destroy();
+    }, REQUEST_MS);
+    let req: ReturnType<typeof request> | undefined;
+    try {
+      req = request(
+      { host: t.host, port: t.port, path: "/api/v1/namespaces/kube-system", method: "GET", ca: t.ca, minVersion: "TLSv1.2", headers: { Authorization: `Bearer ${t.token}` } },
       (res) => {
         const status = res.statusCode ?? 0;
         const chunks: Buffer[] = [];
         let size = 0;
         res.on("data", (c: Buffer) => {
           size += c.length;
-          if (size > 1 << 20) req.destroy(new Error("answer over 1 MiB"));
-          else chunks.push(c);
+          if (size <= 1 << 20) return void chunks.push(c);
+          resolve({ ok: false, permanent: true, detail: "answer over 1 MiB" }); // like a decode error: retrying won't help
+          req?.destroy();
         });
         res.on("end", () => {
           if (status === 429 || status >= 500) return resolve({ ok: false, permanent: false, detail: `GET namespace kube-system: ${status}` });
@@ -186,7 +217,10 @@ function getNamespaceUID(t: { host: string; port: number; token: string; ca: Buf
         res.on("error", (e) => resolve({ ok: false, permanent: false, detail: String(e) }));
       },
     );
-    req.on("timeout", () => req.destroy(new Error("timeout")));
+    } catch (e) {
+      // e.g. a token with a line break: an invalid header, a configuration error
+      return resolve({ ok: false, permanent: true, detail: String(e) });
+    }
     req.on("error", (e: NodeJS.ErrnoException) => resolve({ ok: false, permanent: certErrors.has(e.code ?? ""), detail: String(e) }));
     req.end();
   });
@@ -216,8 +250,9 @@ async function windowsMachineGuid(): Promise<string> {
   const out = await run(`${root}\\System32\\reg.exe`, ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid", "/reg:64"]).catch((e) => {
     throw new FingerprintError("no_fingerprint", `MachineGuid: ${String(e)}`);
   });
-  const m = /^\s*MachineGuid\s+REG_SZ\s+(\S.*?)\s*$/m.exec(out);
-  if (!m) throw new FingerprintError("no_fingerprint", "MachineGuid not found or not a string");
+  // reg.exe prints "    MachineGuid    REG_SZ    <value>": the value as stored, after the 4-space separator.
+  const m = /^ {4}MachineGuid {4}REG_SZ {4}(.*?)\r?$/m.exec(out);
+  if (!m || m[1] === "") throw new FingerprintError("no_fingerprint", "MachineGuid not found, empty or not a string");
   return m[1]!;
 }
 
@@ -271,8 +306,8 @@ export function linuxMachineID(fs: LinuxFS): string {
     if (b === undefined) continue;
     try {
       return parseMachineID(b);
-    } catch (e) {
-      last = (e as Error).message;
+    } catch {
+      last = "machine-id missing or uninitialized";
     }
   }
   return none(last);
@@ -305,8 +340,10 @@ export function containingMount(mountinfo: string, path: string): Mount | undefi
   for (const line of mountinfo.split("\n")) {
     const at = line.indexOf(" - ");
     if (at < 0) continue;
-    const f = line.slice(0, at).split(/[ \t]+/).filter(Boolean);
-    const g = line.slice(at + 3).split(/[ \t]+/).filter(Boolean);
+    // Spaces only: the kernel escapes space, tab, newline and backslash, so
+    // any other byte (\v, a Unicode space) belongs to the field.
+    const f = line.slice(0, at).split(" ").filter(Boolean);
+    const g = line.slice(at + 3).split(" ").filter(Boolean);
     if (f.length < 5 || g.length < 1) continue;
     const m = { root: unescapeMount(f[3]!), point: unescapeMount(f[4]!), fstype: g[0]! };
     if (!(m.point === path || m.point === "/" || path.startsWith(m.point + "/"))) continue;

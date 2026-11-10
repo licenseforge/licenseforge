@@ -97,7 +97,7 @@ func containingMount(mountinfo []byte, path string) (mount, bool) {
 	found := false
 	for _, line := range strings.Split(string(mountinfo), "\n") {
 		pre, post, ok := strings.Cut(line, " - ")
-		f, g := strings.Fields(pre), strings.Fields(post)
+		f, g := spaceFields(pre), spaceFields(post)
 		if !ok || len(f) < 5 || len(g) < 1 {
 			continue
 		}
@@ -110,6 +110,20 @@ func containingMount(mountinfo []byte, path string) (mount, bool) {
 		}
 	}
 	return best, found
+}
+
+// spaceFields splits a mountinfo line on spaces only: the kernel escapes
+// space, tab, newline and backslash in its fields (\040 …), so any other
+// byte, \v or a Unicode space included, belongs to a field. strings.Fields
+// would split on those too, and read another path.
+func spaceFields(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, " ") {
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func isParentOrSelf(dir, path string) bool {

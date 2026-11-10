@@ -54,6 +54,9 @@ func TestLinuxMachineID(t *testing.T) {
 		{"lxc system container uses its own id", map[string]string{"/proc/1/environ": "PATH=/bin\x00container=lxc\x00", "/etc/machine-id": validID}, validID},
 		{"oci container in pid 1 environ", map[string]string{"/proc/1/environ": "container=oci\x00", "/etc/machine-id": validID}, ""},
 		{"no machine-id at all", map[string]string{}, ""},
+		// Fields are split on spaces only (the kernel escapes the rest), as in every SDK.
+		{"a \\v in a host path is part of the field", map[string]string{"/.dockerenv": "", "/etc/machine-id": validID, "/proc/self/mountinfo": rootExt4 + bindMount("/x\v/etc/machine-id", "ext4")}, validID},
+		{"a Unicode space in a tmpfs root doesn't hide the tmpfs", map[string]string{"/etc/machine-id": validID, "/proc/self/mountinfo": rootExt4 + bindMount("/a\u00a0b", "tmpfs")}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id, err := linuxMachineID(fakeFS(tc.files))

@@ -2,7 +2,7 @@
 // and the Kubernetes lookup against a local TLS server.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -63,6 +63,9 @@ test("Linux machine-id: the Go SDK's cases", () => {
     ["nspawn system container uses its own id", { "/run/systemd/container": "systemd-nspawn\n", "/etc/machine-id": validID }, validID],
     ["lxc system container uses its own id", { "/proc/1/environ": "PATH=/bin\0container=lxc\0", "/etc/machine-id": validID }, validID],
     ["oci container in pid 1 environ", { "/proc/1/environ": "container=oci\0", "/etc/machine-id": validID }, ""],
+    ["the last container= in environ wins", { "/proc/1/environ": "container=lxc\0container=oci\0", "/etc/machine-id": validID }, ""],
+    ["a \\v in a host path is part of the field (Go and TS alike)", { "/.dockerenv": "", "/etc/machine-id": validID, "/proc/self/mountinfo": rootExt4 + bindMount("/x\v/etc/machine-id", "ext4") }, validID],
+    ["a Unicode space in a tmpfs root doesn't hide the tmpfs", { "/etc/machine-id": validID, "/proc/self/mountinfo": rootExt4 + bindMount("/a\u00a0b", "tmpfs") }, ""],
     ["no machine-id at all", {}, ""],
   ];
   for (const [name, files, want] of cases) {
@@ -87,6 +90,9 @@ test("compute: override, then the env override if allowed, then Kubernetes, then
   assert.equal((await compute("tnt_acme", "acme-db", {}, env({ LICENSEFORGE_FINGERPRINT: "user" }))).source, "machine-id");
   assert.deepEqual(await compute("tnt_acme", "acme-db", { allowEnvOverride: true }, env({ LICENSEFORGE_FINGERPRINT: " user\n", KUBERNETES_SERVICE_HOST: "x" })), { fingerprint: fp("user"), source: "env", binding: "machine" });
   assert.equal((await compute("tnt_acme", "acme-db", { allowEnvOverride: true }, env({ LICENSEFORGE_FINGERPRINT: " \t" }))).source, "machine-id");
+  // Only SP, HT, CR, LF are trimmed (not \v or Unicode spaces), as in every SDK.
+  assert.equal((await compute("tnt_acme", "acme-db", { allowEnvOverride: true }, env({ LICENSEFORGE_FINGERPRINT: "\vX\u00a0 " }))).fingerprint, fp("\vX\u00a0"));
+  assert.equal(await code(() => compute("tnt_acme", "acme-db", { allowEnvOverride: true }, env({ LICENSEFORGE_FINGERPRINT: "a\uFFFDb" }))), "invalid", "invalid UTF-8 from the environment");
   // The vendor's override wins over everything; sync or async; empty is an error.
   assert.deepEqual(await compute("tnt_acme", "acme-db", { override: () => "\tserial-1 ", allowEnvOverride: true }, env({ LICENSEFORGE_FINGERPRINT: "user" })), { fingerprint: fp("serial-1"), source: "override", binding: "machine" });
   assert.equal((await compute("tnt_acme", "acme-db", { override: async () => "serial-2" }, env({}))).fingerprint, fp("serial-2"));
@@ -101,11 +107,15 @@ test("compute: override, then the env override if allowed, then Kubernetes, then
 });
 
 // A local Kubernetes API with a throwaway self-signed certificate (openssl).
-function tlsPair() {
+function tlsPair(san = "DNS:localhost,IP:127.0.0.1") {
   const dir = mkdtempSync(join(tmpdir(), "lf-k8s-"));
-  execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-days", "1", "-subj", "/CN=localhost",
-    "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1", "-keyout", join(dir, "k.pem"), "-out", join(dir, "c.pem")], { stdio: "ignore" });
-  return { key: readFileSync(join(dir, "k.pem")), cert: readFileSync(join(dir, "c.pem")) };
+  try {
+    execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-days", "1", "-subj", "/CN=localhost",
+      "-addext", `subjectAltName=${san}`, "-keyout", join(dir, "k.pem"), "-out", join(dir, "c.pem")], { stdio: "ignore" });
+    return { key: readFileSync(join(dir, "k.pem")), cert: readFileSync(join(dir, "c.pem")) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 test("Kubernetes: the namespace UID with the token; retries transient answers; permanent ones fail", async () => {
@@ -137,8 +147,43 @@ test("Kubernetes: the namespace UID with the token; retries transient answers; p
     seen.length = 0;
     assert.equal(await code(() => namespaceUID({ ...target, ca: tlsPair().cert }, [1, 1])), "failed");
     assert.equal(seen.length, 0);
+    // An answer over 1 MiB is permanent, like a decode error.
+    answers.push([200, JSON.stringify({ metadata: { uid: "u" }, pad: "x".repeat(1 << 20) })]); // valid JSON, too big
+    seen.length = 0;
+    assert.equal(await code(() => namespaceUID(target, [1, 1])), "failed");
+    assert.equal(seen.length, 1);
+    // A token with a line break can't be sent: permanent, a FingerprintError.
+    assert.equal(await code(() => namespaceUID({ ...target, token: "a\nb" }, [1, 1])), "failed");
   } finally {
     srv.close();
+  }
+});
+
+test("Kubernetes: a name the certificate doesn't cover is permanent; a server dripping bytes hits the 5 s deadline", async () => {
+  const onlyDNS = tlsPair("DNS:localhost"); // not 127.0.0.1
+  const srv = createServer({ key: onlyDNS.key, cert: onlyDNS.cert }, (_req, res) => res.end("{}"));
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const port = (srv.address() as AddressInfo).port;
+  try {
+    assert.equal(await code(() => namespaceUID({ host: "127.0.0.1", port, token: "t", ca: onlyDNS.cert }, [1, 1])), "failed");
+  } finally {
+    srv.close();
+  }
+  const pair = tlsPair();
+  const drip = createServer({ key: pair.key, cert: pair.cert }, (_req, res) => {
+    res.writeHead(200);
+    const t = setInterval(() => res.write(" "), 1000); // one byte a second: never idle for 5 s
+    res.on("close", () => clearInterval(t));
+  });
+  await new Promise<void>((r) => drip.listen(0, "127.0.0.1", r));
+  const start = Date.now();
+  try {
+    assert.equal(await code(() => namespaceUID({ host: "127.0.0.1", port: (drip.address() as AddressInfo).port, token: "t", ca: pair.cert }, [])), "transient");
+    const took = Date.now() - start;
+    assert.ok(took >= 4500 && took < 8000, `took ${took} ms`);
+  } finally {
+    drip.closeAllConnections();
+    drip.close();
   }
 });
 
