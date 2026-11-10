@@ -2,16 +2,19 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
 
-// The recovery actions (ADR-0044): each runs under change's locks (the
-// cursor, then the endpoint), so a send being recorded finishes first and
-// one recorded later matches nothing (the dispatcher pins its writes to the
-// lease, seq and attempts it read). Audited with what they actually did.
+// The recovery actions (ADR-0044) run under change's locks (the cursor, then
+// the endpoint), so a send being recorded finishes first. Enable and the
+// skips reset the retry state, so a send recorded later matches nothing
+// (the dispatcher pins its writes to the lease, seq and attempts it read);
+// Disable leaves the cursor alone, and the dispatcher disables only an
+// enabled endpoint. Audited with what they actually did.
 
 // UserDisabled is the reason recorded when a user disables an endpoint.
 const UserDisabled = "disabled by a user"
@@ -67,6 +70,7 @@ func (s Service) Enable(ctx context.Context, id string) (Endpoint, error) {
 // says which).
 func (s Service) SkipEvent(ctx context.Context, id string, seq int64) (Endpoint, error) {
 	return s.change(ctx, "webhook.skip_event", id, func(tx *ent.Tx, row *ent.WebhookEndpoint, ev *audit.Event) error {
+		ev.Details["requested_seq"] = seq
 		cur, err := cursorSeq(ctx, tx, id)
 		if err != nil {
 			return err
@@ -75,10 +79,10 @@ func (s Service) SkipEvent(ctx context.Context, id string, seq int64) (Endpoint,
 		if err != nil {
 			return err
 		}
-		if next != seq { // also when it was delivered or passed meanwhile
+		if next == 0 || next != seq { // also when it was delivered or passed meanwhile
 			return fmt.Errorf("%w: %d isn't the endpoint's next event (delivered meanwhile, or not an event it subscribes to)", ErrInvalid, seq)
 		}
-		ev.Details["skipped_seq"] = seq
+		ev.Details["skipped_seq"], ev.Details["from_seq"] = seq, cur // from a cursor below a prune: the passed range
 		return cursorUpdate(ctx, tx, id, seq)
 	})
 }
@@ -101,7 +105,7 @@ func (s Service) SkipToNow(ctx context.Context, id string) (Endpoint, error) {
 				return err
 			}
 		}
-		if err := rows.Close(); err != nil {
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return err
 		}
 		ev.Details["from_seq"], ev.Details["to_seq"] = cur, max(cur, head)

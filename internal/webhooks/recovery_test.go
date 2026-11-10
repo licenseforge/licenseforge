@@ -122,6 +122,27 @@ func TestSkip(t *testing.T) {
 	if _, err := f.s.SkipEvent(ctx, c.ID, seat-1); !errors.Is(err, ErrInvalid) {
 		t.Errorf("skip an entry that isn't an event: %v", err)
 	}
+	for _, bad := range []int64{0, -1} {
+		if _, err := f.s.SkipEvent(ctx, c.ID, bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("skip %d: %v", bad, err)
+		}
+	}
+	ref := f.events(t, f.a, "webhook.skip_event")
+	var rd map[string]any
+	if err := json.Unmarshal([]byte(ref[0].Details), &rd); err != nil || ref[0].Outcome != auditevent.OutcomeFailure || rd["requested_seq"] != float64(-1) {
+		t.Errorf("refused skip audited as %s %s", ref[0].Outcome, ref[0].Details)
+	}
+	// The subscription changed since the dashboard showed the event: refused.
+	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrInvalid) {
+		t.Errorf("skip an event no longer subscribed: %v", err)
+	}
+	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked", "activation.created"}); err != nil {
+		t.Fatal(err)
+	}
+	f.setRetry(t, c.ID, 3)
 	if _, err := f.s.SkipEvent(f.as(f.a, f.viewer, authz.Viewer), c.ID, seat); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("viewer skip: %v", err)
 	}
@@ -149,7 +170,26 @@ func TestSkip(t *testing.T) {
 		t.Errorf("skip to now audited as %s", ev[0].Details)
 	}
 	ev = f.events(t, f.a, "webhook.skip_event")
-	if err := json.Unmarshal([]byte(ev[0].Details), &d); err != nil || ev[0].Outcome != auditevent.OutcomeSuccess || d["skipped_seq"] != float64(revoked) {
+	if err := json.Unmarshal([]byte(ev[0].Details), &d); err != nil || ev[0].Outcome != auditevent.OutcomeSuccess || d["skipped_seq"] != float64(revoked) || d["from_seq"] != float64(seat) {
 		t.Errorf("skip audited as %s %s", ev[0].Outcome, ev[0].Details)
+	}
+}
+
+// No event pending (e.g. the held-back event's type was unsubscribed): there
+// is nothing to skip.
+func TestSkipNothingPending(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	c, err := f.s.Create(ctx, hookURL, []string{"license.revoked"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	f.setRetry(t, c.ID, 4)
+	if _, err := f.s.SkipEvent(ctx, c.ID, 0); !errors.Is(err, ErrInvalid) {
+		t.Errorf("skip with nothing pending: %v", err)
+	}
+	if e, _ := f.s.Get(ctx, c.ID); e.Attempts != 4 {
+		t.Errorf("retry state reset by a refused skip: %d", e.Attempts)
 	}
 }

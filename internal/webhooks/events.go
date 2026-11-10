@@ -41,33 +41,34 @@ func EventType(action, details string) string {
 	return ""
 }
 
-// nextEvent returns the seq of the first successful entry after seq in the
-// tenant's chain that is an event the endpoint subscribes to, or 0.
-func nextEvent(ctx context.Context, tx *ent.Tx, tenantID string, seq int64, events []string) (int64, error) {
-	for {
-		rows, err := tx.QueryContext(ctx, `SELECT seq, action, details::text FROM audit_events
-			WHERE tenant_id = $1 AND seq > $2 AND outcome = 'success' AND action = ANY($3) ORDER BY seq LIMIT 200`, tenantID, seq, pgtype.FlatArray[string](mapped))
-		if err != nil {
-			return 0, err
-		}
-		n, found := 0, int64(0)
-		for rows.Next() {
-			var action, details string
-			if err := rows.Scan(&seq, &action, &details); err != nil {
-				_ = rows.Close()
-				return 0, err
-			}
-			n++
-			if t := EventType(action, details); t != "" && slices.Contains(events, t) {
-				found = seq
-				break
-			}
-		}
-		if err := rows.Close(); err != nil {
-			return 0, err
-		}
-		if found != 0 || n < 200 {
-			return found, nil
+// actionsFor lists the audit actions that become one of events.
+func actionsFor(events []string) []string {
+	var out []string
+	for _, a := range mapped {
+		if slices.Contains(events, EventType(a, `{"new_seat": true}`)) {
+			out = append(out, a)
 		}
 	}
+	return out
+}
+
+// nextEvent returns the seq of the first successful entry after seq in the
+// tenant's chain that is an event the endpoint subscribes to, or 0. One
+// indexed query (EventType's rules in SQL), so it is cheap under the
+// endpoint's locks however long the chain.
+func nextEvent(ctx context.Context, tx *ent.Tx, tenantID string, seq int64, events []string) (int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT seq FROM audit_events WHERE tenant_id = $1 AND seq > $2 AND outcome = 'success'
+		AND action = ANY($3) AND (action <> 'activation.offline' OR details->>'new_seat' = 'true') ORDER BY seq LIMIT 1`,
+		tenantID, seq, pgtype.FlatArray[string](actionsFor(events)))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var next int64
+	if rows.Next() {
+		if err := rows.Scan(&next); err != nil {
+			return 0, err
+		}
+	}
+	return next, rows.Err()
 }
