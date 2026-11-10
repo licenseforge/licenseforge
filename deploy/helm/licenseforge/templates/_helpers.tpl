@@ -85,13 +85,20 @@ the server, unless local). */}}
 {{ printf "- name: LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT\n  value: \"true\"" | indent (index $ 1) }}
 {{- end }}
 {{- end -}}
-{{- define "licenseforge.extraCAMounts" -}}
-{{- $root := index . 0 }}{{- with ($root.Values.extraCA | default dict).secretName }}
-{{ printf "volumeMounts:\n  - {name: extra-ca, mountPath: /etc/licenseforge/extra-ca, readOnly: true}" | indent (index $ 1) }}
+{{/* A Job's secret files and the extra CA: (list root indent secretName key).
+The database URL is a file, not an environment variable (DISA Kubernetes
+STIG V-242415): the program reads LICENSEFORGE_*_FILE. */}}
+{{- define "licenseforge.jobMounts" -}}
+{{- $root := index . 0 }}
+{{ printf "volumeMounts:\n  - {name: secrets, mountPath: /etc/licenseforge/secrets, readOnly: true}" | indent (index $ 1) }}
+{{- with ($root.Values.extraCA | default dict).secretName }}
+{{ printf "  - {name: extra-ca, mountPath: /etc/licenseforge/extra-ca, readOnly: true}" | indent (index $ 1) }}
 {{- end }}
 {{- end -}}
-{{- define "licenseforge.extraCAVolumes" -}}
-{{- $root := index . 0 }}{{- $ca := $root.Values.extraCA | default dict }}{{- with $ca.secretName }}
-{{ printf "volumes:\n  - name: extra-ca\n    secret: {secretName: %s, items: [{key: %s, path: ca.crt}]}" (quote .) (quote $ca.key) | indent (index $ 1) }}
+{{- define "licenseforge.jobVolumes" -}}
+{{- $root := index . 0 }}{{- $ca := $root.Values.extraCA | default dict }}
+{{ printf "volumes:\n  - name: secrets\n    secret: {secretName: %s, items: [{key: %s, path: %s}], defaultMode: 0440}  # group: the pod's fsGroup" (quote (index $ 2)) (quote (index $ 3)) (index $ 3) | indent (index $ 1) }}
+{{- with $ca.secretName }}
+{{ printf "  - name: extra-ca\n    secret: {secretName: %s, items: [{key: %s, path: ca.crt}]}" (quote .) (quote $ca.key) | indent (index $ 1) }}
 {{- end }}
 {{- end -}}

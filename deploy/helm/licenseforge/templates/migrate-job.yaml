@@ -33,13 +33,13 @@ spec:
           args: [migrate]
           securityContext: {{- include "licenseforge.containerSecurityContext" . | nindent 12 }}
           env:
-            - name: LICENSEFORGE_OWNER_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.migrate | quote }}, key: owner-database-url}}
+            - name: LICENSEFORGE_OWNER_DATABASE_URL_FILE
+              value: /etc/licenseforge/secrets/owner-database-url
             {{- include "licenseforge.extraCAEnv" (list . 12) }}
             {{- include "licenseforge.dbPlaintextEnv" (list . 12) }}
-          {{- include "licenseforge.extraCAMounts" (list . 10) }}
+          {{- include "licenseforge.jobMounts" (list . 10) }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
-      {{- include "licenseforge.extraCAVolumes" (list . 6) }}
+      {{- include "licenseforge.jobVolumes" (list . 6 .Values.secrets.migrate "owner-database-url") }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

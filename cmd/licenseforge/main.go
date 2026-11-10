@@ -297,11 +297,11 @@ func migrate(ctx context.Context, log *slog.Logger) error {
 func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	warnPlaintextDatabase(log)
 	defer func() { _ = ln.Close(); _ = mln.Close() }()
-	if os.Getenv("LICENSEFORGE_OWNER_DATABASE_URL") != "" {
-		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
+	if envSet("LICENSEFORGE_OWNER_DATABASE_URL") {
+		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL (or _FILE) is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
 	}
-	if os.Getenv("LICENSEFORGE_RETENTION_DATABASE_URL") != "" { // ADR-0036: no DELETE on audit entries in serving pods
-		return errors.New("LICENSEFORGE_RETENTION_DATABASE_URL is set: the server must not hold the retention login; use it for `licenseforge audit prune` only")
+	if envSet("LICENSEFORGE_RETENTION_DATABASE_URL") { // ADR-0036: no DELETE on audit entries in serving pods
+		return errors.New("LICENSEFORGE_RETENTION_DATABASE_URL (or _FILE) is set: the server must not hold the retention login; use it for `licenseforge audit prune` only")
 	}
 	drain, err := time.ParseDuration(envOr("LICENSEFORGE_DRAIN", "5s"))
 	if err != nil || drain < 0 {
@@ -352,9 +352,13 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		sinks["syslog"] = sink
 	}
 	if endpoint := os.Getenv("LICENSEFORGE_AUDIT_OTLP_ENDPOINT"); endpoint != "" {
+		headers, err := secretEnv("LICENSEFORGE_AUDIT_OTLP_HEADERS")
+		if err != nil {
+			return err
+		}
 		sink, err := auditexport.NewOTLP(auditexport.OTLPConfig{Endpoint: endpoint,
 			CAFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CA_FILE"), CertFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_CERT_FILE"),
-			KeyFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_KEY_FILE"), Headers: os.Getenv("LICENSEFORGE_AUDIT_OTLP_HEADERS")})
+			KeyFile: os.Getenv("LICENSEFORGE_AUDIT_OTLP_KEY_FILE"), Headers: headers})
 		if err != nil {
 			return fmt.Errorf("LICENSEFORGE_AUDIT_OTLP_*: %w", err)
 		}
@@ -425,11 +429,15 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	}
 	var sessions *weblogin.Sessions
 	if issuer := os.Getenv("LICENSEFORGE_OIDC_ISSUER"); issuer != "" {
+		clientSecret, err := secretEnv("LICENSEFORGE_OIDC_CLIENT_SECRET")
+		if err != nil {
+			return err
+		}
 		discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		login, err := weblogin.New(discoverCtx, weblogin.Config{
 			Issuer:       issuer,
 			ClientID:     os.Getenv("LICENSEFORGE_OIDC_CLIENT_ID"),
-			ClientSecret: os.Getenv("LICENSEFORGE_OIDC_CLIENT_SECRET"),
+			ClientSecret: clientSecret,
 			RedirectURL:  os.Getenv("LICENSEFORGE_OIDC_REDIRECT_URL"),
 			Banner:       os.Getenv("LICENSEFORGE_LOGIN_BANNER"),
 			// Read only here, at start: a later change needs a restart.
@@ -622,12 +630,41 @@ func envOr(key, def string) string {
 	return def
 }
 
+// mustEnv reads a required secret setting (database URLs, master keys),
+// from the environment or from the file named by key_FILE (secretEnv).
 func mustEnv(key string) (string, error) {
-	if v := os.Getenv(key); v != "" {
-		return v, nil
+	v, err := secretEnv(key)
+	if err == nil && v == "" {
+		err = fmt.Errorf("%s is not set (nor %s_FILE)", key, key)
 	}
-	return "", fmt.Errorf("%s is not set", key)
+	return v, err
 }
+
+// secretEnv reads a secret setting from key, or from the file key_FILE
+// names: a mounted Secret, so the secret isn't in the process environment
+// (DISA Kubernetes STIG V-242415). Setting both is an error, and so is an
+// empty file; a trailing line break in the file is dropped.
+func secretEnv(key string) (string, error) {
+	path := os.Getenv(key + "_FILE")
+	if path == "" {
+		return os.Getenv(key), nil
+	}
+	if os.Getenv(key) != "" {
+		return "", fmt.Errorf("%s and %s_FILE are both set: use one", key, key)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("%s_FILE: %w", key, err)
+	}
+	v := strings.TrimRight(string(b), "\r\n")
+	if v == "" {
+		return "", fmt.Errorf("%s_FILE: %s is empty", key, path)
+	}
+	return v, nil
+}
+
+// envSet reports whether key or key_FILE is set: what serve refuses to hold.
+func envSet(key string) bool { return os.Getenv(key) != "" || os.Getenv(key+"_FILE") != "" }
 
 // webhookDispatcher checks the operator's webhook settings
 // (LICENSEFORGE_WEBHOOK_*; invalid ones stop the server) and returns what

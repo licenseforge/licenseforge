@@ -14,6 +14,10 @@
 {{- end }}
 {{- $extraCA := .Values.extraCA | default dict }}
 {{- if $extraCA.secretName }}{{ $mounts = append $mounts (dict "name" "extra-ca" "dir" "/etc/licenseforge/extra-ca" "secret" $extraCA.secretName "key" $extraCA.key) }}{{ end }}
+{{- /* Secrets as files, not environment variables (DISA Kubernetes STIG V-242415): the server reads LICENSEFORGE_*_FILE. */}}
+{{- $mounts = append $mounts (dict "name" "secrets" "dir" "/etc/licenseforge/secrets" "secret" .Values.secrets.server "items" (list "database-url" "platform-database-url" "identity-database-url" "master-keys")) }}
+{{- with $otlp.headersSecret }}{{ $mounts = append $mounts (dict "name" "otlp-headers" "dir" "/etc/licenseforge/otlp/headers" "secret" . "items" (list "headers")) }}{{ end }}
+{{- with dig "clientSecret" "secretName" "" $oidc }}{{ $mounts = append $mounts (dict "name" "oidc-secret" "dir" "/etc/licenseforge/oidc" "secret" . "items" (list (required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc))) "as" "client-secret") }}{{ end }}
 {{- if and $oidc.enabled (not (and $oidc.issuer $oidc.clientID $oidc.redirectURL)) }}{{ fail "oidc.enabled needs oidc.issuer, oidc.clientID and oidc.redirectURL" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -55,14 +59,14 @@ spec:
               containerPort: {{ include "licenseforge.metricsPort" . }}
           env:
             # Explicit keys, never envFrom: the owner login must not reach serving pods.
-            - name: LICENSEFORGE_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: database-url}}
-            - name: LICENSEFORGE_PLATFORM_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: platform-database-url}}
-            - name: LICENSEFORGE_IDENTITY_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: identity-database-url}}
-            - name: LICENSEFORGE_MASTER_KEYS
-              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.server | quote }}, key: master-keys}}
+            - name: LICENSEFORGE_DATABASE_URL_FILE
+              value: /etc/licenseforge/secrets/database-url
+            - name: LICENSEFORGE_PLATFORM_DATABASE_URL_FILE
+              value: /etc/licenseforge/secrets/platform-database-url
+            - name: LICENSEFORGE_IDENTITY_DATABASE_URL_FILE
+              value: /etc/licenseforge/secrets/identity-database-url
+            - name: LICENSEFORGE_MASTER_KEYS_FILE
+              value: /etc/licenseforge/secrets/master-keys
             - name: LICENSEFORGE_DRAIN
               value: {{ printf "%ds" (int .Values.drainSeconds) | quote }}
             - name: LICENSEFORGE_METRICS_ADDR
@@ -133,8 +137,8 @@ spec:
               value: /etc/licenseforge/otlp/client/tls.key
             {{- end }}
             {{- with $otlp.headersSecret }}
-            - name: LICENSEFORGE_AUDIT_OTLP_HEADERS
-              valueFrom: {secretKeyRef: {name: {{ . | quote }}, key: headers}}
+            - name: LICENSEFORGE_AUDIT_OTLP_HEADERS_FILE
+              value: /etc/licenseforge/otlp/headers/headers
             {{- end }}
             {{- end }}
             {{- if $oidc.enabled }}
@@ -145,8 +149,8 @@ spec:
             - name: LICENSEFORGE_OIDC_REDIRECT_URL
               value: {{ $oidc.redirectURL | quote }}
             {{- with dig "clientSecret" "secretName" "" $oidc }}
-            - name: LICENSEFORGE_OIDC_CLIENT_SECRET
-              valueFrom: {secretKeyRef: {name: {{ . | quote }}, key: {{ required "oidc.clientSecret.key is required with oidc.clientSecret.secretName" (dig "clientSecret" "key" "" $oidc) | quote }}}}
+            - name: LICENSEFORGE_OIDC_CLIENT_SECRET_FILE
+              value: /etc/licenseforge/oidc/client-secret
             {{- end }}
             {{- end }}
             {{- include "licenseforge.dbPlaintextEnv" (list . 12) }}
@@ -176,7 +180,16 @@ spec:
       volumes:
         {{- range . }}
         - name: {{ .name }}
-          {{- if .client }}
+          {{- if .items }}
+          {{- $as := .as }}
+          secret:
+            secretName: {{ .secret | quote }}
+            defaultMode: 0440  # group: the pod's fsGroup
+            items:
+              {{- range .items }}
+              - {key: {{ . | quote }}, path: {{ $as | default . }}}
+              {{- end }}
+          {{- else if .client }}
           secret: {secretName: {{ .secret | quote }}, items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}], defaultMode: 0440}  # group: the pod's fsGroup
           {{- else if .key }}
           secret: {secretName: {{ .secret | quote }}, items: [{key: {{ .key | quote }}, path: ca.crt}]}
