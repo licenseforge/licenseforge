@@ -324,23 +324,34 @@ func TestConcurrentReplicasDeliverInOrder(t *testing.T) {
 	}
 }
 
-// blocking is a Sink that waits until its context is done.
-type blocking struct{}
+// blocking is a Sink that waits until its context is done, and records when
+// it was called and the deadline it got.
+type blocking struct{ called, deadline *time.Time }
 
-func (blocking) Send(ctx context.Context, _ []Entry) error { <-ctx.Done(); return ctx.Err() }
+func (b blocking) Send(ctx context.Context, _ []Entry) error {
+	if b.called != nil {
+		*b.called = time.Now()
+		*b.deadline, _ = ctx.Deadline()
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
 
 // A send gets half the lease, so it gives up before another replica may take over.
 func TestSendCantOutliveTheLease(t *testing.T) {
 	d := openDB(t)
 	chain(t, d, 1)
-	x := exporter(t, d, sinkName(), blocking{})
+	var called, deadline time.Time
+	x := exporter(t, d, sinkName(), blocking{&called, &deadline})
 	x.Lease = 400 * time.Millisecond
-	start := time.Now()
 	if _, err := x.Once(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Once = %v, want the send's deadline", err)
 	}
-	if took := time.Since(start); took > 350*time.Millisecond {
-		t.Errorf("send ran %v of a 400ms lease", took)
+	// The deadline counts from the claim, before the send: at most half the
+	// lease after the send started, however slow the machine (no wall-clock
+	// bound on the claim and release around it).
+	if deadline.IsZero() || deadline.After(called.Add(x.Lease/2)) {
+		t.Errorf("the send's deadline is %v after it started, want at most %v", deadline.Sub(called), x.Lease/2)
 	}
 }
 
