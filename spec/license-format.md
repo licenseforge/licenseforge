@@ -12,7 +12,7 @@ lf1.<kid>.<base64url(payload_json)>.<base64url(signature)>
 ```
 - Signed message = the exact ASCII bytes `lf1.<kid>.<base64url(payload_json)>`. Version and kid are covered by the signature; no JSON canonicalization needed.
 - `kid` sits **outside** the payload so the SDK picks the key *before* parsing any untrusted JSON.
-- **Algorithm is bound to the key, never read from the file.** The SDK's trusted key set is a list of `{kid, alg, public_key}`; `alg` comes from that list. v1 supports `ed25519`; `ecdsa-p256` and `ml-dsa-65` (post-quantum, FIPS 204) can be added later by issuing new keys, without a format change and without JWT-style `alg` confusion. ([ADR-0021 Certification readiness](../docs/adr/0021-certification-readiness.md))
+- **Algorithm is bound to the key, never read from the file.** The SDK's trusted key set is a list of `{kid, alg, public_key}`; `alg` comes from that list. Its JSON form (the dashboard's, and the vectors' `keys`) is an array of objects with exactly those fields, `public_key` in base64url; SDKs load it as given (an unknown `alg`, a duplicate `kid` or a wrong key length surface when that key is used) and refuse only what can't be represented: unknown or missing fields, a `kid` outside its pattern, non-canonical base64url, an empty set. v1 supports `ed25519`; `ecdsa-p256` and `ml-dsa-65` (post-quantum, FIPS 204) can be added later by issuing new keys, without a format change and without JWT-style `alg` confusion. ([ADR-0021 Certification readiness](../docs/adr/0021-certification-readiness.md))
 - PEM-ish armor so it survives email, copy-paste, ConfigMaps.
 
 ### Encoding rules

@@ -86,7 +86,7 @@ const en = {
   "keys.trustedHelp": "Embed these keys in your builds. The set lists the pending, active and retired keys that signed: retired keys keep offline files they signed valid until they expire. Discarded keys are left out.",
   "keys.compromised": "If a key was compromised: when it's the active key, first generate a new key and promote it. Then leave the compromised key out of what you embed: builds that trust it accept licenses forged with it (offline files it signed then stop verifying).",
   "keys.goTitle": "Go SDK (licensefile.KeySet)",
-  "keys.jsonTitle": "JSON, as in the license format (public_key is base64url without padding: decode it to the key's bytes)",
+  "keys.jsonTitle": "JSON, as in the license format (the Go SDK loads it with licensefile.ParseKeySet; public_key is base64url without padding)",
   "keys.incompleteCopy": "Not every key is shown, so the set can't be copied here.",
   "keys.copy": "Copy",
   "keys.copyGo": "Copy Go",
