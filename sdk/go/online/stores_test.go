@@ -329,7 +329,7 @@ func TestKubernetesStoreNames(t *testing.T) {
 // A null answer or one without a resourceVersion is an error: no panic, and
 // no unconditional PUT over a concurrent writer.
 func TestKubernetesStoreOddAnswers(t *testing.T) {
-	for name, body := range map[string]string{"null": "null", "no metadata": `{"data":{"lease":"x"}}`, "empty resourceVersion": `{"metadata":{"resourceVersion":""}}`} {
+	for name, body := range map[string]string{"null": "null", "no metadata": `{"data":{"lease":"x"}}`, "empty resourceVersion": `{"metadata":{"resourceVersion":""}}`, "number resourceVersion": `{"metadata":{"resourceVersion":7}}`} {
 		puts := 0
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPut {

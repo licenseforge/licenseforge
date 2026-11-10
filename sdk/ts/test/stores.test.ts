@@ -156,10 +156,14 @@ test("odd answers: null, or no resourceVersion, is an error and no PUT", async (
       res.writeHead(200, { "Content-Type": "application/json" }).end(body);
     });
     await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
-    const api = { host: "127.0.0.1", port: (srv.address() as AddressInfo).port, ca: cert, namespace: "apps", token: () => "t" };
-    await assert.rejects(new KubernetesConfigMapStore({ name: "x", api }).save("lf1.x"), /isn't an object|resourceVersion/, body);
-    assert.equal(puts, 0, body);
-    srv.close();
+    try {
+      const api = { host: "127.0.0.1", port: (srv.address() as AddressInfo).port, ca: cert, namespace: "apps", token: () => "t" };
+      await assert.rejects(new KubernetesConfigMapStore({ name: "x", api }).save("lf1.x"), /isn't an object|resourceVersion/, body);
+      assert.equal(puts, 0, body);
+    } finally {
+      srv.closeAllConnections(); // a failure must not hang the suite
+      srv.close();
+    }
   }
 });
 

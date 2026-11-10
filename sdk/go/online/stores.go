@@ -333,7 +333,8 @@ func (k *kubeStore) saveOnce(ctx context.Context, path, kind, name, key, lease s
 	// Only a PUT carrying the resourceVersion read is conditional: without
 	// one it would overwrite a concurrent writer. This also refuses a null
 	// answer (a nil map: writing into it would panic).
-	if meta, _ := obj["metadata"].(map[string]any); meta == nil || meta["resourceVersion"] == nil || meta["resourceVersion"] == "" {
+	meta, _ := obj["metadata"].(map[string]any)
+	if rv, _ := meta["resourceVersion"].(string); rv == "" {
 		return errors.New("the API's answer has no metadata.resourceVersion")
 	}
 	data, _ := obj["data"].(map[string]any)
