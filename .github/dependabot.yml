@@ -22,6 +22,9 @@ updates:
   - package-ecosystem: docker
     directory: / # the Dockerfile's digest-pinned base images
     schedule: { interval: weekly }
+    ignore: # Node majors move with web/ (package.json engines, .nvmrc), as one change
+      - dependency-name: library/node
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
