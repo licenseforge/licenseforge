@@ -68,5 +68,8 @@ func (Activation) Indexes() []ent.Index {
 		// Every activation ever, deactivated included: the seat-move history
 		// (ADR-0034: was this machine seen, how many machines).
 		index.Fields("license_id", "fingerprint").StorageKey("activation_history"),
+		// The daily metrics series (ADR-0046): activations and deactivations by day.
+		index.Fields("tenant_id", "first_seen_at"),
+		index.Fields("tenant_id", "deactivated_at").Annotations(entsql.IndexWhere("deactivated_at IS NOT NULL")),
 	}
 }

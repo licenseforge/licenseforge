@@ -152,6 +152,19 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{ActivationsColumns[15], ActivationsColumns[4]},
 			},
+			{
+				Name:    "activation_tenant_id_first_seen_at",
+				Unique:  false,
+				Columns: []*schema.Column{ActivationsColumns[1], ActivationsColumns[11]},
+			},
+			{
+				Name:    "activation_tenant_id_deactivated_at",
+				Unique:  false,
+				Columns: []*schema.Column{ActivationsColumns[1], ActivationsColumns[13]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deactivated_at IS NOT NULL",
+				},
+			},
 		},
 	}
 	// AuditAnchorsColumns holds the columns for the "audit_anchors" table.

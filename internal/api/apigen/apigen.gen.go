@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for ActivationBinding.
@@ -849,6 +850,26 @@ type CustomerPatch struct {
 	Email        *string             `json:"email,omitempty"`
 	ExternalRefs *map[string]*string `json:"external_refs,omitempty"`
 	Name         *string             `json:"name,omitempty"`
+}
+
+// DailyMetrics defines model for DailyMetrics.
+type DailyMetrics struct {
+	Days []DailyMetricsDay `json:"days"`
+}
+
+// DailyMetricsDay defines model for DailyMetricsDay.
+type DailyMetricsDay struct {
+	// Activations Machines activated that day, online or offline.
+	Activations int64 `json:"activations"`
+
+	// Date The UTC day.
+	Date openapi_types.Date `json:"date"`
+
+	// Deactivations Machines deactivated that day: by the customer, a receipt or a support reset.
+	Deactivations int64 `json:"deactivations"`
+
+	// LicensesIssued Licenses created that day.
+	LicensesIssued int64 `json:"licenses_issued"`
 }
 
 // DeactivationReceipt defines model for DeactivationReceipt.
@@ -1856,6 +1877,12 @@ type UpdateMemberParams struct {
 	RevokeInvitations *bool `form:"revoke_invitations,omitempty" json:"revoke_invitations,omitempty"`
 }
 
+// GetDailyMetricsParams defines parameters for GetDailyMetrics.
+type GetDailyMetricsParams struct {
+	// Days How many days, today included.
+	Days *int `form:"days,omitempty" json:"days,omitempty"`
+}
+
 // ListPlansParams defines parameters for ListPlans.
 type ListPlansParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -2095,6 +2122,9 @@ type ServerInterface interface {
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
 	// (PATCH /tenants/{tenant}/members/{id})
 	UpdateMember(w http.ResponseWriter, r *http.Request, tenant Tenant, id string, params UpdateMemberParams)
+	// GetDailyMetrics Per-day counts for the dashboard's charts, within the caller's scope (ADR-0046).
+	// (GET /tenants/{tenant}/metrics/daily)
+	GetDailyMetrics(w http.ResponseWriter, r *http.Request, tenant Tenant, params GetDailyMetricsParams)
 	// ListPlans List plans in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/plans)
 	ListPlans(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListPlansParams)
@@ -3864,6 +3894,48 @@ func (siw *ServerInterfaceWrapper) UpdateMember(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetDailyMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetDailyMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDailyMetricsParams
+
+	// ------------- Optional query parameter "days" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "days", r.URL.Query(), &params.Days, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "days"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "days", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDailyMetrics(w, r, tenant, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPlans operation middleware
 func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
 
@@ -5037,6 +5109,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/invitations/{id}/revoke", wrapper.RevokeInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invitations/accept", wrapper.AcceptInvitation)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/summary", wrapper.GetSummary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/metrics/daily", wrapper.GetDailyMetrics)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.ListLicenses)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses", wrapper.IssueLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
@@ -10987,6 +11060,120 @@ func (response UpdateMember422ApplicationProblemPlusJSONResponse) VisitUpdateMem
 	return err
 }
 
+type GetDailyMetricsRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Params GetDailyMetricsParams
+}
+
+type GetDailyMetricsResponseObject interface {
+	VisitGetDailyMetricsResponse(w http.ResponseWriter) error
+}
+
+type GetDailyMetrics200JSONResponse DailyMetrics
+
+func (response GetDailyMetrics200JSONResponse) VisitGetDailyMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDailyMetrics400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetDailyMetrics400ApplicationProblemPlusJSONResponse) VisitGetDailyMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDailyMetrics401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetDailyMetrics401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetDailyMetrics401ResponseHeaders
+}
+
+func (response GetDailyMetrics401ApplicationProblemPlusJSONResponse) VisitGetDailyMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDailyMetrics403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetDailyMetrics403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetDailyMetrics403ResponseHeaders
+}
+
+func (response GetDailyMetrics403ApplicationProblemPlusJSONResponse) VisitGetDailyMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDailyMetrics404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetDailyMetrics404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetDailyMetrics404ResponseHeaders
+}
+
+func (response GetDailyMetrics404ApplicationProblemPlusJSONResponse) VisitGetDailyMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPlansRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListPlansParams
@@ -14877,6 +15064,9 @@ type StrictServerInterface interface {
 	// UpdateMember Change a member's role or product scope (JSON Merge Patch).
 	// (PATCH /tenants/{tenant}/members/{id})
 	UpdateMember(ctx context.Context, request UpdateMemberRequestObject) (UpdateMemberResponseObject, error)
+	// GetDailyMetrics Per-day counts for the dashboard's charts, within the caller's scope (ADR-0046).
+	// (GET /tenants/{tenant}/metrics/daily)
+	GetDailyMetrics(ctx context.Context, request GetDailyMetricsRequestObject) (GetDailyMetricsResponseObject, error)
 	// ListPlans List plans in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/plans)
 	ListPlans(ctx context.Context, request ListPlansRequestObject) (ListPlansResponseObject, error)
@@ -16213,6 +16403,33 @@ func (sh *strictHandler) UpdateMember(w http.ResponseWriter, r *http.Request, te
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateMemberResponseObject); ok {
 		if err := validResponse.VisitUpdateMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDailyMetrics operation middleware
+func (sh *strictHandler) GetDailyMetrics(w http.ResponseWriter, r *http.Request, tenant Tenant, params GetDailyMetricsParams) {
+	var request GetDailyMetricsRequestObject
+
+	request.Tenant = tenant
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDailyMetrics(ctx, request.(GetDailyMetricsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDailyMetrics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDailyMetricsResponseObject); ok {
+		if err := validResponse.VisitGetDailyMetricsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

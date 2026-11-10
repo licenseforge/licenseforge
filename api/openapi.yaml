@@ -324,6 +324,34 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/metrics/daily:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: getDailyMetrics
+      summary: Per-day counts for the dashboard's charts, within the caller's scope (ADR-0046).
+      description: |
+        Needs license:read. One entry per UTC day (by the server's database
+        clock), oldest first, for the last `days` days ending today (today
+        is partial); every day is present, with zeros when nothing happened.
+        A product-scoped caller counts its products' licenses and their
+        activations only. More series may be added as new members; clients
+        must ignore members they don't know.
+      parameters:
+        - name: days
+          in: query
+          description: How many days, today included.
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        "200":
+          description: The series.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyMetrics" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1874,6 +1902,21 @@ components:
               format: int64
               description: "Customers with at least one activation seen (activated or refreshed) since month_start, archived customers and deactivated machines included: the active-customer measure (ADR-0016, ADR-0040). Site licenses and offline files aren't seen, and a plan whose lease is longer than about two months may not refresh within a month (undercount)."
             month_start: { type: string, format: date-time, description: "The start of the current calendar month in UTC, by the server's database clock." }
+    DailyMetrics:
+      type: object
+      required: [days]
+      properties:
+        days:
+          type: array
+          items: { $ref: "#/components/schemas/DailyMetricsDay" }
+    DailyMetricsDay:
+      type: object
+      required: [date, licenses_issued, activations, deactivations]
+      properties:
+        date: { type: string, format: date, description: The UTC day. }
+        licenses_issued: { type: integer, format: int64, description: Licenses created that day. }
+        activations: { type: integer, format: int64, description: "Machines activated that day, online or offline." }
+        deactivations: { type: integer, format: int64, description: "Machines deactivated that day: by the customer, a receipt or a support reset." }
     LicenseStatus:
       type: string
       enum: [active, suspended, revoked]

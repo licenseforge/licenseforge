@@ -238,6 +238,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/metrics/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Per-day counts for the dashboard's charts, within the caller's scope (ADR-0046).
+         * @description Needs license:read. One entry per UTC day (by the server's database
+         *     clock), oldest first, for the last `days` days ending today (today
+         *     is partial); every day is present, with zeros when nothing happened.
+         *     A product-scoped caller counts its products' licenses and their
+         *     activations only. More series may be added as new members; clients
+         *     must ignore members they don't know.
+         */
+        get: operations["getDailyMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses": {
         parameters: {
             query?: never;
@@ -1574,6 +1602,31 @@ export interface components {
                 month_start: string;
             };
         };
+        DailyMetrics: {
+            days: components["schemas"]["DailyMetricsDay"][];
+        };
+        DailyMetricsDay: {
+            /**
+             * Format: date
+             * @description The UTC day.
+             */
+            date: string;
+            /**
+             * Format: int64
+             * @description Licenses created that day.
+             */
+            licenses_issued: number;
+            /**
+             * Format: int64
+             * @description Machines activated that day, online or offline.
+             */
+            activations: number;
+            /**
+             * Format: int64
+             * @description Machines deactivated that day: by the customer, a receipt or a support reset.
+             */
+            deactivations: number;
+        };
         /** @enum {string} */
         LicenseStatus: "active" | "suspended" | "revoked";
         License: {
@@ -2621,6 +2674,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Summary"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    getDailyMetrics: {
+        parameters: {
+            query?: {
+                /** @description How many days, today included. */
+                days?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyMetrics"];
                 };
             };
             400: components["responses"]["Problem"];

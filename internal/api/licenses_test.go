@@ -316,6 +316,64 @@ func (f *fixture) lastEvent(t *testing.T, tenant string) *ent.AuditEvent {
 	return e
 }
 
+// GET /metrics/daily: the series in the caller's scope and tenant (counts
+// per day are tested in the licenses service); days defaults to 30 and is
+// bounded (ADR-0046).
+func TestDailyMetrics(t *testing.T) {
+	f := setup(t)
+	c := f.catalog(t)
+	owner := f.session(t, f.ownerA, true)
+	lic := Prefix + "/tenants/" + f.a.Slug + "/licenses"
+	for _, body := range []string{issueBody(f.prodA, c.planP, c.customer), issueBody(c.prodQ, c.planQ, c.customer)} {
+		if r := f.do(t, "POST", lic, body, owner); r.code != 201 {
+			t.Fatalf("issue: %d %s", r.code, r.raw)
+		}
+	}
+	path := Prefix + "/tenants/" + f.a.Slug + "/metrics/daily"
+	today := time.Now().UTC().Format(time.DateOnly)
+	for name, tc := range map[string]struct {
+		query  string
+		o      opt
+		days   int
+		issued float64 // today
+	}{
+		"owner, default 30 days":  {"", owner, 30, 2},
+		"7 days":                  {"?days=7", owner, 7, 2},
+		"scoped to prodA":         {"?days=90", f.session(t, f.scoped, false), 90, 1},
+		"API token, all products": {"?days=1", bearer(f.token(t, f.a.ID, f.ownerA, authz.Viewer).Token), 1, 2},
+	} {
+		r := f.do(t, "GET", path+tc.query, "", tc.o)
+		days, _ := r.body["days"].([]any)
+		if r.code != 200 || len(days) != tc.days {
+			t.Errorf("%s: %d %s", name, r.code, r.raw)
+			continue
+		}
+		last := days[len(days)-1].(map[string]any)
+		want := map[string]any{"date": today, "licenses_issued": tc.issued, "activations": 0.0, "deactivations": 0.0}
+		if !reflect.DeepEqual(last, want) && last["date"] == today { // past midnight UTC mid-test: skip the check
+			t.Errorf("%s: today is %v, want %v", name, last, want)
+		}
+		if first := days[0].(map[string]any)["date"]; first != time.Now().UTC().AddDate(0, 0, 1-tc.days).Format(time.DateOnly) && last["date"] == today {
+			t.Errorf("%s: first day %v", name, first)
+		}
+	}
+	if r := f.do(t, "GET", Prefix+"/tenants/"+f.b.Slug+"/metrics/daily?days=1", "", f.session(t, f.ownerB, false)); r.code != 200 ||
+		r.body["days"].([]any)[0].(map[string]any)["licenses_issued"] != 0.0 {
+		t.Errorf("other tenant: %d %s", r.code, r.raw)
+	}
+	for _, q := range []string{"?days=0", "?days=91", "?days=-1"} {
+		if r := f.do(t, "GET", path+q, "", owner); !strings.Contains(r.raw, "days must be 1 to 90") {
+			t.Errorf("%s: %d %s", q, r.code, r.raw)
+		}
+		f.do(t, "GET", path+q, "", owner).problem(t, 400, "invalid_request")
+	}
+	f.do(t, "GET", path+"?days=x", "", owner).problem(t, 400, "invalid_request")
+	f.do(t, "GET", path+"?day=7", "", owner).problem(t, 400, "invalid_request")
+	f.do(t, "GET", path, "").problem(t, 401, "unauthenticated")
+	f.do(t, "GET", path, "", f.session(t, f.outsider, false)).problem(t, 404, "not_found")
+	f.do(t, "GET", path, "", bearer(f.token(t, f.a.ID, f.ownerA, authz.SDK).Token)).problem(t, 403, "forbidden")
+}
+
 // GET /summary: exact counts in the caller's scope and tenant; customers
 // only for callers who see every product (absent, not zero, otherwise).
 func TestSummary(t *testing.T) {
