@@ -3,7 +3,7 @@
     "uuid": "2e540aa4-20c7-5263-83d3-c2eb48ee1945",
     "metadata": {
       "title": "LicenseForge server: NIST SP 800-53 Rev 5 component definition",
-      "last-modified": "2026-11-09T00:00:00Z",
+      "last-modified": "2026-11-10T00:00:00Z",
       "version": "0.1.0-draft",
       "oscal-version": "1.2.3",
       "remarks": "Describes the controls the LicenseForge server implements or plans, for use in the system security plan of a system that runs it. Status (prop implementation-status, namespace https://licenseforge.io/ns/oscal): implemented = in main with tests; partial = in main, with the gaps in remarks; planned = a roadmap item, not in main; inherited = met by the deploying organization or its platform. Designed to support FedRAMP Moderate, HIPAA and NIST 800-53 assessments; it is not a FedRAMP authorization or readiness designation. Human-readable version: compliance/nist-800-53-matrix.md."
@@ -1280,7 +1280,7 @@
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
                 "control-id": "sc-8",
-                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention, the tenant CLI commands) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Webhook deliveries are https only, verify the receiver's certificate and never follow redirects (ADR-0044). Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention, the tenant CLI commands) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Webhook deliveries are https only, verify the receiver's certificate and never follow redirects (ADR-0044). Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves. The admin CLI (`licenseforge api`, and `offline`) sends its API token only over https (http to loopback), never follows redirects, and refuses a base URL or path that could move a request to another host or out of /api/v1 (ADR-0048).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1532,7 +1532,7 @@
               {
                 "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
                 "control-id": "si-7",
-                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md).",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md). The SDKs (Go, TypeScript) verify license files against Ed25519 keys embedded in the build and refuse weak trusted keys (small-order points, non-canonical encodings) before the signature check, so a tampered key set can't make a forged license verify (spec, conformance vectors).",
                 "props": [
                   {
                     "name": "implementation-status",
