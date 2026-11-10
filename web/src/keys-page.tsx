@@ -7,6 +7,7 @@ import {
   canReadKeys,
   createSigningKey,
   discardSigningKey,
+  goKeySet,
   promoteSigningKey,
   type SigningKey,
   signingKeysQuery,
@@ -33,7 +34,8 @@ export function KeysPage() {
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const keys = list.data?.items ?? [];
   const pending = keys.some((k) => k.status === "pending");
-  const trusted = JSON.stringify(trustedKeySet(keys), null, 2);
+  const active = keys.find((k) => k.status === "active");
+  const trusted = trustedKeySet(keys);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -50,6 +52,7 @@ export function KeysPage() {
         </p>
       )}
       {list.isSuccess && keys.length === 0 && <p className="mt-6 text-sm text-muted-foreground">{manage ? t("keys.emptyOwner") : t("keys.empty")}</p>}
+      {keys.length > 0 && !active && <p role="status" className="mt-6 text-sm font-medium">{t("keys.noActive")}</p>}
       {keys.length > 0 && (
         <>
           <table className="mt-6 w-full text-left text-sm">
@@ -90,41 +93,57 @@ export function KeysPage() {
             </tbody>
           </table>
           {list.data?.next_cursor && <p className="mt-2 text-xs text-muted-foreground">{t("keys.incomplete")}</p>}
-          <TrustedSet json={trusted} />
+          <TrustedSet keys={trusted} complete={!list.data?.next_cursor} />
         </>
       )}
-      {confirm && <ConfirmDialog tenant={slug} confirm={confirm} first={keys.length === 0} onDone={refresh} onClose={() => setConfirm(null)} />}
+      {confirm && <ConfirmDialog tenant={slug} confirm={confirm} first={keys.length === 0} active={active} onDone={refresh} onClose={() => setConfirm(null)} />}
     </>
   );
 }
 
-/** The JSON a vendor pastes into the SDK's trusted key set. */
-function TrustedSet({ json }: { json: string }) {
-  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+/** The keys a vendor embeds: as Go for the SDK, and as the license format's JSON for anything else. */
+function TrustedSet({ keys, complete }: { keys: ReturnType<typeof trustedKeySet>; complete: boolean }) {
   return (
     <section aria-labelledby="trusted-title" className="mt-8">
       <h2 id="trusted-title" className="text-lg font-semibold">{t("keys.trustedTitle")}</h2>
-      <p id="trusted-help" className="mt-1 text-sm text-muted-foreground">{t("keys.trustedHelp")}</p>
-      <pre aria-describedby="trusted-help" className="mt-2 overflow-x-auto rounded-md border p-3 font-mono text-xs">{json}</pre>
+      <p className="mt-1 text-sm text-muted-foreground">{t("keys.trustedHelp")}</p>
+      <p className="mt-1 text-sm font-medium">{t("keys.compromised")}</p>
+      {!complete && <p className="mt-1 text-sm">{t("keys.incompleteCopy")}</p>}
+      <Snippet id="go" title={t("keys.goTitle")} text={goKeySet(keys)} copyLabel={t("keys.copyGo")} complete={complete} />
+      <Snippet id="json" title={t("keys.jsonTitle")} text={JSON.stringify(keys, null, 2)} copyLabel={t("keys.copyJson")} complete={complete} />
+    </section>
+  );
+}
+
+function Snippet({ id, title, text, copyLabel, complete }: { id: string; title: string; text: string; copyLabel: string; complete: boolean }) {
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <div className="mt-4">
+      <h3 id={`${id}-title`} className="text-sm font-semibold">{title}</h3>
+      {/* focusable: keyboard users can scroll a wide key */}
+      <pre id={id} tabIndex={0} aria-labelledby={`${id}-title`} className="mt-2 overflow-x-auto rounded-md border p-3 font-mono text-xs">{text}</pre>
       <div className="mt-2 flex items-center gap-2">
         <Button
           variant="ghost"
+          disabled={!complete}
           onClick={() =>
-            navigator.clipboard.writeText(json).then(
+            navigator.clipboard.writeText(text).then(
               () => setCopy("copied"),
               () => setCopy("failed"),
             )
           }
         >
-          {t("keys.copy")}
+          {copyLabel}
         </Button>
         <span role="status" className="text-sm">{copy === "copied" ? t("keys.copied") : copy === "failed" ? t("keys.copyFailed") : ""}</span>
       </div>
-    </section>
+    </div>
   );
 }
 
-function ConfirmDialog({ tenant, confirm, first, onDone, onClose }: { tenant: string; confirm: Confirm; first: boolean; onDone: () => Promise<void>; onClose: () => void }) {
+function ConfirmDialog({ tenant, confirm, first, active, onDone, onClose }: {
+  tenant: string; confirm: Confirm; first: boolean; active: SigningKey | undefined; onDone: () => Promise<void>; onClose: () => void;
+}) {
   const { action, key } = confirm;
   const run = useMutation({
     mutationFn: async () => {
@@ -146,6 +165,7 @@ function ConfirmDialog({ tenant, confirm, first, onDone, onClose }: { tenant: st
   return (
     <Modal title={key ? t("keys.confirmTitle", { action: t(label), kid: key.kid }) : t(label)} onClose={run.isPending ? () => {} : onClose}>
       <p className="text-sm">{t(text)}</p>
+      {action === "promote" && active && <p className="mt-2 text-sm font-medium">{t("keys.confirm.retires", { kid: active.kid })}</p>}
       {run.isError && (
         <p role="alert" className="mt-3 text-sm font-medium">
           {errorText(run.error)}

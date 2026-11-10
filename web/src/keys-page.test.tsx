@@ -3,7 +3,7 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { trustedKeySet, type SigningKey } from "./api/keys";
+import { goKeySet, keyBytes, trustedKeySet, type SigningKey } from "./api/keys";
 import { createAppRouter } from "./router";
 
 
@@ -27,12 +27,12 @@ afterEach(() => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const key = (over: Record<string, unknown> = {}) => ({
-  kid: "sk_active", alg: "ed25519", public_key: "PUBactive", status: "active",
+  kid: "sk_active", alg: "ed25519", public_key: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", status: "active",
   created_at: "2026-11-01T00:00:00Z", activated_at: "2026-11-01T00:00:00Z", retired_at: null, ...over,
 });
-const pendingKey = key({ kid: "sk_pending", public_key: "PUBpending", status: "pending", activated_at: null });
-const oldKey = key({ kid: "sk_old", public_key: "PUBold", status: "retired", retired_at: "2026-11-01T00:00:00Z", activated_at: "2026-10-01T00:00:00Z" });
-const discarded = key({ kid: "sk_discarded", public_key: "PUBdiscarded", status: "retired", activated_at: null, retired_at: "2026-11-02T00:00:00Z" });
+const pendingKey = key({ kid: "sk_pending", public_key: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI", status: "pending", activated_at: null });
+const oldKey = key({ kid: "sk_old", public_key: "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM", status: "retired", retired_at: "2026-11-01T00:00:00Z", activated_at: "2026-10-01T00:00:00Z" });
+const discarded = key({ kid: "sk_discarded", public_key: "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ", status: "retired", activated_at: null, retired_at: "2026-11-02T00:00:00Z" });
 
 type Sent = { method: string; path: string; body: unknown; type: string | null };
 
@@ -74,14 +74,16 @@ const button = (el: HTMLElement, text: string) => [...el.querySelectorAll("butto
 
 it("trusts pending, active and retired-after-signing keys, never a discarded one", () => {
   expect(trustedKeySet([pendingKey, key(), oldKey, discarded] as SigningKey[]).map((k) => k.kid)).toEqual(["sk_pending", "sk_active", "sk_old"]);
-  expect(trustedKeySet([key()] as SigningKey[])).toEqual([{ kid: "sk_active", alg: "ed25519", public_key: "PUBactive" }]);
+  expect(trustedKeySet([key()] as SigningKey[])).toEqual([{ kid: "sk_active", alg: "ed25519", public_key: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE" }]);
 });
 
 it("shows viewers the keys and the trusted key set, without controls", async () => {
   const { el } = await open("viewer", [pendingKey, key(), oldKey, discarded]);
   await vi.waitFor(() => expect(el.querySelectorAll("tbody tr").length).toBe(4));
-  expect(el.textContent).toContain("Discarded");
-  const set = JSON.parse(el.querySelector("pre")!.textContent!);
+  const row = (kid: string) => [...el.querySelectorAll("tbody tr")].find((r) => r.textContent!.includes(kid))!;
+  expect(row("sk_discarded").textContent).toContain("never signed");
+  expect(row("sk_old").textContent).not.toContain("never signed");
+  const set = JSON.parse(el.querySelector("pre#json")!.textContent!);
   expect(set.map((k: { kid: string }) => k.kid)).toEqual(["sk_pending", "sk_active", "sk_old"]);
   for (const b of ["Generate key", "Promote", "Discard"]) expect(button(el, b)).toBeUndefined();
   expect([...el.querySelectorAll("nav a")].some((a) => a.textContent === "Signing keys")).toBe(true);
@@ -123,6 +125,7 @@ it("hides Generate while a key is pending; promotes and discards it after a warn
   expect(el.querySelector('button[aria-label="Promote sk_pending"]')).not.toBeNull();
   await act(async () => button(el, "Promote")!.click());
   expect(el.querySelector("dialog")!.textContent).toContain("can't be undone");
+  expect(el.querySelector("dialog")!.textContent).toContain("The active key sk_active is retired");
   const promote = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Promote") as HTMLButtonElement;
   await act(async () => promote.click());
   await vi.waitFor(() => expect(sent.some((s) => s.path === "/api/v1/tenants/acme/signing-keys/sk_pending/promote")).toBe(true));
@@ -154,4 +157,58 @@ it("admins see the keys but can't change them", async () => {
   const { el } = await open("admin", [pendingKey, key()]);
   await vi.waitFor(() => expect(el.querySelectorAll("tbody tr").length).toBe(2));
   for (const b of ["Generate key", "Promote", "Discard"]) expect(button(el, b)).toBeUndefined();
+});
+
+it("writes the Go key set with the key's bytes, decoded from base64url", () => {
+  const pub = "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k"; // the spec's example key, with - and _
+  expect(Array.from(keyBytes(pub))).toEqual(Array.from(Buffer.from(pub, "base64url")));
+  expect(keyBytes(pub)).toHaveLength(32);
+  const go = goKeySet([{ kid: "sk_a", alg: "ed25519", public_key: pub }]);
+  const hex = Array.from(Buffer.from(pub, "base64url"), (b) => "0x" + b.toString(16).padStart(2, "0")).join(", ");
+  expect(go).toBe(`var trustedKeys = licensefile.KeySet{\n\t{KID: "sk_a", Alg: "ed25519", Key: []byte{${hex}}},\n}`);
+});
+
+it("copies the Go and JSON sets; not when the list is incomplete", async () => {
+  const writes: string[] = [];
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: async (s: string) => void writes.push(s) } });
+  const { el } = await open("viewer", [key(), discarded]);
+  await vi.waitFor(() => expect(button(el, "Copy Go")).toBeDefined());
+  await act(async () => button(el, "Copy Go")!.click());
+  await act(async () => button(el, "Copy JSON")!.click());
+  expect(writes[0]).toContain('{KID: "sk_active", Alg: "ed25519", Key: []byte{0x01, ');
+  expect(JSON.parse(writes[1]!)).toEqual([{ kid: "sk_active", alg: "ed25519", public_key: key().public_key }]);
+  act(() => root?.unmount());
+  document.body.innerHTML = "";
+  const more = await open("viewer", [key()], (_req, u) => (u.pathname.endsWith("/signing-keys") ? json({ items: [key()], next_cursor: "c" }) : undefined));
+  await vi.waitFor(() => expect(more.el.textContent).toContain("can't be copied here"));
+  expect([button(more.el, "Copy Go")!.disabled, button(more.el, "Copy JSON")!.disabled]).toEqual([true, true]);
+});
+
+it("says nothing signs while no key is active, and a new key is pending then", async () => {
+  const { el } = await open("owner", [oldKey]);
+  await vi.waitFor(() => expect(el.textContent).toContain("No key is active"));
+  await act(async () => button(el, "Generate key")!.click());
+  expect(el.querySelector("dialog")!.textContent).toContain("The new key is pending");
+  expect(el.querySelector("dialog")!.textContent).not.toContain("active at once");
+});
+
+it("keeps the dialog while a request is out: Esc, Cancel and the action wait", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let posts = 0;
+  const { el } = await open("owner", [pendingKey, key()], (req) => {
+    if (req.method !== "POST") return undefined;
+    posts++;
+    return held.then(() => json(key())) as unknown as Response;
+  });
+  await vi.waitFor(() => expect(button(el, "Discard")).toBeDefined());
+  await act(async () => button(el, "Discard")!.click());
+  const go = () => [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Discard") as HTMLButtonElement;
+  await act(async () => go().click());
+  await vi.waitFor(() => expect(go().disabled).toBe(true));
+  await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+  expect(el.querySelector("dialog")).not.toBeNull();
+  expect(button(el, "Cancel")!.disabled).toBe(true);
+  expect(posts).toBe(1);
+  await act(async () => release());
 });

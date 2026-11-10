@@ -38,3 +38,18 @@ export const canManageKeys = (m: Membership | undefined) => !!m && m.role === "o
 export function trustedKeySet(keys: SigningKey[]) {
   return keys.filter((k) => k.status !== "retired" || k.activated_at != null).map(({ kid, alg, public_key }) => ({ kid, alg, public_key }));
 }
+
+/** A public key's bytes (base64url without padding, RFC 4648 §5). */
+export function keyBytes(publicKey: string): Uint8Array {
+  // atob is forgiving base64 (WHATWG): no padding needed, only the standard alphabet.
+  return Uint8Array.from(atob(publicKey.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+}
+
+/** The trusted key set as Go source for the SDK (licensefile.KeySet): keys as byte literals, nothing to decode. */
+export function goKeySet(keys: { kid: string; alg: string; public_key: string }[]) {
+  const lines = keys.map((k) => {
+    const bytes = Array.from(keyBytes(k.public_key), (b) => "0x" + b.toString(16).padStart(2, "0")).join(", ");
+    return `\t{KID: ${JSON.stringify(k.kid)}, Alg: ${JSON.stringify(k.alg)}, Key: []byte{${bytes}}},`;
+  });
+  return ["var trustedKeys = licensefile.KeySet{", ...lines, "}"].join("\n");
+}
