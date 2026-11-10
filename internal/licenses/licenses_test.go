@@ -562,7 +562,11 @@ func TestStateMachine(t *testing.T) {
 		} else {
 			status = st.want
 			if err != nil || l.Status != st.want || e.Outcome != auditevent.OutcomeSuccess ||
-				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want {
+				!strings.Contains(e.Details, `"to":"`+string(st.want)+`"`) || row.Status != st.want ||
+				// what a webhook payload needs (ADR-0044)
+				!strings.Contains(e.Details, `"customer_id":"`+row.CustomerID+`"`) || !strings.Contains(e.Details, `"plan_slug":"`+row.PlanSlug+`"`) ||
+				!strings.Contains(e.Details, `"plan_id":"`+row.PlanID+`"`) || !strings.Contains(e.Details, expiresJSON(row.ExpiresAt)) ||
+				!strings.Contains(e.Details, `"product_id":"`+row.ProductID+`"`) {
 				t.Errorf("%s: err %v, license %v, event %+v", st.name, err, l, e)
 			}
 		}
@@ -1114,5 +1118,50 @@ func TestChangeWaitsForConcurrentRevoke(t *testing.T) {
 	})
 	if err := <-done; !errors.Is(err, ErrState) {
 		t.Errorf("suspend after a concurrent revoke: %v, want ErrState", err)
+	}
+}
+
+// expiresJSON is how an entry's details carry expires_at.
+func expiresJSON(t *time.Time) string {
+	if t == nil {
+		return `"expires_at":null`
+	}
+	return `"expires_at":"` + t.UTC().Format(time.RFC3339Nano) + `"`
+}
+
+// A transition records the license as it is when the change happens: a
+// first activation that set expires_at while the transition waited for the
+// lock is in the entry (what a webhook payload is built from, ADR-0044).
+func TestTransitionRecordsExpiryAtTheChange(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var planID string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		pl, err := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug("presold").SetName("p").
+			SetDurationMonths(12).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation).Save(ctx)
+		planID = pl.ID
+		return err
+	})
+	m := as(f.a.id, authz.Manager, all)
+	is, err := f.s.Issue(ctx, m, IssueRequest{ProductID: f.a.prodP, PlanID: planID, CustomerID: f.a.customer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error { // as a first activation does, under the license's lock
+		if _, err := tx.ExecContext(ctx, `UPDATE licenses SET first_activated_at = clock_timestamp(), expires_at = clock_timestamp() + interval '1 year' WHERE id = $1`, is.License.ID); err != nil {
+			return err
+		}
+		go func() { _, err := f.s.Suspend(ctx, m, is.License.ID); done <- err }()
+		storetest.WaitForLockWaiter(t, env)
+		return nil
+	})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	e := f.lastEvent(t, f.a.id)
+	row := f.get(t, f.a.id, is.License.ID)
+	if row.ExpiresAt == nil || !strings.Contains(e.Details, expiresJSON(row.ExpiresAt)) {
+		t.Errorf("entry %s, license expires %v", e.Details, row.ExpiresAt)
 	}
 }

@@ -347,12 +347,8 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 			overrides[k] = "granted"
 		}
 	}
-	var expires any
-	if row.ExpiresAt != nil {
-		expires = row.ExpiresAt.UTC().Format(time.RFC3339Nano)
-	}
 	ev.Details = map[string]any{"product_id": row.ProductID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug,
-		"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": expires, "overrides": overrides}
+		"customer_id": row.CustomerID, "type": string(row.Type), "expires_at": rfc3339(row.ExpiresAt), "overrides": overrides}
 	if _, err := audit.Record(ctx, tx, tenantID, ev); err != nil {
 		return Issued{}, ev, err
 	}
@@ -553,7 +549,11 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 			return err
 		}
 		ev.Outcome = auditevent.OutcomeSuccess
-		ev.Details = map[string]any{"from": string(l.Status), "to": string(row.Status), "product_id": l.ProductID}
+		// What a webhook payload needs (ADR-0044): a snapshot at the change.
+		// The row as changed, read under the lock: a concurrent first
+		// activation may have set expires_at since the unlocked read.
+		ev.Details = map[string]any{"from": string(l.Status), "to": string(row.Status), "product_id": row.ProductID,
+			"customer_id": row.CustomerID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug, "expires_at": rfc3339(row.ExpiresAt)}
 		_, err = audit.Record(ctx, tx, tenantID, ev)
 		return err
 	})
@@ -775,4 +775,12 @@ func (s Service) refused(ctx context.Context, tenantID string, ev audit.Event, e
 		return fmt.Errorf("licenses: recording a refusal: %w", rerr)
 	}
 	return err
+}
+
+// rfc3339 is an optional time as audit details carry it (nil: no expiry).
+func rfc3339(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }

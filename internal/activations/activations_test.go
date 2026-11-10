@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -245,7 +246,8 @@ func TestActivateReturnsVerifiableLease(t *testing.T) {
 		t.Fatalf("%d new events", len(es)-before)
 	}
 	if e := es[len(es)-1]; e.Action != "activation.create" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != got.ActivationID ||
-		e.ActorType != auditevent.ActorTypeSystem || !strings.Contains(e.Details, is.License.ID) || strings.Contains(e.Details, is.Key[3:12]) {
+		e.ActorType != auditevent.ActorTypeSystem || !strings.Contains(e.Details, is.License.ID) || strings.Contains(e.Details, is.Key[3:12]) ||
+		!payload(e.Details, is.License, "online") {
 		t.Errorf("event %+v", e)
 	}
 
@@ -307,7 +309,8 @@ func TestSeatLimitUnderConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	es := f.events(t)
-	if e := es[len(es)-1]; e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != first.ID {
+	if e := es[len(es)-1]; e.Action != "activation.deactivate" || e.Outcome != auditevent.OutcomeSuccess || *e.ObjectID != first.ID ||
+		!payload(e.Details, is.License, "online") {
 		t.Errorf("event %+v", e)
 	}
 	if err := f.s.Deactivate(ctx, f.req(is.Key, first.Fingerprint)); !errors.Is(err, ErrNotActivated) {
@@ -412,6 +415,9 @@ func TestRefusals(t *testing.T) {
 	// A cluster fingerprint activates a cluster license.
 	if _, err := f.s.Activate(ctx, k8s(f.req(cluster.Key, fp()))); err != nil {
 		t.Errorf("cluster: %v", err)
+	}
+	if es := f.events(t); !payload(es[len(es)-1].Details, cluster.License, "online") || !strings.Contains(es[len(es)-1].Details, `"binding":"cluster"`) {
+		t.Errorf("cluster activation details %s", es[len(es)-1].Details)
 	}
 
 	// An activated machine loses its lease when the license is suspended,
@@ -926,4 +932,16 @@ func TestDeactivateByIDOnRevokedLicense(t *testing.T) {
 	if n := deactivations(); n != before { // the loser freed nothing: no entry
 		t.Errorf("deactivation entries %d → %d, want no new one", before, n)
 	}
+}
+
+// payload reports whether an activation entry's details carry what a
+// webhook payload needs (ADR-0044): license, product, customer, binding and,
+// when mode isn't "", the seat's mode.
+func payload(details string, l *ent.License, mode string) bool {
+	var d map[string]any
+	if json.Unmarshal([]byte(details), &d) != nil {
+		return false
+	}
+	ok := d["license_id"] == l.ID && d["product_id"] == l.ProductID && d["customer_id"] == l.CustomerID && d["binding"] == string(l.BindType)
+	return ok && (mode == "" || d["mode"] == mode)
 }

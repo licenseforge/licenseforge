@@ -223,6 +223,9 @@ func TestOfflineAndOnlineSeatsStayApart(t *testing.T) {
 	if a, err := f.s.DeactivateByID(ctx, manager(f.a), is.License.ID, got.ActivationID); err != nil || a.DeactivatedAt == nil {
 		t.Errorf("dashboard deactivate: %+v, %v", a, err)
 	}
+	if es := f.offlineEvents(t, "activation.deactivate"); !payload(es[len(es)-1].Details, is.License, "offline") {
+		t.Errorf("dashboard deactivate details %s", es[len(es)-1].Details)
+	}
 }
 
 // Seats are counted under the license's exclusive lock: a request waits

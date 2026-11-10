@@ -102,6 +102,7 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 		l, err := visible(ctx, tx, licenseID)
 		if l != nil {
 			ev.Details = map[string]any{"license_id": l.ID, "product_id": l.ProductID}
+			licenseDetails(ev.Details, l, "")
 		}
 		if err != nil {
 			return err
@@ -113,7 +114,7 @@ func (s Service) DeactivateByID(ctx context.Context, p authz.Principal, licenseI
 		if err != nil {
 			return err
 		}
-		ev.ObjectID, ev.Details["fingerprint"] = act.ID, act.Fingerprint
+		ev.ObjectID, ev.Details["fingerprint"], ev.Details["mode"] = act.ID, act.Fingerprint, string(act.Mode)
 		if err := authz.Require(ctx, authz.ActivationManage, l.ProductID); err != nil {
 			return err
 		}
