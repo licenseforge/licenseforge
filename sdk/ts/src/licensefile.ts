@@ -70,19 +70,30 @@ function unarmor(input: string): string {
 }
 
 /**
- * Checks a license's envelope and signature against the trusted keys and
- * returns the verified payload bytes and the key ID. It doesn't look at the
- * claims: use `open` for that.
+ * The spec's envelope checks up to the key lookup (size, BOM, armor,
+ * whitespace, four parts, version, kid, canonical base64url): the token's
+ * parts, its signature bytes and its payload bytes.
  */
-export function verify(license: string, keys: readonly PublicKey[]): { payload: Uint8Array; kid: string } {
+export function envelope(license: string): { token: string; kid: string; body: string; sig: Uint8Array; payload: Uint8Array } {
   if (Buffer.byteLength(license, "utf8") > MAX_SIZE) fail("malformed", "too large");
-  const parts = unarmor(license).split(".");
+  const token = unarmor(license);
+  const parts = token.split(".");
   const [ver, kid = "", body = "", sigText = ""] = parts;
   if (parts.length !== 4 || ver !== "lf1" || !kidRE.test(kid) || body === "") fail("malformed");
   const sig = b64url(sigText);
   if (!sig) return fail("malformed", "signature encoding");
   const payload = b64url(body);
   if (!payload) return fail("malformed", "payload encoding");
+  return { token, kid, body, sig, payload };
+}
+
+/**
+ * Checks a license's envelope and signature against the trusted keys and
+ * returns the verified payload bytes and the key ID. It doesn't look at the
+ * claims: use `open` for that.
+ */
+export function verify(license: string, keys: readonly PublicKey[]): { payload: Uint8Array; kid: string } {
+  const { kid, body, sig, payload } = envelope(license);
   const found = keys.filter((k) => k.kid === kid);
   if (found.length === 0) fail("unknown_key");
   if (found.length > 1) fail("invalid_key_set", `duplicate kid ${JSON.stringify(kid)}`);
