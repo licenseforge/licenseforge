@@ -1126,6 +1126,183 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tenant's webhook endpoints, oldest first (at most 10).
+         * @description Needs webhook:read on every product; a product-scoped caller sees none. URLs show only scheme, host and port.
+         */
+        get: operations["listWebhooks"];
+        put?: never;
+        /**
+         * Add a webhook endpoint. Its signing secret is in this response only.
+         * @description Needs webhook:write on every product. Events from creation on, never
+         *     history (ADR-0044). At most 10 endpoints per tenant (409 webhook_limit).
+         */
+        post: operations["createWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        /** One webhook endpoint and its delivery state. */
+        get: operations["getWebhook"];
+        put?: never;
+        post?: never;
+        /** Delete an endpoint with its delivery log. */
+        delete: operations["deleteWebhook"];
+        options?: never;
+        head?: never;
+        /** Change an endpoint's URL and/or events (a merge patch; neither can be null). Its delivery position stays. */
+        patch: operations["updateWebhook"];
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret). */
+        post: operations["rotateWebhookSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop deliveries (the position stays). 409 if already disabled. */
+        post: operations["disableWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled. */
+        post: operations["enableWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/skip-event": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass the event held back (delivery.next_seq), for a payload the receiver will never accept. 409 if it isn't the next event any more. */
+        post: operations["skipWebhookEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/skip-to-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass every event so far; delivery resumes with the next one. */
+        post: operations["skipWebhookToNow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        /** The endpoint's delivery attempts of the last 7 days, newest first. */
+        get: operations["listWebhookDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1823,6 +2000,136 @@ export interface components {
             /** @description Replaces the product scope; with all_products absent or false. */
             product_ids?: string[];
         };
+        /** @enum {string} */
+        WebhookEventType: "license.issued" | "license.revoked" | "license.suspended" | "license.reinstated" | "activation.created" | "activation.deactivated";
+        Webhook: {
+            /** @example whe_01jcz5b2y3c4d5e6f7g8h9j0k1 */
+            id: string;
+            /**
+             * @description Scheme, host and port only: the path and query (which may hold a token) are never shown.
+             * @example https://hooks.example.com:443
+             */
+            url: string;
+            events: components["schemas"]["WebhookEventType"][];
+            enabled: boolean;
+            /** @description Why it was disabled: by a user, a 410 from the receiver, about 28 hours of failures, or a URL or secret that can't be read. */
+            disabled_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            delivery: components["schemas"]["WebhookDeliveryState"];
+        };
+        WebhookDeliveryState: {
+            /**
+             * Format: int64
+             * @description The last audit entry passed (events after it are pending).
+             */
+            seq: number;
+            /** @description Failed attempts of the next event (0 to 8). */
+            attempts: number;
+            /**
+             * Format: date-time
+             * @description When it is tried again; null: as soon as it's due.
+             */
+            next_attempt_at: string | null;
+            /** @description A send is in progress. */
+            in_flight: boolean;
+            /**
+             * Format: int64
+             * @description The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending within the next 10,000 audit entries (an endpoint far behind: use skip-to-now).
+             */
+            next_seq: number | null;
+        };
+        WebhookList: {
+            items: components["schemas"]["Webhook"][];
+        };
+        WebhookCreate: {
+            /** @description https; an IP address or an ASCII DNS name (punycode); no credentials or fragment. Where it may point is checked at each delivery. */
+            url: string;
+            events: components["schemas"]["WebhookEventType"][];
+        };
+        WebhookUpdate: {
+            url?: string;
+            events?: components["schemas"]["WebhookEventType"][];
+        };
+        WebhookCreated: components["schemas"]["Webhook"] & {
+            /**
+             * @description The Standard Webhooks signing secret. Shown once.
+             * @example whsec_…
+             */
+            secret: string;
+        };
+        WebhookSkip: {
+            /** Format: int64 */
+            seq: number;
+        };
+        WebhookDelivery: {
+            id: string;
+            /** Format: int64 */
+            seq: number;
+            /** @description The webhook-id header the receiver got (its deduplication key). */
+            event_id: string;
+            event_type: components["schemas"]["WebhookEventType"];
+            /** @description 1 to 8. */
+            attempt: number;
+            /** @enum {string} */
+            outcome: "success" | "failure";
+            /**
+             * @description A failure in fixed words: timeout, connection failed, tls, redirect, or http and the status. Never an address or a response body.
+             * @example http 500
+             */
+            error: string | null;
+            status_code: number | null;
+            duration_ms: number;
+            /** Format: date-time */
+            attempted_at: string;
+        };
+        WebhookDeliveryPage: {
+            items: components["schemas"]["WebhookDelivery"][];
+            /** @description Absent on the last page. */
+            next_cursor?: string;
+        };
+        /**
+         * @description The body a receiver gets (ADR-0044), signed per Standard Webhooks v1
+         *     (webhook-id, webhook-timestamp, webhook-signature headers). data is
+         *     WebhookLicenseData for license.* events and WebhookActivationData for
+         *     activation.* events: a snapshot at the change. Fields an older entry
+         *     doesn't have are left out.
+         */
+        WebhookPayload: {
+            type: components["schemas"]["WebhookEventType"];
+            /**
+             * Format: date-time
+             * @description When the change happened.
+             */
+            timestamp: string;
+            data: Record<string, never>;
+        };
+        WebhookLicenseData: {
+            license_id?: string;
+            product_id?: string;
+            customer_id?: string;
+            /** @description The plan's slug. */
+            plan?: string;
+            status?: components["schemas"]["LicenseStatus"];
+            /**
+             * Format: date-time
+             * @description null: never expires.
+             */
+            expires_at?: string | null;
+        };
+        WebhookActivationData: {
+            activation_id?: string;
+            license_id?: string;
+            product_id?: string;
+            customer_id?: string;
+            fingerprint?: string;
+            /** @enum {string} */
+            binding?: "machine" | "cluster";
+            /** @enum {string} */
+            mode?: "online" | "offline";
+        };
         ApiTokenPage: {
             items: components["schemas"]["ApiToken"][];
             /** @description Absent on the last page. */
@@ -1881,6 +2188,7 @@ export interface components {
         LicenseId: string;
         ActivationId: string;
         Kid: string;
+        WebhookID: string;
         /** @description The tenant's slug or ID (`tnt_…`). */
         Tenant: string;
         /** @description The tenant's ID (`tnt_…`), the license's `tenant` claim (fingerprints are derived from it). */
@@ -3680,6 +3988,336 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All endpoints. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The endpoint. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deleteWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["WebhookUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    rotateWebhookSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    disableWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    enableWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    skipWebhookEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookSkip"];
+            };
+        };
+        responses: {
+            /** @description Skipped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    skipWebhookToNow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Skipped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listWebhookDeliveries: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque; `next_cursor` of the previous page. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
 }

@@ -42,6 +42,7 @@ import (
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
+	"licenseforge.io/licenseforge/internal/webhooks"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -72,6 +73,8 @@ type Config struct {
 	Audit audit.Log
 	// Idempotency keeps Idempotency-Key outcomes (license issue, activate).
 	Idempotency idempotency.Store
+	// Webhooks: a tenant's outbound webhook endpoints (ADR-0044).
+	Webhooks webhooks.Service
 	// Tenants changes the tenant's own settings (MFA policy, ADR-0038).
 	Tenants tenants.Service
 	// Platform is what platform admins do outside tenants (ADR-0042), and
@@ -335,20 +338,21 @@ func clean(s string) string {
 // queryParams are each operation's query parameters; others answer 400.
 // TestRoutesMatchSpec keeps it equal to the spec.
 var queryParams = map[string][]string{
-	"ListApiTokens":       {"limit", "cursor"},
-	"ListPlatformTenants": {"limit", "cursor"},
-	"ListMembers":         {"limit", "cursor"},
-	"ListInvitations":     {"limit", "cursor"},
-	"ListLicenses":        {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
-	"ListProducts":        {"limit", "cursor", "archived"},
-	"ListFeatures":        {"limit", "cursor", "product_id"},
-	"ListPlans":           {"limit", "cursor", "product_id"},
-	"ListCustomers":       {"limit", "cursor"},
-	"ListAuditEvents":     {"limit", "cursor", "after_seq"},
-	"ListActivations":     {"limit", "cursor"},
-	"ListSigningKeys":     {"limit", "cursor"},
-	"RemoveMember":        {"revoke_tokens", "revoke_invitations"},
-	"UpdateMember":        {"revoke_tokens", "revoke_invitations"},
+	"ListApiTokens":         {"limit", "cursor"},
+	"ListPlatformTenants":   {"limit", "cursor"},
+	"ListMembers":           {"limit", "cursor"},
+	"ListInvitations":       {"limit", "cursor"},
+	"ListLicenses":          {"limit", "cursor", "product_id", "customer_id", "status", "created_after", "created_before"},
+	"ListProducts":          {"limit", "cursor", "archived"},
+	"ListFeatures":          {"limit", "cursor", "product_id"},
+	"ListPlans":             {"limit", "cursor", "product_id"},
+	"ListCustomers":         {"limit", "cursor"},
+	"ListAuditEvents":       {"limit", "cursor", "after_seq"},
+	"ListActivations":       {"limit", "cursor"},
+	"ListSigningKeys":       {"limit", "cursor"},
+	"ListWebhookDeliveries": {"limit", "cursor"},
+	"RemoveMember":          {"revoke_tokens", "revoke_invitations"},
+	"UpdateMember":          {"revoke_tokens", "revoke_invitations"},
 }
 
 // strictInput refuses unknown query parameters and decodes the body again
@@ -532,6 +536,8 @@ func mapErr(err error) *problem {
 	case errors.As(err, &p):
 	case platformProblem(err) != nil:
 		p = platformProblem(err)
+	case webhookProblem(err) != nil:
+		p = webhookProblem(err)
 	case errors.Is(err, signing.ErrPendingExists):
 		p = &problem{status: http.StatusConflict, code: "pending_key_exists", detail: "The tenant already has a pending key; promote or discard it first."}
 	case errors.Is(err, signing.ErrNotPending):

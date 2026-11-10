@@ -77,7 +77,7 @@ func TestDisableEnable(t *testing.T) {
 	if err != nil || e.Enabled || e.DisabledReason != UserDisabled || e.Seq != c.Seq {
 		t.Fatalf("Disable = %+v, %v", e, err)
 	}
-	if _, err := f.s.Disable(ctx, c.ID); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Disable(ctx, c.ID); !errors.Is(err, ErrState) {
 		t.Errorf("disable twice: %v", err)
 	}
 	f.setRetry(t, c.ID, 5)
@@ -91,7 +91,7 @@ func TestDisableEnable(t *testing.T) {
 	if err != nil || !e.Enabled || e.DisabledReason != "" || e.Attempts != 0 || e.NextAttemptAt != nil || e.Seq != c.Seq {
 		t.Fatalf("Enable = %+v, %v", e, err)
 	}
-	if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, ErrState) {
 		t.Errorf("enable an enabled endpoint: %v", err)
 	}
 	ev := f.events(t, f.a, "webhook.enable")
@@ -116,10 +116,10 @@ func TestSkip(t *testing.T) {
 	revoked := f.record(t, f.a, "license.revoke", ok, nil)
 	f.setRetry(t, c.ID, 3)
 	// Only the event held back can be skipped.
-	if _, err := f.s.SkipEvent(ctx, c.ID, revoked); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, revoked); !errors.Is(err, ErrState) {
 		t.Errorf("skip past the next event: %v", err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat-1); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat-1); !errors.Is(err, ErrState) {
 		t.Errorf("skip an entry that isn't an event: %v", err)
 	}
 	for _, bad := range []int64{0, -1} {
@@ -136,7 +136,7 @@ func TestSkip(t *testing.T) {
 	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrState) {
 		t.Errorf("skip an event no longer subscribed: %v", err)
 	}
 	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked", "activation.created"}); err != nil {
@@ -146,11 +146,14 @@ func TestSkip(t *testing.T) {
 	if _, err := f.s.SkipEvent(f.as(f.a, f.viewer, authz.Viewer), c.ID, seat); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("viewer skip: %v", err)
 	}
+	if g, _ := f.s.Get(ctx, c.ID); g.NextSeq != seat {
+		t.Errorf("next_seq %d, want %d (the event held back)", g.NextSeq, seat)
+	}
 	e, err := f.s.SkipEvent(ctx, c.ID, seat)
 	if err != nil || e.Seq != seat || e.Attempts != 0 || e.NextAttemptAt != nil {
 		t.Fatalf("SkipEvent = %+v, %v", e, err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrInvalid) { // passed already
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrState) { // passed already
 		t.Errorf("skip twice: %v", err)
 	}
 	if e, err := f.s.SkipEvent(ctx, c.ID, revoked); err != nil || e.Seq != revoked {
@@ -184,12 +187,39 @@ func TestSkipNothingPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	issued := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
 	f.setRetry(t, c.ID, 4)
-	if _, err := f.s.SkipEvent(ctx, c.ID, 0); !errors.Is(err, ErrInvalid) {
+	if e, _ := f.s.Get(ctx, c.ID); e.NextSeq != 0 {
+		t.Errorf("next_seq %d with nothing pending", e.NextSeq)
+	}
+	if _, err := f.s.SkipEvent(ctx, c.ID, issued); !errors.Is(err, ErrState) {
 		t.Errorf("skip with nothing pending: %v", err)
 	}
 	if e, _ := f.s.Get(ctx, c.ID); e.Attempts != 4 {
 		t.Errorf("retry state reset by a refused skip: %d", e.Attempts)
+	}
+}
+
+// The look-ahead bound: an event further than within entries ahead isn't
+// seen (0: no bound).
+func TestNextEventWithin(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	base := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	rev := f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, nil) // base+2
+	if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error {
+		for within, want := range map[int64]int64{1: 0, 2: rev, 0: rev} {
+			got, err := nextEventWithin(ctx, tx, f.a, base, []string{"license.revoked"}, within)
+			if err != nil {
+				return err
+			}
+			if got != want {
+				t.Errorf("within %d: %d, want %d", within, got, want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

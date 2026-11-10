@@ -48,12 +48,22 @@ var (
 	ErrNotFound = errors.New("webhooks: no such endpoint")
 	// ErrInvalid means the request is malformed (URL, events).
 	ErrInvalid = errors.New("webhooks: invalid request")
+	// ErrState means the endpoint's state doesn't allow the action (enable
+	// an enabled endpoint, skip an event that isn't the one held back).
+	ErrState = errors.New("webhooks: the endpoint's state doesn't allow this")
 	// ErrLimit means the tenant already has MaxEndpoints endpoints.
 	ErrLimit = fmt.Errorf("webhooks: at most %d endpoints per tenant", MaxEndpoints)
 )
 
 // testHookRead runs in change after the endpoint is read (tests only).
 var testHookRead func()
+
+// InvalidError is a malformed request: which field (a JSON pointer into the
+// request) and why, in words that never echo the URL. errors.Is(e, ErrInvalid).
+type InvalidError struct{ Field, Message string }
+
+func (e *InvalidError) Error() string        { return "webhooks: invalid " + e.Field + ": " + e.Message }
+func (e *InvalidError) Is(target error) bool { return target == ErrInvalid }
 
 // Service works on the tenant pool.
 type Service struct {
@@ -77,6 +87,10 @@ type Endpoint struct {
 	Attempts      int
 	NextAttemptAt *time.Time
 	InFlight      bool
+	// NextSeq is the next event it will send (the one held back while it
+	// retries: what SkipEvent takes); 0 if none is pending within the next
+	// nextSeqWithin entries.
+	NextSeq int64
 }
 
 // Created is a new endpoint and its signing secret, shown once.
@@ -88,7 +102,7 @@ type Created struct {
 // checkURL validates a receiver URL and returns what may be shown of it.
 // Where it may point (addresses, ports) is checked when connecting.
 func checkURL(raw string) (display string, err error) {
-	bad := func(why string) (string, error) { return "", fmt.Errorf("%w: url %s", ErrInvalid, why) }
+	bad := func(why string) (string, error) { return "", &InvalidError{"/url", why} }
 	if len(raw) > MaxURL {
 		return bad(fmt.Sprintf("longer than %d bytes", MaxURL))
 	}
@@ -127,11 +141,11 @@ func checkEvents(events []string) ([]string, error) {
 	out := slices.Clone(events)
 	slices.Sort(out)
 	if len(out) == 0 || len(slices.Compact(slices.Clone(out))) != len(out) {
-		return nil, fmt.Errorf("%w: events: at least one, no duplicates", ErrInvalid)
+		return nil, &InvalidError{"/events", "at least one, no duplicates"}
 	}
 	for _, e := range out {
 		if !slices.Contains(Events, e) {
-			return nil, fmt.Errorf("%w: unknown event %q", ErrInvalid, e)
+			return nil, &InvalidError{"/events", "unknown event"}
 		}
 	}
 	return out, nil
@@ -219,7 +233,7 @@ func (s Service) Create(ctx context.Context, rawURL string, events []string) (Cr
 			return err
 		}
 		out = Created{Endpoint: view(row), Secret: secret}
-		return state(ctx, tx, &out.Endpoint)
+		return current(ctx, tx, tenantID, &out.Endpoint)
 	})
 	if err != nil {
 		ev.ObjectID, ev.Details = "", nil
@@ -235,6 +249,21 @@ func view(row *ent.WebhookEndpoint) Endpoint {
 	}
 	return e
 }
+
+// current fills e's delivery state and its next pending event.
+func current(ctx context.Context, tx *ent.Tx, tenantID string, e *Endpoint) error {
+	if err := state(ctx, tx, e); err != nil {
+		return err
+	}
+	var err error
+	e.NextSeq, err = nextEventWithin(ctx, tx, tenantID, e.Seq, e.Events, nextSeqWithin)
+	return err
+}
+
+// nextSeqWithin bounds the look-ahead for NextSeq: an event held back sits
+// right after the cursor (the dispatcher moves it there), so this only cuts
+// the scan for an endpoint far behind (disabled while its chain grew).
+const nextSeqWithin = 10000
 
 // state fills e's delivery state from its cursor (explicit columns: the
 // tenant pool can't read the lease holder).
@@ -270,7 +299,7 @@ func (s Service) List(ctx context.Context) ([]Endpoint, error) {
 		}
 		for _, r := range rows {
 			e := view(r)
-			if err := state(ctx, tx, &e); err != nil {
+			if err := current(ctx, tx, tenantID, &e); err != nil {
 				return err
 			}
 			out = append(out, e)
@@ -300,7 +329,7 @@ func (s Service) Get(ctx context.Context, id string) (Endpoint, error) {
 			return err
 		}
 		out = view(row)
-		return state(ctx, tx, &out)
+		return current(ctx, tx, tenantID, &out)
 	})
 	return out, err
 }
@@ -363,23 +392,25 @@ func (s Service) change(ctx context.Context, action, id string, fn func(tx *ent.
 			return err
 		}
 		out = view(row)
-		return state(ctx, tx, &out)
+		return current(ctx, tx, tenantID, &out)
 	})
 	if err != nil {
-		return Endpoint{}, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound)
+		return Endpoint{}, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound, ErrState)
 	}
 	return out, nil
 }
 
 // Update changes an endpoint's URL (if rawURL isn't nil) and subscribed
-// events (if events isn't nil); at least one. Its delivery position stays.
-func (s Service) Update(ctx context.Context, id string, rawURL *string, events []string) (Endpoint, error) {
+// events (if events isn't nil), as a merge patch: neither is a no-op, and
+// null lists fields sent as null, which are refused (neither can be
+// removed). Its delivery position stays.
+func (s Service) Update(ctx context.Context, id string, rawURL *string, events []string, null ...string) (Endpoint, error) {
 	var display string
 	var err error
-	if rawURL == nil && events == nil {
-		err = fmt.Errorf("%w: nothing to change", ErrInvalid)
+	if len(null) > 0 {
+		err = &InvalidError{"/" + null[0], "can't be null"}
 	}
-	if rawURL != nil {
+	if err == nil && rawURL != nil {
 		display, err = checkURL(*rawURL)
 	}
 	if err == nil && events != nil {
