@@ -2,15 +2,15 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Node.js service, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Server-side only, Node 22 or later, with no runtime dependencies (ADR-0010).
 
-Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`). Next: loading the dashboard's key set, fingerprints, offline requests and receipts, and the online client.
+Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`). Next: fingerprints, offline requests and receipts, and the online client.
 
 ```ts
-import { open, LicenseError, type PublicKey } from "@licenseforge/sdk";
+import { readFileSync } from "node:fs";
+import { open, parseKeySet, LicenseError } from "@licenseforge/sdk";
 
-// Your tenant's public keys, from the dashboard (Settings → Signing keys).
-// The key is its exact 32 bytes; a loader for the dashboard's JSON key set
-// (strict base64url) comes next.
-const keys: PublicKey[] = [{ kid: "acme:2026-11", alg: "ed25519", key: new Uint8Array([/* 32 bytes */]) }];
+// Your tenant's trusted key set, as the dashboard shows it (Settings →
+// Signing keys → JSON), shipped with your build.
+const keys = parseKeySet(readFileSync(new URL("./licenseforge-keys.json", import.meta.url)));
 
 try {
   const { claims, status } = open(licenseText, keys, { now: new Date(), product: "acme-db", fingerprint });
@@ -22,6 +22,7 @@ try {
 }
 ```
 
+- `parseKeySet(json)` reads the trusted key set under the spec's rules (exact fields, canonical base64url). A malformed set is `invalid_key_set`; an unknown alg, a duplicate kid or a weak key loads and surfaces in `verify`.
 - `verify(license, keys)` checks the envelope and the signature, and returns the payload and key ID.
 - `parseClaims(payload)` applies the strict encoding rules. `check(claims, options)` runs the claim checks in the spec's order.
 - `open` does all three. `LicenseError.code` is the spec's class.

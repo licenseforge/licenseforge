@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check, LicenseError, parseClaims, type PublicKey, verify } from "../src/index.js";
-import { b64url, parseDuration, parseTime } from "../src/licensefile.js";
+import { check, LicenseError, parseClaims, parseKeySet, type PublicKey, verify } from "../src/index.js";
+import { parseDuration, parseTime } from "../src/licensefile.js";
 
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`../../../../spec/vectors/${name}`, import.meta.url), "utf8"));
 const code = (fn: () => unknown): string => {
@@ -19,12 +19,9 @@ const code = (fn: () => unknown): string => {
 
 test("lf1.json: envelope and signature", () => {
   const v = vectors("lf1.json");
-  // Loaded as given: a bad alg or key length surfaces in verify.
-  const keys: PublicKey[] = v.keys.map((k: { kid: string; alg: string; public_key: string }) => {
-    const key = b64url(k.public_key);
-    assert.ok(key, `vector key ${k.kid} is canonical base64url`);
-    return { kid: k.kid, alg: k.alg, key };
-  });
+  // Through parseKeySet, as an app loads them; a bad alg, key length or a
+  // weak key loads as given and surfaces in verify.
+  const keys: PublicKey[] = parseKeySet(JSON.stringify(v.keys));
   assert.ok(v.cases.length > 0);
   for (const c of v.cases) {
     let got = "valid";
