@@ -150,8 +150,9 @@ func startServe(t *testing.T) (string, string, func() error) {
 	go func() { errc <- serve(ctx, ln, mln, quiet) }()
 	// Ready once it answers: serve opens the database before it serves, and
 	// stopping it during that is a startup error, not a clean stop.
+	probe := &http.Client{Timeout: 2 * time.Second}
 	for start := time.Now(); ; time.Sleep(50 * time.Millisecond) {
-		if resp, err := http.Get("http://" + ln.Addr().String() + "/healthz"); err == nil {
+		if resp, err := probe.Get("http://" + ln.Addr().String() + "/healthz"); err == nil {
 			_ = resp.Body.Close()
 			break
 		}
@@ -163,6 +164,10 @@ func startServe(t *testing.T) (string, string, func() error) {
 		}
 		if time.Since(start) > 30*time.Second {
 			cancel()
+			select { // don't leave it running into the next test
+			case <-errc:
+			case <-time.After(20 * time.Second):
+			}
 			t.Fatal("serve didn't start")
 		}
 	}
@@ -519,6 +524,9 @@ func TestServeVerifiesAudit(t *testing.T) {
 		return n
 	}
 	before := count()
+	// This process's verifier: only serve sets the gauge here, after a run.
+	metrics.AuditVerifyLastSuccess.Set(0)
+	start := time.Now()
 	_, _, stop := startServe(t)
 	defer func() {
 		if err := stop(); err != nil {
@@ -526,12 +534,12 @@ func TestServeVerifiesAudit(t *testing.T) {
 		}
 	}()
 	for range 100 {
-		if count() > before {
+		if testutil.ToFloat64(metrics.AuditVerifyLastSuccess) >= float64(start.Unix()) && count() > before {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Error("no audit.checkpoint written after start")
+	t.Error("no audit verification run (and checkpoint) after start")
 }
 
 // `licenseforge tenant create` makes a tenant and its first owner's
