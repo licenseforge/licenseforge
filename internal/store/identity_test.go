@@ -786,7 +786,7 @@ func TestSessionAndTenantGrantsPinned(t *testing.T) {
 	for _, tc := range []struct{ role, table, priv, want string }{
 		{AppRole, "tenants", "UPDATE", "audit_retention_days,mfa_policy,updated_at"},
 		{IdentityRole, "tenants", "UPDATE", ""},
-		{IdentityRole, "tenants", "SELECT", "id,mfa_policy,name,slug,test"}, // the switcher and the session check, nothing else
+		{IdentityRole, "tenants", "SELECT", "id,mfa_policy,name,slug,test"},                                            // the switcher and the session check, nothing else
 		{PlatformRole, "tenants", "UPDATE", "audit_retention_days,created_at,id,mfa_policy,name,slug,test,updated_at"}, // test: held by test_fixed (ADR-0047)
 		{IdentityRole, "sessions", "UPDATE", "last_seen_at"},
 		{AppRole, "sessions", "UPDATE", ""},
