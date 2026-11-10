@@ -125,9 +125,13 @@ jobs:
           done
           helm template t . $s --show-only templates/networkpolicy.yaml | grep -A3 -F 'Webhook receivers' | grep -qF -- '- {port: 443, protocol: TCP}' || { echo "no webhook egress rule"; exit 1; }
           if helm template t . $s --set webhooks.workers=0 --show-only templates/networkpolicy.yaml | grep -qF 'Webhook receivers'; then echo "webhook egress with no workers"; exit 1; fi
-          for bad in 'webhooks.ports={}' webhooks.workers=65 'webhooks.ports[0]=0' webhooks.typo=1; do
+          for bad in webhooks.workers=65 webhooks.workers=-1 'webhooks.ports[0]=0' webhooks.typo=1; do
             if helm template t . $s --set "$bad" >/dev/null 2>&1; then echo "rendered with $bad"; exit 1; fi
           done
+          # An empty port list (a rule without ports allows every port): the schema refuses it, and so does the template.
+          printf 'webhooks:\n  ports: []\n' >/tmp/noports.yaml
+          helm template t . $s -f /tmp/noports.yaml 2>&1 | grep -qF 'minItems' || { echo "schema allowed webhooks.ports: []"; exit 1; }
+          helm template t . $s -f /tmp/noports.yaml --skip-schema-validation 2>&1 | grep -qF 'webhooks.ports must not be empty' || { echo "template allowed webhooks.ports: []"; exit 1; }
           # OIDC: env from values, client secret only by reference, IdP egress only when on.
           o="--set oidc.enabled=true --set oidc.issuer=https://idp.example --set oidc.clientID=lf --set oidc.redirectURL=https://lf.example/auth/callback"
           helm lint --strict . $s $o --set oidc.clientSecret.secretName=idp

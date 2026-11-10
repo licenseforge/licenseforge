@@ -31,39 +31,69 @@ func TestRun(t *testing.T) {
 	if got := testutil.ToFloat64(metrics.WebhookDeliveries.WithLabelValues("success")); got != before+1 {
 		t.Errorf("success counter %v, want %v", got, before+1)
 	}
+	// A failure counts as one.
+	failed := testutil.ToFloat64(metrics.WebhookDeliveries.WithLabelValues("failure"))
+	f.recv.status = 500
+	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.once(t)
+	if got := testutil.ToFloat64(metrics.WebhookDeliveries.WithLabelValues("failure")); got != failed+1 {
+		t.Errorf("failure counter %v, want %v", got, failed+1)
+	}
 }
 
-// Delivery records older than DeliveryRetention go; newer ones stay. The
-// gauges count disabled endpoints and the lag.
-func TestPruneAndGauges(t *testing.T) {
+// Delivery records older than DeliveryRetention go, in batches; newer ones
+// stay.
+func TestPrune(t *testing.T) {
 	f := setupDispatch(t)
 	c := f.endpoint(t, "license.issued")
-	for _, age := range []string{"8 days", "6 days", "1 minute"} {
+	f.platformExec(t, `INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, duration_ms, attempted_at)
+		SELECT 'whd_' || translate(substr(md5(g::text), 1, 26), '0189', 'wxyz'), $1, $2, 1, $3, 'license.issued', 1, 'failure', 'timeout', 1, now() - interval '8 days'
+		FROM generate_series(1, 5001) g`, f.a, c.ID, ids.AuditEvent())
+	for _, age := range []string{"6 days", "1 minute"} {
 		f.platformExec(t, `INSERT INTO webhook_deliveries (id, tenant_id, endpoint_id, seq, event_id, event_type, attempt, outcome, category, duration_ms, attempted_at)
 			VALUES ($1, $2, $3, 1, $4, 'license.issued', 1, 'failure', 'timeout', 1, now() - $5::interval)`, ids.WebhookDelivery(), f.a, c.ID, ids.AuditEvent(), age)
 	}
-	n, err := f.d.Prune(f.ctx)
-	if err != nil || n < 1 {
+	if n, err := f.d.Prune(f.ctx); err != nil || n != 5001 {
 		t.Fatalf("Prune = %d, %v", n, err)
 	}
 	if d := f.deliveries(t, c.ID); len(d) != 2 {
 		t.Errorf("%d records left, want 2", len(d))
 	}
-	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails) // pending: lag
+}
+
+// The lag gauges measure enabled endpoints only, from the oldest entry
+// after the cursor; the disabled gauge counts the dispatcher's disables,
+// not users'.
+func TestGauges(t *testing.T) {
+	f := setupDispatch(t)
+	c := f.endpoint(t, "license.issued")
+	seq := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, issueDetails)
+	f.record(t, f.a, "license.revoke", auditevent.OutcomeSuccess, nil)
+	f.platformExecOwner(t, `UPDATE audit_events SET occurred_at = now() - interval '1 hour' WHERE tenant_id = $1 AND seq = $2`, f.a, seq)
 	if err := f.d.gauges(f.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if lag := testutil.ToFloat64(metrics.WebhookLag); lag < 0 {
-		t.Errorf("lag %v", lag)
+	if lag, behind := testutil.ToFloat64(metrics.WebhookLag), testutil.ToFloat64(metrics.WebhookLagEvents); lag < 3500 || behind < 2 {
+		t.Errorf("lag %v s, %v entries; want about an hour and at least 2", lag, behind)
 	}
-	disabledBefore := testutil.ToFloat64(metrics.WebhookDisabled)
+	before := testutil.ToFloat64(metrics.WebhookDisabled)
 	if _, err := f.s.Disable(f.ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.d.gauges(f.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := testutil.ToFloat64(metrics.WebhookDisabled); got != disabledBefore+1 {
-		t.Errorf("disabled gauge %v, want %v", got, disabledBefore+1)
+	if testutil.ToFloat64(metrics.WebhookDisabled) != before {
+		t.Error("a user's disable counted")
+	}
+	if lag := testutil.ToFloat64(metrics.WebhookLag); lag > 60 {
+		t.Errorf("a disabled endpoint's backlog counted: %v", lag)
+	}
+	f.platformExec(t, `UPDATE webhook_endpoints SET disabled_reason = $2 WHERE id = $1`, c.ID, ReasonFailing)
+	if err := f.d.gauges(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.WebhookDisabled); got != before+1 {
+		t.Errorf("disabled gauge %v, want %v", got, before+1)
 	}
 }

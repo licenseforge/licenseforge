@@ -122,7 +122,7 @@
               {
                 "uuid": "c8d7c976-cf3e-54bd-b11a-1e6634ecb880",
                 "control-id": "ac-4",
-                "description": "Tenant data can't flow between tenants: forced RLS on every table, and every reference between tenant tables uses a composite *_same_tenant key, because foreign key checks bypass RLS. At the network level, the Helm NetworkPolicies allow server ingress on 8080 only and egress to DNS and the database port only.",
+                "description": "Tenant data can't flow between tenants: forced RLS on every table, and every reference between tenant tables uses a composite *_same_tenant key, because foreign key checks bypass RLS. At the network level, the Helm NetworkPolicies allow server ingress on 8080 only, and egress to DNS and the database port, to the OIDC provider and SIEM collectors when configured, and to webhook receivers on the allowed ports (443) while webhook delivery is on; the server itself refuses internal, link-local and cloud metadata addresses for webhooks at dial time (ADR-0044).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -652,7 +652,7 @@
               {
                 "uuid": "14269ea7-d088-51e2-a3a3-28c1b2bcc2a6",
                 "control-id": "cm-7",
-                "description": "A single static binary on distroless/static, non-root, with no shell. It serves only /healthz, /readyz and, when OIDC is configured, /auth/*. Egress is limited to DNS and the database by NetworkPolicy, and no service account token is mounted.",
+                "description": "A single static binary on distroless/static, non-root, with no shell. It serves only /healthz, /readyz and, when OIDC is configured, /auth/*. Egress is limited by NetworkPolicy to DNS, the database and the configured OIDC, SIEM and webhook ports (webhooks: 443; internal addresses refused by the server at dial time), and no service account token is mounted.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1217,7 +1217,7 @@
               {
                 "uuid": "1085c3b2-eb7f-54de-8357-9cc26371ca4a",
                 "control-id": "sc-7",
-                "description": "NetworkPolicies (on by default): server ingress on 8080 only; egress for the server and the migration Job to DNS and the database port only. The Service is ClusterIP; exposure is through the operator's ingress.",
+                "description": "NetworkPolicies (on by default): server ingress on 8080 only; egress for the migration Job to DNS and the database port only; for the server also to the OIDC provider and SIEM collectors when configured, and to webhook receivers on webhooks.ports (443) to any destination unless webhooks.egress.to narrows it, with internal, link-local and cloud metadata addresses refused by the server at dial time (ADR-0044). The Service is ClusterIP; exposure is through the operator's ingress.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1235,7 +1235,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "The ingressFrom and databaseTo peers default to any: narrow them. The default policy has no egress to the OIDC provider: add a NetworkPolicy for it when login is enabled (Secure Configuration Guide; first-class oidc.egress values in PR #49)."
+                "remarks": "The ingressFrom and databaseTo peers default to any: narrow them. Webhook egress on 443 to any destination is on while webhooks.workers > 0 (rules add up: narrowing oidc.egress.to doesn't restrict 443 then); narrow webhooks.egress.to where receivers are known. The default policy has no egress to the OIDC provider: add a NetworkPolicy for it when login is enabled (Secure Configuration Guide; first-class oidc.egress values in PR #49)."
               },
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",

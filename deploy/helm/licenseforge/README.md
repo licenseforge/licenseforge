@@ -65,7 +65,9 @@ allows egress to it on `oidc.egress.port` (443) and that port only. By default
 that is to any destination, like the DNS and database rules: an external IdP's
 addresses are rarely fixed, and a port-scoped rule keeps the rest of egress
 closed. "Any destination" includes in-cluster pods, nodes and the Kubernetes
-API server on that port; in production narrow it. Narrow `oidc.egress.to` to the provider's CIDRs, or to a
+API server on that port; in production narrow it. Rules add up: while webhook
+delivery is on, egress on 443 is open to any destination for webhooks (narrow
+`webhooks.egress.to`), so narrowing `oidc.egress.to` alone doesn't close 443. Narrow `oidc.egress.to` to the provider's CIDRs, or to a
 namespace/pod selector for an in-cluster Keycloak. With a selector, the port
 is the provider's **pod** port, because policies apply after the Service's
 DNAT: Keycloak listens on 8443 (or 8080 over plain HTTP), not the Service's
@@ -74,7 +76,7 @@ URL, or without a port.
 
 ## Webhooks
 
-Every server pod delivers tenants' webhooks (ADR-0044); `webhooks.workers` (default 8, `0` for none) sets how many at once per pod. The server refuses internal, link-local and cloud metadata addresses whatever the NetworkPolicy allows, and connects only on `webhooks.ports` (443). The NetworkPolicy allows egress on those ports to any destination; narrow it with `webhooks.egress.to`. For a self-hosted, single-vendor install with receivers on a private network, list their ranges in `webhooks.allowCIDRs` (every tenant can then reach them; loopback, link-local and metadata addresses stay refused). On an IPv6-only cluster with an operator-chosen NAT64 prefix, add the prefix to `webhooks.denyCIDRs`.
+Every server pod delivers tenants' webhooks (ADR-0044); `webhooks.workers` (default 8, `0` for none) sets how many at once per pod. The server refuses internal, link-local and cloud metadata addresses whatever the NetworkPolicy allows, and connects only on `webhooks.ports` (443). The NetworkPolicy allows egress on those ports to any destination (on upgrade too: this widens a release's egress); narrow it with `webhooks.egress.to`, or set `webhooks.workers: 0` to deliver none and add no rule. For a self-hosted, single-vendor install with receivers on a private network, list their ranges in `webhooks.allowCIDRs` (every tenant can then reach them; loopback, link-local and metadata addresses stay refused). On an IPv6-only cluster with an operator-chosen NAT64 prefix, add the prefix to `webhooks.denyCIDRs`.
 
 ## The first tenant
 A platform admin creates tenants on the dashboard's **Tenants** screen (`/platform`; a platform admin without tenants lands there), or with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
@@ -94,8 +96,9 @@ Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal
 - **A development cluster** whose database has no TLS: set `databaseAllowPlaintext: true` (the server, the migration Job and the audit-prune CronJob then accept any database URL, and the server logs a warning at every start). Never in production.
 - **Behind an ingress**, set `trustedProxies` to the ingress controller's addresses (CIDRs): the server then takes the client from `X-Forwarded-For` for its per-address rate limit and audit entries. Unset, every client counts as the ingress.
 
-- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port only
-  (plus the OIDC provider when `oidc.enabled`),
+- **NetworkPolicy**: ingress on 8080, egress to DNS and the database port
+  (plus the OIDC provider when `oidc.enabled`, SIEM collectors when configured,
+  and webhook receivers on `webhooks.ports` while `webhooks.workers` > 0),
   for the server and (as a hook policy, so it applies from the first install)
   the migration Job. It needs a CNI that enforces policies. Narrow
   `networkPolicy.ingressFrom` to your ingress controller and

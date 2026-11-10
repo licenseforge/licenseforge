@@ -28,17 +28,26 @@ func (d *Dispatcher) Run(ctx context.Context, workers int) {
 	wg.Wait()
 }
 
+// maxErrorPause caps a worker's backoff while rounds fail (database down).
+const maxErrorPause = time.Minute
+
 func (d *Dispatcher) work(ctx context.Context) {
+	errPause := idle
 	for ctx.Err() == nil {
 		worked, err := d.Once(ctx)
-		if err != nil && ctx.Err() == nil {
+		pause := idle
+		switch {
+		case err != nil && ctx.Err() == nil:
 			metrics.WebhookErrors.Inc()
-			d.Log.Error("webhook dispatch", "err", err)
-		}
-		if worked && err == nil {
+			d.Log.Error("webhook dispatch", "err", err, "retry_in", errPause.String())
+			pause, errPause = errPause, min(errPause*2, maxErrorPause)
+		case worked:
+			errPause = idle
 			continue
+		default:
+			errPause = idle
 		}
-		pause := idle + time.Duration(rand.Int64N(int64(idle))) // replicas drift apart
+		pause += time.Duration(rand.Int64N(int64(idle))) // replicas drift apart
 		select {
 		case <-ctx.Done():
 		case <-time.After(pause):
@@ -53,6 +62,7 @@ func (d *Dispatcher) housekeep(ctx context.Context) {
 	for {
 		if time.Since(lastPrune) >= time.Hour {
 			if n, err := d.Prune(ctx); err != nil && ctx.Err() == nil {
+				metrics.WebhookErrors.Inc()
 				d.Log.Error("webhook delivery log pruning", "err", err)
 			} else if n > 0 {
 				d.Log.Info("webhook delivery log pruned", "records", n)
@@ -60,6 +70,7 @@ func (d *Dispatcher) housekeep(ctx context.Context) {
 			lastPrune = time.Now()
 		}
 		if err := d.gauges(ctx); err != nil && ctx.Err() == nil {
+			metrics.WebhookErrors.Inc()
 			d.Log.Error("webhook metrics", "err", err)
 		}
 		select {
@@ -92,21 +103,27 @@ func (d *Dispatcher) Prune(ctx context.Context) (int64, error) {
 	}
 }
 
-// gauges sets the disabled-endpoint count and the maximum lag.
+// gauges sets the dispatcher-disabled count and the maximum lag (seconds
+// and entries) of enabled endpoints: the oldest entry after each cursor (a
+// retention cut leaves no gap in the measure).
 func (d *Dispatcher) gauges(ctx context.Context) error {
 	return d.DB.ReadPlatform(ctx, false, func(tx *ent.Tx) error {
-		var disabled int64
+		var disabled, behind int64
 		var lag float64
-		if _, err := scan(ctx, tx, `SELECT count(*) FROM webhook_endpoints WHERE NOT enabled`, nil, &disabled); err != nil {
+		if _, err := scan(ctx, tx, `SELECT count(*) FROM webhook_endpoints WHERE NOT enabled AND disabled_reason <> $1`,
+			[]any{UserDisabled}, &disabled); err != nil {
 			return err
 		}
-		if _, err := scan(ctx, tx, `SELECT COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - e.occurred_at)), 0)::float8
+		if _, err := scan(ctx, tx, `SELECT COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - n.occurred_at)), 0)::float8, COALESCE(max(n.head - c.seq), 0)
 			FROM webhook_cursors c JOIN webhook_endpoints w ON w.id = c.endpoint_id AND w.enabled
-			JOIN audit_events e ON e.tenant_id = c.tenant_id AND e.seq = c.seq + 1`, nil, &lag); err != nil {
+			CROSS JOIN LATERAL (SELECT min(e.occurred_at) AS occurred_at, max(e.seq) AS head FROM audit_events e
+				WHERE e.tenant_id = c.tenant_id AND e.seq > c.seq) n
+			WHERE n.head IS NOT NULL`, nil, &lag, &behind); err != nil {
 			return err
 		}
 		metrics.WebhookDisabled.Set(float64(disabled))
 		metrics.WebhookLag.Set(lag)
+		metrics.WebhookLagEvents.Set(float64(behind))
 		return nil
 	})
 }

@@ -109,10 +109,13 @@ var (
 		Name: "licenseforge_webhook_deliveries_total", Help: "Webhook delivery attempts recorded, by outcome (success, failure).",
 	}, []string{"outcome"})
 	WebhookErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "licenseforge_webhook_dispatch_errors_total", Help: "Webhook dispatch rounds that failed (database, keyring), not receiver failures.",
+		Name: "licenseforge_webhook_dispatch_errors_total", Help: "Webhook dispatch, pruning and metric rounds that failed (database, keyring), not receiver failures.",
 	})
 	WebhookDisabled = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "licenseforge_webhook_endpoints_disabled", Help: "Webhook endpoints currently disabled, across tenants.",
+		Name: "licenseforge_webhook_endpoints_disabled", Help: "Webhook endpoints the dispatcher disabled (failing, 410, unreadable), across tenants; user disables not counted.",
+	})
+	WebhookLagEvents = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "licenseforge_webhook_lag_events", Help: "Most audit entries an enabled webhook endpoint is behind its chain.",
 	})
 	WebhookLag = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "licenseforge_webhook_lag_seconds", Help: "Age of the oldest audit entry an enabled webhook endpoint hasn't passed yet.",
@@ -136,7 +139,7 @@ func init() {
 	AuditWriteFailures.WithLabelValues("tenant")
 	AuditWriteFailures.WithLabelValues("platform")
 	Registry.MustRegister(UnknownLicenseKeys, MFARefusals, AuditWriteFailures, AuditVerifyFailures, AuditVerifyLastSuccess, AuditVerifyErrors, AuditVerifyLastFull, AuditExportFailures, AuditExportLag,
-		WebhookDeliveries, WebhookErrors, WebhookDisabled, WebhookLag, requests, duration, poolCollector{},
+		WebhookDeliveries, WebhookErrors, WebhookDisabled, WebhookLag, WebhookLagEvents, requests, duration, poolCollector{},
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 

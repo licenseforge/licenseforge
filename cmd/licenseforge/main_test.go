@@ -593,3 +593,21 @@ func TestTenantInviteOwner(t *testing.T) {
 		t.Error("ran on the tenant login")
 	}
 }
+
+// Webhook settings: 0 workers starts nothing; out-of-range counts are refused.
+func TestWebhookDispatcherSettings(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	for v, ok := range map[string]bool{"": true, "0": true, "8": true, "64": true, "-1": false, "65": false, "x": false} {
+		t.Setenv("LICENSEFORGE_WEBHOOK_WORKERS", v)
+		start, err := webhookDispatcher(nil, nil, log)
+		if (err == nil) != ok {
+			t.Errorf("workers %q: %v", v, err)
+		}
+		if v == "0" && start != nil {
+			t.Error("0 workers starts a dispatcher")
+		}
+		if ok && v != "0" && start == nil {
+			t.Errorf("workers %q: nothing to start", v)
+		}
+	}
+}

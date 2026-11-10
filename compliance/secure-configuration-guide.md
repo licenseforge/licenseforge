@@ -167,12 +167,16 @@ From [`values.yaml`](../deploy/helm/licenseforge/values.yaml). Pod security isn'
 | `networkPolicy.databaseTo` | `[]` = any destination on the port | Narrow to the database's CIDR or pods |
 | `networkPolicy.databasePort` | `5432` | Only this port is open for egress, besides DNS |
 | `networkPolicy.dns.ports` / `.to` | `[53]` / any | Narrow `to` to your DNS pods; OpenShift uses 5353 |
+| `webhooks.workers` | `8` | `0` delivers no webhooks from this release and adds no egress rule |
+| `webhooks.ports` | `[443]` | Receiver ports, for the server and the NetworkPolicy; more ports let tenants POST to any public host on them (the server warns) |
+| `webhooks.egress.to` | `[]` = any destination on the ports | Narrow to known receivers; the server refuses internal and metadata addresses anyway |
+| `webhooks.allowCIDRs` | `[]` | Only for single-vendor self-hosted installs: every tenant can then reach those ranges |
 | `podLabels` | `{}` | The chart's own labels can't be overridden (they select NetworkPolicy targets) |
 
 ## NetworkPolicies
 
 The chart ships two policies ([`networkpolicy.yaml`](../deploy/helm/licenseforge/templates/networkpolicy.yaml)):
-- **Server**: ingress TCP 8080 only, from `ingressFrom`; egress to DNS and the database port only.
+- **Server**: ingress TCP 8080 only, from `ingressFrom`; egress to DNS and the database port, the OIDC provider and SIEM collectors when configured, and webhook receivers on `webhooks.ports` while `webhooks.workers` > 0 (any destination unless `webhooks.egress.to` narrows it; the server refuses internal, link-local and metadata addresses at dial time, ADR-0044).
 - **Migration Job**: no ingress; the same egress. It is a Helm hook, so it exists before the Job runs on the first install. `helm uninstall` leaves it behind (it selects only migration pods).
 
 Policies are additive. To enable OIDC login, add a policy that allows egress from the server pods to the IdP on 443 instead of disabling the chart's:

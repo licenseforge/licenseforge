@@ -65,6 +65,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -364,8 +365,10 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	}
 
 	// Outbound webhooks (ADR-0044): every replica delivers; 0 workers turns
-	// delivery off here (another replica, or none, delivers).
-	if err := startWebhooks(ctx, db, keyring, log); err != nil {
+	// delivery off here (another replica, or none, delivers). Checked now,
+	// started once the server is about to serve.
+	startWebhooks, err := webhookDispatcher(db, keyring, log)
+	if err != nil {
 		return err
 	}
 
@@ -465,6 +468,21 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 	errc, merrc := make(chan error, 1), make(chan error, 1)
+	if startWebhooks != nil {
+		// Stopped before the database closes (deferred earlier, so run
+		// later): sends in flight are released and results being written
+		// finish (each within 10 s).
+		whCtx, whStop := context.WithCancel(ctx)
+		done := startWebhooks(whCtx)
+		defer func() {
+			whStop()
+			select {
+			case <-done:
+			case <-time.After(15 * time.Second):
+				log.Warn("webhook dispatcher didn't stop in time")
+			}
+		}()
+	}
 	go func() {
 		log.Info("listening", "addr", ln.Addr().String(), "metrics", mln.Addr().String(), "version", version)
 		errc <- srv.Serve(ln)
@@ -601,30 +619,37 @@ func mustEnv(key string) (string, error) {
 	return "", fmt.Errorf("%s is not set", key)
 }
 
-// startWebhooks starts the webhook dispatcher with the operator's egress
-// policy (LICENSEFORGE_WEBHOOK_*); invalid settings stop the server.
-func startWebhooks(ctx context.Context, db *store.DB, keyring *secrets.Keyring, log *slog.Logger) error {
+// webhookDispatcher checks the operator's webhook settings
+// (LICENSEFORGE_WEBHOOK_*; invalid ones stop the server) and returns what
+// starts delivery (nil: 0 workers). start's channel closes once it stopped.
+func webhookDispatcher(db *store.DB, keyring *secrets.Keyring, log *slog.Logger) (start func(context.Context) <-chan struct{}, err error) {
 	workers := 8
 	if v := os.Getenv("LICENSEFORGE_WEBHOOK_WORKERS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 || n > 64 {
-			return fmt.Errorf("LICENSEFORGE_WEBHOOK_WORKERS: want 0 to 64, got %q", v)
+			return nil, fmt.Errorf("LICENSEFORGE_WEBHOOK_WORKERS: want 0 to 64, got %q", v)
 		}
 		workers = n
 	}
 	guard, err := webhooks.ParseGuard(os.Getenv("LICENSEFORGE_WEBHOOK_ALLOW_CIDRS"), os.Getenv("LICENSEFORGE_WEBHOOK_DENY_CIDRS"),
 		os.Getenv("LICENSEFORGE_WEBHOOK_PORTS"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if workers == 0 {
 		log.Info("LICENSEFORGE_WEBHOOK_WORKERS is 0: this replica delivers no webhooks")
-		return nil
+		return nil, nil
 	}
 	if len(guard.Allow) > 0 {
 		log.Warn("webhooks may reach internal addresses (LICENSEFORGE_WEBHOOK_ALLOW_CIDRS): for single-vendor self-hosted installs", "allow", os.Getenv("LICENSEFORGE_WEBHOOK_ALLOW_CIDRS"))
 	}
+	if extra := slices.DeleteFunc(slices.Clone(guard.Ports), func(p int) bool { return p == 443 }); len(extra) > 0 {
+		log.Warn("webhooks may connect to ports other than 443 (LICENSEFORGE_WEBHOOK_PORTS): tenants can make this server POST to any public host on them", "ports", extra)
+	}
 	d := webhooks.NewDispatcher(db, keyring, guard.Client(), log)
-	go d.Run(ctx, workers) // stops with ctx; a send in flight is released, the next replica sends it
-	return nil
+	return func(ctx context.Context) <-chan struct{} {
+		done := make(chan struct{})
+		go func() { d.Run(ctx, workers); close(done) }() // a send in flight is released; the next replica sends it
+		return done
+	}, nil
 }
