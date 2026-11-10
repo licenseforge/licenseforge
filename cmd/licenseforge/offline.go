@@ -159,7 +159,9 @@ func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.
 		if err != nil {
 			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN_FILE: %w", cmd, err)
 		}
-		token = strings.TrimRight(string(b), "\r\n")
+		if token = strings.TrimRight(string(b), "\r\n"); token == "" {
+			return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN_FILE: %s is empty", cmd, path)
+		}
 	}
 	u, err = url.Parse(base)
 	// ForceQuery: a stray "?" would turn the API path into a query; dot
@@ -173,8 +175,8 @@ func apiTarget(getenv func(string) string, cmd string, needTenant bool) (u *url.
 	if token == "" {
 		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN is required", cmd)
 	}
-	if strings.ContainsFunc(token, func(r rune) bool { return r < 0x21 || r == 0x7f }) { // a newline from a secret file
-		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN has whitespace or control characters", cmd)
+	if strings.ContainsFunc(token, func(r rune) bool { return r < 0x21 || r > 0x7e }) { // a newline or BOM from a secret file; tokens are ASCII
+		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TOKEN has whitespace, control or non-ASCII characters", cmd)
 	}
 	if tenant != "" && (strings.ContainsAny(tenant, "/%?#\\") || tenant == "." || tenant == "..") { // one path segment: a slug or tnt_ ID
 		return nil, "", "", fmt.Errorf("%s: LICENSEFORGE_TENANT %q is not a tenant slug or ID", cmd, tenant)

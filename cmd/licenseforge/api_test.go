@@ -176,9 +176,17 @@ func TestAPICommand(t *testing.T) {
 	if code, _, _ := run("", "GET", "/me/tenants"); code != 0 || len(got) != 1 || got[0].auth != "Bearer lf_filetok" {
 		t.Errorf("token file: %d %+v", code, got)
 	}
-	env["LICENSEFORGE_TOKEN_FILE"] = filepath.Join(dir, "nope")
-	if code, _, errOut := run("", "GET", "/me/tenants"); code != 2 || !strings.Contains(errOut, "LICENSEFORGE_TOKEN_FILE") {
-		t.Errorf("missing token file: %d %q", code, errOut)
+	for name, content := range map[string]string{"nope": "", "empty": "\n", "bom": "\ufefflf_filetok"} {
+		path := filepath.Join(dir, name)
+		if content != "" {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		env["LICENSEFORGE_TOKEN_FILE"] = path
+		if code, _, errOut := run("", "GET", "/me/tenants"); code != 2 || !strings.Contains(errOut, "LICENSEFORGE_TOKEN") {
+			t.Errorf("token file %s: %d %q", name, code, errOut)
+		}
 	}
 	env["LICENSEFORGE_TOKEN_FILE"], env["LICENSEFORGE_TOKEN"] = "", "lf_tok"
 	env["LICENSEFORGE_TENANT"] = ""
