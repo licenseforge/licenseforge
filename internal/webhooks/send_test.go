@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -119,8 +120,11 @@ func TestSend(t *testing.T) {
 	mux.HandleFunc("/moved", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/target", http.StatusFound) })
 	mux.HandleFunc("/target", func(w http.ResponseWriter, _ *http.Request) { hits.Add(1) })
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		// Reading the body to EOF lets the server notice the client hanging
+		// up (r.Context() ends), so srv.Close doesn't wait out the 5 s.
+		_, _ = io.Copy(io.Discard, r.Body)
 		select {
-		case <-time.After(5 * time.Second): // far above the 300ms client; srv.Close waits for it
+		case <-time.After(5 * time.Second): // far above the clients that time out
 		case <-r.Context().Done():
 		}
 	})
@@ -183,7 +187,8 @@ func TestSend(t *testing.T) {
 			t.Errorf("%s: %+v, %v", path, a, err)
 		}
 	}
-	if a, err := Send(ctx, testClient(srv, 300*time.Millisecond), srv.URL+"/slow", "msg_1", now, body, secret); err != nil || a.Category != "timeout" {
+	fast := testClient(srv, 300*time.Millisecond)
+	if a, err := Send(ctx, fast, srv.URL+"/slow", "msg_1", now, body, secret); err != nil || a.Category != "timeout" {
 		t.Errorf("/slow: %+v, %v", a, err)
 	}
 	if hits.Load() != 0 {
