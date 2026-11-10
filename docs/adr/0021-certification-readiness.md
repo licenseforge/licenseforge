@@ -15,7 +15,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 | **ISO 27001** | Our company (ISMS) | EU enterprise deals | No. Same controls as SOC 2 |
 | **GDPR** (+ DPA with each vendor) | Hosted cloud; EU vendors | From first EU customer | No, after data minimisation below |
 | **EU Cyber Resilience Act (CRA)** | Our SDKs/agent embedded in vendors' products; vendors will pass obligations to us | Reporting obligations from Sep 2026, full application Dec 2027 | No. Needs SBOM, vulnerability handling, security updates |
-| **FIPS 140-3** (validated crypto) | US federal, defence, regulated buyers | On demand, per deal | No. Ed25519 is approved (FIPS 186-5); FIPS builds via Go's FIPS 140-3 module; ECDSA P-256 fallback by new key type |
+| **FIPS 140-3** (validated crypto) | US federal, defence, regulated buyers | On demand, per deal | No. Ed25519 is approved (FIPS 186-5) in Go's FIPS 140-3 module (#5247) and in Bouncy Castle FIPS Java 2.1.1 (#4943); FIPS builds via Go's module; ECDSA P-256 only if a mandated module lacks EdDSA |
 | **FedRAMP / StateRAMP** | Hosted for US government | Product readiness from v0.1 ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md)); authorization with the hosted offering | No. Dedicated-instance deployments + FIPS images cover the architecture side |
 | **CNSA 2.0 / post-quantum** | Defence/national security buyers | 2030+ timelines | No. ML-DSA (FIPS 204) can be added as a key type without a format change |
 | **PCI DSS** | Card payments | Never | Avoided by delegating billing ([ADR-0007 Billing and campaigns delegated to payment providers](0007-billing-and-campaigns-delegated-to-payment-providers.md)) |
@@ -56,7 +56,7 @@ To sell LicenseForge (hosted and enterprise) and to be embedded in vendors' regu
 
 ## Open verification items
 - [x] Go Cryptographic Module v1.0.0: CMVP #5247 active, EdDSA approved ([CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)).
-- [x] Confirm Ed25519 in Bouncy Castle FIPS (Java): approved from BC-FJA 2.1 (FIPS 186-5, certificate #4943), so no P-256 keys ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md), 2026-11-10). OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved.
+- [x] Confirm Ed25519 in Bouncy Castle FIPS (Java): approved in BC-FJA 2.1.1 (FIPS 186-5, certificate #4943), so no P-256 keys ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md), 2026-11-10). OpenSSL 3.5+ FIPS provider (Node) lists Ed25519 as approved.
 - [ ] Confirm CRA obligations for open-source projects vs. commercial distributors (we are both).
 
 ## Consequences

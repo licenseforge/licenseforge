@@ -21,7 +21,7 @@ So "from day 1" means: **the product is built and documented so that a FedRAMP M
 ### Crypto (SC-13, SC-8, SC-28)
 - **FIPS build in CI from day 1** with `GOFIPS140=certified` (latest Go module with a CMVP certificate; today v1.0.0, cert #5247), tested on every PR, published as `-fips` images.
 - **Ed25519 stays the only key type in v0.1**: EdDSA is on the approved-algorithm list of CMVP #5247, so it is FIPS-approved inside Go's validated module. **ECDSA P-256 is decided in v0.2** with the Java SDK: added only if Bouncy Castle FIPS lacks EdDSA. No format change needed ([License File Format](../../spec/license-format.md): algorithm bound to `kid`).
-  - **Decided 2026-11-10: no P-256.** Bouncy Castle FIPS Java (BC-FJA) 2.1.x has EdDSA (Ed25519, Ed448) in its approved algorithms under FIPS 186-5 (CAVP A4270; FIPS 140-3 certificate #4943, security policy for 2.1.1; Java 8, 11, 17 and 21 tested). The Java SDK verifies Ed25519 in approved mode with BC-FJA 2.1 or later; 2.0.x predates FIPS 186-5 and doesn't approve EdDSA. The JDK's own Ed25519 (SunEC) is fine outside FIPS mode but isn't a validated module. Ed25519 stays the only key type; P-256 comes back only if a buyer's mandated module lacks EdDSA (Compliance verification 2026-11).
+  - **Decided 2026-11-10: no P-256.** Bouncy Castle FIPS Java (BC-FJA) 2.1.1 has EdDSA (Ed25519, Ed448) in its approved algorithms under FIPS 186-5 (CAVP A4270; FIPS 140-3 certificate #4943, interim validation, sunset 2030-01-16; Java 8, 11, 17 and 21 tested). The security policy also lists EdDSA in its Table 6 (not allowed in approved mode); the certificate's approved list and the policy's Table 10 (approved services) govern. The Java SDK (v0.2) will verify Ed25519 in approved mode with the validated jar: BC-FJA 2.1.1, or a later version once a CMVP certificate lists it with EdDSA; its tests run with `CryptoServicesRegistrar.isInApprovedOnlyMode()` true. BC-FJA 2.0.0 (certificate #4743) doesn't approve EdDSA. The JDK's own Ed25519 (SunEC) is fine outside FIPS mode but isn't a validated module. Ed25519 stays the only key type; P-256 comes back only if a buyer's mandated module lacks EdDSA (Compliance verification 2026-11).
 - FIPS mode restricts TLS to FIPS-approved suites; TLS 1.2+ everywhere, 1.3 preferred.
 - Encryption at rest for all secrets (envelope), DB/disk encryption documented as a deployment requirement.
 
@@ -74,6 +74,6 @@ Details: Compliance verification 2026-11 (design vault). Primary sources: [NIST 
 - [x] OSCAL: latest v1.2.3; target 1.2.x component definition.
 
 ## Still open
-- [x] Bouncy Castle FIPS (Java): is EdDSA approved? Yes, from BC-FJA 2.1 (certificate #4943): no P-256 (2026-11-10).
+- [x] Bouncy Castle FIPS (Java): is EdDSA approved? Yes, BC-FJA 2.1.1 (certificate #4943): no P-256 (2026-11-10).
 - [ ] FedRAMP VDR/VER rulesets: exact vulnerability remediation timelines; align `SECURITY.md` SLAs if they differ.
 - [ ] FedRAMP RFC-0024 (machine-readable authorization packages; unrelated to ADR numbering): scope and deadlines confirmed on fedramp.gov (secondary sources disagree).

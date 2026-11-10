@@ -22,12 +22,15 @@ Each SDK has the same surface: `verify(file)`, `activate(key)`, `refresh()`, `de
 - Covers the large majority of on-prem and B2B vendors.
 - **TypeScript SDK is server-side only (Node ≥ 20).** No browser build: client-side JS can be edited by anyone, so it can't enforce anything. A frontend asks its own backend for entitlements. Bun/Deno may work via `node:crypto` compatibility but aren't officially supported.
 - Java 15+ minimum; Java 8/11 users need BouncyCastle (document, don't support officially).
-- Java FIPS mode: verification goes through Bouncy Castle FIPS Java (BC-FJA) 2.1 or later, which approves Ed25519 (FIPS 186-5, certificate #4943); the SDK documents it as the provider for FIPS deployments ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md), 2026-11-10).
 - Gaps: other languages are covered first by the in-cluster agent's local API and an OpenFeature provider ([ADR-0012 In-cluster license agent](0012-in-cluster-license-agent.md), v0.3). A C-ABI core with .NET and Python bindings is Later. Community SDKs can certify against the test vectors.
 
 > [!NOTE]
 > **Amended 2026-11-02**
 > After Licensing competitor feature gaps: no new native SDKs before v0.4; the agent closes the server-side language gap.
+
+> [!NOTE]
+> **Amended 2026-11-10**
+> Java FIPS mode: the SDK verifies through the validated Bouncy Castle FIPS Java jar, BC-FJA 2.1.1 (certificate #4943, Ed25519 approved under FIPS 186-5), or a later version once a CMVP certificate lists it; the SDK documents the exact validated version ([ADR-0024 HIPAA, NIST and FedRAMP readiness from day 1](0024-hipaa-nist-and-fedramp-readiness-from-day-1.md)).
 
 ## Alternatives considered
 - **One C core + bindings**: single implementation, but FFI/packaging pain on every platform.
