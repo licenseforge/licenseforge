@@ -61,6 +61,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with: { version: v4.3.1 }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - name: Every rendered workload meets the restricted Pod Security profile (compliance/kubernetes-hardening.md)
+        env: { LICENSEFORGE_REQUIRE_HELM: "1" }
+        run: go test -count=1 ./deploy/helm/
       - name: Lint and render the Helm chart
         working-directory: deploy/helm/licenseforge
         run: |
