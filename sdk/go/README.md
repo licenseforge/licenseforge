@@ -12,6 +12,15 @@ Module `licenseforge.io/licenseforge/sdk/go`, standard library only (ADR-0023, A
 
 ## Online activation
 
+Embed the trusted keys from the dashboard (Settings → Signing keys): paste its Go `licensefile.KeySet`, or embed its JSON and load it with `licensefile.ParseKeySet`:
+
+```go
+//go:embed trusted-keys.json
+var trustedKeysJSON []byte
+
+trustedKeys, err := licensefile.ParseKeySet(trustedKeysJSON)
+```
+
 ```go
 fp, err := fingerprint.Compute(ctx, tenantID, "acme-db", fingerprint.Options{})
 guard, err := clock.New(clock.FileStore{Path: stateDir + "/clock"}, licenseKey, clock.Options{})

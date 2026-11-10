@@ -214,13 +214,17 @@ func TestVectors(t *testing.T) {
 	if err := json.Unmarshal(got, &vf); err != nil {
 		t.Fatal(err)
 	}
-	var keys KeySet
-	for _, k := range vf.Keys {
-		raw, err := b64.DecodeString(k.PublicKey)
-		if err != nil {
-			t.Fatal(err)
-		}
-		keys = append(keys, PublicKey{KID: k.KID, Alg: k.Alg, Key: raw})
+	// The vectors' key list loads through ParseKeySet, as a build would load
+	// the dashboard's: unknown algs, duplicates and short keys included.
+	var set struct {
+		Keys json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(got, &set); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := ParseKeySet(set.Keys)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, c := range vf.Cases {
 		t.Run(c.Name, func(t *testing.T) {
