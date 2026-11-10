@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -322,5 +323,29 @@ func TestKubernetesStoreNames(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	if err := (&KubernetesSecret{Name: "x"}).Save("x"); err == nil || !strings.Contains(err.Error(), "not in a Kubernetes cluster") {
 		t.Errorf("no cluster: %v", err)
+	}
+}
+
+// A null answer or one without a resourceVersion is an error: no panic, and
+// no unconditional PUT over a concurrent writer.
+func TestKubernetesStoreOddAnswers(t *testing.T) {
+	for name, body := range map[string]string{"null": "null", "no metadata": `{"data":{"lease":"x"}}`, "empty resourceVersion": `{"metadata":{"resourceVersion":""}}`} {
+		puts := 0
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				puts++
+			}
+			_, _ = io.WriteString(w, body)
+		}))
+		token := filepath.Join(t.TempDir(), "token")
+		if err := os.WriteFile(token, []byte("t"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		k := &KubernetesConfigMap{Name: "x"}
+		k.base, k.tokenFile, k.client, k.ns = srv.URL, token, srv.Client(), "ns"
+		if err := k.Save("lease"); err == nil || puts != 0 {
+			t.Errorf("%s: %v, %d PUTs", name, err, puts)
+		}
+		srv.Close()
 	}
 }

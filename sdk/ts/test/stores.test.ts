@@ -125,6 +125,67 @@ test("Secret: the value is base64; a conflict means another round; 403 says what
   }
 });
 
+test("retries: a deletion between GET and PUT recreates; a create race retries; \"\" on a missing object writes nothing", async () => {
+  const k = await fakeAPI();
+  try {
+    const s = new KubernetesConfigMapStore({ name: "race", api: k.api });
+    const path = "/api/v1/namespaces/apps/configmaps/race";
+    await s.save("lf1.a");
+    k.inject.push({ method: "PUT", status: 404 }); // deleted meanwhile: another round
+    await s.save("lf1.b");
+    assert.equal(await s.load(), "lf1.b");
+    k.objects.delete(path);
+    k.inject.push({ method: "POST", status: 409 }); // created meanwhile: another round
+    await s.save("lf1.c");
+    assert.equal(await s.load(), "lf1.c");
+    k.objects.delete(path);
+    const before = k.log.length;
+    await s.save("");
+    assert.deepEqual(k.log.slice(before).map((l) => l.split(" ")[0]), ["GET"], "nothing to remove");
+  } finally {
+    k.close();
+  }
+});
+
+test("odd answers: null, or no resourceVersion, is an error and no PUT", async () => {
+  const { key, cert } = tls();
+  for (const body of ["null", JSON.stringify({ data: { lease: "x" } }), JSON.stringify({ metadata: {} })]) {
+    let puts = 0;
+    const srv = createServer({ key, cert }, (req, res) => {
+      if (req.method === "PUT") puts++;
+      res.writeHead(200, { "Content-Type": "application/json" }).end(body);
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const api = { host: "127.0.0.1", port: (srv.address() as AddressInfo).port, ca: cert, namespace: "apps", token: () => "t" };
+    await assert.rejects(new KubernetesConfigMapStore({ name: "x", api }).save("lf1.x"), /isn't an object|resourceVersion/, body);
+    assert.equal(puts, 0, body);
+    srv.close();
+  }
+});
+
+test("a token with a line break is refused before anything is sent", async () => {
+  const k = await fakeAPI();
+  try {
+    await assert.rejects(new KubernetesConfigMapStore({ name: "x", api: { ...k.api, token: () => "abc\r\nX-Evil: 1" } }).load());
+    assert.equal(k.log.length, 0);
+  } finally {
+    k.close();
+  }
+});
+
+test("a Secret value with line breaks decodes, as in Go", async () => {
+  const k = await fakeAPI();
+  try {
+    const s = new KubernetesSecretStore({ name: "nl", api: k.api });
+    await s.save("lf1.abcdef");
+    const o = k.objects.get("/api/v1/namespaces/apps/secrets/nl")!;
+    o.data.lease = o.data.lease.slice(0, 4) + "\r\n" + o.data.lease.slice(4);
+    assert.equal(await s.load(), "lf1.abcdef");
+  } finally {
+    k.close();
+  }
+});
+
 test("names are checked before any request", async () => {
   const k = await fakeAPI();
   try {

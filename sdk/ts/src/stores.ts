@@ -47,6 +47,7 @@ function inCluster(): KubernetesAPI {
   let namespace: string;
   try {
     ca = readFileSync(`${SA_DIR}/ca.crt`);
+    if (!ca.includes("-----BEGIN CERTIFICATE-----")) throw new Error("invalid service account CA");
     namespace = readFileSync(`${SA_DIR}/namespace`, "utf8").trim();
   } catch (e) {
     throw new Error(`licenseforge lease store: no service account (automountServiceAccountToken?): ${String(e)}`);
@@ -83,8 +84,9 @@ abstract class KubernetesStore implements LeaseStore {
   }
 
   private decode(v: unknown): string {
-    const s = typeof v === "string" ? v : "";
+    let s = typeof v === "string" ? v : "";
     if (this.kind !== "Secret") return s;
+    s = s.replace(/[\r\n]/g, ""); // Go's StdEncoding skips CR and LF too
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s) || s.length % 4 !== 0) throw new Error("the Secret's value isn't base64");
     return Buffer.from(s, "base64").toString("utf8");
   }
@@ -131,9 +133,12 @@ abstract class KubernetesStore implements LeaseStore {
   }
 
   private async saveOnce(api: KubernetesAPI, path: string, key: string, lease: string, deadline: number): Promise<void> {
-    let obj: { data?: Record<string, unknown> } & Record<string, unknown>;
+    let obj: { data?: Record<string, unknown>; metadata?: { resourceVersion?: unknown } } & Record<string, unknown>;
     try {
       obj = (await call(api, "GET", path, undefined, deadline)) as typeof obj;
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("the API's answer isn't an object");
+      // Only a PUT carrying the resourceVersion read is conditional: without one it would overwrite a concurrent writer.
+      if (typeof obj.metadata?.resourceVersion !== "string" || obj.metadata.resourceVersion === "") throw new Error("the API's answer has no metadata.resourceVersion");
     } catch (e) {
       if (!(e instanceof APIError && e.status === 404)) throw e;
       if (lease === "") return; // nothing to remove
