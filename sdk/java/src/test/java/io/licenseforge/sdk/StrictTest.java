@@ -149,6 +149,8 @@ class StrictTest {
     String bom = "\uFEFF" + license + "\n".repeat(LicenseFile.MAX_SIZE - n - 1);
     assertEquals("malformed", code(() -> LicenseFile.verify(bom, ks)), "bytes, not chars");
     assertEquals("ok", code(() -> LicenseFile.verify("\uFEFF" + license, ks)), "one BOM is ignored");
+    // Empty parts count: String.split would drop trailing ones.
+    for (String extra : List.of(".", "..", ". ")) assertEquals("malformed", code(() -> LicenseFile.verify(license + extra, ks)), "trailing " + extra);
   }
 
   @Test

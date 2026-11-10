@@ -64,6 +64,7 @@ class KeySetTest {
     cases.put("long padded", "[{\"kid\":\"a\",\"alg\":\"ed25519\",\"public_key\":\"" + VEC + "=\"}]");
     cases.put("lone surrogate escape", "[{\"kid\":\"a\",\"alg\":\"\\ud800\",\"public_key\":\"AAAA\"}]");
     cases.put("lone surrogate in a string", "[{\"kid\":\"a\",\"alg\":\"\uD800\",\"public_key\":\"AAAA\"}]");
+    cases.put("lone low surrogate in a string", "[{\"kid\":\"a\",\"alg\":\"\uDC00\",\"public_key\":\"AAAA\"}]");
     cases.put("BOM", "\uFEFF[{\"kid\":\"a\",\"alg\":\"ed25519\",\"public_key\":\"AAAA\"}]");
     byte[] json = "[{\"kid\":\"a\",\"alg\":\"ed25519\",\"public_key\":\"AAAA\"}]".getBytes(StandardCharsets.UTF_8);
     byte[] bom = new byte[json.length + 3];

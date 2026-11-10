@@ -19,6 +19,11 @@ updates:
     schedule: { interval: weekly }
     groups:
       sdk-ts: { patterns: ["*"] }
+  - package-ecosystem: maven
+    directory: /sdk/java # JUnit and the build plugins: the SDK has no runtime dependencies
+    schedule: { interval: weekly }
+    groups:
+      sdk-java: { patterns: ["*"] }
   - package-ecosystem: docker
     directory: / # the Dockerfile's digest-pinned base images
     schedule: { interval: weekly }
