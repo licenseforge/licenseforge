@@ -38,6 +38,31 @@
       "kid": "test:short",
       "alg": "ed25519",
       "public_key": "K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqIw"
+    },
+    {
+      "kid": "test:weak-identity",
+      "alg": "ed25519",
+      "public_key": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "kid": "test:weak-negative-zero",
+      "alg": "ed25519",
+      "public_key": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA"
+    },
+    {
+      "kid": "test:weak-noncanonical-small",
+      "alg": "ed25519",
+      "public_key": "7f_______________________________________38"
+    },
+    {
+      "kid": "test:weak-noncanonical-large",
+      "alg": "ed25519",
+      "public_key": "8P_______________________________________38"
+    },
+    {
+      "kid": "test:weak-order-8",
+      "alg": "ed25519",
+      "public_key": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o"
     }
   ],
   "cases": [
@@ -111,6 +136,36 @@
     {
       "name": "invalid_key_set_short_key",
       "license": "lf1.test:short.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.ZVDcW03iuVNXO8KnnWQtf090JUdeweoL46mvSyrS4Nv96M2aLKoCYEDXefGaIa8lSSxKBJpzDNOaJDMc2-SbDg",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_small_order_forgery",
+      "license": "lf1.test:weak-identity.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_negative_zero_key",
+      "license": "lf1.test:weak-negative-zero.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_noncanonical_small_key",
+      "license": "lf1.test:weak-noncanonical-small.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_noncanonical_large_key",
+      "license": "lf1.test:weak-noncanonical-large.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_order_8_key",
+      "license": "lf1.test:weak-order-8.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.23l36DYQjS8NKPC92_vPjIPI6H4-cRLODPqZoC_HxUdcQk6tsrfhQfKGQ-38zo_qH67BK_EtOwcHnyBSZytwBg",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "invalid_key_set_weak_key_before_signature_length",
+      "license": "lf1.test:weak-identity.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       "expect": "invalid_key_set"
     },
     {
