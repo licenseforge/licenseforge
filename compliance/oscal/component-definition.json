@@ -337,7 +337,7 @@
               {
                 "uuid": "74627718-5e8c-5d06-a842-f12117e54a3b",
                 "control-id": "au-2",
-                "description": "On the tenant's chain, every change made through the product, with its refusals (failure, denied) by a caller the tenant knows: members (member.update, member.remove), invitations (create, revoke; accept on success), API tokens (create, revoke), signing keys (signing_key.create, promote, discard), the tenant's MFA policy and audit retention (tenant.mfa_policy.update, tenant.audit_retention.update), the catalog (product, feature, plan: create, update, archive; plan.features.update), customers, licenses (issue, suspend, reinstate, revoke, key_reveal, rehosts_reset, offline_file), activations (create, deactivate, offline, offline_return), reads of the audit log (audit_event.read), sessions refused by the tenant's MFA policy (session.mfa_required), and audit.retention on every chain it cuts. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token), user.logout, platform_admin.bootstrap, tenant.create, tenant.owner_invitation (the CLI's with via: cli), session refusals on the platform routes (session.platform_denied, session.mfa_required) and audit.checkpoint (ADR-0021, ADR-0027).",
+                "description": "On the tenant's chain, every change made through the product, with its refusals (failure, denied) by a caller the tenant knows: members (member.update, member.remove), invitations (create, revoke; accept on success), API tokens (create, revoke), webhook endpoints (webhook.create, update, rotate_secret, delete, disable, enable, skip_event, skip_to_now; the dispatcher's own webhook.disable and webhook.pruned_skip as system), signing keys (signing_key.create, promote, discard), the tenant's MFA policy and audit retention (tenant.mfa_policy.update, tenant.audit_retention.update), the catalog (product, feature, plan: create, update, archive; plan.features.update), customers, licenses (issue, suspend, reinstate, revoke, key_reveal, rehosts_reset, offline_file), activations (create, deactivate, offline, offline_return), reads of the audit log (audit_event.read), sessions refused by the tenant's MFA policy (session.mfa_required), and audit.retention on every chain it cuts. On the platform chain (events without a tenant, readable only on the platform pool): user.login (success; a disabled user denied; refusals of a verified ID token), user.logout, platform_admin.bootstrap, tenant.create, tenant.owner_invitation (the CLI's with via: cli), session refusals on the platform routes (session.platform_denied, session.mfa_required) and audit.checkpoint (ADR-0021, ADR-0027).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -384,6 +384,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/members/members_test.go",
                     "rel": "reference",
                     "text": "TestUpdate"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/endpoints_test.go",
+                    "rel": "reference",
+                    "text": "TestUpdateRotateDelete"
                   }
                 ],
                 "remarks": "Not audited: (1) refusals before a credential maps to the tenant's own objects, which anyone can cause: unknown or malformed API tokens, license keys and invitation tokens, invitation acceptances refused for any reason, CSRF and origin refusals, and a signed-in user asking for a tenant they don't belong to (counted in the HTTP metrics; the API also logs them); login failures before a verified ID token likewise; (2) session expiry (idle and absolute timeouts), and a session replaced by a new login; (3) session refusals beyond the first per session (recorded once, so polling can't flood the chain; a failed write is logged, not the answer); (4) changes the operator makes in SQL, which have no API yet: platform-admin grants and removals beyond the bootstrap, user suspension and erasure, customer erasure (ADR-0029, ADR-0031); (5) idempotent replays, which return the stored outcome; (6) online lease refreshes, their refusals and re-activations of a known machine: metrics, not entries (ADR-0034)."
@@ -1240,7 +1245,7 @@
               {
                 "uuid": "d08562e3-d4c4-5cd5-8613-6709ceff2aea",
                 "control-id": "sc-8",
-                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention, the tenant CLI commands) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
+                "description": "The server refuses non-https OIDC issuer and redirect URLs (except localhost) and sets every cookie Secure with the __Host- prefix. Every database connection (server pools, migration, audit retention, the tenant CLI commands) must verify the server's certificate (sslmode=verify-full, or verify-ca with sslrootcert; no plaintext fallback) unless the host is local; otherwise the process refuses to start. Webhook deliveries are https only, verify the receiver's certificate and never follow redirects (ADR-0044). Every client connection, database and HTTP, negotiates TLS 1.2 or later; in FIPS mode Go's crypto/tls allows only approved versions, suites and curves.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1275,6 +1280,11 @@
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/deploy/helm/licenseforge/README.md",
                     "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/send_test.go",
+                    "rel": "reference",
+                    "text": "TestSend"
                   }
                 ],
                 "remarks": "The server listens on plain HTTP: TLS terminates at the operator's ingress or service mesh, whose TLS settings are the operator's (TLS 1.2+). LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT=true (Helm databaseAllowPlaintext) lifts the database check for development clusters."
@@ -1282,7 +1292,7 @@
               {
                 "uuid": "8be7d414-abfc-58f2-a5b9-0138338d1542",
                 "control-id": "sc-12",
-                "description": "Master keyring (LICENSEFORGE_MASTER_KEYS): named 32-byte keys, the first active, all usable to decrypt, so rotation needs no downtime; HKDF-SHA256 derives separate encryption and lookup subkeys. Per-tenant Ed25519 signing keys go pending → active → retired, and a retired key's private key is erased from the live table. Owners manage the lifecycle through the REST API (create, promote, discard, each audited); every member with key:read lists the public keys, never private material.",
+                "description": "Master keyring (LICENSEFORGE_MASTER_KEYS): named 32-byte keys, the first active, all usable to decrypt, so rotation needs no downtime; HKDF-SHA256 derives separate encryption and lookup subkeys. Per-tenant Ed25519 signing keys go pending → active → retired, and a retired key's private key is erased from the live table. Owners manage the lifecycle through the REST API (create, promote, discard, each audited); every member with key:read lists the public keys, never private material. Webhook signing secrets (32 random bytes) are encrypted with the keyring bound to tenant and endpoint, shown once, and rotated with the previous one signing for 24 hours (ADR-0044).",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1320,7 +1330,7 @@
               {
                 "uuid": "e00928a9-27dc-5c89-967b-9fe4649a29e4",
                 "control-id": "sc-13",
-                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256, HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
+                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256 (also webhook signatures, Standard Webhooks), HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1346,6 +1356,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/go/licensefile/licensefile_test.go",
                     "rel": "reference",
                     "text": "TestFIPSModeWhenRequested"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/receiver_test.go",
+                    "rel": "reference",
+                    "text": "TestReceiverSnippet"
                   }
                 ],
                 "remarks": "The default build and image are not FIPS (GOFIPS140=off). Every release also publishes signed -fips images (ghcr.io/licenseforge/licenseforge:<version>-fips, linux/amd64 and linux/arm64) built with GOFIPS140=certified."
