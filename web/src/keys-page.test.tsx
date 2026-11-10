@@ -36,7 +36,7 @@ const discarded = key({ kid: "sk_discarded", public_key: "BAQEBAQEBAQEBAQEBAQEBA
 
 type Sent = { method: string; path: string; body: unknown; type: string | null };
 
-async function open(role: string, hooks: unknown[], extra?: (req: Request, u: URL) => Response | undefined, all = true) {
+async function open(role: string, hooks: unknown[], extra?: (req: Request, u: URL) => Response | undefined, all = true, test = false) {
   const sent: Sent[] = [];
   vi.stubGlobal(
     "fetch",
@@ -46,7 +46,7 @@ async function open(role: string, hooks: unknown[], extra?: (req: Request, u: UR
       if (u.pathname.startsWith("/api/v1/tenants/")) sent.push({ method: req.method, path: u.pathname, body, type: req.headers.get("Content-Type") });
       if (u.pathname === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (u.pathname === "/api/v1/me/tenants")
-        return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: all, product_ids: all ? [] : ["prd_1"], mfa_policy: "none", accessible: true }] });
+        return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: all, product_ids: all ? [] : ["prd_1"], mfa_policy: "none", accessible: true, test }] });
       const r = extra?.(req, u);
       if (r) return r;
       if (u.pathname === "/api/v1/tenants/acme/signing-keys" && req.method === "GET") return json({ items: hooks });
@@ -212,4 +212,20 @@ it("keeps the dialog while a request is out: Esc, Cancel and the action wait", a
   expect(button(el, "Cancel")!.disabled).toBe(true);
   expect(posts).toBe(1);
   await act(async () => release());
+});
+
+it("in a test-mode tenant: a banner on every page, the switcher says so, and the keys aren't for release builds (ADR-0047)", async () => {
+  const { el } = await open("viewer", [], undefined, true, true);
+  await vi.waitFor(() => expect(el.querySelectorAll("header option")).toHaveLength(1)); // the tenants have loaded
+  expect(el.querySelector("main")!.firstElementChild?.textContent).toMatch(/^Test mode\. This tenant is for integration and CI\./);
+  expect([...el.querySelectorAll("header option")].map((o) => o.textContent)).toEqual(["Acme (test)"]);
+  expect(el.textContent).toContain("trust them in development and CI builds only, never in release builds");
+});
+
+it("a live tenant has no test-mode banner or note", async () => {
+  const { el } = await open("viewer", []);
+  await vi.waitFor(() => expect(el.querySelectorAll("header option")).toHaveLength(1)); // the tenants have loaded
+  expect(el.textContent).not.toContain("Test mode");
+  expect(el.textContent).not.toContain("never in release builds");
+  expect([...el.querySelectorAll("header option")].map((o) => o.textContent)).toEqual(["Acme"]);
 });

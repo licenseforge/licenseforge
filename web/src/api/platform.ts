@@ -14,8 +14,8 @@ export const platformTenantsQuery = infiniteQueryOptions({
 });
 
 /** Creates a tenant and its first owner's invitation; the result holds the link token, shown once. */
-export async function createPlatformTenant(slug: string, name: string, ownerEmail: string): Promise<PlatformTenantCreated> {
-  return unwrap(await api.POST("/platform/tenants", { body: { slug, name, owner_email: ownerEmail } }));
+export async function createPlatformTenant(slug: string, name: string, ownerEmail: string, test = false): Promise<PlatformTenantCreated> {
+  return unwrap(await api.POST("/platform/tenants", { body: { slug, name, owner_email: ownerEmail, test } }));
 }
 
 /**

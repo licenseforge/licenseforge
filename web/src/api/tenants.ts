@@ -8,9 +8,10 @@ export type MfaPolicy = components["schemas"]["MfaPolicy"];
 /**
  * A tenant of the signed-in user, with their role and scope there (hides
  * actions they can't do), its MFA policy and whether this session meets it
- * (ADR-0038; false: the tenant's routes answer 403 mfa_required).
+ * (ADR-0038; false: the tenant's routes answer 403 mfa_required), and
+ * whether it's a test-mode tenant (ADR-0047).
  */
-export type Tenant = { id: string; slug: string; name: string; mfaPolicy: MfaPolicy; accessible: boolean } & Membership;
+export type Tenant = { id: string; slug: string; name: string; mfaPolicy: MfaPolicy; accessible: boolean; test: boolean } & Membership;
 
 /** The signed-in user's tenants (GET /me/tenants), sorted by slug. */
 export async function listTenants(): Promise<Tenant[]> {
@@ -23,6 +24,7 @@ export async function listTenants(): Promise<Tenant[]> {
     scope: { all: m.all_products, products: m.product_ids },
     mfaPolicy: m.mfa_policy,
     accessible: m.accessible !== false, // only an explicit false blocks (the server always sends it)
+    test: m.test === true,
   }));
 }
 

@@ -60,7 +60,7 @@ function TenantSwitcher() {
         {slug === undefined && <option value="" disabled />}
         {tenants.map((tn) => (
           <option key={tn.slug} value={tn.slug}>
-            {tn.name}
+            {tn.test ? t("tenant.testOption", { name: tn.name }) : tn.name}
           </option>
         ))}
       </select>

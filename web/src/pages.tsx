@@ -86,6 +86,12 @@ export function TenantLayout() {
   }
   return (
     <>
+      {/* A test-mode tenant (ADR-0047), on every page: what it is and isn't for. */}
+      {caller?.test && (
+        <p className="mb-6 rounded-md border-2 border-dashed border-foreground px-4 py-2 text-sm">
+          <strong>{t("tenant.testBanner")}</strong> {t("tenant.testBannerBody")}
+        </p>
+      )}
       <nav aria-label={t("app.name")} className="mb-6 flex gap-2">
         <Link to="/t/$slug" params={{ slug }} activeOptions={{ exact: true }} className={link}>
           {t("nav.overview")}
