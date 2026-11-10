@@ -163,8 +163,8 @@ export function parseTime(s: string): Date {
   const m = timeRE.exec(s);
   if (!m) return fail("malformed", `timestamp ${JSON.stringify(s)}`);
   const [y, mo, d, h, mi, se] = m.slice(1).map(Number) as [number, number, number, number, number, number];
-  const t = new Date(Date.UTC(y, mo - 1, d, h, mi, se));
-  if (y < 1970 || t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d || h > 23 || mi > 59 || se > 59) {
+  const t = new Date(Date.UTC(y, mo - 1, d, h, mi, se)); // an impossible day rolls into another month
+  if (y < 1970 || t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || h > 23 || mi > 59 || se > 59) {
     fail("malformed", `timestamp ${JSON.stringify(s)}`);
   }
   return t;
