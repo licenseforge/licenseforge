@@ -1,4 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useId } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { getCustomer, getProduct } from "@/api/catalog";
 import type { LicenseStatus } from "@/api/licenses";
@@ -39,17 +40,19 @@ function DailyChart({ days, field }: { days: DailyMetricsDay[]; field: (typeof s
   const W = 300, H = 80, slot = W / days.length, bar = Math.min(24, slot - 2);
   const label = t(`overview.daily.${field}`);
   const summary = t("overview.daily.total", { n: formatCount(total), days: String(days.length) });
+  const id = useId();
   return (
     <figure className="rounded-md border p-4">
-      <figcaption className="text-sm text-muted-foreground">
+      <figcaption id={id} className="text-sm text-muted-foreground">
         {label} · {summary}
       </figcaption>
       <div className="mt-2 flex gap-2">
-        <span className="text-xs text-muted-foreground tabular-nums" aria-hidden="true">{formatCount(Math.max(...values))}</span>
-        <svg viewBox={`0 0 ${W} ${H}`} className="h-20 w-full" role="img" aria-label={`${label}: ${summary}`}>
-          <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} stroke="currentColor" className="text-muted-foreground/40" strokeWidth={1} />
+        <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums" aria-hidden="true">{formatCount(Math.max(...values))}</span>
+        {/* Stretched to the box at every width (no letterboxing); the baseline stays a hairline. */}
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-20 w-full" role="img" aria-labelledby={id}>
+          <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} stroke="currentColor" className="text-muted-foreground/40" strokeWidth={1} vectorEffect="non-scaling-stroke" />
           {days.map((d, i) => {
-            const h = (d[field] / max) * (H - 4);
+            const h = d[field] > 0 ? Math.max(2, (d[field] / max) * (H - 4)) : 0; // a non-zero day stays visible
             const x = i * slot + (slot - bar) / 2;
             const r = Math.min(4, h, bar / 2); // 4px rounded data end, square at the baseline
             return (
@@ -68,7 +71,7 @@ function DailyChart({ days, field }: { days: DailyMetricsDay[]; field: (typeof s
           })}
         </svg>
       </div>
-      <div className="mt-1 flex justify-between text-xs text-muted-foreground" aria-hidden="true">
+      <div className="mt-1 ml-12 flex justify-between text-xs text-muted-foreground" aria-hidden="true">
         <span>{dayText(days[0]!.date)}</span>
         <span>{dayText(days[days.length - 1]!.date)}</span>
       </div>
@@ -87,6 +90,7 @@ function DailyCharts({ days }: { days: DailyMetricsDay[] }) {
       <details className="mt-2 text-sm">
         <summary className="cursor-pointer text-muted-foreground">{t("overview.daily.table")}</summary>
         <table className="mt-2 w-full text-left tabular-nums">
+          <caption className="sr-only">{t("overview.daily.title")}</caption>
           <thead>
             <tr className="border-b text-muted-foreground">
               <th scope="col" className="px-2 py-1 font-medium">{t("overview.daily.day")}</th>
@@ -155,6 +159,7 @@ export function Overview() {
       )}
       <h2 className="mt-8 font-semibold">{t("overview.daily.title")}</h2>
       {daily.isError && <p role="alert" className="mt-2">{errorText(daily.error)}</p>}
+      {daily.isPending && <p className="mt-2 text-muted-foreground">…</p>}
       {daily.data && daily.data.length > 0 && <DailyCharts days={daily.data} />}
       <div className="mt-8 flex items-center justify-between">
         <h2 className="font-semibold">{t("overview.recent")}</h2>
