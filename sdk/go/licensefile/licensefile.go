@@ -15,6 +15,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -127,6 +128,9 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 		if len(key.Key) != ed25519.PublicKeySize {
 			return nil, "", fmt.Errorf("%w: ed25519 key for %q has length %d", ErrInvalidKeySet, kid, len(key.Key))
 		}
+		if weakEd25519(key.Key) {
+			return nil, "", fmt.Errorf("%w: ed25519 key for %q is not a canonical, full-order point", ErrInvalidKeySet, kid)
+		}
 		if len(sig) != ed25519.SignatureSize {
 			return nil, "", fmt.Errorf("%w: signature length", ErrMalformed)
 		}
@@ -140,6 +144,56 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 
 	payload, _ = b64.DecodeString(parts[2]) // validated above
 	return payload, kid, nil
+}
+
+// smallOrder are the encodings of the eight points of order dividing 8 on
+// edwards25519 (spec: weak keys). With one of them as the public key, a
+// signature with R and S chosen to match verifies for any message under
+// crypto/ed25519 (cofactorless verification), so the key set refuses them.
+var smallOrder = [8]string{
+	"0000000000000000000000000000000000000000000000000000000000000000",
+	"0000000000000000000000000000000000000000000000000000000000000080",
+	"0100000000000000000000000000000000000000000000000000000000000000",
+	"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+	"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+	"c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+	"c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+	"ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+}
+
+// weakEd25519 reports a public key the spec refuses: a non-canonical
+// encoding (y >= p, or the negative-zero x of y = 1 or y = p-1) or a
+// small-order point. key is 32 bytes.
+func weakEd25519(key []byte) bool {
+	h := hex.EncodeToString(key)
+	for _, s := range smallOrder {
+		if h == s {
+			return true
+		}
+	}
+	// y is the little-endian value without the top bit; p = 2^255-19 is
+	// ed ff .. ff 7f. y >= p only if bytes 1..30 are ff, byte 31 is 7f and
+	// byte 0 is at least ed.
+	y31 := key[31] & 0x7f
+	high := y31 == 0x7f
+	for _, b := range key[1:31] {
+		high = high && b == 0xff
+	}
+	if high && key[0] >= 0xed {
+		return true
+	}
+	// x = 0 (y = 1 or y = p-1) with the sign bit set: negative zero.
+	if key[31]&0x80 != 0 {
+		one := key[0] == 1 && y31 == 0
+		minusOne := key[0] == 0xec && high
+		for _, b := range key[1:31] {
+			one = one && b == 0
+		}
+		if one || minusOne {
+			return true
+		}
+	}
+	return false
 }
 
 // envelope applies the spec's envelope rules up to the key lookup: armor,

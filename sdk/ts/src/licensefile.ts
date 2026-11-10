@@ -89,11 +89,42 @@ export function verify(license: string, keys: readonly PublicKey[]): { payload: 
   const key = found[0]!;
   if (key.alg !== "ed25519") fail("unsupported_alg");
   if (key.key.length !== 32) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} has length ${key.key.length}`);
+  if (weakEd25519(key.key)) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} is not a canonical, full-order point`);
   if (sig.length !== 64) fail("malformed", "signature length");
   const pub = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(key.key).toString("base64url") }, format: "jwk" });
   // OpenSSL's Ed25519 refuses a non-canonical S (S ≥ L), as the spec requires.
   if (!cryptoVerify(null, Buffer.from(`lf1.${kid}.${body}`, "ascii"), pub, sig)) fail("bad_signature");
   return { payload, kid };
+}
+
+// The eight small-order points' canonical encodings (spec: weak keys). Go's
+// cofactorless verification accepts a chosen signature for any message under
+// them; every SDK refuses the key so they all answer the same.
+const SMALL_ORDER = new Set([
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0000000000000000000000000000000000000000000000000000000000000080",
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+]);
+
+/** A 32-byte key the spec refuses: a small-order point, or a non-canonical encoding. */
+export function weakEd25519(key: Uint8Array): boolean {
+  if (SMALL_ORDER.has(Buffer.from(key).toString("hex"))) return true;
+  // y (little-endian, top bit cleared) ≥ p = 2^255 − 19 (ed ff … ff 7f).
+  const mid = key.subarray(1, 31);
+  const top = key[31]! & 0x7f;
+  const high = top === 0x7f && mid.every((b) => b === 0xff);
+  if (high && key[0]! >= 0xed) return true;
+  // Negative zero: the sign bit with x = 0 (y = 1 or y = p − 1).
+  if (key[31]! & 0x80) {
+    if (key[0] === 1 && top === 0 && mid.every((b) => b === 0)) return true;
+    if (key[0] === 0xec && high) return true;
+  }
+  return false;
 }
 
 export type BindingType = "none" | "machine" | "cluster";
