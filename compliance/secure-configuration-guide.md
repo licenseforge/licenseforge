@@ -148,7 +148,7 @@ Login is delegated to your IdP (ADR-0003); LicenseForge stores no passwords.
 
 ## Helm values
 
-From [`values.yaml`](../deploy/helm/licenseforge/values.yaml). Pod security isn't configurable: pods always run as UID 65532, non-root, with a read-only root filesystem, all capabilities dropped, no privilege escalation, `RuntimeDefault` seccomp and no service account token (Pod Security Standard *restricted*).
+From [`values.yaml`](../deploy/helm/licenseforge/values.yaml). How the chart maps to the NSA/CISA Kubernetes Hardening Guidance, and what's left to the cluster operator: [Kubernetes hardening](kubernetes-hardening.md). Pod security isn't configurable: pods always run as UID 65532, non-root, with a read-only root filesystem, all capabilities dropped, no privilege escalation, `RuntimeDefault` seccomp and no service account token (Pod Security Standard *restricted*).
 
 | Value | Default | Security relevance |
 |---|---|---|
