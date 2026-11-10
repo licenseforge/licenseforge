@@ -314,6 +314,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/updates-until": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a license's maintenance end (renew or correct it).
+         * @description ADR-0045. Builds dated after `updates_until` aren't covered; null covers every build. Stored in whole seconds; it must be after the license's issue. Needs license:write on the license's product. A revoked license answers 409 invalid_state. Online leases carry the new value from their next refresh; offline files already issued keep theirs until replaced. Audited as license.updates_until with the previous value.
+         */
+        post: operations["setLicenseUpdatesUntil"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses/{id}/reinstate": {
         parameters: {
             query?: never;
@@ -1616,6 +1640,11 @@ export interface components {
              * @enum {string}
              */
             type?: "dev" | "trial" | "paid" | "community";
+            /**
+             * Format: date-time
+             * @description Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, year 9999 or earlier in UTC, whole seconds (truncated). Absent: from the plan. Not nullable (null answers 422): to cover every build, clear it with updates-until after issue, or use a plan without updates_months.
+             */
+            updates_until?: string;
             /** @description Per-license feature changes by feature key (an enterprise deal). */
             overrides?: {
                 [key: string]: {
@@ -2728,6 +2757,43 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    setLicenseUpdatesUntil: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date-time */
+                    updates_until: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     reinstateLicense: {

@@ -96,6 +96,7 @@ type IssueRequest struct {
 	Type                          license.Type        // "" = paid
 	Overrides                     map[string]Override // by feature key
 	ExternalRefs                  map[string]string   // order, CRM, ERP IDs; see ValidRefs
+	UpdatesUntil                  *time.Time          // maintenance end instead of the plan's term (ADR-0045)
 }
 
 // Issued is a new license. Key is the plaintext license key: returned here
@@ -316,6 +317,13 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 	if err != nil {
 		return Issued{}, ev, err
 	}
+	updates := Expiry(now, pl.UpdatesMonths, nil)
+	if req.UpdatesUntil != nil {
+		var uerr error
+		if updates, uerr = validUpdatesUntil(*req.UpdatesUntil, now); uerr != nil {
+			return refused(uerr)
+		}
+	}
 	c := tx.License.Create().SetID(id).SetTenantID(tenantID).SetProductID(pl.ProductID).SetPlanID(pl.ID).
 		SetCustomerID(req.CustomerID).SetType(req.Type).
 		SetKeyCiphertext(ct).SetKeyLookup(lookup).SetKeyHint(key[len(key)-6:]).
@@ -328,8 +336,8 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 		SetIssuedAt(now).SetCreatedAt(now).SetUpdatedAt(now) // one clock for the row (ADR-0032 lists sort by created_at)
 	// Maintenance counts from issue whatever the expiry basis (ADR-0045), in
 	// whole seconds as the claims carry it.
-	if u := Expiry(now, pl.UpdatesMonths, nil); u != nil {
-		c.SetUpdatesUntil(u.Truncate(time.Second))
+	if updates != nil {
+		c.SetUpdatesUntil(updates.Truncate(time.Second))
 	}
 	// from_first_activation: the term starts at first activation (nil until then).
 	if pl.ExpiryBasis == plan.ExpiryBasisFromIssue {
@@ -443,14 +451,18 @@ func Expiry(start time.Time, months *int, seconds *int64) *time.Time {
 type transition struct {
 	action string
 	from   []license.Status
-	set    string
+	set    string                                     // placeholders from $3 take args
+	args   []any                                      //
+	check  func(l *ent.License) error                 // the values, on the unlocked read (ADR-0032: before the state)
+	detail func(was, row *ent.License) map[string]any // the entry's details; nil: a status change's
 }
 
 var (
-	suspend   = transition{"license.suspend", []license.Status{license.StatusActive}, `status = 'suspended', suspended_at = clock_timestamp()`}
-	reinstate = transition{"license.reinstate", []license.Status{license.StatusSuspended}, `status = 'active', suspended_at = NULL`}
+	suspend   = transition{action: "license.suspend", from: []license.Status{license.StatusActive}, set: `status = 'suspended', suspended_at = clock_timestamp()`}
+	reinstate = transition{action: "license.reinstate", from: []license.Status{license.StatusSuspended}, set: `status = 'active', suspended_at = NULL`}
 	// Revocation is final: no transition starts from revoked.
-	revoke = transition{"license.revoke", []license.Status{license.StatusActive, license.StatusSuspended}, `status = 'revoked', revoked_at = clock_timestamp(), suspended_at = NULL`}
+	revoke = transition{action: "license.revoke", from: []license.Status{license.StatusActive, license.StatusSuspended},
+		set: `status = 'revoked', revoked_at = clock_timestamp(), suspended_at = NULL`}
 )
 
 // Changed is a license after a status change, with its seats taken
@@ -475,6 +487,45 @@ func (s Service) Reinstate(ctx context.Context, p authz.Principal, licenseID str
 // Revoke revokes an active or suspended license, finally.
 func (s Service) Revoke(ctx context.Context, p authz.Principal, licenseID string) (Changed, error) {
 	return s.change(ctx, p, licenseID, revoke)
+}
+
+// SetUpdatesUntil sets a license's maintenance end (ADR-0045), to renew or
+// correct it; nil covers every build. Like a status change: p needs
+// license:write on its product, a revoked license is refused (ErrState),
+// and the next lease or offline file carries it.
+func (s Service) SetUpdatesUntil(ctx context.Context, p authz.Principal, licenseID string, until *time.Time) (Changed, error) {
+	t := transition{action: "license.updates_until", from: []license.Status{license.StatusActive, license.StatusSuspended},
+		set: `updates_until = $3`, args: []any{nil}}
+	t.check = func(l *ent.License) error {
+		if until == nil {
+			return nil
+		}
+		u, err := validUpdatesUntil(*until, l.IssuedAt)
+		if err != nil {
+			return err
+		}
+		// t.args is shared with the copy change() runs: it binds $3 there.
+		t.args[0] = *u
+		return nil
+	}
+	t.detail = func(was, row *ent.License) map[string]any {
+		return map[string]any{"previous": rfc3339(was.UpdatesUntil), "updates_until": rfc3339(row.UpdatesUntil), "product_id": row.ProductID,
+			"customer_id": row.CustomerID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug}
+	}
+	return s.change(ctx, p, licenseID, t)
+}
+
+// validUpdatesUntil is a maintenance end in whole seconds, after issue and
+// within the license format's years (UTC 9999 at most).
+func validUpdatesUntil(t time.Time, issued time.Time) (*time.Time, error) {
+	u := t.UTC().Truncate(time.Second)
+	switch {
+	case !u.After(issued):
+		return &u, &InvalidError{"/updates_until", "must be after the license's issue"}
+	case u.Year() > 9999:
+		return &u, &InvalidError{"/updates_until", "must be in year 9999 or earlier (UTC)"}
+	}
+	return &u, nil
 }
 
 func (s Service) change(ctx context.Context, p authz.Principal, licenseID string, t transition) (Changed, error) {
@@ -506,6 +557,11 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		}
 		if err := authz.Require(ctx, authz.LicenseWrite, l.ProductID); err != nil {
 			return err
+		}
+		if t.check != nil {
+			if err := t.check(l); err != nil {
+				return err
+			}
 		}
 		// Lock order (internal/issue): the license row, then the audit lock.
 		// NO KEY UPDATE: what the UPDATE takes anyway; it still waits for an
@@ -540,7 +596,14 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 			return fmt.Errorf("%w: license is %s", ErrState, l.Status)
 		}
 		// Guarded and counted: ent's UpdateOneID would hide a zero-row update.
-		res, err := tx.ExecContext(ctx, `UPDATE licenses SET `+t.set+`, updated_at = clock_timestamp() WHERE id = $1 AND status = $2`, l.ID, l.Status)
+		var was *ent.License // under the lock: what the entry says it changed from
+		if t.detail != nil {
+			if was, err = tx.License.Get(ctx, l.ID); err != nil {
+				return err
+			}
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE licenses SET `+t.set+`, updated_at = clock_timestamp() WHERE id = $1 AND status = $2`,
+			append([]any{l.ID, l.Status}, t.args...)...)
 		if err != nil {
 			return err
 		}
@@ -559,6 +622,9 @@ func (s Service) change(ctx context.Context, p authz.Principal, licenseID string
 		// activation may have set expires_at since the unlocked read.
 		ev.Details = map[string]any{"from": string(l.Status), "to": string(row.Status), "product_id": row.ProductID,
 			"customer_id": row.CustomerID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug, "expires_at": rfc3339(row.ExpiresAt)}
+		if t.detail != nil {
+			ev.Details = t.detail(was, row.License)
+		}
 		_, err = audit.Record(ctx, tx, tenantID, ev)
 		return err
 	})

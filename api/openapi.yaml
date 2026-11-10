@@ -417,6 +417,36 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/updates-until:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: setLicenseUpdatesUntil
+      summary: Set a license's maintenance end (renew or correct it).
+      description: "ADR-0045. Builds dated after `updates_until` aren't covered; null covers every build. Stored in whole seconds; it must be after the license's issue. Needs license:write on the license's product. A revoked license answers 409 invalid_state. Online leases carry the new value from their next refresh; offline files already issued keep theirs until replaced. Audited as license.updates_until with the previous value."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [updates_until]
+              properties:
+                updates_until: { type: string, format: date-time, nullable: true }
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses/{id}/reinstate:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1891,6 +1921,7 @@ components:
         plan_id: { type: string }
         customer_id: { type: string }
         type: { type: string, enum: [dev, trial, paid, community], default: paid }
+        updates_until: { type: string, format: date-time, description: "Maintenance end (ADR-0045) instead of the plan's updates_months, e.g. a contract's date: after the issue, year 9999 or earlier in UTC, whole seconds (truncated). Absent: from the plan. Not nullable (null answers 422): to cover every build, clear it with updates-until after issue, or use a plan without updates_months." }
         overrides:
           type: object
           description: Per-license feature changes by feature key (an enterprise deal).

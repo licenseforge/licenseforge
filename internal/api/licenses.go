@@ -112,6 +112,18 @@ func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRe
 	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
+func (s *server) SetLicenseUpdatesUntil(ctx context.Context, req apigen.SetLicenseUpdatesUntilRequestObject) (apigen.SetLicenseUpdatesUntilResponseObject, error) {
+	// Required, nullable: absent must not read as null (every build covered).
+	if req.Body.UpdatesUntil == nil && len(nulls(ctx, "updates_until")) == 0 {
+		return nil, invalid(fieldError{"/updates_until", "required: a date-time, or null for every build"})
+	}
+	c, err := s.Licenses.SetUpdatesUntil(ctx, principal(ctx), req.Id, req.Body.UpdatesUntil)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetLicenseUpdatesUntil200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
+}
+
 func (s *server) ReinstateLicense(ctx context.Context, req apigen.ReinstateLicenseRequestObject) (apigen.ReinstateLicenseResponseObject, error) {
 	c, err := s.Licenses.Reinstate(ctx, principal(ctx), req.Id)
 	if err != nil {
@@ -134,6 +146,11 @@ func (s *server) RevokeLicense(ctx context.Context, req apigen.RevokeLicenseRequ
 // permission checks pass again.
 func (s *server) IssueLicense(ctx context.Context, req apigen.IssueLicenseRequestObject) (apigen.IssueLicenseResponseObject, error) {
 	p := principal(ctx)
+	// null isn't "every build" here (it is on updates-until): refuse it rather
+	// than silently use the plan's term.
+	if len(nulls(ctx, "updates_until")) > 0 {
+		return nil, invalid(fieldError{"/updates_until", "a date-time; omit it for the plan's term"})
+	}
 	ir := issueRequest(req.Body)
 	if req.Params.IdempotencyKey == nil {
 		got, err := s.Licenses.Issue(ctx, p, ir)
@@ -272,7 +289,7 @@ func (o outcome) VisitIssueLicenseResponse(w http.ResponseWriter) error {
 }
 
 func issueRequest(b *apigen.IssueLicenseJSONRequestBody) licenses.IssueRequest {
-	r := licenses.IssueRequest{ProductID: b.ProductId, PlanID: b.PlanId, CustomerID: b.CustomerId}
+	r := licenses.IssueRequest{ProductID: b.ProductId, PlanID: b.PlanId, CustomerID: b.CustomerId, UpdatesUntil: b.UpdatesUntil}
 	if b.Type != nil {
 		r.Type = license.Type(*b.Type)
 	}
