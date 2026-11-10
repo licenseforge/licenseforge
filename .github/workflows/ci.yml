@@ -212,7 +212,8 @@ jobs:
           grep -A1 -F -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" | grep -q 'to:' && { echo "default IdP egress has a to"; exit 1; }
           grep -qF -- '- ports: [{port: 443, protocol: TCP}]' <<<"$n" || { echo "no default IdP egress"; exit 1; }
           grep -qF '0.0.0.0/0' <<<"$n" && { echo "0.0.0.0/0 in the policy"; exit 1; }
-          n=$(helm template t . $s $o --set oidc.egress.port=8443 --set 'oidc.egress.to[0].ipBlock.cidr=203.0.113.0/24' --show-only templates/networkpolicy.yaml)
+          # (webhooks off: their receiver rule is on 443 too)
+          n=$(helm template t . $s $o --set webhooks.workers=0 --set oidc.egress.port=8443 --set 'oidc.egress.to[0].ipBlock.cidr=203.0.113.0/24' --show-only templates/networkpolicy.yaml)
           for want in 'cidr: 203.0.113.0/24' '{port: 8443, protocol: TCP}'; do grep -qF "$want" <<<"$n" || { echo "IdP egress not narrowed: $want"; exit 1; }; done
           grep -qE '0\.0\.0\.0/0|port: 443\b' <<<"$n" && { echo "narrowed IdP egress still open"; exit 1; }
-          if helm template t . $s --show-only templates/networkpolicy.yaml --show-only templates/deployment.yaml | grep -qE 'port: 443\b|LICENSEFORGE_OIDC'; then echo "OIDC egress or env while off"; exit 1; fi
+          if helm template t . $s --set webhooks.workers=0 --show-only templates/networkpolicy.yaml --show-only templates/deployment.yaml | grep -qE 'port: 443\b|LICENSEFORGE_OIDC'; then echo "OIDC egress or env while off"; exit 1; fi
