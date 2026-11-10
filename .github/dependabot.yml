@@ -11,6 +11,9 @@ updates:
     schedule: { interval: weekly }
     groups: # one PR per week, not one per package
       web: { patterns: ["*"] }
+    ignore: # typescript-eslint supports TypeScript < 6.1 only; lift when it supports 7
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
