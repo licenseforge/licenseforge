@@ -76,21 +76,24 @@ type podSpec struct {
 	Volumes             []map[string]any `yaml:"volumes"`
 }
 
+type template struct {
+	Metadata struct {
+		Annotations map[string]string `yaml:"annotations"`
+	} `yaml:"metadata"`
+	Spec podSpec `yaml:"spec"`
+}
+
 type object struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec struct {
-		podSpec  `yaml:",inline"`
-		Template struct {
-			Spec podSpec `yaml:"spec"`
-		} `yaml:"template"`
+		podSpec     `yaml:",inline"`
+		Template    template `yaml:"template"`
 		JobTemplate struct {
 			Spec struct {
-				Template struct {
-					Spec podSpec `yaml:"spec"`
-				} `yaml:"template"`
+				Template template `yaml:"template"`
 			} `yaml:"spec"`
 		} `yaml:"jobTemplate"`
 	} `yaml:"spec"`
@@ -141,18 +144,25 @@ func TestWorkloadsAreRestricted(t *testing.T) {
 	for name, extra := range renders {
 		for _, o := range render(t, extra) {
 			var ps podSpec
+			var annotations map[string]string
 			switch o.Kind {
 			case "Deployment", "Job", "StatefulSet", "DaemonSet", "ReplicaSet":
-				ps = o.Spec.Template.Spec
+				ps, annotations = o.Spec.Template.Spec, o.Spec.Template.Metadata.Annotations
 			case "CronJob":
-				ps = o.Spec.JobTemplate.Spec.Template.Spec
+				ps, annotations = o.Spec.JobTemplate.Spec.Template.Spec, o.Spec.JobTemplate.Spec.Template.Metadata.Annotations
 			case "Pod":
 				ps = o.Spec.podSpec
 			default:
-				if len(o.Spec.Containers) > 0 { // a bare Pod's spec is the pod spec
+				if len(o.Spec.Containers) > 0 || len(o.Spec.Template.Spec.Containers) > 0 { // e.g. an Argo Rollout
 					t.Errorf("%s: %s/%s has containers the test doesn't check", name, o.Kind, o.Metadata.Name)
 				}
 				continue
+			}
+			// The annotation form of AppArmor, still checked by the restricted profile.
+			for k, v := range annotations {
+				if strings.HasPrefix(k, "container.apparmor.security.beta.kubernetes.io/") && v != "runtime/default" && !strings.HasPrefix(v, "localhost/") {
+					t.Errorf("%s: %s/%s: AppArmor annotation %s=%s", name, o.Kind, o.Metadata.Name, k, v)
+				}
 			}
 			kinds[o.Kind] = true
 			where := name + ": " + o.Kind + "/" + o.Metadata.Name
@@ -188,8 +198,8 @@ func checkPod(t *testing.T, where string, ps podSpec) {
 	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot || sc.RunAsUser == nil || *sc.RunAsUser == 0 {
 		bad("may run as root")
 	}
-	if sc.RunAsGroup == nil || *sc.RunAsGroup != 65532 {
-		bad("runAsGroup %v, want 65532", sc.RunAsGroup)
+	if sc.RunAsGroup == nil {
+		bad("runAsGroup unset, want 65532")
 	}
 	if sc.SeccompProfile.Type != "RuntimeDefault" && sc.SeccompProfile.Type != "Localhost" {
 		bad("seccomp profile %q", sc.SeccompProfile.Type)
@@ -239,6 +249,9 @@ func checkFields(bad func(string, ...any), f securityFields) {
 	}
 	if f.RunAsNonRoot != nil && !*f.RunAsNonRoot {
 		bad("runAsNonRoot false")
+	}
+	if f.RunAsGroup != nil && *f.RunAsGroup != 65532 {
+		bad("runAsGroup %d, want 65532", *f.RunAsGroup)
 	}
 	if t := f.SeccompProfile.Type; t != "" && t != "RuntimeDefault" && t != "Localhost" {
 		bad("seccomp profile %q", t)
