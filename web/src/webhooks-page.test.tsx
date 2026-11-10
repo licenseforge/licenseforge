@@ -280,6 +280,7 @@ it("keeps the rotate dialog open until the new secret arrives, whatever Esc or C
   await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
   const cancel = [...el.querySelectorAll("dialog button")].find((b) => b.textContent === "Cancel") as HTMLButtonElement;
   expect(cancel.disabled).toBe(true);
+  expect(go.disabled).toBe(true); // one rotation per click
   await act(async () => cancel.click());
   expect(el.querySelector("dialog")).not.toBeNull();
   await act(async () => release());
@@ -298,6 +299,8 @@ it("keeps a new endpoint's dialog open while it is created", async () => {
   await act(async () => el.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
   await act(async () => el.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
   expect(el.querySelector("dialog")).not.toBeNull();
+  expect(button(el, "Cancel")!.disabled).toBe(true);
+  expect(button(el, "Add endpoint")!.disabled).toBe(true); // no second endpoint from a double submit
   await act(async () => release());
   await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe(SECRET));
 });
