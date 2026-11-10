@@ -77,7 +77,7 @@ func TestDisableEnable(t *testing.T) {
 	if err != nil || e.Enabled || e.DisabledReason != UserDisabled || e.Seq != c.Seq {
 		t.Fatalf("Disable = %+v, %v", e, err)
 	}
-	if _, err := f.s.Disable(ctx, c.ID); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Disable(ctx, c.ID); !errors.Is(err, ErrState) {
 		t.Errorf("disable twice: %v", err)
 	}
 	f.setRetry(t, c.ID, 5)
@@ -91,7 +91,7 @@ func TestDisableEnable(t *testing.T) {
 	if err != nil || !e.Enabled || e.DisabledReason != "" || e.Attempts != 0 || e.NextAttemptAt != nil || e.Seq != c.Seq {
 		t.Fatalf("Enable = %+v, %v", e, err)
 	}
-	if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, ErrState) {
 		t.Errorf("enable an enabled endpoint: %v", err)
 	}
 	ev := f.events(t, f.a, "webhook.enable")
@@ -116,14 +116,14 @@ func TestSkip(t *testing.T) {
 	revoked := f.record(t, f.a, "license.revoke", ok, nil)
 	f.setRetry(t, c.ID, 3)
 	// Only the event held back can be skipped.
-	if _, err := f.s.SkipEvent(ctx, c.ID, revoked); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, revoked); !errors.Is(err, ErrState) {
 		t.Errorf("skip past the next event: %v", err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat-1); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat-1); !errors.Is(err, ErrState) {
 		t.Errorf("skip an entry that isn't an event: %v", err)
 	}
 	for _, bad := range []int64{0, -1} {
-		if _, err := f.s.SkipEvent(ctx, c.ID, bad); !errors.Is(err, ErrInvalid) {
+		if _, err := f.s.SkipEvent(ctx, c.ID, bad); !errors.Is(err, ErrState) {
 			t.Errorf("skip %d: %v", bad, err)
 		}
 	}
@@ -136,7 +136,7 @@ func TestSkip(t *testing.T) {
 	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrState) {
 		t.Errorf("skip an event no longer subscribed: %v", err)
 	}
 	if _, err := f.s.Update(ctx, c.ID, nil, []string{"license.revoked", "activation.created"}); err != nil {
@@ -150,7 +150,7 @@ func TestSkip(t *testing.T) {
 	if err != nil || e.Seq != seat || e.Attempts != 0 || e.NextAttemptAt != nil {
 		t.Fatalf("SkipEvent = %+v, %v", e, err)
 	}
-	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrInvalid) { // passed already
+	if _, err := f.s.SkipEvent(ctx, c.ID, seat); !errors.Is(err, ErrState) { // passed already
 		t.Errorf("skip twice: %v", err)
 	}
 	if e, err := f.s.SkipEvent(ctx, c.ID, revoked); err != nil || e.Seq != revoked {
@@ -186,7 +186,7 @@ func TestSkipNothingPending(t *testing.T) {
 	}
 	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
 	f.setRetry(t, c.ID, 4)
-	if _, err := f.s.SkipEvent(ctx, c.ID, 0); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.SkipEvent(ctx, c.ID, 0); !errors.Is(err, ErrState) {
 		t.Errorf("skip with nothing pending: %v", err)
 	}
 	if e, _ := f.s.Get(ctx, c.ID); e.Attempts != 4 {

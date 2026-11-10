@@ -94,6 +94,7 @@ import (
 	"licenseforge.io/licenseforge/internal/signing"
 	"licenseforge.io/licenseforge/internal/store"
 	"licenseforge.io/licenseforge/internal/tenants"
+	"licenseforge.io/licenseforge/internal/webhooks"
 	"licenseforge.io/licenseforge/internal/weblogin"
 	"licenseforge.io/licenseforge/web"
 )
@@ -430,6 +431,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	// and stored idempotent responses (which can hold one) are encrypted, and
 	// the activation API decrypts license keys and signs leases.
 	mux.Handle(api.Prefix+"/", api.New(api.Config{Tokens: apitokens.Service{DB: db}, Members: members.Service{DB: db}, Invitations: invitations.Service{DB: db}, Tenants: tenants.Service{DB: db}, Identity: ids,
+		Webhooks: webhooks.Service{DB: db, Keys: keyring},
 		Platform: platform.Service{DB: db}, PlatformMFAPolicy: platformMFA,
 		Licenses: licenses.Service{DB: db, Keys: keyring}, Idempotency: idempotency.Store{DB: db, Keys: keyring},
 		Products: catalog.Products{DB: db}, Features: catalog.Features{DB: db}, Plans: catalog.Plans{DB: db}, Customers: customers.Service{DB: db}, Audit: audit.Log{DB: db}, SigningKeys: signing.Local{DB: db, Keys: keyring},

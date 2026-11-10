@@ -37,7 +37,7 @@ func cursorSeq(ctx context.Context, tx *ent.Tx, id string) (int64, error) {
 func (s Service) Disable(ctx context.Context, id string) (Endpoint, error) {
 	return s.change(ctx, "webhook.disable", id, func(tx *ent.Tx, row *ent.WebhookEndpoint, _ *audit.Event) error {
 		if !row.Enabled {
-			return fmt.Errorf("%w: already disabled", ErrInvalid)
+			return fmt.Errorf("%w: already disabled", ErrState)
 		}
 		return tx.WebhookEndpoint.UpdateOneID(id).SetEnabled(false).SetDisabledReason(UserDisabled).Exec(ctx)
 	})
@@ -48,7 +48,7 @@ func (s Service) Disable(ctx context.Context, id string) (Endpoint, error) {
 func (s Service) Enable(ctx context.Context, id string) (Endpoint, error) {
 	return s.change(ctx, "webhook.enable", id, func(tx *ent.Tx, row *ent.WebhookEndpoint, ev *audit.Event) error {
 		if row.Enabled {
-			return fmt.Errorf("%w: not disabled", ErrInvalid)
+			return fmt.Errorf("%w: not disabled", ErrState)
 		}
 		if row.DisabledReason != nil {
 			ev.Details["disabled_reason"] = *row.DisabledReason
@@ -80,7 +80,7 @@ func (s Service) SkipEvent(ctx context.Context, id string, seq int64) (Endpoint,
 			return err
 		}
 		if next == 0 || next != seq { // also when it was delivered or passed meanwhile
-			return fmt.Errorf("%w: %d isn't the endpoint's next event (delivered meanwhile, or not an event it subscribes to)", ErrInvalid, seq)
+			return fmt.Errorf("%w: %d isn't the endpoint's next event (delivered meanwhile, or not an event it subscribes to)", ErrState, seq)
 		}
 		ev.Details["skipped_seq"], ev.Details["from_seq"] = seq, cur // from a cursor below a prune: the passed range
 		return cursorUpdate(ctx, tx, id, seq)

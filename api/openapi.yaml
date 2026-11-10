@@ -1359,6 +1359,184 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+    get:
+      operationId: listWebhooks
+      summary: List the tenant's webhook endpoints, oldest first (at most 10).
+      description: Needs webhook:read on every product; a product-scoped caller sees none. URLs show only scheme, host and port.
+      responses:
+        "200":
+          description: All endpoints.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookList" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createWebhook
+      summary: Add a webhook endpoint. Its signing secret is in this response only.
+      description: |
+        Needs webhook:write on every product. Events from creation on, never
+        history (ADR-0044). At most 10 endpoints per tenant (409 webhook_limit).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookCreate" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookCreated" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    get:
+      operationId: getWebhook
+      summary: One webhook endpoint and its delivery state.
+      responses:
+        "200":
+          description: The endpoint.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateWebhook
+      summary: Change an endpoint's URL and/or events. Its delivery position stays.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookUpdate" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteWebhook
+      summary: Delete an endpoint with its delivery log.
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/rotate-secret:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    post:
+      operationId: rotateWebhookSecret
+      summary: A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret).
+      responses:
+        "200":
+          description: Rotated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookCreated" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/disable:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    post:
+      operationId: disableWebhook
+      summary: Stop deliveries (the position stays). 409 if already disabled.
+      responses:
+        "200": { description: Disabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/enable:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    post:
+      operationId: enableWebhook
+      summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
+      responses:
+        "200": { description: Enabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/skip-event:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    post:
+      operationId: skipWebhookEvent
+      summary: Pass the event held back (its seq, as delivery.next_seq or a delivery shows), for a payload the receiver will never accept. 409 if it isn't the next event any more.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookSkip" }
+      responses:
+        "200": { description: Skipped., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/skip-to-now:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    post:
+      operationId: skipWebhookToNow
+      summary: Pass every event so far; delivery resumes with the next one.
+      responses:
+        "200": { description: Skipped., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/webhooks/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/WebhookID"
+    get:
+      operationId: listWebhookDeliveries
+      summary: The endpoint's delivery attempts of the last 7 days, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookDeliveryPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     apiToken:
@@ -1416,6 +1594,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: sk_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+    WebhookID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: whe_01jcz5b2y3c4d5e6f7g8h9j0k1 }
     Tenant:
       name: tenant
       in: path
@@ -2065,6 +2248,109 @@ components:
           type: array
           items: { type: string }
           description: Replaces the product scope; with all_products absent or false.
+    WebhookEventType:
+      type: string
+      enum: [license.issued, license.revoked, license.suspended, license.reinstated, activation.created, activation.deactivated]
+    Webhook:
+      type: object
+      required: [id, url, events, enabled, disabled_reason, created_at, updated_at, delivery]
+      properties:
+        id: { type: string, example: whe_01jcz5b2y3c4d5e6f7g8h9j0k1 }
+        url: { type: string, description: "Scheme, host and port only: the path and query (which may hold a token) are never shown.", example: "https://hooks.example.com:443" }
+        events: { type: array, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        enabled: { type: boolean }
+        disabled_reason: { type: string, nullable: true, description: "Why it was disabled: by a user, a 410 from the receiver, about 28 hours of failures, or a URL or secret that can't be read." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        delivery: { $ref: "#/components/schemas/WebhookDeliveryState" }
+    WebhookDeliveryState:
+      type: object
+      required: [seq, attempts, next_attempt_at, in_flight]
+      properties:
+        seq: { type: integer, format: int64, description: "The last audit entry passed (events after it are pending)." }
+        attempts: { type: integer, description: "Failed attempts of the next event (0 to 8)." }
+        next_attempt_at: { type: string, format: date-time, nullable: true, description: "When it is tried again; null: as soon as it's due." }
+        in_flight: { type: boolean, description: A send is in progress. }
+    WebhookList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Webhook" } }
+    WebhookCreate:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, maxLength: 2048, description: "https; an IP address or an ASCII DNS name (punycode); no credentials or fragment. Where it may point is checked at each delivery." }
+        events: { type: array, minItems: 1, items: { $ref: "#/components/schemas/WebhookEventType" } }
+    WebhookUpdate:
+      type: object
+      properties:
+        url: { type: string, maxLength: 2048 }
+        events: { type: array, minItems: 1, items: { $ref: "#/components/schemas/WebhookEventType" } }
+    WebhookCreated:
+      allOf:
+        - $ref: "#/components/schemas/Webhook"
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, description: "The Standard Webhooks signing secret. Shown once.", example: "whsec_…" }
+    WebhookSkip:
+      type: object
+      required: [seq]
+      properties:
+        seq: { type: integer, format: int64, minimum: 1 }
+    WebhookDelivery:
+      type: object
+      required: [id, seq, event_id, event_type, attempt, outcome, error, status_code, duration_ms, attempted_at]
+      properties:
+        id: { type: string }
+        seq: { type: integer, format: int64 }
+        event_id: { type: string, description: "The webhook-id header the receiver got (its deduplication key)." }
+        event_type: { $ref: "#/components/schemas/WebhookEventType" }
+        attempt: { type: integer, description: 1 to 8. }
+        outcome: { type: string, enum: [success, failure] }
+        error: { type: string, nullable: true, description: "A failure in fixed words: timeout, connection failed, tls, redirect, or http and the status. Never an address or a response body.", example: "http 500" }
+        status_code: { type: integer, nullable: true }
+        duration_ms: { type: integer }
+        attempted_at: { type: string, format: date-time }
+    WebhookDeliveryPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WebhookDelivery" } }
+        next_cursor: { type: string, description: Absent on the last page. }
+    WebhookPayload:
+      type: object
+      description: |
+        The body a receiver gets (ADR-0044), signed per Standard Webhooks v1
+        (webhook-id, webhook-timestamp, webhook-signature headers). data is
+        WebhookLicenseData for license.* events and WebhookActivationData for
+        activation.* events: a snapshot at the change. Fields an older entry
+        doesn't have are left out.
+      required: [type, timestamp, data]
+      properties:
+        type: { $ref: "#/components/schemas/WebhookEventType" }
+        timestamp: { type: string, format: date-time, description: When the change happened. }
+        data: { type: object }
+    WebhookLicenseData:
+      type: object
+      properties:
+        license_id: { type: string }
+        product_id: { type: string }
+        customer_id: { type: string }
+        plan: { type: string, description: The plan's slug. }
+        status: { $ref: "#/components/schemas/LicenseStatus" }
+        expires_at: { type: string, format: date-time, nullable: true, description: "null: never expires." }
+    WebhookActivationData:
+      type: object
+      properties:
+        activation_id: { type: string }
+        license_id: { type: string }
+        product_id: { type: string }
+        customer_id: { type: string }
+        fingerprint: { type: string }
+        binding: { type: string, enum: [machine, cluster] }
+        mode: { type: string, enum: [online, offline] }
     ApiTokenPage:
       type: object
       required: [items]

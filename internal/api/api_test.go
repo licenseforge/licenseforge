@@ -48,6 +48,7 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/storetest"
 	"licenseforge.io/licenseforge/internal/tenants"
+	"licenseforge.io/licenseforge/internal/webhooks"
 	"licenseforge.io/licenseforge/internal/weblogin"
 )
 
@@ -86,7 +87,8 @@ func setup(t *testing.T) *fixture {
 	f.srv = New(Config{Tokens: f.tokens, Members: members.Service{DB: d}, Invitations: invitations.Service{DB: d}, Tenants: tenants.Service{DB: d}, Identity: identity.Service{DB: d}, Sessions: sessions, Platform: platform.Service{DB: d},
 		Licenses: licenses.Service{DB: d, Keys: kr}, Idempotency: idempotency.Store{DB: d, Keys: kr},
 		Products: catalog.Products{DB: d}, Features: catalog.Features{DB: d}, Plans: catalog.Plans{DB: d}, Customers: customers.Service{DB: d}, Audit: audit.Log{DB: d}, SigningKeys: signing.Local{DB: d, Keys: kr}, Activations: activations.Service{DB: d, Keys: kr},
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
+		Webhooks: webhooks.Service{DB: d, Keys: kr},
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil))}).(*server)
 	if err := d.WithPlatform(ctx, func(tx *ent.Tx) error {
 		for _, tn := range []**ent.Tenant{&f.a, &f.b} {
 			if *tn, err = tx.Tenant.Create().SetSlug("t-" + storetest.Suffix()).SetName("T").Save(ctx); err != nil {
