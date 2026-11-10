@@ -17,6 +17,7 @@ export {
   verify,
 } from "./licensefile.js";
 export { parseKeySet } from "./keyset.js";
+export { ClockError, type ClockNow, type ClockStore, DEFAULT_TOLERANCE_SECONDS, FileClockStore, Guard, MemoryClockStore } from "./clock.js";
 export {
   type ActivationRequest,
   type DeactivationReceipt,
