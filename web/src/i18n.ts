@@ -345,6 +345,7 @@ const en = {
   "licenses.perpetual": "Never (perpetual)",
   "licenses.updatesUntil": "Updates until",
   "licenses.allBuilds": "Every build",
+  "licenses.utcDate": "{date} (UTC)",
   "licenses.maintenance": "Maintenance",
   "licenses.maintenanceHelp": "Builds dated after this day (UTC) aren't covered. Apps pick a change up at their next lease refresh; offline files already issued keep their date.",
   "licenses.maintenanceDate": "Covers builds through",

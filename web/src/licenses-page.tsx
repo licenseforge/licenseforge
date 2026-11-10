@@ -179,7 +179,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
         {row(t("licenses.col.plan"), `${l.plan_slug} (${t(`licenses.type.${l.type}`)})`)}
         {row(t("tokens.col.status"), t(`licenses.status.${l.status}`))}
         {row(t("tokens.col.expires"), expiryText(l))}
-        {row(t("licenses.updatesUntil"), l.updates_until ? `${utcDay.format(new Date(l.updates_until))} (UTC)` : t("licenses.allBuilds"))}
+        {row(t("licenses.updatesUntil"), l.updates_until ? t("licenses.utcDate", { date: utcDay.format(new Date(l.updates_until)) }) : t("licenses.allBuilds"))}
         {row(t("licenses.maxActivations"), l.max_activations === null ? t("licenses.unlimited") : String(l.max_activations))}
         {row(t("licenses.issued"), date.format(new Date(l.issued_at)))}
         {l.suspended_at && row(t("licenses.suspendedAt"), date.format(new Date(l.suspended_at)))}

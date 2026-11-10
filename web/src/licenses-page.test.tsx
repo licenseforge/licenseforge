@@ -208,6 +208,31 @@ describe("LicenseDialog", () => {
     ]);
   });
 
+  it("waits for a save: neither button sends twice", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let posts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        posts++;
+        await held;
+        return json({ ...license, updates_until: null });
+      }),
+    );
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={{ ...license, updates_until: "2027-01-31T23:59:59Z" }} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    const day = el.querySelector<HTMLInputElement>('input[type="date"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day, "2028-01-31");
+      day.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Save maintenance")!.click());
+    await vi.waitFor(() => expect(posts).toBe(1));
+    await vi.waitFor(() => expect([button("Save maintenance")!.disabled, button("Cover every build")!.disabled]).toEqual([true, true]));
+    await act(async () => release());
+  });
+
   it("shows the server's reason for a refused date on the field", async () => {
     vi.stubGlobal(
       "fetch",
