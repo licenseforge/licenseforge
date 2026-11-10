@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Node.js service, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Server-side only, Node 22 or later, with no runtime dependencies (ADR-0010).
 
-Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`, `offline.json`). Next: lease stores for Kubernetes (ConfigMap, Secret) and files.
+Status: in progress, not published yet. It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`, `offline.json`). Next: a first release.
 
 ```ts
 import { readFileSync } from "node:fs";
@@ -46,6 +46,11 @@ try {
   - `current()` before each license check;
   - `run(signal, onError)` in the background, which refreshes from `refresh_after` on;
   - `deactivate()` to free the seat.
+
+  Store the lease with `store`:
+  - `FileLeaseStore(path)`;
+  - `KubernetesConfigMapStore({ name })`, so every replica of a cluster-bound app shares one lease. RBAC: get and update on that ConfigMap by name; create it beforehand;
+  - `KubernetesSecretStore({ name })`, the same on a Secret.
 
   Every lease is verified (signature, product, tenant, this machine, binding) before it is used or stored. Older leases are refused as replays. The client checks with max(local, server time) and never trusts the HTTP Date header. `OnlineError.code` carries the API's stable codes.
 
