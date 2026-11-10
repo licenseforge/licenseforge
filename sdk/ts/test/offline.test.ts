@@ -50,13 +50,13 @@ const nonce = Uint8Array.from({ length: 16 }, (_, i) => i);
 test("encodeRequest and encodeReceipt round-trip, refuse what the parser refuses, and write whole seconds", () => {
   const req = {
     tenant: "tnt_acme", product: "acme-db", key: "LF-ABCDE-\nFGHIJ ", binding: { type: "machine" as const, fingerprint: fp },
-    fpSource: "machine-id" as const, nonce, created: new Date("2026-11-08T10:00:00.789Z"), hostname: "db-1", appVersion: "2.4.0",
+    fpSource: "machine-id" as const, nonce, created: new Date("2026-11-08T10:00:00.789Z"), hostname: "db-1", appVersion: "2.4 <b>&",
   };
   const r = parseRequest(encodeRequest(req));
-  assert.deepEqual([r.key, r.created.toISOString(), r.hostname, r.appVersion, r.sdkVersion], ["LF-ABCDE-FGHIJ", "2026-11-08T10:00:00.000Z", "db-1", "2.4.0", undefined]);
-  // Go's encoder sorts the keys: the same request reads the same bytes.
+  assert.deepEqual([r.key, r.created.toISOString(), r.hostname, r.appVersion, r.sdkVersion], ["LF-ABCDE-FGHIJ", "2026-11-08T10:00:00.000Z", "db-1", "2.4 <b>&", undefined]);
+  // Go's encoder sorts the keys and escapes <, > and &: the same request reads the same bytes.
   const json = Buffer.from(encodeRequest(req).slice("lfreq1.".length), "base64url").toString();
-  assert.equal(json, `{"app_version":"2.4.0","bind":{"fp":"${fp}","type":"machine"},"created":"2026-11-08T10:00:00Z","fp_source":"machine-id","hostname":"db-1","key":"LF-ABCDE-FGHIJ","nonce":"AAECAwQFBgcICQoLDA0ODw","product":"acme-db","tenant":"tnt_acme","v":1}`);
+  assert.equal(json, `{"app_version":"2.4 \\u003cb\\u003e\\u0026","bind":{"fp":"${fp}","type":"machine"},"created":"2026-11-08T10:00:00Z","fp_source":"machine-id","hostname":"db-1","key":"LF-ABCDE-FGHIJ","nonce":"AAECAwQFBgcICQoLDA0ODw","product":"acme-db","tenant":"tnt_acme","v":1}`);
   for (const bad of [{ ...req, fpSource: "kubernetes" as const }, { ...req, hostname: "bad host" }, { ...req, nonce: new Uint8Array(15) }, { ...req, tenant: "t\0x" }, { ...req, created: new Date(Number.NaN) }, { ...req, product: "\uD800" }]) {
     assert.throws(() => encodeRequest(bad), (e) => e instanceof LicenseError && e.code === "malformed");
   }

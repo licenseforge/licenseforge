@@ -151,7 +151,11 @@ function encode(version: string, fields: Record<string, unknown>, check: (s: str
     if (typeof v === "string" && !v.isWellFormed()) malformed(`${k} is not valid Unicode`);
   }
   const sorted = Object.fromEntries(Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : 1)));
-  const s = `${version}.${Buffer.from(JSON.stringify(sorted), "utf8").toString("base64url")}`;
+  // Go's json.Marshal escapes <, >, & and U+2028/U+2029; the same here, so
+  // both SDKs write the same bytes (and the same offlineSHA256). Only string
+  // values can hold them: the keys are fixed.
+  const json = JSON.stringify(sorted).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  const s = `${version}.${Buffer.from(json, "utf8").toString("base64url")}`;
   check(s); // an SDK can't write what the server refuses
   return s;
 }
