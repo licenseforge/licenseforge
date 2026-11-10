@@ -123,7 +123,7 @@ func TestSkip(t *testing.T) {
 		t.Errorf("skip an entry that isn't an event: %v", err)
 	}
 	for _, bad := range []int64{0, -1} {
-		if _, err := f.s.SkipEvent(ctx, c.ID, bad); !errors.Is(err, ErrState) {
+		if _, err := f.s.SkipEvent(ctx, c.ID, bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("skip %d: %v", bad, err)
 		}
 	}
@@ -145,6 +145,9 @@ func TestSkip(t *testing.T) {
 	f.setRetry(t, c.ID, 3)
 	if _, err := f.s.SkipEvent(f.as(f.a, f.viewer, authz.Viewer), c.ID, seat); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("viewer skip: %v", err)
+	}
+	if g, _ := f.s.Get(ctx, c.ID); g.NextSeq != seat {
+		t.Errorf("next_seq %d, want %d (the event held back)", g.NextSeq, seat)
 	}
 	e, err := f.s.SkipEvent(ctx, c.ID, seat)
 	if err != nil || e.Seq != seat || e.Attempts != 0 || e.NextAttemptAt != nil {
@@ -184,9 +187,12 @@ func TestSkipNothingPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
+	issued := f.record(t, f.a, "license.issue", auditevent.OutcomeSuccess, nil)
 	f.setRetry(t, c.ID, 4)
-	if _, err := f.s.SkipEvent(ctx, c.ID, 0); !errors.Is(err, ErrState) {
+	if e, _ := f.s.Get(ctx, c.ID); e.NextSeq != 0 {
+		t.Errorf("next_seq %d with nothing pending", e.NextSeq)
+	}
+	if _, err := f.s.SkipEvent(ctx, c.ID, issued); !errors.Is(err, ErrState) {
 		t.Errorf("skip with nothing pending: %v", err)
 	}
 	if e, _ := f.s.Get(ctx, c.ID); e.Attempts != 4 {

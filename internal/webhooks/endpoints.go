@@ -87,6 +87,9 @@ type Endpoint struct {
 	Attempts      int
 	NextAttemptAt *time.Time
 	InFlight      bool
+	// NextSeq is the next event it will send (the one held back while it
+	// retries: what SkipEvent takes); 0 if none is pending.
+	NextSeq int64
 }
 
 // Created is a new endpoint and its signing secret, shown once.
@@ -141,7 +144,7 @@ func checkEvents(events []string) ([]string, error) {
 	}
 	for _, e := range out {
 		if !slices.Contains(Events, e) {
-			return nil, &InvalidError{"/events", "unknown event " + strconv.Quote(e)}
+			return nil, &InvalidError{"/events", "unknown event"}
 		}
 	}
 	return out, nil
@@ -229,7 +232,7 @@ func (s Service) Create(ctx context.Context, rawURL string, events []string) (Cr
 			return err
 		}
 		out = Created{Endpoint: view(row), Secret: secret}
-		return state(ctx, tx, &out.Endpoint)
+		return current(ctx, tx, tenantID, &out.Endpoint)
 	})
 	if err != nil {
 		ev.ObjectID, ev.Details = "", nil
@@ -244,6 +247,16 @@ func view(row *ent.WebhookEndpoint) Endpoint {
 		e.DisabledReason = *row.DisabledReason
 	}
 	return e
+}
+
+// current fills e's delivery state and its next pending event.
+func current(ctx context.Context, tx *ent.Tx, tenantID string, e *Endpoint) error {
+	if err := state(ctx, tx, e); err != nil {
+		return err
+	}
+	var err error
+	e.NextSeq, err = nextEvent(ctx, tx, tenantID, e.Seq, e.Events)
+	return err
 }
 
 // state fills e's delivery state from its cursor (explicit columns: the
@@ -280,7 +293,7 @@ func (s Service) List(ctx context.Context) ([]Endpoint, error) {
 		}
 		for _, r := range rows {
 			e := view(r)
-			if err := state(ctx, tx, &e); err != nil {
+			if err := current(ctx, tx, tenantID, &e); err != nil {
 				return err
 			}
 			out = append(out, e)
@@ -310,7 +323,7 @@ func (s Service) Get(ctx context.Context, id string) (Endpoint, error) {
 			return err
 		}
 		out = view(row)
-		return state(ctx, tx, &out)
+		return current(ctx, tx, tenantID, &out)
 	})
 	return out, err
 }
@@ -373,7 +386,7 @@ func (s Service) change(ctx context.Context, action, id string, fn func(tx *ent.
 			return err
 		}
 		out = view(row)
-		return state(ctx, tx, &out)
+		return current(ctx, tx, tenantID, &out)
 	})
 	if err != nil {
 		return Endpoint{}, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrInvalid, ErrNotFound, ErrState)
@@ -382,14 +395,16 @@ func (s Service) change(ctx context.Context, action, id string, fn func(tx *ent.
 }
 
 // Update changes an endpoint's URL (if rawURL isn't nil) and subscribed
-// events (if events isn't nil); at least one. Its delivery position stays.
-func (s Service) Update(ctx context.Context, id string, rawURL *string, events []string) (Endpoint, error) {
+// events (if events isn't nil), as a merge patch: neither is a no-op, and
+// null lists fields sent as null, which are refused (neither can be
+// removed). Its delivery position stays.
+func (s Service) Update(ctx context.Context, id string, rawURL *string, events []string, null ...string) (Endpoint, error) {
 	var display string
 	var err error
-	if rawURL == nil && events == nil {
-		err = &InvalidError{"", "give url or events"}
+	if len(null) > 0 {
+		err = &InvalidError{"/" + null[0], "can't be null"}
 	}
-	if rawURL != nil {
+	if err == nil && rawURL != nil {
 		display, err = checkURL(*rawURL)
 	}
 	if err == nil && events != nil {

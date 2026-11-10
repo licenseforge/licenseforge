@@ -453,8 +453,15 @@ func TestNotFoundBeforeDenied(t *testing.T) {
 	if _, err := f.s.Update(gone, c.ID, nil, ev); !errors.Is(err, authz.ErrDenied) {
 		t.Errorf("non-member update: %v", err)
 	}
-	if _, err := f.s.Update(f.as(f.a, f.ownerA, authz.Owner), c.ID, nil, nil); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Update(f.as(f.a, f.ownerA, authz.Owner), c.ID, nil, nil); err != nil { // a merge patch with nothing in it
 		t.Errorf("empty update: %v", err)
+	}
+	var inv *InvalidError
+	if _, err := f.s.Update(f.as(f.a, f.ownerA, authz.Owner), c.ID, nil, nil, "url"); !errors.As(err, &inv) || inv.Field != "/url" {
+		t.Errorf("null url: %v", err)
+	}
+	if _, err := f.s.Update(scoped, c.ID, nil, nil, "url"); !errors.Is(err, ErrNotFound) { // null checked after not found
+		t.Errorf("null url from a caller who can't see it: %v", err)
 	}
 }
 

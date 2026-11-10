@@ -1642,6 +1642,9 @@ type WebhookDeliveryState struct {
 	// NextAttemptAt When it is tried again; null: as soon as it's due.
 	NextAttemptAt *time.Time `json:"next_attempt_at"`
 
+	// NextSeq The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending.
+	NextSeq *int64 `json:"next_seq"`
+
 	// Seq The last audit entry passed (events after it are pending).
 	Seq int64 `json:"seq"`
 }
@@ -1935,8 +1938,8 @@ type UpdateProductApplicationMergePatchPlusJSONRequestBody = ProductPatch
 // CreateWebhookJSONRequestBody defines body for CreateWebhook for application/json ContentType.
 type CreateWebhookJSONRequestBody = WebhookCreate
 
-// UpdateWebhookJSONRequestBody defines body for UpdateWebhook for application/json ContentType.
-type UpdateWebhookJSONRequestBody = WebhookUpdate
+// UpdateWebhookApplicationMergePatchPlusJSONRequestBody defines body for UpdateWebhook for application/merge-patch+json ContentType.
+type UpdateWebhookApplicationMergePatchPlusJSONRequestBody = WebhookUpdate
 
 // SkipWebhookEventJSONRequestBody defines body for SkipWebhookEvent for application/json ContentType.
 type SkipWebhookEventJSONRequestBody = WebhookSkip
@@ -2126,7 +2129,7 @@ type ServerInterface interface {
 	// GetWebhook One webhook endpoint and its delivery state.
 	// (GET /tenants/{tenant}/webhooks/{id})
 	GetWebhook(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
-	// UpdateWebhook Change an endpoint's URL and/or events. Its delivery position stays.
+	// UpdateWebhook Change an endpoint's URL and/or events (a merge patch; neither can be null). Its delivery position stays.
 	// (PATCH /tenants/{tenant}/webhooks/{id})
 	UpdateWebhook(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
 	// ListWebhookDeliveries The endpoint's delivery attempts of the last 7 days, newest first.
@@ -2141,7 +2144,7 @@ type ServerInterface interface {
 	// RotateWebhookSecret A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret).
 	// (POST /tenants/{tenant}/webhooks/{id}/rotate-secret)
 	RotateWebhookSecret(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
-	// SkipWebhookEvent Pass the event held back (its seq, as delivery.next_seq or a delivery shows), for a payload the receiver will never accept. 409 if it isn't the next event any more.
+	// SkipWebhookEvent Pass the event held back (delivery.next_seq), for a payload the receiver will never accept. 409 if it isn't the next event any more.
 	// (POST /tenants/{tenant}/webhooks/{id}/skip-event)
 	SkipWebhookEvent(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
 	// SkipWebhookToNow Pass every event so far; delivery resumes with the next one.
@@ -13053,8 +13056,32 @@ func (response ListWebhooks200JSONResponse) VisitListWebhooksResponse(w http.Res
 	return err
 }
 
-type ListWebhooks401ApplicationProblemPlusJSONResponse struct {
+type ListWebhooks400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListWebhooks400ApplicationProblemPlusJSONResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWebhooks401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListWebhooks401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ListWebhooks401ResponseHeaders
 }
 
 func (response ListWebhooks401ApplicationProblemPlusJSONResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
@@ -13323,8 +13350,32 @@ func (response DeleteWebhook204Response) VisitDeleteWebhookResponse(w http.Respo
 	return nil
 }
 
-type DeleteWebhook401ApplicationProblemPlusJSONResponse struct {
+type DeleteWebhook400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteWebhook400ApplicationProblemPlusJSONResponse) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWebhook401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DeleteWebhook401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DeleteWebhook401ResponseHeaders
 }
 
 func (response DeleteWebhook401ApplicationProblemPlusJSONResponse) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
@@ -13413,8 +13464,32 @@ func (response GetWebhook200JSONResponse) VisitGetWebhookResponse(w http.Respons
 	return err
 }
 
-type GetWebhook401ApplicationProblemPlusJSONResponse struct {
+type GetWebhook400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetWebhook400ApplicationProblemPlusJSONResponse) VisitGetWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWebhook401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type GetWebhook401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers GetWebhook401ResponseHeaders
 }
 
 func (response GetWebhook401ApplicationProblemPlusJSONResponse) VisitGetWebhookResponse(w http.ResponseWriter) error {
@@ -13483,7 +13558,7 @@ func (response GetWebhook404ApplicationProblemPlusJSONResponse) VisitGetWebhookR
 type UpdateWebhookRequestObject struct {
 	Tenant Tenant    `json:"tenant"`
 	Id     WebhookID `json:"id"`
-	Body   *UpdateWebhookJSONRequestBody
+	Body   *UpdateWebhookApplicationMergePatchPlusJSONRequestBody
 }
 
 type UpdateWebhookResponseObject interface {
@@ -13781,8 +13856,32 @@ func (response DisableWebhook200JSONResponse) VisitDisableWebhookResponse(w http
 	return err
 }
 
-type DisableWebhook401ApplicationProblemPlusJSONResponse struct {
+type DisableWebhook400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DisableWebhook400ApplicationProblemPlusJSONResponse) VisitDisableWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableWebhook401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type DisableWebhook401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers DisableWebhook401ResponseHeaders
 }
 
 func (response DisableWebhook401ApplicationProblemPlusJSONResponse) VisitDisableWebhookResponse(w http.ResponseWriter) error {
@@ -13895,8 +13994,32 @@ func (response EnableWebhook200JSONResponse) VisitEnableWebhookResponse(w http.R
 	return err
 }
 
-type EnableWebhook401ApplicationProblemPlusJSONResponse struct {
+type EnableWebhook400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response EnableWebhook400ApplicationProblemPlusJSONResponse) VisitEnableWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableWebhook401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type EnableWebhook401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers EnableWebhook401ResponseHeaders
 }
 
 func (response EnableWebhook401ApplicationProblemPlusJSONResponse) VisitEnableWebhookResponse(w http.ResponseWriter) error {
@@ -14009,8 +14132,32 @@ func (response RotateWebhookSecret200JSONResponse) VisitRotateWebhookSecretRespo
 	return err
 }
 
-type RotateWebhookSecret401ApplicationProblemPlusJSONResponse struct {
+type RotateWebhookSecret400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RotateWebhookSecret400ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateWebhookSecret401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RotateWebhookSecret401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RotateWebhookSecret401ResponseHeaders
 }
 
 func (response RotateWebhookSecret401ApplicationProblemPlusJSONResponse) VisitRotateWebhookSecretResponse(w http.ResponseWriter) error {
@@ -14215,6 +14362,30 @@ func (response SkipWebhookEvent409ApplicationProblemPlusJSONResponse) VisitSkipW
 	return err
 }
 
+type SkipWebhookEvent413ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SkipWebhookEvent413ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SkipWebhookEvent413ResponseHeaders
+}
+
+func (response SkipWebhookEvent413ApplicationProblemPlusJSONResponse) VisitSkipWebhookEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SkipWebhookEvent422ResponseHeaders struct {
 	XRequestId *string
 }
@@ -14262,8 +14433,32 @@ func (response SkipWebhookToNow200JSONResponse) VisitSkipWebhookToNowResponse(w 
 	return err
 }
 
-type SkipWebhookToNow401ApplicationProblemPlusJSONResponse struct {
+type SkipWebhookToNow400ApplicationProblemPlusJSONResponse struct {
 	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SkipWebhookToNow400ApplicationProblemPlusJSONResponse) VisitSkipWebhookToNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SkipWebhookToNow401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SkipWebhookToNow401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SkipWebhookToNow401ResponseHeaders
 }
 
 func (response SkipWebhookToNow401ApplicationProblemPlusJSONResponse) VisitSkipWebhookToNowResponse(w http.ResponseWriter) error {
@@ -14514,7 +14709,7 @@ type StrictServerInterface interface {
 	// GetWebhook One webhook endpoint and its delivery state.
 	// (GET /tenants/{tenant}/webhooks/{id})
 	GetWebhook(ctx context.Context, request GetWebhookRequestObject) (GetWebhookResponseObject, error)
-	// UpdateWebhook Change an endpoint's URL and/or events. Its delivery position stays.
+	// UpdateWebhook Change an endpoint's URL and/or events (a merge patch; neither can be null). Its delivery position stays.
 	// (PATCH /tenants/{tenant}/webhooks/{id})
 	UpdateWebhook(ctx context.Context, request UpdateWebhookRequestObject) (UpdateWebhookResponseObject, error)
 	// ListWebhookDeliveries The endpoint's delivery attempts of the last 7 days, newest first.
@@ -14529,7 +14724,7 @@ type StrictServerInterface interface {
 	// RotateWebhookSecret A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret).
 	// (POST /tenants/{tenant}/webhooks/{id}/rotate-secret)
 	RotateWebhookSecret(ctx context.Context, request RotateWebhookSecretRequestObject) (RotateWebhookSecretResponseObject, error)
-	// SkipWebhookEvent Pass the event held back (its seq, as delivery.next_seq or a delivery shows), for a payload the receiver will never accept. 409 if it isn't the next event any more.
+	// SkipWebhookEvent Pass the event held back (delivery.next_seq), for a payload the receiver will never accept. 409 if it isn't the next event any more.
 	// (POST /tenants/{tenant}/webhooks/{id}/skip-event)
 	SkipWebhookEvent(ctx context.Context, request SkipWebhookEventRequestObject) (SkipWebhookEventResponseObject, error)
 	// SkipWebhookToNow Pass every event so far; delivery resumes with the next one.
@@ -16370,7 +16565,7 @@ func (sh *strictHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request, t
 	request.Tenant = tenant
 	request.Id = id
 
-	var body UpdateWebhookJSONRequestBody
+	var body UpdateWebhookApplicationMergePatchPlusJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return

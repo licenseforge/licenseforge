@@ -1372,6 +1372,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebhookList" }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1412,16 +1413,17 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
     patch:
       operationId: updateWebhook
-      summary: Change an endpoint's URL and/or events. Its delivery position stays.
+      summary: Change an endpoint's URL and/or events (a merge patch; neither can be null). Its delivery position stays.
       requestBody:
         required: true
         content:
-          application/json:
+          application/merge-patch+json:
             schema: { $ref: "#/components/schemas/WebhookUpdate" }
       responses:
         "200":
@@ -1440,6 +1442,7 @@ paths:
       summary: Delete an endpoint with its delivery log.
       responses:
         "204": { description: Deleted. }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1456,6 +1459,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebhookCreated" }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1468,6 +1472,7 @@ paths:
       summary: Stop deliveries (the position stays). 409 if already disabled.
       responses:
         "200": { description: Disabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1481,6 +1486,7 @@ paths:
       summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
       responses:
         "200": { description: Enabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1491,7 +1497,7 @@ paths:
       - $ref: "#/components/parameters/WebhookID"
     post:
       operationId: skipWebhookEvent
-      summary: Pass the event held back (its seq, as delivery.next_seq or a delivery shows), for a payload the receiver will never accept. 409 if it isn't the next event any more.
+      summary: Pass the event held back (delivery.next_seq), for a payload the receiver will never accept. 409 if it isn't the next event any more.
       requestBody:
         required: true
         content:
@@ -1504,6 +1510,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/webhooks/{id}/skip-to-now:
     parameters:
@@ -1514,6 +1521,7 @@ paths:
       summary: Pass every event so far; delivery resumes with the next one.
       responses:
         "200": { description: Skipped., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -2265,12 +2273,13 @@ components:
         delivery: { $ref: "#/components/schemas/WebhookDeliveryState" }
     WebhookDeliveryState:
       type: object
-      required: [seq, attempts, next_attempt_at, in_flight]
+      required: [seq, attempts, next_attempt_at, in_flight, next_seq]
       properties:
         seq: { type: integer, format: int64, description: "The last audit entry passed (events after it are pending)." }
         attempts: { type: integer, description: "Failed attempts of the next event (0 to 8)." }
         next_attempt_at: { type: string, format: date-time, nullable: true, description: "When it is tried again; null: as soon as it's due." }
         in_flight: { type: boolean, description: A send is in progress. }
+        next_seq: { type: integer, format: int64, nullable: true, description: "The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending." }
     WebhookList:
       type: object
       required: [items]
@@ -2281,12 +2290,12 @@ components:
       required: [url, events]
       properties:
         url: { type: string, maxLength: 2048, description: "https; an IP address or an ASCII DNS name (punycode); no credentials or fragment. Where it may point is checked at each delivery." }
-        events: { type: array, minItems: 1, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        events: { type: array, minItems: 1, uniqueItems: true, items: { $ref: "#/components/schemas/WebhookEventType" } }
     WebhookUpdate:
       type: object
       properties:
         url: { type: string, maxLength: 2048 }
-        events: { type: array, minItems: 1, items: { $ref: "#/components/schemas/WebhookEventType" } }
+        events: { type: array, minItems: 1, uniqueItems: true, items: { $ref: "#/components/schemas/WebhookEventType" } }
     WebhookCreated:
       allOf:
         - $ref: "#/components/schemas/Webhook"

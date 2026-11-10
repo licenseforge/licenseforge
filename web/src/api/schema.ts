@@ -1173,7 +1173,7 @@ export interface paths {
         delete: operations["deleteWebhook"];
         options?: never;
         head?: never;
-        /** Change an endpoint's URL and/or events. Its delivery position stays. */
+        /** Change an endpoint's URL and/or events (a merge patch; neither can be null). Its delivery position stays. */
         patch: operations["updateWebhook"];
         trace?: never;
     };
@@ -1253,7 +1253,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pass the event held back (its seq, as delivery.next_seq or a delivery shows), for a payload the receiver will never accept. 409 if it isn't the next event any more. */
+        /** Pass the event held back (delivery.next_seq), for a payload the receiver will never accept. 409 if it isn't the next event any more. */
         post: operations["skipWebhookEvent"];
         delete?: never;
         options?: never;
@@ -2035,6 +2035,11 @@ export interface components {
             next_attempt_at: string | null;
             /** @description A send is in progress. */
             in_flight: boolean;
+            /**
+             * Format: int64
+             * @description The next event it will send (the one held back while it retries; what skip-event takes); null if none is pending.
+             */
+            next_seq: number | null;
         };
         WebhookList: {
             items: components["schemas"]["Webhook"][];
@@ -4006,6 +4011,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookList"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4067,6 +4073,7 @@ export interface operations {
                     "application/json": components["schemas"]["Webhook"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4092,6 +4099,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4110,7 +4118,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["WebhookUpdate"];
+                "application/merge-patch+json": components["schemas"]["WebhookUpdate"];
             };
         };
         responses: {
@@ -4153,6 +4161,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookCreated"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4180,6 +4189,7 @@ export interface operations {
                     "application/json": components["schemas"]["Webhook"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4208,6 +4218,7 @@ export interface operations {
                     "application/json": components["schemas"]["Webhook"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
@@ -4245,6 +4256,7 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
         };
     };
@@ -4270,6 +4282,7 @@ export interface operations {
                     "application/json": components["schemas"]["Webhook"];
                 };
             };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];

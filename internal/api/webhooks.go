@@ -29,7 +29,14 @@ func webhookView(e webhooks.Endpoint) apigen.Webhook {
 	}
 	return apigen.Webhook{Id: e.ID, Url: e.URL, Events: events, Enabled: e.Enabled, DisabledReason: reason,
 		CreatedAt: e.CreatedAt.UTC(), UpdatedAt: e.UpdatedAt.UTC(),
-		Delivery: apigen.WebhookDeliveryState{Seq: e.Seq, Attempts: e.Attempts, NextAttemptAt: next, InFlight: e.InFlight}}
+		Delivery: apigen.WebhookDeliveryState{Seq: e.Seq, Attempts: e.Attempts, NextAttemptAt: next, InFlight: e.InFlight, NextSeq: nextSeq(e.NextSeq)}}
+}
+
+func nextSeq(n int64) *int64 {
+	if n == 0 {
+		return nil
+	}
+	return &n
 }
 
 func webhookCreated(e webhooks.Endpoint, secret string) apigen.WebhookCreated {
@@ -79,7 +86,7 @@ func (s *server) UpdateWebhook(ctx context.Context, req apigen.UpdateWebhookRequ
 	if req.Body.Events != nil {
 		events = eventNames(*req.Body.Events)
 	}
-	e, err := s.Webhooks.Update(ctx, req.Id, req.Body.Url, events)
+	e, err := s.Webhooks.Update(ctx, req.Id, req.Body.Url, events, nulls(ctx, "url", "events")...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,10 +125,7 @@ func (s *server) EnableWebhook(ctx context.Context, req apigen.EnableWebhookRequ
 }
 
 func (s *server) SkipWebhookEvent(ctx context.Context, req apigen.SkipWebhookEventRequestObject) (apigen.SkipWebhookEventResponseObject, error) {
-	if req.Body.Seq < 1 {
-		return nil, invalid(fieldError{"/seq", "must be an audit entry's seq (1 or more)"})
-	}
-	e, err := s.Webhooks.SkipEvent(ctx, req.Id, req.Body.Seq)
+	e, err := s.Webhooks.SkipEvent(ctx, req.Id, req.Body.Seq) // seq checked after not found and denied (ADR-0032)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +171,10 @@ func deliveryError(d webhooks.Delivery) *string {
 	var s string
 	switch d.Category {
 	case "http":
-		s = "http " + strconv.Itoa(*d.StatusCode)
+		s = "http"
+		if d.StatusCode != nil { // always set for http (a CHECK)
+			s += " " + strconv.Itoa(*d.StatusCode)
+		}
 	case "connection":
 		s = "connection failed"
 	default: // timeout, tls, redirect
@@ -185,7 +192,7 @@ func webhookProblem(err error) *problem {
 	case errors.Is(err, webhooks.ErrNotFound):
 		return errNotFound
 	case errors.Is(err, webhooks.ErrLimit):
-		return &problem{status: http.StatusConflict, code: "webhook_limit", detail: "The tenant already has the most webhook endpoints allowed (10)."}
+		return &problem{status: http.StatusConflict, code: "webhook_limit_reached", detail: "The tenant already has the most webhook endpoints allowed (10)."}
 	case errors.Is(err, webhooks.ErrState):
 		return &problem{status: http.StatusConflict, code: "invalid_state", detail: "The endpoint's state doesn't allow this (already disabled, not disabled, or not the event held back)."}
 	}

@@ -71,6 +71,9 @@ func (s Service) Enable(ctx context.Context, id string) (Endpoint, error) {
 func (s Service) SkipEvent(ctx context.Context, id string, seq int64) (Endpoint, error) {
 	return s.change(ctx, "webhook.skip_event", id, func(tx *ent.Tx, row *ent.WebhookEndpoint, ev *audit.Event) error {
 		ev.Details["requested_seq"] = seq
+		if seq < 1 {
+			return &InvalidError{"/seq", "must be an audit entry's seq (1 or more)"}
+		}
 		cur, err := cursorSeq(ctx, tx, id)
 		if err != nil {
 			return err
