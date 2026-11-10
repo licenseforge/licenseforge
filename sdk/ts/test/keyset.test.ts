@@ -53,7 +53,7 @@ test("what can't be represented, or reads differently elsewhere, is invalid_key_
     ["lone surrogate escape", `[{"kid":"a","alg":"\\ud800","public_key":"AAAA"}]`],
     ["lone surrogate in a string", `[{"kid":"a","alg":"\uD800","public_key":"AAAA"}]`],
     ["invalid UTF-8", Uint8Array.from([...new TextEncoder().encode(`[{"kid":"a","alg":"ed`), 0xff, ...new TextEncoder().encode(`","public_key":"AAAA"}]`)])],
-    ["BOM", `﻿[{"kid":"a","alg":"ed25519","public_key":"AAAA"}]`],
+    ["BOM", `\uFEFF[{"kid":"a","alg":"ed25519","public_key":"AAAA"}]`],
     ["BOM in bytes", Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(`[{"kid":"a","alg":"ed25519","public_key":"AAAA"}]`)])],
   ];
   for (const [name, input] of cases) {

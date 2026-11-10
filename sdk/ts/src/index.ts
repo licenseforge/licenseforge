@@ -18,6 +18,17 @@ export {
 } from "./licensefile.js";
 export { parseKeySet } from "./keyset.js";
 export {
+  type ActivationRequest,
+  type DeactivationReceipt,
+  encodeReceipt,
+  encodeRequest,
+  fileSHA256,
+  MAX_OFFLINE_SIZE,
+  offlineSHA256,
+  parseReceipt,
+  parseRequest,
+} from "./offline.js";
+export {
   compute,
   ENV_OVERRIDE,
   type Fingerprint,

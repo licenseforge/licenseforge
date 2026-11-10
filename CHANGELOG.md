@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Compliance documents reflect the release pipeline that shipped with 0.1.0-alpha.1: CM-8 (SBOMs) and SR-4 (provenance) are implemented; SI-7, SR-11 and SSDF PS.2/PS.3 record the signatures with their remaining gaps (the Go SDK isn't published; releases aren't immutable); SC-13, SI-2, RV.2 and the Secure Configuration Guide point at the published, signed `-fips` images and signed releases instead of "planned".
 
 ### Added
+- TypeScript SDK offline formats (ADR-0043): `encodeRequest`/`parseRequest` (`lfreq1`), `encodeReceipt`/`parseReceipt` (`lfrcpt1`), `fileSHA256` and `offlineSHA256`, with the Go SDK's rules (no unknown fields, a bound fingerprint, `kubernetes` exactly for a cluster binding, a 16-byte nonce, the request size limit). The encoders sort keys as Go does and check their own output. Passes `offline.json`, including its `file_hashes`.
 - TypeScript SDK fingerprints (ADR-0017): `hash`, `compute` and `forLicense`, with the same sources, order and rules as the Go SDK.
   - Sources: the vendor override, the `LICENSEFORGE_FINGERPRINT` environment variable only when allowed, Kubernetes (the `kube-system` namespace UID, with transient errors retried and RBAC or certificate errors failing at once), and the OS machine ID.
   - Linux `/etc/machine-id` is refused on tmpfs/ramfs and in application containers unless the host's file is bind-mounted; system containers keep their own.
