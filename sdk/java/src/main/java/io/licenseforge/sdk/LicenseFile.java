@@ -91,7 +91,7 @@ public final class LicenseFile {
   }
 
   /** Whether s is longer than max bytes in UTF-8 (an unpaired surrogate counts 3, as its replacement). */
-  private static boolean longerThan(String s, int max) {
+  static boolean longerThan(String s, int max) {
     long n = 0;
     for (int k = 0; k < s.length(); k++) {
       char c = s.charAt(k);
@@ -124,13 +124,14 @@ public final class LicenseFile {
     return out.toString();
   }
 
-  private record Envelope(String kid, String body, byte[] sig, byte[] payload) {}
+  private record Envelope(String token, String kid, String body, byte[] sig, byte[] payload) {}
 
   /** The spec's envelope checks up to the key lookup. */
   private static Envelope envelope(String license) throws LicenseException {
     Objects.requireNonNull(license, "license");
     if (longerThan(license, MAX_SIZE)) throw new LicenseException(Code.MALFORMED, "too large");
-    String[] parts = unarmor(license).split("\\.", -1); // -1: keep empty parts
+    String token = unarmor(license);
+    String[] parts = token.split("\\.", -1); // -1: keep empty parts
     if (parts.length != 4 || !parts[0].equals("lf1") || !KID.matcher(parts[1]).matches() || parts[2].isEmpty()) {
       throw new LicenseException(Code.MALFORMED);
     }
@@ -138,11 +139,16 @@ public final class LicenseFile {
     if (sig == null) throw new LicenseException(Code.MALFORMED, "signature encoding");
     byte[] payload = b64url(parts[2]);
     if (payload == null) throw new LicenseException(Code.MALFORMED, "payload encoding");
-    return new Envelope(parts[1], parts[2], sig, payload);
+    return new Envelope(token, parts[1], parts[2], sig, payload);
   }
 
   /** The JDK's Ed25519 provider (ADR-0010). */
   static final String PROVIDER = "SunEC";
+
+  /** The bare token after the envelope checks (armor, BOM and whitespace removed). */
+  static String envelopeToken(String license) throws LicenseException {
+    return envelope(license).token();
+  }
 
   // SubjectPublicKeyInfo for Ed25519 (RFC 8410) before the 32 key bytes.
   private static final byte[] ED25519_SPKI = HexFormat.of().parseHex("302a300506032b6570032100");

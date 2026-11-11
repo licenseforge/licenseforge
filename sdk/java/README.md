@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Java application, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Java 17 or later, no runtime dependencies: Ed25519 comes from the JDK (ADR-0010).
 
-Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json` and `lf1-claims.json`. Next: fingerprints, offline formats, the clock guard and the online client, as in the Go and TypeScript SDKs.
+Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json` and `offline.json`. Next: fingerprints, the clock guard and the online client, as in the Go and TypeScript SDKs.
 
 ```java
 import io.licenseforge.sdk.*;
@@ -33,6 +33,11 @@ try {
 - `LicenseFile.parseClaims(payload)` applies the strict encoding rules with its own JSON reader (no Jackson or Gson: they accept duplicate keys and fold `1.0` into `1`). `LicenseFile.check(claims, options)` runs the claim checks in the spec's order.
 - `LicenseFile.open` does all three. `LicenseException.code()` is the spec's class; `code().spec()` its name.
 - `Entitlements`: `hasFeature(key)`, `limit(key)` (`UNLIMITED` is -1, absent is 0) and `allows(key, total)`.
+- Offline activation (ADR-0043), in `Offline`:
+  - `encodeRequest(request)` writes the `lfreq1` request an air-gapped machine hands over; `parseRequest` reads one.
+  - `encodeReceipt` and `parseReceipt` do the same for the `lfrcpt1` deactivation receipt, and `fileSha256(file)` is the receipt's hash of the deleted file.
+  - `offlineSha256` identifies a request or receipt, ignoring changed line endings.
+  - The encoders write the same bytes as the Go and TypeScript SDKs (sorted keys, Go's escaping), and refuse what the parser would.
 
 - Signatures are checked with the JDK's `SunEC` provider by name, whatever providers your app installs first (BouncyCastle, for example, would give different answers on crafted inputs). A jlinked runtime on JDK 17 to 21 needs the `jdk.crypto.ec` module.
 - `LicenseFile.Status` may gain values: keep a `default` branch when you switch on it.
