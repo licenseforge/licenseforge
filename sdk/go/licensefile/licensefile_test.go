@@ -114,29 +114,54 @@ func buildVectors(t *testing.T) vectorFile {
 		return join(parts[0], parts[1], parts[2], b64.EncodeToString(append(r, reverse(s.FillBytes(make([]byte, 32)))...)))
 	}
 
-	// A mixed-order key A' = A + T8 passes the weak-key rule. With R = T8 and a
-	// payload ground so that k ≡ 7 (mod 8), S = k·a verifies cofactorless
-	// (Go, SunEC) while OpenSSL refuses: only refusing every small-order R,
-	// not just the identity, makes the SDKs agree.
+	// A mixed-order key A' = A + T8 (spec: weak keys). With an honest nonce
+	// r and a payload ground so that k ≡ 0 (mod 8), S = r + k·a verifies
+	// cofactorless (Go, OpenSSL, SunEC) while Bouncy Castle FIPS refuses the
+	// key: only refusing the key makes every SDK agree.
 	t8 := weakKey("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a")
-	mixedKey := edEncode(edAdd(edDecode(priv.Public().(ed25519.PublicKey)), edDecode(t8)))
-	var mixedOrderR string
+	mixedKey := edEncode(mustDecode(priv.Public().(ed25519.PublicKey)).add(mustDecode(t8)))
+	var mixedOrderKey string
 	for n := 0; ; n++ {
 		p := b64.EncodeToString([]byte(fmt.Sprintf(`{"v":1,"lid":"lic_test","product":"acme-db","n":%d}`, n)))
 		msg := join("lf1", "test:mixed-order", p)
+		rh := sha512.Sum512(append(append([]byte{}, expanded[32:]...), msg...))
+		r := new(big.Int).Mod(new(big.Int).SetBytes(reverse(rh[:])), order)
+		bigR := ed25519.Sign(priv, []byte(msg))[:32] // r·B
 		h := sha512.New()
-		h.Write(t8)
+		h.Write(bigR)
 		h.Write(mixedKey)
 		h.Write([]byte(msg))
 		k := new(big.Int).SetBytes(reverse(h.Sum(nil)))
 		k.Mod(k, order)
-		if new(big.Int).Mod(k, big.NewInt(8)).Int64() != 7 {
+		if new(big.Int).Mod(k, big.NewInt(8)).Sign() != 0 {
 			continue
 		}
 		s := k.Mul(k, scalar)
-		s.Mod(s, order)
-		mixedOrderR = join(msg, b64.EncodeToString(append(append([]byte{}, t8...), reverse(s.FillBytes(make([]byte, 32)))...)))
+		s.Add(s, r).Mod(s, order)
+		sig := append(append([]byte{}, bigR...), reverse(s.FillBytes(make([]byte, 32)))...)
+		if !ed25519.Verify(mixedKey, []byte(msg), sig) {
+			panic("mixed-order vector doesn't verify cofactorless")
+		}
+		mixedOrderKey = join(msg, b64.EncodeToString(sig))
 		break
+	}
+
+	// A mixed-order R under the real key: R' = r·B + T8, S = r + k·a. Cofactorless
+	// verification refuses it; a cofactored one (plain Bouncy Castle) accepts.
+	var mixedR string
+	{
+		msg := join(parts[0], parts[1], parts[2])
+		rh := sha512.Sum512(append(append([]byte{}, expanded[32:]...), msg...))
+		r := new(big.Int).Mod(new(big.Int).SetBytes(reverse(rh[:])), order)
+		bigR := edEncode(mustDecode(ed25519.Sign(priv, []byte(msg))[:32]).add(mustDecode(t8)))
+		h := sha512.New()
+		h.Write(bigR)
+		h.Write(priv.Public().(ed25519.PublicKey))
+		h.Write([]byte(msg))
+		k := new(big.Int).Mod(new(big.Int).SetBytes(reverse(h.Sum(nil))), order)
+		s := k.Mul(k, scalar)
+		s.Add(s, r).Mod(s, order)
+		mixedR = join(msg, b64.EncodeToString(append(bigR, reverse(s.FillBytes(make([]byte, 32)))...)))
 	}
 
 	// Unknown kid combined with a second fault, to pin error precedence.
@@ -167,7 +192,7 @@ func buildVectors(t *testing.T) vectorFile {
 			{KID: "test:dup", Alg: AlgEd25519, PublicKey: pub},
 			{KID: "test:dup", Alg: AlgEd25519, PublicKey: pub},
 			{KID: "test:short", Alg: AlgEd25519, PublicKey: b64.EncodeToString(priv.Public().(ed25519.PublicKey)[:31])},
-			// Weak keys (spec): small-order points and non-canonical encodings.
+			// Weak keys (spec): small-order and mixed-order points, non-canonical encodings.
 			{KID: "test:weak-identity", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("0100000000000000000000000000000000000000000000000000000000000000"))},
 			{KID: "test:weak-negative-zero", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("0100000000000000000000000000000000000000000000000000000000000080"))},
 			{KID: "test:weak-noncanonical-small", Alg: AlgEd25519, PublicKey: b64.EncodeToString(weakKey("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"))},
@@ -200,7 +225,9 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "bad_signature_small_order_r", License: chosenR("0100000000000000000000000000000000000000000000000000000000000000"), Expect: "bad_signature"},
 			{Name: "bad_signature_order_8_r", License: chosenR("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"), Expect: "bad_signature"},
 			{Name: "bad_signature_negative_zero_r", License: chosenR("0100000000000000000000000000000000000000000000000000000000000080"), Expect: "bad_signature"},
-			{Name: "bad_signature_order_8_r_mixed_order_key", License: mixedOrderR, Expect: "bad_signature"},
+			{Name: "invalid_key_set_mixed_order_key", License: mixedOrderKey, Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_mixed_order_key_before_signature_length", License: join("lf1", "test:mixed-order", parts[2], shortSig), Expect: "invalid_key_set"},
+			{Name: "bad_signature_mixed_order_r", License: mixedR, Expect: "bad_signature"},
 			{Name: "bad_signature_noncanonical_r", License: chosenR("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), Expect: "bad_signature"},
 			{Name: "bad_signature_payload_tampered", License: join(parts[0], parts[1], otherPayload, parts[3]), Expect: "bad_signature"},
 			{Name: "bad_signature_kid_swapped", License: join(parts[0], "test:other", parts[2], parts[3]), Expect: "bad_signature"},
@@ -339,51 +366,20 @@ func TestFIPSModeWhenRequested(t *testing.T) {
 	}
 }
 
-// Minimal edwards25519 arithmetic for the vector generator (affine
-// coordinates, math/big): -x² + y² = 1 + d·x²·y² over p = 2^255 - 19.
-var (
-	edP    = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
-	edD    = new(big.Int).Mod(new(big.Int).Mul(big.NewInt(-121665), new(big.Int).ModInverse(big.NewInt(121666), edP)), edP)
-	edSqrt = new(big.Int).Exp(big.NewInt(2), new(big.Int).Rsh(new(big.Int).Sub(edP, big.NewInt(1)), 2), edP) // sqrt(-1)
-)
-
-type edPoint struct{ x, y *big.Int }
-
-func edDecode(b []byte) edPoint {
-	e := reverse(b)
-	sign := e[0] >> 7
-	e[0] &= 0x7f
-	y := new(big.Int).SetBytes(e)
-	y2 := new(big.Int).Mul(y, y)
-	u := new(big.Int).Sub(y2, big.NewInt(1))
-	v := new(big.Int).Add(new(big.Int).Mul(edD, y2), big.NewInt(1))
-	x2 := new(big.Int).Mod(new(big.Int).Mul(u, new(big.Int).ModInverse(v, edP)), edP)
-	x := new(big.Int).Exp(x2, new(big.Int).Rsh(new(big.Int).Add(edP, big.NewInt(3)), 3), edP)
-	if new(big.Int).Mod(new(big.Int).Mul(x, x), edP).Cmp(x2) != 0 {
-		x.Mod(x.Mul(x, edSqrt), edP)
-	}
-	if new(big.Int).Mod(new(big.Int).Mul(x, x), edP).Cmp(x2) != 0 {
+// edDecode for the vector generator: the input is a known point.
+func mustDecode(b []byte) edPoint {
+	p, ok := edDecode(b)
+	if !ok {
 		panic("not a point")
 	}
-	if uint(x.Bit(0)) != uint(sign) {
-		x.Sub(edP, x)
-	}
-	return edPoint{x, y}
-}
-
-func edAdd(a, b edPoint) edPoint {
-	xy := new(big.Int).Mul(new(big.Int).Mul(a.x, b.x), new(big.Int).Mul(a.y, b.y))
-	dxy := new(big.Int).Mod(xy.Mul(xy, edD), edP)
-	xn := new(big.Int).Add(new(big.Int).Mul(a.x, b.y), new(big.Int).Mul(a.y, b.x))
-	yn := new(big.Int).Add(new(big.Int).Mul(a.y, b.y), new(big.Int).Mul(a.x, b.x))
-	x := new(big.Int).Mul(xn, new(big.Int).ModInverse(new(big.Int).Add(big.NewInt(1), dxy), edP))
-	y := new(big.Int).Mul(yn, new(big.Int).ModInverse(new(big.Int).Sub(big.NewInt(1), dxy), edP))
-	return edPoint{x.Mod(x, edP), y.Mod(y, edP)}
+	return p
 }
 
 func edEncode(p edPoint) []byte {
-	b := p.y.FillBytes(make([]byte, 32))
-	b[0] |= byte(p.x.Bit(0)) << 7
+	zi := new(big.Int).ModInverse(p.z, edP)
+	x, y := mul(p.x, zi), mul(p.y, zi)
+	b := y.FillBytes(make([]byte, 32))
+	b[0] |= byte(x.Bit(0)) << 7
 	return reverse(b)
 }
 
@@ -393,6 +389,32 @@ func weakKey(h string) []byte {
 		panic(h)
 	}
 	return b
+}
+
+// A key plus any small-order point but the identity is mixed-order; real
+// keys and values that aren't points are not (spec: weak keys).
+func TestMixedOrderEd25519(t *testing.T) {
+	for i := range 16 {
+		pub := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(i)}, 32)).Public().(ed25519.PublicKey)
+		if mixedOrderEd25519(pub) {
+			t.Errorf("%x: real key refused", pub)
+		}
+		for _, h := range smallOrder {
+			mixed := edEncode(mustDecode(pub).add(mustDecode(weakKey(h))))
+			if got, want := mixedOrderEd25519(mixed), h != smallOrder[2]; got != want {
+				t.Errorf("%x + %s: mixed-order %v, want %v", pub, h, got, want)
+			}
+		}
+	}
+	for _, h := range smallOrder {
+		if got, want := mixedOrderEd25519(weakKey(h)), h != smallOrder[2]; got != want {
+			t.Errorf("%s: %v, want %v", h, got, want)
+		}
+	}
+	// y = 2 has no x: not a point, left to the signature check.
+	if mixedOrderEd25519(weakKey("0200000000000000000000000000000000000000000000000000000000000000")) {
+		t.Error("a non-point reported mixed-order")
+	}
 }
 
 // Every weak encoding is refused, and ordinary keys aren't (spec: weak keys).
@@ -416,8 +438,8 @@ func TestWeakEd25519(t *testing.T) {
 		}
 	}
 	strong := [][]byte{ed25519.NewKeyFromSeed(testSeed).Public().(ed25519.PublicKey),
-		weakKey("eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), // y = p-3: a full-order point
-		weakKey("0300000000000000000000000000000000000000000000000000000000000000")} // y = 3: a full-order point
+		weakKey("eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), // y = p-3: a point, not small-order
+		weakKey("0300000000000000000000000000000000000000000000000000000000000000")} // y = 3: a point, not small-order
 	for i := range 64 {
 		seed := bytes.Repeat([]byte{byte(i)}, 32)
 		strong = append(strong, ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))

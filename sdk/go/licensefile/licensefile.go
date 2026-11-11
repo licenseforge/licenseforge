@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 )
@@ -128,8 +129,8 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 		if len(key.Key) != ed25519.PublicKeySize {
 			return nil, "", fmt.Errorf("%w: ed25519 key for %q has length %d", ErrInvalidKeySet, kid, len(key.Key))
 		}
-		if weakEd25519(key.Key) {
-			return nil, "", fmt.Errorf("%w: ed25519 key for %q is not a canonical, full-order point", ErrInvalidKeySet, kid)
+		if weakEd25519(key.Key) || mixedOrderEd25519(key.Key) {
+			return nil, "", fmt.Errorf("%w: ed25519 key for %q is not a canonical, prime-order point", ErrInvalidKeySet, kid)
 		}
 		if len(sig) != ed25519.SignatureSize {
 			return nil, "", fmt.Errorf("%w: signature length", ErrMalformed)
@@ -199,6 +200,80 @@ func weakEd25519(key []byte) bool {
 		}
 	}
 	return false
+}
+
+// mixedOrderEd25519 reports a canonical curve point outside the prime-order
+// subgroup, [L]·A ≠ identity (spec: weak keys). Its holder can sign so that
+// cofactorless verification accepts, while FIPS 186-5 key validation (Bouncy
+// Castle FIPS) refuses the key. A value that isn't a point is not reported:
+// it can't verify anything (bad_signature). Variable time: keys are public.
+func mixedOrderEd25519(key []byte) bool {
+	p, ok := edDecode(key)
+	if !ok {
+		return false
+	}
+	q := edPoint{new(big.Int), big.NewInt(1), big.NewInt(1), new(big.Int)}
+	for i := edL.BitLen() - 1; i >= 0; i-- {
+		q = q.add(q)
+		if edL.Bit(i) == 1 {
+			q = q.add(p)
+		}
+	}
+	return q.y.Cmp(q.z) != 0 // y = 1 only at the identity
+}
+
+// edDecode decodes a 32-byte encoding (RFC 8032 5.1.3); ok is false when
+// it has no x. The caller has refused non-canonical encodings.
+func edDecode(key []byte) (_ edPoint, ok bool) {
+	e := make([]byte, 32)
+	for i, b := range key {
+		e[31-i] = b
+	}
+	sign := e[0] >> 7
+	e[0] &= 0x7f
+	y := new(big.Int).SetBytes(e)
+	// x² = (y² − 1) / (d·y² + 1); x = (x²)^((p+3)/8), times sqrt(−1) if needed.
+	y2 := mod(new(big.Int).Mul(y, y))
+	x2 := mod(new(big.Int).Mul(new(big.Int).Sub(y2, big.NewInt(1)), new(big.Int).ModInverse(mod(new(big.Int).Add(new(big.Int).Mul(edD, y2), big.NewInt(1))), edP)))
+	x := new(big.Int).Exp(x2, edP3d8, edP)
+	if mod(new(big.Int).Mul(x, x)).Cmp(x2) != 0 {
+		x = mod(x.Mul(x, edSqrtM1))
+	}
+	if mod(new(big.Int).Mul(x, x)).Cmp(x2) != 0 {
+		return edPoint{}, false
+	}
+	if x.Bit(0) != uint(sign) {
+		x = mod(x.Neg(x))
+	}
+	return edPoint{x, y, big.NewInt(1), mul(x, y)}, true
+}
+
+// edwards25519 in extended coordinates (x = X/Z, y = Y/Z, x·y = T/Z) over
+// p = 2^255 − 19, with L the prime order of the base point.
+var (
+	edP      = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
+	edL, _   = new(big.Int).SetString("7237005577332262213973186563042994240857116359379907606001950938285454250989", 10)
+	edD      = mod(new(big.Int).Mul(big.NewInt(-121665), new(big.Int).ModInverse(big.NewInt(121666), edP)))
+	ed2D     = mod(new(big.Int).Lsh(edD, 1))
+	edP3d8   = new(big.Int).Rsh(new(big.Int).Add(edP, big.NewInt(3)), 3)
+	edSqrtM1 = new(big.Int).Exp(big.NewInt(2), new(big.Int).Rsh(new(big.Int).Sub(edP, big.NewInt(1)), 2), edP)
+)
+
+type edPoint struct{ x, y, z, t *big.Int }
+
+func mod(v *big.Int) *big.Int { return v.Mod(v, edP) }
+
+func mul(a, b *big.Int) *big.Int { return mod(new(big.Int).Mul(a, b)) }
+
+// add is the complete addition for a = −1 (add-2008-hwcd-3); it also doubles.
+func (p edPoint) add(q edPoint) edPoint {
+	a := mul(new(big.Int).Sub(p.y, p.x), new(big.Int).Sub(q.y, q.x))
+	b := mul(new(big.Int).Add(p.y, p.x), new(big.Int).Add(q.y, q.x))
+	c := mul(mul(p.t, ed2D), q.t)
+	d := mul(new(big.Int).Lsh(p.z, 1), q.z)
+	e, f := new(big.Int).Sub(b, a), new(big.Int).Sub(d, c)
+	g, h := new(big.Int).Add(d, c), new(big.Int).Add(b, a)
+	return edPoint{mul(e, f), mul(g, h), mul(f, g), mul(e, h)}
 }
 
 // envelope applies the spec's envelope rules up to the key lookup: armor,
