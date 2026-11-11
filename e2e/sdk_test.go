@@ -54,12 +54,6 @@ func TestSDKJourneys(t *testing.T) {
 	}{
 		{"typescript", "ts", func(*testing.T) []string { return []string{"node", "--import", "./sdk/nip.mjs", "sdk/driver.mjs"} }},
 		{"java", "java", func(t *testing.T) []string {
-			// The JVM trusts the environment's CA through its trust store, as a
-			// vendor's app would be set up for a private CA.
-			store := filepath.Join(t.TempDir(), "ca.p12")
-			if out, err := exec.Command("keytool", "-importcert", "-noprompt", "-alias", "e2e", "-file", e.CAFile, "-keystore", store, "-storetype", "PKCS12", "-storepass", "e2e-pass").CombinedOutput(); err != nil {
-				t.Fatalf("keytool: %v\n%s", err, out)
-			}
 			java := []string{"java"}
 			// <ip>.nip.io resolves without DNS, as in the Go journeys (nip.mjs).
 			if host := mustURL(t, e.BaseURL).Hostname(); nipIP.MatchString(host) {
@@ -69,7 +63,7 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				java = append(java, "-Djdk.net.hosts.file="+hosts)
 			}
-			return append(java, "-Djavax.net.ssl.trustStore="+store, "-Djavax.net.ssl.trustStorePassword=e2e-pass", "-cp", "../sdk/java/target/classes", "sdk/Driver.java")
+			return append(java, "-cp", "../sdk/java/target/classes", "sdk/Driver.java")
 		}},
 	} {
 		t.Run(sdk.name, func(t *testing.T) {
@@ -94,7 +88,7 @@ func TestSDKJourneys(t *testing.T) {
 				c.Env = append(append(os.Environ(),
 					"LF_BASE_URL="+e.BaseURL, "LF_TENANT_ID="+tn.ID, "LF_PRODUCT="+p.Slug, "LF_LICENSE_KEY="+l.Key,
 					"LF_KEYS="+string(keys), "LF_MACHINE="+machine, "LF_STORE="+filepath.Join(dir, machine+".lease"),
-					"NODE_EXTRA_CA_CERTS="+e.CAFile), extra...)
+					"LF_CA="+e.CAFile), extra...) // the client's ca option: neither Node nor the JVM trusts it
 				out, err := c.Output()
 				var r result
 				if err != nil || json.Unmarshal(out, &r) != nil {

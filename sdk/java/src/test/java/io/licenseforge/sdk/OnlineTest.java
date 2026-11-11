@@ -602,6 +602,29 @@ class OnlineTest {
   }
 
   @Test
+  void caTrustsAPrivateCAAndOnlyIt(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+    FingerprintTest.Tls tls = FingerprintTest.tls(dir, "ip:127.0.0.1");
+    FingerprintTest.Tls other = FingerprintTest.tls(dir, "ip:127.0.0.1");
+    java.util.Deque<FingerprintTest.Answer> out = new java.util.ArrayDeque<>();
+    com.sun.net.httpserver.HttpsServer s = FingerprintTest.server(tls, out, new ArrayList<>());
+    try {
+      String https = "https://127.0.0.1:" + s.getAddress().getPort();
+      String body = "{\"lease\":\"" + L.at(NOW).sign() + "\",\"activation_id\":\"act_1\"}";
+      Config one = Config.builder(https, "tnt_acme", "acme-db", "LF-KEY", KEYS, FINGERPRINT).maxAttempts(1);
+      byte[] pem = tls.certPem();
+      one.ca(pem);
+      java.util.Arrays.fill(pem, (byte) 'A'); // the config keeps its own copy
+      Client c = client(one);
+      out.add(new FingerprintTest.Answer(200, body));
+      assertEquals("act_1", c.activate().activationId());
+      assertEquals("network", code(() -> client(Config.builder(https, "tnt_acme", "acme-db", "LF-KEY", KEYS, FINGERPRINT).maxAttempts(1)).activate()), "not in the JVM's trust store");
+      assertEquals("network", code(() -> client(Config.builder(https, "tnt_acme", "acme-db", "LF-KEY", KEYS, FINGERPRINT).maxAttempts(1).ca(other.certPem())).activate()), "another CA");
+    } finally {
+      s.stop(0);
+    }
+  }
+
+  @Test
   void configIsValidated() {
     for (String bad : List.of("http://api.example", "https://u:p@api.example", "https://api.example?x=1", "not a url", "ftp://localhost")) {
       assertThrows(IllegalArgumentException.class, () -> Config.builder(bad, "t", "p", "k", KEYS, FINGERPRINT), bad);
@@ -618,6 +641,9 @@ class OnlineTest {
     }
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, FINGERPRINT).timeout(Duration.ZERO));
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, FINGERPRINT).maxAttempts(0));
+    for (String ca : List.of("", "not pem")) {
+      assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, FINGERPRINT).ca(ca.getBytes(StandardCharsets.US_ASCII)), ca);
+    }
     Config.builder("http://localhost:8080/lf/", "t", "p", "k", KEYS, FINGERPRINT); // loopback http is fine
     Config.builder("http://[::1]:8080", "t", "p", "k", KEYS, FINGERPRINT);
   }

@@ -13,6 +13,8 @@
 // local + offset); with a clock guard it also resets the mark to the iat.
 // The HTTP Date header is never trusted.
 import { randomBytes, randomInt } from "node:crypto";
+import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { request as httpsRequest } from "node:https";
 import type { Guard } from "./clock.js";
 import type { Fingerprint } from "./fingerprint.js";
 import { check, type CheckOptions, type Claims, Entitlements, type PublicKey, parseClaims, type Status, verify } from "./licensefile.js";
@@ -89,6 +91,11 @@ export interface ClientConfig {
   maxAttempts?: number;
   /** Per request. Default 30 s. */
   timeoutMs?: number;
+  /**
+   * A server behind a private CA: its certificate(s), PEM. The client then
+   * trusts only these, not Node's bundled CAs (or NODE_EXTRA_CA_CERTS).
+   */
+  ca?: string | Buffer;
 }
 
 export interface Lease {
@@ -151,6 +158,7 @@ export class Client {
     }
     if (cfg.fingerprint.binding !== "machine" && cfg.fingerprint.binding !== "cluster") throw new TypeError("licenseforge online: fingerprint.binding must be machine or cluster");
     if (cfg.timeoutMs !== undefined && !(Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0)) throw new RangeError("licenseforge online: timeoutMs must be > 0");
+    if (cfg.ca !== undefined && !String(cfg.ca).includes("-----BEGIN CERTIFICATE-----")) throw new TypeError("licenseforge online: ca must be PEM certificates");
     this.base = u;
     this.cfg = { ...cfg, maxAttempts: cfg.maxAttempts && cfg.maxAttempts > 0 ? cfg.maxAttempts : 4, timeoutMs: cfg.timeoutMs ?? 30_000 };
   }
@@ -452,21 +460,19 @@ export class Client {
     };
     if (idemKey) headers["Idempotency-Key"] = idemKey;
     const timeout = AbortSignal.timeout(this.cfg.timeoutMs);
-    let res: Response;
+    let res: { status: number; headers: IncomingHttpHeaders };
     let raw: string;
     try {
-      // No redirects: the license key is in a header.
-      res = await fetch(url, { method: "POST", headers, body, redirect: "manual", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-      raw = await readCapped(res);
+      ({ res, raw } = await post(new URL(url), headers, body, this.cfg.ca, signal ? AbortSignal.any([signal, timeout]) : timeout));
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
       throw new OnlineError("network", String(e));
     }
     if (res.status === want) return raw;
-    const retryAfterMs = parseRetryAfter(res.headers.get("Retry-After"), this.now());
+    const retryAfterMs = parseRetryAfter(header(res.headers["retry-after"]), this.now());
     // The stable codes count only in a problem answer with a 4xx status: a
     // proxy's error page or a garbled 5xx must not read as "revoked".
-    const type = (res.headers.get("Content-Type") ?? "").split(";")[0]!.trim().toLowerCase();
+    const type = (header(res.headers["content-type"]) ?? "").split(";")[0]!.trim().toLowerCase();
     if (type === "application/problem+json" && res.status >= 400 && res.status < 500) {
       try {
         const p = JSON.parse(raw);
@@ -483,16 +489,32 @@ export class Client {
   }
 }
 
-async function readCapped(res: Response): Promise<string> {
-  if (!res.body) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const c of res.body as unknown as AsyncIterable<Uint8Array>) {
-    size += c.length;
-    if (size > MAX_ANSWER) throw new Error("answer over 1 MiB");
-    chunks.push(c);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+const header = (v: string | string[] | undefined): string | null => (Array.isArray(v) ? v[0] : v) ?? null;
+
+/**
+ * One POST, the answer capped at 1 MiB. node:http(s) rather than fetch, so a
+ * private CA can be given per client; it never follows redirects (the
+ * license key is in a header). signal covers the whole exchange.
+ */
+function post(url: URL, headers: Record<string, string>, body: string, ca: string | Buffer | undefined, signal: AbortSignal): Promise<{ res: { status: number; headers: IncomingHttpHeaders }; raw: string }> {
+  return new Promise((resolve, reject) => {
+    const payload = Buffer.from(body, "utf8");
+    const opts = { method: "POST", headers: { ...headers, "Content-Length": String(payload.length) }, signal };
+    const req = url.protocol === "https:" ? httpsRequest(url, { ...opts, ca, minVersion: "TLSv1.2" }) : httpRequest(url, opts);
+    req.on("response", (res) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_ANSWER) req.destroy(new Error("answer over 1 MiB"));
+        else chunks.push(c);
+      });
+      res.on("error", reject); // cut off mid-answer too
+      res.on("end", () => resolve({ res: { status: res.statusCode ?? 0, headers: res.headers }, raw: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.end(payload);
+  });
 }
 
 /** Retry-After as delay-seconds or an HTTP date, capped at 10 minutes. */
