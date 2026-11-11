@@ -105,8 +105,7 @@ class OfflineClientTest {
   }
 
   static OfflineClient.Config cfg(MemStore store) {
-    return new OfflineClient.Config(TENANT, "acme-db", "LF-ABCDE-FGHIJ", KEYS, FP, Optional.of("air-1"), Optional.empty(), store, Optional.empty(),
-        Optional.empty(), Optional.empty());
+    return OfflineClient.Config.builder(TENANT, "acme-db", "LF-ABCDE-FGHIJ", KEYS, FP, store).hostname("air-1");
   }
 
   static OfflineClient client(MemStore store) {
@@ -114,9 +113,8 @@ class OfflineClientTest {
   }
 
   static OfflineClient withClock(MemStore store, Clock.Guard g, Duration tolerance) {
-    OfflineClient.Config c = cfg(store);
-    return new OfflineClient(new OfflineClient.Config(c.tenantId(), c.product(), c.licenseKey(), c.keys(), c.fingerprint(), c.hostname(), c.appVersion(), store,
-        Optional.of(g), Optional.ofNullable(tolerance), Optional.empty()));
+    OfflineClient.Config c = cfg(store).clock(g);
+    return new OfflineClient(tolerance == null ? c : c.clockTolerance(tolerance));
   }
 
   interface Call {
@@ -203,9 +201,8 @@ class OfflineClientTest {
     assertEquals(T0.minus(H).plusSeconds(60), c.current(T0).claims().issuedAt());
     assertEquals("ok", code(() -> c.install(renewed, T0))); // the same file again
     // An installed file that no longer verifies here blocks nothing.
-    OfflineClient.Config k = cfg(store);
-    OfflineClient moved = new OfflineClient(new OfflineClient.Config(k.tenantId(), k.product(), k.licenseKey(), k.keys(),
-        new Fingerprint(OTHER, FingerprintSource.MACHINE_ID, BindingType.MACHINE), k.hostname(), k.appVersion(), store, k.clock(), k.clockTolerance(), k.buildDate()));
+    OfflineClient moved = new OfflineClient(OfflineClient.Config.builder(TENANT, "acme-db", "LF-ABCDE-FGHIJ", KEYS,
+        new Fingerprint(OTHER, FingerprintSource.MACHINE_ID, BindingType.MACHINE), store));
     assertEquals("ok", code(() -> moved.install(F.of().bind("{\"type\":\"machine\",\"fp\":\"" + OTHER + "\"}").sign(), T0)));
   }
 
@@ -214,9 +211,7 @@ class OfflineClientTest {
     MemStore store = new MemStore();
     OfflineClient c = client(store);
     assertEquals(LicenseFile.Status.GRACE, c.install(F.of().exp(T0.minusSeconds(600)).grace("PT1H").sign(), T0).status());
-    OfflineClient.Config k = cfg(store);
-    OfflineClient built = new OfflineClient(new OfflineClient.Config(k.tenantId(), k.product(), k.licenseKey(), k.keys(), k.fingerprint(), k.hostname(),
-        k.appVersion(), store, k.clock(), k.clockTolerance(), Optional.of(T0)));
+    OfflineClient built = new OfflineClient(cfg(store).buildDate(T0));
     assertEquals("ok", code(() -> built.current(T0)));
     c.install(F.of().iat(T0.minus(H).plusSeconds(1)).updatesUntil(T0.minus(Duration.ofHours(24))).sign(), T0);
     assertEquals("UPDATES_EXPIRED", code(() -> built.current(T0)));
@@ -271,7 +266,7 @@ class OfflineClientTest {
     unheld.failSave = true;
     MemStore s2 = new MemStore();
     OfflineClient c2 = withClock(s2, new Clock.Guard(unheld, "LF-ABCDE-FGHIJ"), Duration.ZERO);
-    assertTrue(code(() -> c2.install(ahead, T0)).contains("can't hold it"));
+    assertEquals("CLOCK_NOT_SAVED", code(() -> c2.install(ahead, T0)));
     assertNull(s2.b);
     // Five minutes fast needs no raise (the default claim tolerance).
     OfflineClient c3 = withClock(new MemStore(), new Clock.Guard(unheld, "LF-ABCDE-FGHIJ"), null);
@@ -290,10 +285,34 @@ class OfflineClientTest {
   }
 
   @Test
+  void guardRaiseStopsAtItsTolerance() throws Exception {
+    OfflineClient exact = withClock(new MemStore(), new Clock.Guard(new MemStore(), "LF-ABCDE-FGHIJ", H), Duration.ZERO);
+    assertEquals("ok", code(() -> exact.install(F.of().iat(T0.plus(H)).sign(), T0))); // exactly local + tolerance
+    OfflineClient past = withClock(new MemStore(), new Clock.Guard(new MemStore(), "LF-ABCDE-FGHIJ", H), Duration.ZERO);
+    assertEquals("CLOCK_SKEW", code(() -> past.install(F.of().iat(T0.plus(H).plusSeconds(1)).sign(), T0)));
+    // A file failing its checks at its own iat doesn't raise the guard.
+    Clock.Guard g = new Clock.Guard(new MemStore(), "LF-ABCDE-FGHIJ", H);
+    OfflineClient built = new OfflineClient(cfg(new MemStore()).clock(g).clockTolerance(Duration.ZERO).buildDate(T0));
+    assertEquals("UPDATES_EXPIRED", code(() -> built.install(F.of().iat(T0.plusSeconds(1800)).updatesUntil(T0.minus(Duration.ofHours(24))).sign(), T0)));
+    assertEquals(T0, g.now(T0).now(), "the guard wasn't raised to the file's iat");
+  }
+
+  @Test
+  void emptyFileCountsAsNone() {
+    MemStore store = new MemStore();
+    store.b = "{\"offline\":1,\"file\":\"\"}".getBytes(StandardCharsets.UTF_8);
+    assertEquals("NO_LICENSE", code(() -> client(store).current(T0)));
+  }
+
+  @Test
   void config() {
-    assertThrows(IllegalArgumentException.class, () -> new OfflineClient(new OfflineClient.Config(TENANT, "acme-db", "", KEYS, FP, Optional.empty(), Optional.empty(),
-        new MemStore(), Optional.empty(), Optional.empty(), Optional.empty())));
-    assertThrows(IllegalArgumentException.class, () -> OfflineClient.Config.of(TENANT, "acme-db", "LF-1", KEYS,
+    assertThrows(IllegalArgumentException.class, () -> OfflineClient.Config.builder(TENANT, "acme-db", "", KEYS, FP, new MemStore()));
+    assertThrows(IllegalArgumentException.class, () -> OfflineClient.Config.builder(TENANT, "acme-db", "LF-1", KEYS,
         new Fingerprint(MACHINE, FingerprintSource.MACHINE_ID, BindingType.NONE), new MemStore()));
+    // Later changes to the caller's Config don't reach a client.
+    OfflineClient.Config c = cfg(new MemStore());
+    OfflineClient client = new OfflineClient(c);
+    c.buildDate(T0.plus(Duration.ofDays(9999))); // after updates_until: would refuse the file
+    assertEquals("ok", code(() -> client.install(F.of().updatesUntil(T0.plus(Duration.ofDays(1))).sign(), T0)));
   }
 }

@@ -21,9 +21,10 @@ import { SDK_VERSION } from "./online.js";
  * newer file of its license): request a new one. older_file: a newer file of
  * the same license is installed. other_license: another license is installed;
  * deactivate it first. foreign_state: the store holds other state (the clock
- * guard's?): give each its own file.
+ * guard's?): give each its own file. clock_not_saved: the file's iat is
+ * ahead of this machine's clock and the clock guard couldn't be raised to it.
  */
-export type OfflineErrorCode = "no_license" | "bad_file" | "returned" | "older_file" | "other_license" | "foreign_state";
+export type OfflineErrorCode = "no_license" | "bad_file" | "returned" | "older_file" | "other_license" | "foreign_state" | "clock_not_saved";
 
 export class OfflineError extends Error {
   constructor(
@@ -61,11 +62,10 @@ export interface OfflineConfig {
   buildDate?: Date;
 }
 
-/** What the store holds: offline 1 tells it from other state; returned is license ID → iat of the newest file returned. */
+/** What the store holds: the installed file, and license ID → iat (ISO) of the newest file returned. A Map: any lid is a plain key. */
 interface State {
-  offline: 1;
   file?: string;
-  returned?: Record<string, string>;
+  returned: Map<string, string>;
 }
 
 /**
@@ -129,11 +129,11 @@ export class OfflineClient {
       if (!(e instanceof LicenseError && e.code === "clock_skew" && g && claims.issuedAt.getTime() <= local.getTime() + g.toleranceMs)) throw e;
       status = check(claims, { ...o, now: claims.issuedAt });
       if (!g.observe(claims.issuedAt, local)) {
-        throw new Error("licenseforge offline: the file's iat is ahead of this machine's clock and the clock guard can't hold it");
+        throw new OfflineError("clock_not_saved", "the file's iat is ahead of this machine's clock and the clock guard can't hold it");
       }
     }
     this.update((s) => {
-      const r = s.returned?.[claims.licenseId];
+      const r = s.returned.get(claims.licenseId);
       if (r !== undefined && claims.issuedAt.getTime() <= Date.parse(r)) throw new OfflineError("returned", "this license file was returned; request a new one");
       if (s.file) {
         let cur: Claims | undefined;
@@ -183,10 +183,10 @@ export class OfflineClient {
         nonce: randomBytes(16),
         created: now,
       });
-      const returned = { ...s.returned };
-      const r = returned[claims.licenseId];
-      if (r === undefined || claims.issuedAt.getTime() > Date.parse(r)) returned[claims.licenseId] = claims.issuedAt.toISOString();
-      return { offline: 1, returned };
+      const returned = new Map(s.returned);
+      const r = returned.get(claims.licenseId);
+      if (r === undefined || claims.issuedAt.getTime() > Date.parse(r)) returned.set(claims.licenseId, claims.issuedAt.toISOString());
+      return { returned };
     });
     return receipt;
   }
@@ -220,7 +220,11 @@ export class OfflineClient {
   /** Runs fn on the stored state; fn returns the new state, or undefined for no change. */
   private update(fn: (s: State) => State | undefined): void {
     const next = fn(decode(this.cfg.store.load()));
-    if (next) this.cfg.store.save(Buffer.from(JSON.stringify(next), "utf8"));
+    if (!next) return;
+    const doc: Record<string, unknown> = { offline: 1 };
+    if (next.file) doc.file = next.file;
+    if (next.returned.size > 0) doc.returned = Object.fromEntries(next.returned);
+    this.cfg.store.save(Buffer.from(JSON.stringify(doc), "utf8"));
   }
 }
 
@@ -228,24 +232,24 @@ export class OfflineClient {
 // no more than deleting it (ADR-0014). Well-formed state of another kind is
 // foreign_state: the stores are mixed up, and writing would destroy it.
 function decode(b: Uint8Array | undefined): State {
+  const none: State = { returned: new Map() };
   let v: unknown;
   try {
     v = b && b.length > 0 ? JSON.parse(Buffer.from(b).toString("utf8")) : undefined;
   } catch {
-    return { offline: 1 };
+    return none;
   }
-  if (v === null || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length === 0) return { offline: 1 };
+  if (v === null || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length === 0) return none;
   const s = v as Record<string, unknown>;
   if (s.offline !== 1) throw new OfflineError("foreign_state", "the store holds other state (shared with the clock guard?); use a store of its own");
-  if (s.file !== undefined && typeof s.file !== "string") return { offline: 1 }; // ours, but damaged: none
-  const file = s.file as string | undefined;
-  const returned: Record<string, string> = {};
+  if (s.file !== undefined && typeof s.file !== "string") return none; // ours, but damaged: none
+  const returned = new Map<string, string>();
   if (s.returned !== undefined) {
-    if (s.returned === null || typeof s.returned !== "object" || Array.isArray(s.returned)) return { offline: 1 };
+    if (s.returned === null || typeof s.returned !== "object" || Array.isArray(s.returned)) return none;
     for (const [k, t] of Object.entries(s.returned)) {
-      if (typeof t !== "string" || Number.isNaN(Date.parse(t))) return { offline: 1 }; // ours, but damaged: none
-      returned[k] = t;
+      if (typeof t !== "string" || Number.isNaN(Date.parse(t))) return none;
+      returned.set(k, t);
     }
   }
-  return file === undefined ? { offline: 1, returned } : { offline: 1, file, returned };
+  return s.file ? { file: s.file, returned } : { returned };
 }

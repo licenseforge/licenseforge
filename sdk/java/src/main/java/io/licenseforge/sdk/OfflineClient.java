@@ -42,7 +42,9 @@ public final class OfflineClient {
       /** Another license is installed: deactivate it first, so its seat can be returned. */
       OTHER_LICENSE,
       /** The store holds other state (the clock guard's?): give each its own file. */
-      FOREIGN_STATE
+      FOREIGN_STATE,
+      /** The file's iat is ahead of this machine's clock and the clock guard couldn't be raised to it. */
+      CLOCK_NOT_SAVED
     }
 
     private final Code code;
@@ -58,35 +60,86 @@ public final class OfflineClient {
   }
 
   /**
-   * The client's configuration. tenantId, product, licenseKey, keys, fingerprint (machine or cluster)
-   * and store are required; the rest may be empty. Store: its own file, never the clock guard's; on a
-   * memory store a returned file could be installed again after a restart. Unreadable or damaged state
-   * counts as none (ADR-0014), like deleted state. clock protects the time checks against the clock
-   * being turned back (ADR-0018): strongly advised offline.
+   * The client's configuration: {@link #builder} with the required fields, then the optional ones.
+   * The store is its own file, never the clock guard's; on a memory store a returned file could be
+   * installed again after a restart. Unreadable or damaged state counts as none (ADR-0014), like
+   * deleted state. A clock guard protects the time checks against the clock being turned back
+   * (ADR-0018): strongly advised offline, where no server time comes in. Copied when the client is
+   * created.
    */
-  public record Config(String tenantId, String product, String licenseKey, List<PublicKey> keys, Fingerprint fingerprint,
-      Optional<String> hostname, Optional<String> appVersion, Clock.Store store, Optional<Clock.Guard> clock,
-      Optional<Duration> clockTolerance, Optional<Instant> buildDate) {
-    public Config {
-      Objects.requireNonNull(hostname, "hostname");
-      Objects.requireNonNull(appVersion, "appVersion");
-      Objects.requireNonNull(clock, "clock");
-      Objects.requireNonNull(clockTolerance, "clockTolerance");
-      Objects.requireNonNull(buildDate, "buildDate");
-      if (tenantId == null || tenantId.isEmpty() || product == null || product.isEmpty() || licenseKey == null || licenseKey.isEmpty()
-          || keys == null || keys.isEmpty() || fingerprint == null || fingerprint.fingerprint().isEmpty() || store == null) {
+  public static final class Config {
+    private final String tenantId;
+    private final String product;
+    private final String licenseKey;
+    private final List<PublicKey> keys;
+    private final Fingerprint fingerprint;
+    private final Clock.Store store;
+    private Optional<String> hostname = Optional.empty();
+    private Optional<String> appVersion = Optional.empty();
+    private Optional<Clock.Guard> clock = Optional.empty();
+    private Duration clockTolerance = CheckOptions.DEFAULT_CLOCK_TOLERANCE;
+    private Optional<Instant> buildDate = Optional.empty();
+
+    private Config(String tenantId, String product, String licenseKey, List<PublicKey> keys, Fingerprint fingerprint, Clock.Store store) {
+      this.tenantId = tenantId;
+      this.product = product;
+      this.licenseKey = licenseKey;
+      this.keys = keys;
+      this.fingerprint = fingerprint;
+      this.store = store;
+    }
+
+    /**
+     * tenantId (tnt_…, the license's tenant claim), the product slug the app expects, the license key
+     * as the user typed it (it goes in the request), the trusted keys, this machine's fingerprint (a
+     * machine or cluster binding) and the store for the client's state.
+     */
+    public static Config builder(String tenantId, String product, String licenseKey, List<PublicKey> keys, Fingerprint fingerprint, Clock.Store store) {
+      if (tenantId == null || tenantId.isEmpty() || product == null || product.isEmpty() || licenseKey == null || licenseKey.isEmpty() || keys == null
+          || keys.isEmpty() || fingerprint == null || fingerprint.fingerprint().isEmpty() || store == null) {
         throw new IllegalArgumentException("licenseforge offline: tenantId, product, licenseKey, keys, fingerprint and store are required");
       }
       if (fingerprint.binding() != BindingType.MACHINE && fingerprint.binding() != BindingType.CLUSTER) {
         throw new IllegalArgumentException("licenseforge offline: the fingerprint's binding must be machine or cluster");
       }
-      keys = List.copyOf(keys);
+      return new Config(tenantId, product, licenseKey, List.copyOf(keys), fingerprint, store);
     }
 
-    /** The required fields; the others empty. */
-    public static Config of(String tenantId, String product, String licenseKey, List<PublicKey> keys, Fingerprint fingerprint, Clock.Store store) {
-      return new Config(tenantId, product, licenseKey, keys, fingerprint, Optional.empty(), Optional.empty(), store, Optional.empty(), Optional.empty(),
-          Optional.empty());
+    public Config hostname(String v) {
+      hostname = Optional.of(v);
+      return this;
+    }
+
+    public Config appVersion(String v) {
+      appVersion = Optional.of(v);
+      return this;
+    }
+
+    public Config clock(Clock.Guard v) {
+      clock = Optional.of(v);
+      return this;
+    }
+
+    /** How far in the future a file's iat may be (default 24 h); a clock guard can raise its own. */
+    public Config clockTolerance(Duration v) {
+      clockTolerance = Objects.requireNonNull(v, "clockTolerance");
+      return this;
+    }
+
+    /** The app's build date, checked against updates_until. */
+    public Config buildDate(Instant v) {
+      buildDate = Optional.of(v);
+      return this;
+    }
+
+    Config copy() {
+      Config c = new Config(tenantId, product, licenseKey, keys, fingerprint, store);
+      c.hostname = hostname;
+      c.appVersion = appVersion;
+      c.clock = clock;
+      c.clockTolerance = clockTolerance;
+      c.buildDate = buildDate;
+      return c;
     }
   }
 
@@ -94,16 +147,36 @@ public final class OfflineClient {
   private final Config cfg;
 
   public OfflineClient(Config cfg) {
-    this.cfg = Objects.requireNonNull(cfg, "cfg");
+    this.cfg = Objects.requireNonNull(cfg, "cfg").copy(); // later changes to the caller's Config don't reach this client
+  }
+
+  /** {@link #request(Instant)} now. */
+  public String request() throws LicenseException {
+    return request(Instant.now());
+  }
+
+  /** {@link #install(String, Instant)} with the system clock. */
+  public LicenseFile.Opened install(String file) throws OfflineException, LicenseException, Clock.ClockException, IOException {
+    return install(file, Instant.now());
+  }
+
+  /** {@link #current(Instant)} with the system clock. */
+  public LicenseFile.Opened current() throws OfflineException, LicenseException, Clock.ClockException, IOException {
+    return current(Instant.now());
+  }
+
+  /** {@link #deactivate(Instant)} now. */
+  public String deactivate() throws OfflineException, LicenseException, IOException {
+    return deactivate(Instant.now());
   }
 
   /** An activation request (lfreq1) for this machine, to carry to the vendor. It contains the license key: handle it like the key. */
   public String request(Instant now) throws LicenseException {
     byte[] nonce = new byte[16];
     RANDOM.nextBytes(nonce);
-    Fingerprint fp = cfg.fingerprint();
-    return Offline.encodeRequest(new Offline.ActivationRequest(cfg.tenantId(), cfg.product(), cfg.licenseKey(), new Binding(fp.binding(), fp.fingerprint()),
-        fp.source(), nonce, now, cfg.hostname(), cfg.appVersion(), Optional.of(Online.SDK_VERSION)));
+    Fingerprint fp = cfg.fingerprint;
+    return Offline.encodeRequest(new Offline.ActivationRequest(cfg.tenantId, cfg.product, cfg.licenseKey, new Binding(fp.binding(), fp.fingerprint()),
+        fp.source(), nonce, now, cfg.hostname, cfg.appVersion, Optional.of(Online.SDK_VERSION)));
   }
 
   /**
@@ -125,11 +198,11 @@ public final class OfflineClient {
       // The vendor's clock may be ahead of this machine's: within the guard's tolerance its iat is a
       // time this machine will accept (ADR-0018), once the guard holds it; if it can't, current()
       // would refuse the file, so install does.
-      Optional<Clock.Guard> g = cfg.clock();
+      Optional<Clock.Guard> g = cfg.clock;
       if (e.code() != LicenseException.Code.CLOCK_SKEW || g.isEmpty() || claims.issuedAt().isAfter(local.plus(g.get().tolerance()))) throw e;
       status = LicenseFile.check(claims, new CheckOptions(claims.issuedAt(), o.product(), o.fingerprint(), o.buildDate(), o.clockTolerance()));
       if (!g.get().observe(claims.issuedAt(), local)) {
-        throw new IOException("licenseforge offline: the file's iat is ahead of this machine's clock and the clock guard can't hold it");
+        throw new OfflineException(OfflineException.Code.CLOCK_NOT_SAVED, "the file's iat is ahead of this machine's clock and the clock guard can't hold it", null);
       }
     }
     update(s -> {
@@ -178,7 +251,7 @@ public final class OfflineClient {
       Claims claims = verify(s.file);
       byte[] nonce = new byte[16];
       RANDOM.nextBytes(nonce);
-      receipt[0] = Offline.encodeReceipt(new Offline.DeactivationReceipt(cfg.tenantId(), claims.licenseId(), cfg.fingerprint().fingerprint(),
+      receipt[0] = Offline.encodeReceipt(new Offline.DeactivationReceipt(cfg.tenantId, claims.licenseId(), cfg.fingerprint.fingerprint(),
           Offline.fileSha256(s.file), nonce, now));
       Map<String, Instant> returned = new LinkedHashMap<>(s.returned);
       Instant r = returned.get(claims.licenseId());
@@ -191,9 +264,9 @@ public final class OfflineClient {
   /** The file as issued for this machine: signature, the claim checks at its own iat, tenant, product, binding to this fingerprint. */
   private Claims verify(String file) throws OfflineException {
     try {
-      Claims c = LicenseFile.parseClaims(LicenseFile.verify(file, cfg.keys()).payload());
-      LicenseFile.check(c, CheckOptions.of(c.issuedAt(), cfg.product()).withFingerprint(cfg.fingerprint().fingerprint()));
-      if (!c.tenant().equals(cfg.tenantId()) || c.binding().type() != cfg.fingerprint().binding()) {
+      Claims c = LicenseFile.parseClaims(LicenseFile.verify(file, cfg.keys).payload());
+      LicenseFile.check(c, CheckOptions.of(c.issuedAt(), cfg.product).withFingerprint(cfg.fingerprint.fingerprint()));
+      if (!c.tenant().equals(cfg.tenantId) || c.binding().type() != cfg.fingerprint.binding()) {
         throw new OfflineException(OfflineException.Code.BAD_FILE, "for tenant " + c.tenant() + ", binding " + c.binding().type(), null);
       }
       return c;
@@ -204,8 +277,8 @@ public final class OfflineClient {
 
   /** Check options now; with a clock guard, the time has passed its rollback check. */
   private CheckOptions options(Instant local) throws Clock.ClockException {
-    Instant now = cfg.clock().isPresent() ? cfg.clock().get().now(local).now() : local;
-    return new CheckOptions(now, cfg.product(), cfg.fingerprint().fingerprint(), cfg.buildDate(), cfg.clockTolerance().orElse(CheckOptions.DEFAULT_CLOCK_TOLERANCE));
+    Instant now = cfg.clock.isPresent() ? cfg.clock.get().now(local).now() : local;
+    return new CheckOptions(now, cfg.product, cfg.fingerprint.fingerprint(), cfg.buildDate, cfg.clockTolerance);
   }
 
   /** What the store holds: the installed file (null: none), and license ID → iat of the newest file returned. */
@@ -223,7 +296,7 @@ public final class OfflineClient {
   private void update(Change fn) throws OfflineException, LicenseException, IOException {
     Exception[] err = new Exception[1];
     boolean[] wrote = new boolean[1];
-    boolean ok = cfg.store().update(cur -> {
+    boolean ok = cfg.store.update(cur -> {
       err[0] = null; // a store may retry fn
       wrote[0] = false;
       try {
@@ -259,6 +332,7 @@ public final class OfflineClient {
     }
     Object file = m.get("file");
     if (file != null && !(file instanceof String)) return none; // ours, but damaged: none
+    if ("".equals(file)) file = null;
     Map<String, Instant> returned = new LinkedHashMap<>();
     Object r = m.get("returned");
     if (r != null) {

@@ -178,7 +178,7 @@ test("clock guard: install raises it to a future iat; refused when it can't hold
   const unheld = new MemStore();
   unheld.failSave = true;
   const { c: c2, store: s2 } = client({ clock: new Guard(unheld, "LF-ABCDE-FGHIJ"), clockToleranceSeconds: 0 });
-  assert.match(code(() => c2.install(ahead, now)), /can't hold it/);
+  assert.equal(code(() => c2.install(ahead, now)), "clock_not_saved");
   assert.equal(s2.b, undefined);
   // Five minutes fast needs no raise (the default claim tolerance).
   const { c: c3 } = client({ clock: new Guard(unheld, "LF-ABCDE-FGHIJ") });
@@ -194,6 +194,26 @@ test("clock guard: install raises it to a future iat; refused when it can't hold
   const { c: c5 } = client({ clock: new Guard(new MemStore(), "LF-ABCDE-FGHIJ", { toleranceSeconds: 0 }) });
   c5.install(file(), now);
   assert.equal(code(() => c5.current(new Date(T0 - 2 * H))), "rollback");
+});
+
+test("the guard raise stops at its tolerance; a file failing at its own iat doesn't raise it", () => {
+  const strict = (gs: MemStore, over: Partial<OfflineConfig> = {}) => client({ clock: new Guard(gs, "LF-ABCDE-FGHIJ", { toleranceSeconds: 3600 }), clockToleranceSeconds: 0, ...over }).c;
+  assert.equal(code(() => strict(new MemStore()).install(file({ iatMs: T0 + H }), now)), "ok"); // exactly local + tolerance
+  assert.equal(code(() => strict(new MemStore()).install(file({ iatMs: T0 + H + 1000 }), now)), "clock_skew");
+  const g = new Guard(new MemStore(), "LF-ABCDE-FGHIJ", { toleranceSeconds: 3600 });
+  const late = file({ iatMs: T0 + 30 * 60_000, updatesUntilMs: T0 - 24 * H });
+  assert.equal(code(() => client({ clock: g, clockToleranceSeconds: 0, buildDate: now }).c.install(late, now)), "updates_expired");
+  assert.equal(g.now(now).now.getTime(), T0, "the guard wasn't raised to the file's iat");
+});
+
+test("any license ID is remembered as returned", () => {
+  for (const lid of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+    const { c } = client();
+    const f = file({ lid });
+    c.install(f, now);
+    c.deactivate(now);
+    assert.equal(code(() => c.install(f, now)), "returned", lid);
+  }
 });
 
 test("config is checked", () => {
