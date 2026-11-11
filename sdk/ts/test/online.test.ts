@@ -324,7 +324,7 @@ test("create validates its config", async () => {
   ]) {
     await assert.rejects(Client.create(bad), TypeError, JSON.stringify(bad.baseURL));
   }
-  for (const ca of ["", "not pem", Buffer.from("x")]) await assert.rejects(Client.create({ ...good, ca }), TypeError, `ca ${String(ca)}`);
+  for (const ca of ["", "not pem", Buffer.from("x"), "-----BEGIN CERTIFICATE-----\nnotbase64!!\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "x -----BEGIN CERTIFICATE-----"]) await assert.rejects(Client.create({ ...good, ca }), TypeError, `ca ${String(ca)}`);
   for (const timeoutMs of [0, -1, Number.NaN]) await assert.rejects(Client.create({ ...good, timeoutMs }), RangeError, String(timeoutMs));
   await Client.create({ ...good, baseURL: "http://localhost:8080/lf/" }); // loopback http is fine
 });
@@ -344,7 +344,7 @@ function certs() {
   }
 }
 
-test("ca: a server behind a private CA is trusted with it, and only with it", async () => {
+test("ca: a server behind a private CA is trusted with it, and only with it", { timeout: 10_000 }, async () => {
   const { server: tls, other } = certs();
   const srv = createTLSServer(tls, (_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ lease: lease({ iatMs: now }), activation_id: "act_1" }));
@@ -352,7 +352,9 @@ test("ca: a server behind a private CA is trusted with it, and only with it", as
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
   try {
     const base = `https://127.0.0.1:${(srv.address() as AddressInfo).port}`;
-    const c = await client(base, { ca: tls.cert, maxAttempts: 1 });
+    const pem = Buffer.from(tls.cert);
+    const c = await client(base, { ca: pem, maxAttempts: 1 });
+    pem.fill(0x41); // the client keeps its own copy
     await c.activate();
     assert.equal(c.current().claims.licenseId, "lic_1");
     assert.equal(await code((await client(base, { maxAttempts: 1 })).activate()), "network", "not in Node's CAs");
@@ -363,7 +365,7 @@ test("ca: a server behind a private CA is trusted with it, and only with it", as
   }
 });
 
-test("an answer over 1 MiB, cut off, or stalled past timeoutMs is a network error", async () => {
+test("an answer over 1 MiB, cut off, or stalled past timeoutMs is a network error", { timeout: 10_000 }, async () => {
   let n = 0;
   const srv = createServer((_req, res) => {
     const i = n++;

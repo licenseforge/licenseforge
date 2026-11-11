@@ -12,7 +12,7 @@
 // keeps its offset to the local clock and checks with max(local,
 // local + offset); with a clock guard it also resets the mark to the iat.
 // The HTTP Date header is never trusted.
-import { randomBytes, randomInt } from "node:crypto";
+import { randomBytes, randomInt, X509Certificate } from "node:crypto";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Guard } from "./clock.js";
@@ -158,9 +158,11 @@ export class Client {
     }
     if (cfg.fingerprint.binding !== "machine" && cfg.fingerprint.binding !== "cluster") throw new TypeError("licenseforge online: fingerprint.binding must be machine or cluster");
     if (cfg.timeoutMs !== undefined && !(Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0)) throw new RangeError("licenseforge online: timeoutMs must be > 0");
-    if (cfg.ca !== undefined && !String(cfg.ca).includes("-----BEGIN CERTIFICATE-----")) throw new TypeError("licenseforge online: ca must be PEM certificates");
+    if (cfg.ca !== undefined) checkPEM(cfg.ca);
     this.base = u;
+    // A copy of a Buffer ca: the caller reusing theirs doesn't change whom a live client trusts.
     this.cfg = { ...cfg, maxAttempts: cfg.maxAttempts && cfg.maxAttempts > 0 ? cfg.maxAttempts : 4, timeoutMs: cfg.timeoutMs ?? 30_000 };
+    if (Buffer.isBuffer(cfg.ca)) this.cfg.ca = Buffer.from(cfg.ca);
   }
 
   /** Checks cfg and loads a cached lease from cfg.store if one verifies. */
@@ -486,6 +488,17 @@ export class Client {
     if (res.status >= 500) throw new OnlineError("server_error", `status ${res.status}`, res.status, "", retryAfterMs);
     if (res.status === 429) throw new OnlineError("rate_limited", "status 429", res.status, "", retryAfterMs);
     throw new OnlineError("unexpected_status", `status ${res.status}`, res.status, "", retryAfterMs);
+  }
+}
+
+/** Every PEM block in ca must be a certificate that parses: Node's TLS would otherwise trust nothing, silently, and every call fail. */
+function checkPEM(ca: string | Buffer): void {
+  const blocks = String(ca).match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+  try {
+    if (blocks.length === 0) throw new Error("no certificate");
+    for (const b of blocks) new X509Certificate(b);
+  } catch (e) {
+    throw new TypeError(`licenseforge online: ca must be PEM certificates (${String(e)})`);
   }
 }
 

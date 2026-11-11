@@ -273,7 +273,7 @@ public final class Online {
      * trusts only these, not the JVM's trust store.
      */
     public Config ca(byte[] pem) {
-      byte[] v = pem.clone();
+      byte[] v = Objects.requireNonNull(pem, "ca").clone();
       try {
         Fingerprints.trustOnly(v);
       } catch (GeneralSecurityException | IOException e) {
@@ -314,8 +314,8 @@ public final class Online {
     private Client(Config cfg) {
       this.cfg = cfg.copy(); // later changes to the caller's Config don't reach a live client
       try {
-        SSLContext tls = cfg.ca == null ? SSLContext.getInstance("TLS") : Fingerprints.trustOnly(cfg.ca);
-        if (cfg.ca == null) tls.init(null, null, null); // the JVM's trust store
+        SSLContext tls = this.cfg.ca == null ? SSLContext.getInstance("TLS") : Fingerprints.trustOnly(this.cfg.ca);
+        if (this.cfg.ca == null) tls.init(null, null, null); // the JVM's trust store
         SSLParameters params = tls.getDefaultSSLParameters();
         params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"});
         // No redirects: the license key is in a header.
