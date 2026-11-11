@@ -51,7 +51,9 @@ public final class LeaseStores {
     @Override
     public void save(String lease) throws IOException {
       byte[] b = lease.getBytes(StandardCharsets.UTF_8);
-      if (!file.update(cur -> b)) throw new IOException("licenseforge lease store: the lease file wasn't written");
+      if (file.update(cur -> b)) return;
+      // false also means the old file couldn't be read: the write may have worked anyway (as Go's FileStore checks).
+      if (!load().equals(Fingerprints.trim(lease))) throw new IOException("licenseforge lease store: the lease file wasn't written");
     }
   }
 
@@ -124,6 +126,7 @@ public final class LeaseStores {
     private final String key;
     private KubernetesApi api;
     private HttpClient http;
+    Duration timeout = API_TIMEOUT; // tests shorten it
 
     KubernetesStore(String resource, String kind, String name, String namespace, String key, KubernetesApi api) {
       this.resource = resource;
@@ -168,7 +171,7 @@ public final class LeaseStores {
     @Override
     public String load() throws IOException {
       Target t = target();
-      long deadline = System.nanoTime() + API_TIMEOUT.toNanos();
+      long deadline = System.nanoTime() + timeout.toNanos();
       try {
         Object obj = call(t, "GET", t.path(), null, deadline);
         Object data = obj instanceof Map<?, ?> m ? m.get("data") : null;
@@ -176,6 +179,8 @@ public final class LeaseStores {
       } catch (ApiException e) {
         if (e.status == 404) return "";
         throw new IOException("licenseforge lease store: loading " + kind + " " + t.path() + ": " + e.getMessage(), e);
+      } catch (java.io.InterruptedIOException e) {
+        throw e;
       } catch (IOException e) {
         throw new IOException("licenseforge lease store: loading " + kind + " " + t.path() + ": " + e.getMessage(), e);
       }
@@ -190,11 +195,13 @@ public final class LeaseStores {
     @Override
     public void save(String lease) throws IOException {
       Target t = target();
-      long deadline = System.nanoTime() + API_TIMEOUT.toNanos();
+      long deadline = System.nanoTime() + timeout.toNanos();
       for (int attempt = 0; ; attempt++) {
         try {
           saveOnce(t, lease, deadline);
           return;
+        } catch (java.io.InterruptedIOException e) {
+          throw e;
         } catch (IOException e) {
           int status = e instanceof ApiException a ? a.status : 0;
           if ((status == 409 || status == 404) && attempt < 4 && System.nanoTime() < deadline) {
@@ -252,6 +259,7 @@ public final class LeaseStores {
       } catch (RuntimeException e) {
         throw new IOException("the service account token can't be read", e);
       }
+      if (token == null || token.isEmpty()) throw new IOException("the service account token is empty");
       HttpRequest req;
       try {
         HttpRequest.BodyPublisher pub = body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(write(body), StandardCharsets.UTF_8);
@@ -262,20 +270,35 @@ public final class LeaseStores {
         // The JDK's message would quote the header value: never the token.
         throw new IOException("the service account token or the API host can't be sent (a line break?)");
       }
-      HttpResponse<InputStream> res;
-      byte[] raw;
-      try {
-        res = t.http().send(req, HttpResponse.BodyHandlers.ofInputStream());
-        try (InputStream in = res.body()) {
-          raw = in.readNBytes(MAX_ANSWER + 1);
+      // The whole exchange, body included, within the budget: on JDK 17 the request timeout
+      // doesn't cover the body, and the client holds its commit lock while saving.
+      java.util.concurrent.atomic.AtomicReference<InputStream> stream = new java.util.concurrent.atomic.AtomicReference<>();
+      java.util.concurrent.CompletableFuture<Object[]> f = t.http().sendAsync(req, HttpResponse.BodyHandlers.ofInputStream()).thenApply(r -> {
+        stream.set(r.body());
+        try (InputStream in = r.body()) {
+          return new Object[] {r.statusCode(), in.readNBytes(MAX_ANSWER + 1)};
+        } catch (IOException e) {
+          throw new java.io.UncheckedIOException(e);
         }
+      });
+      Object[] got;
+      try {
+        got = f.get(Math.max(1, (deadline - System.nanoTime()) / 1_000_000), java.util.concurrent.TimeUnit.MILLISECONDS);
       } catch (InterruptedException e) {
+        cancel(f, stream);
         Thread.currentThread().interrupt();
         throw new java.io.InterruptedIOException("interrupted");
+      } catch (java.util.concurrent.TimeoutException e) {
+        cancel(f, stream);
+        throw new IOException("timed out");
+      } catch (java.util.concurrent.ExecutionException e) {
+        Throwable c = e.getCause() instanceof java.io.UncheckedIOException u ? u.getCause() : e.getCause();
+        throw c instanceof IOException io ? io : new IOException(String.valueOf(c), c);
       }
+      byte[] raw = (byte[]) got[1];
       if (raw.length > MAX_ANSWER) throw new IOException("answer over 4 MiB");
       String text = new String(raw, StandardCharsets.UTF_8);
-      int status = res.statusCode();
+      int status = (Integer) got[0];
       if (status < 200 || status > 299) {
         String msg = text.length() > 200 ? text.substring(0, 200) : text;
         try {
@@ -290,6 +313,18 @@ public final class LeaseStores {
         return Json.parseValue(text);
       } catch (Json.JsonException e) {
         throw new IOException("the API's answer isn't JSON: " + e.getMessage());
+      }
+    }
+  }
+
+  private static void cancel(java.util.concurrent.CompletableFuture<?> f, java.util.concurrent.atomic.AtomicReference<InputStream> stream) {
+    f.cancel(true);
+    InputStream in = stream.get();
+    if (in != null) {
+      try {
+        in.close(); // unblocks the reader
+      } catch (IOException ignored) {
+        // closing anyway
       }
     }
   }

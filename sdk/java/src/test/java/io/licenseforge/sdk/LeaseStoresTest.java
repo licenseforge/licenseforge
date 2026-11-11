@@ -46,6 +46,16 @@ class LeaseStoresTest {
     assertThrows(NullPointerException.class, () -> new FileLeaseStore(null));
     Files.createDirectory(dir.resolve("adir"));
     assertThrows(IOException.class, () -> new FileLeaseStore(dir.resolve("adir")).load(), "unreadable");
+    assertThrows(IOException.class, () -> new FileLeaseStore(dir.resolve("adir")).save("lf1.x"), "not written");
+    // An unreadable old file that the write replaces anyway: success, as in Go.
+    if (!System.getProperty("os.name").startsWith("Windows") && !"root".equals(System.getProperty("user.name"))) {
+      Path p = dir.resolve("old");
+      FileLeaseStore o = new FileLeaseStore(p);
+      o.save("lf1.old");
+      Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("---------"));
+      o.save("lf1.new");
+      assertEquals("lf1.new", o.load());
+    }
   }
 
   record Inject(String method, int status) {}
@@ -90,7 +100,11 @@ class LeaseStoresTest {
           Map<String, Object> meta = new LinkedHashMap<>((Map<String, Object>) obj.get("metadata"));
           if (method.equals("POST")) {
             String p = url + "/" + meta.get("name");
-            if (objects.containsKey(p)) {
+            String kind = url.endsWith("/secrets") ? "Secret" : "ConfigMap";
+            if (!"v1".equals(obj.get("apiVersion")) || !kind.equals(obj.get("kind"))) {
+              status = 400;
+              out = Map.of("message", "apiVersion and kind required");
+            } else if (objects.containsKey(p)) {
               status = 409;
               out = Map.of("message", "exists");
             } else {
@@ -190,9 +204,11 @@ class LeaseStoresTest {
     inject.add(new Inject("GET", 500));
     assertTrue(assertThrows(IOException.class, s::load).getMessage().contains("loading Secret"));
     Map<String, Object> o = new LinkedHashMap<>(objects.get(path));
-    o.put("data", Map.of("lease", "not base64!"));
-    objects.put(path, o);
-    assertTrue(assertThrows(IOException.class, s::load).getMessage().contains("isn't base64"));
+    for (String bad : List.of("not base64!", "QQ")) { // unpadded: Go's StdEncoding refuses it too
+      o.put("data", Map.of("lease", bad));
+      objects.put(path, o);
+      assertTrue(assertThrows(IOException.class, s::load).getMessage().contains("isn't base64"), bad);
+    }
     // A value with line breaks decodes, as in Go.
     String enc = Base64.getEncoder().encodeToString("lf1.abcdef".getBytes(StandardCharsets.UTF_8));
     o.put("data", Map.of("lease", enc.substring(0, 4) + "\r\n" + enc.substring(4)));
@@ -216,12 +232,19 @@ class LeaseStoresTest {
     int before = log.size();
     s.save("");
     assertEquals(List.of("GET"), log.subList(before, log.size()).stream().map(l -> l.split(" ")[0]).toList(), "nothing to remove");
+    // An endless conflict ends after five rounds.
+    s.save("lf1.d");
+    for (int i = 0; i < 10; i++) inject.add(new Inject("PUT", 409));
+    before = log.size();
+    assertThrows(IOException.class, () -> s.save("lf1.e"));
+    assertEquals(5, log.subList(before, log.size()).stream().filter(l -> l.startsWith("PUT")).count());
+    inject.clear();
   }
 
   @Test
   void oddAnswersAreErrorsWithNoPut(@TempDir Path dir) throws Exception {
     FingerprintTest.Tls t = FingerprintTest.tls(dir, "ip:127.0.0.1");
-    for (String body : List.of("null", "{\"data\":{\"lease\":\"x\"}}", "{\"metadata\":{}}")) {
+    for (String body : List.of("null", "{\"data\":{\"lease\":\"x\"}}", "{\"metadata\":{}}", "{\"metadata\":{\"resourceVersion\":\"\"}}")) {
       int[] puts = {0};
       HttpsServer odd = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       odd.setHttpsConfigurator(new HttpsConfigurator(t.ctx()));
@@ -247,6 +270,60 @@ class LeaseStoresTest {
   }
 
   @Test
+  void bigOrStalledAnswersEndWithinTheBudget(@TempDir Path dir) throws Exception {
+    FingerprintTest.Tls t = FingerprintTest.tls(dir, "ip:127.0.0.1");
+    HttpsServer slow = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    slow.setHttpsConfigurator(new HttpsConfigurator(t.ctx()));
+    slow.setExecutor(java.util.concurrent.Executors.newCachedThreadPool(r -> {
+      Thread th = new Thread(r);
+      th.setDaemon(true);
+      return th;
+    }));
+    slow.createContext("/api/v1/namespaces/big/", ex -> {
+      ex.sendResponseHeaders(200, 0);
+      try (OutputStream o = ex.getResponseBody()) {
+        o.write(("{\"pad\":\"" + "x".repeat((4 << 20) + 10) + "\"}").getBytes(StandardCharsets.UTF_8));
+      } catch (IOException e) {
+        // the client stopped reading
+      }
+      ex.close();
+    });
+    slow.createContext("/", ex -> {
+      ex.sendResponseHeaders(200, 0);
+      try (OutputStream o = ex.getResponseBody()) {
+        o.write('{');
+        o.flush();
+        Thread.sleep(30_000); // headers and a byte, then nothing
+      } catch (Exception e) {
+        // the client went away
+      }
+    });
+    slow.start();
+    try {
+      KubernetesApi a = new KubernetesApi("127.0.0.1", slow.getAddress().getPort(), t.certPem(), "apps", () -> "t");
+      KubernetesConfigMapStore stalled = new KubernetesConfigMapStore("x", null, null, a);
+      stalled.timeout = java.time.Duration.ofSeconds(1);
+      long start = System.nanoTime();
+      assertThrows(IOException.class, stalled::load);
+      assertTrue((System.nanoTime() - start) / 1_000_000 < 5000, "the budget bounds a stalled body");
+      // An answer over 4 MiB is refused (the namespace "big" routes to that answer).
+      IOException e = assertThrows(IOException.class, () -> new KubernetesConfigMapStore("x", "big", null, a).load());
+      assertTrue(e.getMessage().contains("4 MiB"), e.getMessage());
+    } finally {
+      slow.stop(0);
+    }
+  }
+
+  @Test
+  void anEmptyTokenIsNotSent() {
+    for (java.util.function.Supplier<String> tok : List.<java.util.function.Supplier<String>>of(() -> null, () -> "")) {
+      KubernetesApi bad = new KubernetesApi(api.host(), api.port(), api.ca(), "apps", tok);
+      assertThrows(IOException.class, () -> new KubernetesConfigMapStore("x", null, null, bad).load());
+    }
+    assertEquals(0, log.size());
+  }
+
+  @Test
   void aTokenWithALineBreakIsRefusedBeforeAnythingIsSent() {
     KubernetesApi bad = new KubernetesApi(api.host(), api.port(), api.ca(), "apps", () -> "S3CRET\r\nX-Evil: 1");
     IOException e = assertThrows(IOException.class, () -> new KubernetesConfigMapStore("x", null, null, bad).load());
@@ -257,7 +334,7 @@ class LeaseStoresTest {
   @Test
   void namesAreCheckedBeforeAnyRequest() {
     for (String[] o : List.of(new String[] {"Bad_Name", null, null}, new String[] {"ok", "Bad NS", null}, new String[] {"ok", null, ".."},
-        new String[] {"ok", null, "a/b"}, new String[] {"x".repeat(254), null, null})) {
+        new String[] {"ok", null, "a/b"}, new String[] {"ok", null, "."}, new String[] {"x".repeat(254), null, null})) {
       IOException e = assertThrows(IOException.class, () -> new KubernetesConfigMapStore(o[0], o[1], o[2], api).load(), String.join(",", String.valueOf(o[0]), String.valueOf(o[1]), String.valueOf(o[2])));
       assertTrue(e.getMessage().contains("isn't a valid"), e.getMessage());
     }
