@@ -9,6 +9,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
 | Server binaries, linux amd64 and arm64 | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
 | TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
+| Java SDK | Maven Central `io.licenseforge:licenseforge-sdk` (its own version, tag `sdk/java/vX.Y.Z`) | PGP (`.asc`, Central's requirement) | | attestation |
 
 Images, chart and server share one version (ADR-0023). Attestations are stored with GitHub and, for images and chart, also in the registry next to the artifact.
 
@@ -79,6 +80,21 @@ npm audit signatures                 # in your project, after npm ci or npm inst
 
 `npm audit signatures` checks the registry's signature on every installed package and the provenance attestations that are present. It doesn't fail on a package without one, and it doesn't check whose workflow made it. So check the identity yourself: the package's npm page shows the provenance; it must name `licenseforge/licenseforge`, `.github/workflows/sdk-ts-release.yml` and an `sdk/ts/v*` tag. The package's publishing access refuses tokens: any other version could only come from an npm maintainer publishing interactively with 2FA, and would have no provenance, so check it. Pin the version and keep the lockfile: its `integrity` hash makes every later install the same bytes.
 
+## Java SDK (Maven Central)
+
+[`sdk-java-release.yml`](../.github/workflows/sdk-java-release.yml) builds `io.licenseforge:licenseforge-sdk` from an `sdk/java/vX.Y.Z` tag, signs the jars and pom with the release PGP key (Maven Central requires PGP), and attests the jars' SLSA build provenance. The bundle is published on Central by a maintainer after checking it.
+
+```sh
+V=0.1.0-alpha.1
+B=https://repo1.maven.org/maven2/io/licenseforge/licenseforge-sdk/$V
+curl -fsSLO "$B/licenseforge-sdk-$V.jar" -fsSLO "$B/licenseforge-sdk-$V.jar.asc"
+gpg --verify "licenseforge-sdk-$V.jar.asc" "licenseforge-sdk-$V.jar"   # the key's fingerprint is in SECURITY.md once published
+gh attestation verify "licenseforge-sdk-$V.jar" --repo licenseforge/licenseforge \
+  --cert-identity "https://github.com/licenseforge/licenseforge/.github/workflows/sdk-java-release.yml@refs/tags/sdk/java/v$V"
+```
+
+In a build, pin the version, and check signatures with your build tool where it can (Gradle's dependency verification, or Maven's checksum and PGP verification plugins).
+
 ## Air-gapped verification
 
 `gh attestation download oci://$IMAGE --repo licenseforge/licenseforge` (and the same for the chart or a binary) saves the attestation bundles. Verify them offline with `gh attestation verify --bundle <file> --custom-trusted-root <trusted_root.jsonl>`; get the trusted root with `gh attestation trusted-root` while online.
@@ -93,6 +109,13 @@ npm attaches a trusted publisher only to a package that exists, so the first ver
 4. In the package settings, add the trusted publisher (GitHub Actions; `licenseforge/licenseforge`; workflow `sdk-ts-release.yml`; environment `npm`), and set Publishing access to "Require two-factor authentication and disallow tokens".
 5. Within two days, tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`. npm expires a trusted publisher configuration that hasn't published within two days; if that happens, delete it and add it again.
 6. Check `npm dist-tag ls @licenseforge/sdk`: `next` is the alpha, and `latest` stays on the placeholder until the first stable version.
+
+## For maintainers: first Maven Central release of the Java SDK
+
+1. In GitHub, create the environment `maven-central` (a required reviewer; deployment tags `sdk/java/v*`) and add `refs/tags/sdk/java/v*` to the release-tag ruleset.
+2. On the Central Portal (central.sonatype.com), verify the namespace `io.licenseforge` with the DNS TXT record it gives for `licenseforge.io`, and generate a user token. Store base64 of `username:password` as the environment secret `CENTRAL_TOKEN`.
+3. Create the release PGP key (Ed25519, with an expiry), publish the public key to keys.openpgp.org, and add its fingerprint to `SECURITY.md`. Store the armored private key and its passphrase as `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` in the environment only; keep an offline backup.
+4. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. After the run, check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
 
 ## For maintainers: a release that failed halfway
 

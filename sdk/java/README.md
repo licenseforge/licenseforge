@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Java application, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Java 17 or later, no runtime dependencies: Ed25519 comes from the JDK (ADR-0010).
 
-Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json`, `offline.json` and `fingerprint.json`. Next: FIPS mode (Bouncy Castle FIPS) and the first release.
+Status: alpha, not published yet: `io.licenseforge:licenseforge-sdk:0.1.0-alpha.1` on Maven Central once released (module `io.licenseforge.sdk`; [verifying releases](../../docs/verifying-releases.md#java-sdk-maven-central)). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json`, `offline.json` and `fingerprint.json`. Next: FIPS mode (Bouncy Castle FIPS) and the first release.
 
 ```java
 import io.licenseforge.sdk.*;
