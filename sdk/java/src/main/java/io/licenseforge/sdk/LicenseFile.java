@@ -179,8 +179,8 @@ public final class LicenseFile {
     System.arraycopy(raw, 0, spki, ED25519_SPKI.length, 32);
     boolean ok;
     try {
-      // The JDK's own provider, never the first one installed: another (e.g. BouncyCastle)
-      // verifies cofactored or throws unchecked, and the answer must match every SDK's.
+      // The JDK's own provider, never the first one installed: another (e.g. plain BouncyCastle,
+      // not BC FIPS) verifies cofactored or throws unchecked, and the answer must match every SDK's.
       Signature s = Signature.getInstance("Ed25519", PROVIDER);
       s.initVerify(KeyFactory.getInstance("Ed25519", PROVIDER).generatePublic(new X509EncodedKeySpec(spki)));
       s.update(("lf1." + kid + "." + e.body()).getBytes(StandardCharsets.US_ASCII));

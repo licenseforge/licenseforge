@@ -194,6 +194,16 @@
       "expect": "invalid_key_set"
     },
     {
+      "name": "invalid_key_set_mixed_order_key_before_signature_length",
+      "license": "lf1.test:mixed-order.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "invalid_key_set"
+    },
+    {
+      "name": "bad_signature_mixed_order_r",
+      "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.oh9qCE3N7amoCWMlt7zHf0MtXDUVAEI75augFkDTH_39J1y4M-Bq4KUeXKW_O0HdiHtrGA3hXeR6mR9YfN2gBQ",
+      "expect": "bad_signature"
+    },
+    {
       "name": "bad_signature_noncanonical_r",
       "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.7v_______________________________________3-RSP5z_YwU2kj0NoZxEdEF6vuvPTa3PXu1HXzHVI6aAw",
       "expect": "bad_signature"

@@ -146,6 +146,24 @@ func buildVectors(t *testing.T) vectorFile {
 		break
 	}
 
+	// A mixed-order R under the real key: R' = r·B + T8, S = r + k·a. Cofactorless
+	// verification refuses it; a cofactored one (plain Bouncy Castle) accepts.
+	var mixedR string
+	{
+		msg := join(parts[0], parts[1], parts[2])
+		rh := sha512.Sum512(append(append([]byte{}, expanded[32:]...), msg...))
+		r := new(big.Int).Mod(new(big.Int).SetBytes(reverse(rh[:])), order)
+		bigR := edEncode(mustDecode(ed25519.Sign(priv, []byte(msg))[:32]).add(mustDecode(t8)))
+		h := sha512.New()
+		h.Write(bigR)
+		h.Write(priv.Public().(ed25519.PublicKey))
+		h.Write([]byte(msg))
+		k := new(big.Int).Mod(new(big.Int).SetBytes(reverse(h.Sum(nil))), order)
+		s := k.Mul(k, scalar)
+		s.Add(s, r).Mod(s, order)
+		mixedR = join(msg, b64.EncodeToString(append(bigR, reverse(s.FillBytes(make([]byte, 32)))...)))
+	}
+
 	// Unknown kid combined with a second fault, to pin error precedence.
 	missingTok := sign("test:missing", payload)
 	mp := strings.Split(missingTok, ".")
@@ -208,6 +226,8 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "bad_signature_order_8_r", License: chosenR("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"), Expect: "bad_signature"},
 			{Name: "bad_signature_negative_zero_r", License: chosenR("0100000000000000000000000000000000000000000000000000000000000080"), Expect: "bad_signature"},
 			{Name: "invalid_key_set_mixed_order_key", License: mixedOrderKey, Expect: "invalid_key_set"},
+			{Name: "invalid_key_set_mixed_order_key_before_signature_length", License: join("lf1", "test:mixed-order", parts[2], shortSig), Expect: "invalid_key_set"},
+			{Name: "bad_signature_mixed_order_r", License: mixedR, Expect: "bad_signature"},
 			{Name: "bad_signature_noncanonical_r", License: chosenR("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), Expect: "bad_signature"},
 			{Name: "bad_signature_payload_tampered", License: join(parts[0], parts[1], otherPayload, parts[3]), Expect: "bad_signature"},
 			{Name: "bad_signature_kid_swapped", License: join(parts[0], "test:other", parts[2], parts[3]), Expect: "bad_signature"},
