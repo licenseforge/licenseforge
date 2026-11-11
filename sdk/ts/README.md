@@ -54,4 +54,6 @@ try {
 
   Every lease is verified (signature, product, tenant, this machine, binding) before it is used or stored. Older leases are refused as replays. The client checks with max(local, server time) and never trusts the HTTP Date header. `OnlineError.code` carries the API's stable codes.
 
+  A server behind a private CA: start Node with `NODE_EXTRA_CA_CERTS=/path/ca.pem`. The client uses Node's `fetch`, which trusts that CA as well as the system's.
+
 Development: `npm ci && npm test`.

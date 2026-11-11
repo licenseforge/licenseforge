@@ -27,7 +27,11 @@ vet:
 	go vet -tags e2e ./e2e/   # the journeys compile with the API they drive (not run: make e2e)
 
 # End-to-end journeys (ADR-0041) against the environment e2e/env/up.sh deploys on minikube.
+# The SDK journeys run the TypeScript and Java SDKs as built here (Node 22+, JDK 17+, Maven).
+MVN ?= mvn
 e2e:
+	cd sdk/ts && npm ci --silent && rm -rf dist && npm run build --silent
+	cd sdk/java && $(MVN) -B -q -ntp compile
 	cd e2e && go test -tags e2e -count=1 -v ./...
 
 # The browser smoke tests (Playwright, ADR-0041) against the same environment.
