@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Java application, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Java 17 or later, no runtime dependencies: Ed25519 comes from the JDK (ADR-0010).
 
-Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json` and `offline.json`. Next: fingerprints and the online client, as in the Go and TypeScript SDKs.
+Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json`, `offline.json` and `fingerprint.json`. Next: the online client and lease stores, as in the Go and TypeScript SDKs.
 
 ```java
 import io.licenseforge.sdk.*;
@@ -33,6 +33,13 @@ try {
 - `LicenseFile.parseClaims(payload)` applies the strict encoding rules with its own JSON reader (no Jackson or Gson: they accept duplicate keys and fold `1.0` into `1`). `LicenseFile.check(claims, options)` runs the claim checks in the spec's order.
 - `LicenseFile.open` does all three. `LicenseException.code()` is the spec's class; `code().spec()` its name.
 - `Entitlements`: `hasFeature(key)`, `limit(key)` (`UNLIMITED` is -1, absent is 0) and `allows(key, total)`.
+- `Fingerprints.compute(tenant, product, options)` / `forLicense(claims, options)` give this machine's fingerprint (ADR-0017), for a bound license's `withFingerprint` check option. The sources, first match wins:
+  1. your `override` (a `Callable<String>`);
+  2. `LICENSEFORGE_FINGERPRINT`, only if you set `allowEnvOverride`;
+  3. Kubernetes, the `kube-system` namespace UID (the pod's service account needs `get` on that namespace; only the cluster's CA is trusted; 5 s per request, transient failures retried);
+  4. the OS machine ID: `/etc/machine-id` (refused on tmpfs, and in containers unless the host's file is mounted in), `MachineGuid` or `IOPlatformUUID`.
+
+  A `FingerprintException` says why there is none: `NO_FINGERPRINT`, `TRANSIENT` (retry), `INVALID` or `FAILED`. A non-ASCII `LICENSEFORGE_FINGERPRINT` needs a UTF-8 locale (`LANG=C.UTF-8`): under a C or Latin-1 locale the JVM misreads it, so it is refused.
 - `Clock.Guard` protects against the system clock being turned back (ADR-0018): `guard.now()` is the time to check licenses with (max of the system clock and the last trusted time), and throws `ClockException` `ROLLBACK` when the clock is more than the tolerance (24 h) behind. `observe(iat, now)` raises the mark after a license passes; `reset(leaseIat)` lowers it after an online refresh. The state is HMAC-authenticated under the license key; `Clock.FileStore` writes it atomically under a cross-process lock (`MemoryStore` resets on restart). Offline recovery after fixing the clock: delete the state file.
 - Offline activation (ADR-0043), in `Offline`:
   - `encodeRequest(request)` writes the `lfreq1` request an air-gapped machine hands over; `parseRequest` reads one.
