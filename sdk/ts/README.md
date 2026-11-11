@@ -34,6 +34,7 @@ try {
   4. the OS machine ID: `/etc/machine-id` (refused on tmpfs, and in containers unless the host's file is mounted in), `MachineGuid` or `IOPlatformUUID`.
 
   A `FingerprintError` says why there is none: `no_fingerprint`, `transient` (retry), `invalid` or `failed`. On Windows the ID is read with `%SystemRoot%\System32\reg.exe`; whoever controls the app's environment controls that path (as with `NODE_OPTIONS`).
+- The `tenantId` the clients take (`tnt_…`) is shown on the dashboard's Settings → Signing keys page, above the key set.
 - Offline activation (ADR-0043): `new OfflineClient({ tenantId, product, licenseKey, keys, fingerprint, store: new FileClockStore(statePath), clock: new Guard(new FileClockStore(clockPath), licenseKey) })` runs a license on an air-gapped machine, as the Go SDK's `offline` package:
   - `request()` writes the activation request to carry to the vendor (it contains the license key);
   - `install(file)` verifies the vendor's answer and installs it, refusing a file this machine returned (`returned`), an older file of the installed license (`older_file`) and another license's while one is installed (`other_license`);

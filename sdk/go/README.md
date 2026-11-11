@@ -26,7 +26,7 @@ fp, err := fingerprint.Compute(ctx, tenantID, "acme-db", fingerprint.Options{})
 guard, err := clock.New(clock.FileStore{Path: stateDir + "/clock"}, licenseKey, clock.Options{})
 c, err := online.New(online.Config{
 	BaseURL:     "https://api.vendor.example", // the server's API host
-	TenantID:    tenantID,                     // tnt_…
+	TenantID:    tenantID,                     // tnt_…, shown on Settings → Signing keys
 	Product:     "acme-db",
 	LicenseKey:  licenseKey,                   // as the user typed it
 	Keys:        trustedKeys,                  // licensefile.KeySet embedded in the build
