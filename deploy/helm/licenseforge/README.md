@@ -33,11 +33,17 @@ Pods meet the Pod Security Standard **restricted**.
 
 ## Install
 
+Install a release's chart, which runs that release's image ([verify it first](../../../docs/verifying-releases.md)):
+
 ```sh
-helm install licenseforge deploy/helm/licenseforge \
+helm install licenseforge oci://ghcr.io/licenseforge/charts/licenseforge --version <version> \
   --set secrets.server=licenseforge-server \
   --set secrets.migrate=licenseforge-migrate
 ```
+
+From a checkout (`deploy/helm/licenseforge`), the image tag defaults to the chart's `appVersion`, which is no published image: set `image.tag` (and `image.repository` for your own build). Chart and image must come from the same release.
+
+Without OIDC there is no dashboard login, and the first tenant's owner can't accept the invitation: set up [OIDC](#dashboard-login-oidc) before onboarding anyone.
 
 Upgrades run `licenseforge migrate` first; the rollout starts only if it
 succeeds. The Job's deadline (`migrate.activeDeadlineSeconds`, 280s) is below
@@ -47,6 +53,8 @@ Helm's default `--timeout` of 5m; raise both together for long migrations. Set `
 The Secrets can come from a secret manager (External Secrets Operator, Secrets Store CSI Driver): see [Secret managers](../../../docs/secret-managers.md).
 
 ## Dashboard login (OIDC)
+
+Register a client in your IdP first: Authorization Code with PKCE, redirect URI `https://<host>/auth/callback`, scopes `openid email profile` ([Secure Configuration Guide](../../../compliance/secure-configuration-guide.md#oidc)).
 
 ```sh
 kubectl create secret generic licenseforge-oidc --from-literal=client-secret='…'   # omit for a public client

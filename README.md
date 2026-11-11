@@ -3,7 +3,7 @@
 **Open-source, Kubernetes-native software licensing.** Define products, features and plans; issue licenses; control activations online and in air-gapped environments.
 
 > [!WARNING]
-> Alpha (`0.1.0-alpha.1`): online licensing, the admin dashboard core and the compliance baseline work; air-gapped activation and the other SDKs come next (design in the [ADRs](docs/adr/README.md)). The license format and API can change while 0.x and the spec is a draft. Not ready for production.
+> Alpha: online and air-gapped (offline) licensing, the admin dashboard, the CLI and the compliance baseline work on `main`; the latest release, `0.1.0-alpha.1`, predates offline activation, webhooks and `licenseforge tenant create`. The SDKs aren't published yet (see each SDK's README). The license format and API can change while 0.x and the spec is a draft. Not ready for production.
 
 ## Why
 - **Apache-2.0, all of it.** Server, SDKs, Helm chart. No paywalled self-hosting.
@@ -17,16 +17,18 @@
 |---|---|
 | Server (API, dashboard, workers) | in progress |
 | CLI ([docs](docs/cli.md)) | `licenseforge api`, `offline` and `tenant` |
-| Go SDK ([`sdk/go`](sdk/go/README.md)) | in progress: offline verification, fingerprints, clock guard, online client |
+| Go SDK ([`sdk/go`](sdk/go/README.md)) | verification, fingerprints, clock guard, online client, Kubernetes lease stores, offline activation; not tagged yet |
 | TypeScript SDK ([`sdk/ts`](sdk/ts/README.md)) | feature parity with Go; release workflow ready, first release pending |
-| Java SDK ([`sdk/java`](sdk/java/README.md)) | in progress: lf1 verification, claims, key sets |
+| Java SDK ([`sdk/java`](sdk/java/README.md)) | feature parity with Go; release workflow ready, first release pending |
+| Helm chart ([`deploy/helm/licenseforge`](deploy/helm/licenseforge/README.md)) | published with each release |
 | In-cluster agent | planned (v0.3) |
-| Helm chart | planned (v0.1) |
 
 ## Docs
 - [Architecture Decision Records](docs/adr/README.md)
 - [License file format (`lf1`)](spec/license-format.md)
-- [Go SDK](sdk/go/README.md)
+- [Installing with Helm](deploy/helm/licenseforge/README.md), then the [Secure Configuration Guide](compliance/secure-configuration-guide.md) (OIDC client, TLS, backups)
+- SDKs: [Go](sdk/go/README.md), [TypeScript](sdk/ts/README.md), [Java](sdk/java/README.md)
+- [Webhooks](docs/webhooks.md) and [secret managers](docs/secret-managers.md)
 - [Command line](docs/cli.md): `licenseforge api`, `offline` and `tenant`
 - [Verifying a release](docs/verifying-releases.md): signatures, SBOMs and SLSA provenance of images, chart and binaries
 

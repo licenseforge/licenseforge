@@ -16,7 +16,7 @@ Images, chart and server share one version (ADR-0023). Attestations are stored w
 Set the version once. The examples need [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) v3 and the [GitHub CLI](https://cli.github.com/) (`gh auth login` first).
 
 ```sh
-VERSION=0.1.0   # without the leading v
+VERSION=0.1.0-alpha.1   # without the leading v
 ID="https://github.com/licenseforge/licenseforge/.github/workflows/release.yml@refs/tags/v$VERSION"
 ISSUER=https://token.actions.githubusercontent.com
 ```
