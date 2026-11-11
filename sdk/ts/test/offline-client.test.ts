@@ -7,8 +7,9 @@ import { type ClockStore, Guard, OfflineClient, type OfflineConfig, OfflineError
 // The vectors' test key (spec/vectors/lf1.json): seed and public key.
 const seed = Buffer.from("licenseforge-test-vector-seed-01");
 const pub = Buffer.from("K1dYPb52fJP3YCWAkHCq-Yto_8Ix32Cj3226U4PqI6k", "base64url");
-const jwk = (d: Buffer) => createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: d.toString("base64url"), x: pub.toString("base64url") }, format: "jwk" });
-const priv = jwk(seed);
+// From the seed alone (PKCS#8): a JWK needs the matching public half, which Node 24 checks.
+const fromSeed = (d: Buffer) => createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), d]), format: "der", type: "pkcs8" });
+const priv = fromSeed(seed);
 const keys: PublicKey[] = [{ kid: "k1", alg: "ed25519", key: new Uint8Array(pub) }];
 const tenant = "tnt_01jcz5b2y3c4d5e6f7g8h9j0k1";
 const machine = "sha256:81fe9b1a2812e068c320c4264f01b6d4d186a83cc0008fe954fd5d1b6e3f3684";
@@ -159,7 +160,7 @@ test("install refusals store nothing", () => {
     ["other product", file({ product: "other" }), "bad_file"],
     ["unbound", file({ bind: { type: "none" } }), "bad_file"],
     ["expired", file({ iatMs: T0 - 48 * H, expMs: T0 - H }), "expired"],
-    ["another key", file({}, jwk(Buffer.alloc(32, 6))), "bad_file"],
+    ["another key", file({}, fromSeed(Buffer.alloc(32, 6))), "bad_file"],
     ["garbage", "not a license", "bad_file"],
   ];
   for (const [name, f, want] of cases) assert.equal(code(() => c.install(f, now)), want, name);
