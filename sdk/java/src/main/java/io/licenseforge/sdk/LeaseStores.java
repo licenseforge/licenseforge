@@ -53,7 +53,13 @@ public final class LeaseStores {
       byte[] b = lease.getBytes(StandardCharsets.UTF_8);
       if (file.update(cur -> b)) return;
       // false also means the old file couldn't be read: the write may have worked anyway (as Go's FileStore checks).
-      if (!load().equals(Fingerprints.trim(lease))) throw new IOException("licenseforge lease store: the lease file wasn't written");
+      String back;
+      try {
+        back = load();
+      } catch (IOException e) {
+        back = null; // still unreadable: report the write
+      }
+      if (!Fingerprints.trim(lease).equals(back)) throw new IOException("licenseforge lease store: the lease file wasn't written");
     }
   }
 
