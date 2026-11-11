@@ -101,6 +101,9 @@ type browser struct {
 	base string
 	c    *http.Client
 	csrf string
+	// idem, when set, is the next POST's Idempotency-Key ("-": none),
+	// instead of a fresh one for the routes that take one.
+	idem string
 }
 
 var (
@@ -188,8 +191,15 @@ func (b *browser) try(method, path string, body any, want int, out any) error {
 		req.Header.Set("X-CSRF-Token", b.csrf)
 		req.Header.Set("Origin", b.base)
 	}
-	if method == "POST" && strings.HasSuffix(path, "/licenses") {
-		req.Header.Set("Idempotency-Key", rand.Text())
+	if method == "POST" {
+		key := b.idem
+		if key == "" && (strings.HasSuffix(path, "/licenses") || strings.HasSuffix(path, "/activation-requests")) {
+			key = rand.Text()
+		}
+		if key != "" && key != "-" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		b.idem = ""
 	}
 	resp, err := b.c.Do(req)
 	if err != nil {
