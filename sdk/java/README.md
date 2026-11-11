@@ -9,10 +9,14 @@ import io.licenseforge.sdk.*;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 // Your tenant's trusted key set, as the dashboard shows it (Settings →
 // Signing keys → JSON), shipped with your build.
-List<PublicKey> keys = KeySet.parse(MyApp.class.getResourceAsStream("/licenseforge-keys.json").readAllBytes());
+List<PublicKey> keys;
+try (var in = Objects.requireNonNull(MyApp.class.getResourceAsStream("/licenseforge-keys.json"), "key set resource")) {
+  keys = KeySet.parse(in.readAllBytes());
+}
 
 try {
   LicenseFile.Opened lic = LicenseFile.open(Files.readString(Path.of("license.lic")), keys,
@@ -29,5 +33,8 @@ try {
 - `LicenseFile.parseClaims(payload)` applies the strict encoding rules with its own JSON reader (no Jackson or Gson: they accept duplicate keys and fold `1.0` into `1`). `LicenseFile.check(claims, options)` runs the claim checks in the spec's order.
 - `LicenseFile.open` does all three. `LicenseException.code()` is the spec's class; `code().spec()` its name.
 - `Entitlements`: `hasFeature(key)`, `limit(key)` (`UNLIMITED` is -1, absent is 0) and `allows(key, total)`.
+
+- Signatures are checked with the JDK's `SunEC` provider by name, whatever providers your app installs first (BouncyCastle, for example, would give different answers on crafted inputs). A jlinked runtime on JDK 17 to 21 needs the `jdk.crypto.ec` module.
+- `LicenseFile.Status` may gain values: keep a `default` branch when you switch on it.
 
 Build and test: `mvn verify` (Maven 3.9; JUnit is a test-only dependency).

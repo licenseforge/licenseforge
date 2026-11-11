@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
 import java.security.Signature;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.DateTimeException;
@@ -42,7 +43,7 @@ public final class LicenseFile {
   private static final Pattern KID = Pattern.compile("[A-Za-z0-9_:-]{1,128}");
   private static final Pattern B64URL = Pattern.compile("[A-Za-z0-9_-]*");
 
-  /** "GRACE": past exp but within grace, usable: warn the user. */
+  /** "GRACE": past exp but within grace, usable: warn the user. New values may be added: keep a default branch. */
   public enum Status {
     VALID,
     GRACE
@@ -57,6 +58,21 @@ public final class LicenseFile {
     @Override
     public byte[] payload() {
       return payload.clone();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      return o instanceof Verified v && kid.equals(v.kid) && java.util.Arrays.equals(payload, v.payload);
+    }
+
+    @Override
+    public int hashCode() {
+      return 31 * kid.hashCode() + java.util.Arrays.hashCode(payload);
+    }
+
+    @Override
+    public String toString() {
+      return "Verified[kid=" + kid + ", payload=" + payload.length + " bytes]";
     }
   }
 
@@ -92,7 +108,7 @@ public final class LicenseFile {
 
   /** Removes the BOM, armor and whitespace (SP, HT, CR, LF only), returning the bare token. */
   private static String unarmor(String input) throws LicenseException {
-    String s = input.startsWith("﻿") ? input.substring(1) : input;
+    String s = input.startsWith("\uFEFF") ? input.substring(1) : input;
     int a = 0;
     int z = s.length();
     while (a < z && ws(s.charAt(a))) a++;
@@ -125,6 +141,9 @@ public final class LicenseFile {
     return new Envelope(parts[1], parts[2], sig, payload);
   }
 
+  /** The JDK's Ed25519 provider (ADR-0010). */
+  static final String PROVIDER = "SunEC";
+
   // SubjectPublicKeyInfo for Ed25519 (RFC 8410) before the 32 key bytes.
   private static final byte[] ED25519_SPKI = HexFormat.of().parseHex("302a300506032b6570032100");
 
@@ -151,13 +170,15 @@ public final class LicenseFile {
     System.arraycopy(raw, 0, spki, ED25519_SPKI.length, 32);
     boolean ok;
     try {
-      Signature s = Signature.getInstance("Ed25519");
-      s.initVerify(KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spki)));
+      // The JDK's own provider, never the first one installed: another (e.g. BouncyCastle)
+      // verifies cofactored or throws unchecked, and the answer must match every SDK's.
+      Signature s = Signature.getInstance("Ed25519", PROVIDER);
+      s.initVerify(KeyFactory.getInstance("Ed25519", PROVIDER).generatePublic(new X509EncodedKeySpec(spki)));
       s.update(("lf1." + kid + "." + e.body()).getBytes(StandardCharsets.US_ASCII));
-      ok = s.verify(e.sig()); // the JDK's Ed25519 refuses a non-canonical S (S ≥ L), as the spec requires
-    } catch (NoSuchAlgorithmException x) {
-      throw new IllegalStateException("licenseforge: no Ed25519 provider", x);
-    } catch (GeneralSecurityException x) {
+      ok = s.verify(e.sig()); // SunEC refuses a non-canonical S (S ≥ L) and verifies cofactorless, like Go and OpenSSL
+    } catch (NoSuchAlgorithmException | NoSuchProviderException x) {
+      throw new IllegalStateException("licenseforge: no SunEC Ed25519 (a jlinked image on JDK 17-21 needs the jdk.crypto.ec module)", x);
+    } catch (GeneralSecurityException | RuntimeException x) {
       ok = false; // a 32-byte value that isn't a curve point can't verify anything
     }
     if (!ok) throw new LicenseException(Code.BAD_SIGNATURE);

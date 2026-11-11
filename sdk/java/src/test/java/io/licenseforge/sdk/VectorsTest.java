@@ -25,15 +25,39 @@ class VectorsTest {
     return c;
   }
 
+  /** lf1.json's "keys", written back as JSON and read with KeySet.parse. */
+  @SuppressWarnings("unchecked")
+  static List<PublicKey> keys() throws Exception {
+    StringBuilder json = new StringBuilder("[");
+    for (Object k : (List<Object>) vectors("lf1.json").get("keys")) {
+      if (json.length() > 1) json.append(',');
+      json.append('{');
+      String sep = "";
+      for (Map.Entry<String, Object> e : ((Map<String, Object>) k).entrySet()) {
+        json.append(sep).append(quote(e.getKey())).append(':').append(quote((String) e.getValue()));
+        sep = ",";
+      }
+      json.append('}');
+    }
+    return KeySet.parse(json.append(']').toString());
+  }
+
+  static String quote(String s) {
+    StringBuilder b = new StringBuilder("\"");
+    for (char c : s.toCharArray()) {
+      if (c == '"' || c == '\\') b.append('\\').append(c);
+      else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+      else b.append(c);
+    }
+    return b.append('"').toString();
+  }
+
   @Test
   void lf1EnvelopeAndSignature() throws Exception {
     Map<String, Object> v = vectors("lf1.json");
     // Through KeySet.parse, as an app loads them: a bad alg, key length or a
     // weak key loads as given and surfaces in verify.
-    String keysJson = Files.readString(Path.of("../../spec/vectors/lf1.json"));
-    int a = keysJson.indexOf("\"keys\":");
-    int b = keysJson.indexOf(']', a);
-    List<PublicKey> keys = KeySet.parse(keysJson.substring(keysJson.indexOf('[', a), b + 1));
+    List<PublicKey> keys = keys();
     for (Map<String, Object> c : cases(v)) {
       String got = "valid";
       try {

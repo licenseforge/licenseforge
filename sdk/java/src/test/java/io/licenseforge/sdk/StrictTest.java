@@ -59,6 +59,9 @@ class StrictTest {
         Map.entry("duplicate key", OK.replace("}", ",\"lid\":\"x\"}")),
         Map.entry("null lid", OK.replace("\"lic_1\"", "null")),
         Map.entry("NUL in tenant", OK.replace("}", ",\"tenant\":\"t\\u0000x\"}")),
+        Map.entry("raw 0x1F in a string", OK.replace("\"lic_1\"", "\"lic\u001f1\"")),
+        Map.entry("fraction without digits", OK.replace("}", ",\"x\":1.}")),
+        Map.entry("fraction without digits, exponent", OK.replace("}", ",\"x\":1.e5}")),
         Map.entry("nesting 33", OK.replace("}", ",\"x\":" + "[".repeat(32) + "]".repeat(32) + "}")));
     for (Map.Entry<String, String> e : bad.entrySet()) assertEquals("malformed", code(() -> claims(e.getValue())), e.getKey());
     assertEquals("ok", code(() -> claims(OK.replace("}", ",\"x\":" + "[".repeat(31) + "]".repeat(31) + "}"))), "nesting 32");
@@ -122,6 +125,8 @@ class StrictTest {
     assertEquals("clock_skew", code(() -> LicenseFile.check(c, CheckOptions.of(now, "p").withClockTolerance(Duration.ZERO))));
     assertThrows(IllegalArgumentException.class, () -> CheckOptions.of(now, "p").withClockTolerance(Duration.ofSeconds(-1)));
     assertThrows(NullPointerException.class, () -> CheckOptions.of(null, "p"));
+    assertThrows(IllegalArgumentException.class, () -> CheckOptions.of(now, "p").withClockTolerance(java.time.temporal.ChronoUnit.FOREVER.getDuration()));
+    assertEquals(LicenseFile.Status.VALID, LicenseFile.check(c, CheckOptions.of(now, "p").withClockTolerance(CheckOptions.MAX_CLOCK_TOLERANCE)));
   }
 
   @Test
@@ -149,6 +154,11 @@ class StrictTest {
     String bom = "\uFEFF" + license + "\n".repeat(LicenseFile.MAX_SIZE - n - 1);
     assertEquals("malformed", code(() -> LicenseFile.verify(bom, ks)), "bytes, not chars");
     assertEquals("ok", code(() -> LicenseFile.verify("\uFEFF" + license, ks)), "one BOM is ignored");
+    // Lengths base64 can't have (≡ 1 mod 4) and an alg in the wrong case.
+    String[] p = license.split("\\.");
+    assertEquals("malformed", code(() -> LicenseFile.verify(p[0] + "." + p[1] + "." + p[2] + ".A", ks)), "signature of length 1");
+    assertEquals("malformed", code(() -> LicenseFile.verify(p[0] + "." + p[1] + ".A." + p[3], ks)), "payload of length 1");
+    assertEquals("unsupported_alg", code(() -> LicenseFile.verify(license, List.of(new PublicKey("test:2026-11", "ED25519", ks.get(0).key())))));
     // Empty parts count: String.split would drop trailing ones.
     for (String extra : List.of(".", "..", ". ")) assertEquals("malformed", code(() -> LicenseFile.verify(license + extra, ks)), "trailing " + extra);
   }

@@ -16,6 +16,8 @@ import java.util.Optional;
  */
 public record CheckOptions(Instant now, String product, String fingerprint, Optional<Instant> buildDate, Duration clockTolerance) {
   public static final Duration DEFAULT_CLOCK_TOLERANCE = Duration.ofHours(24);
+  /** The longest duration the spec allows anywhere; more would overflow Instant arithmetic. */
+  public static final Duration MAX_CLOCK_TOLERANCE = Duration.ofDays(36500);
 
   public CheckOptions {
     Objects.requireNonNull(now, "now");
@@ -23,7 +25,9 @@ public record CheckOptions(Instant now, String product, String fingerprint, Opti
     Objects.requireNonNull(fingerprint, "fingerprint");
     Objects.requireNonNull(buildDate, "buildDate");
     Objects.requireNonNull(clockTolerance, "clockTolerance");
-    if (clockTolerance.isNegative()) throw new IllegalArgumentException("licenseforge: clockTolerance must be ≥ 0");
+    if (clockTolerance.isNegative() || clockTolerance.compareTo(MAX_CLOCK_TOLERANCE) > 0) {
+      throw new IllegalArgumentException("licenseforge: clockTolerance must be between 0 and 36500 days");
+    }
   }
 
   /** now and product, no fingerprint or build date, the default tolerance. */
