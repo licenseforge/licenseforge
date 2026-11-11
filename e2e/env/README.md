@@ -11,7 +11,7 @@ What `up.sh` deploys, in namespace `licenseforge-e2e`:
 - Tenant `acme`, with an owner invitation for `admin@licenseforge.local` that the journeys accept on their first login. This stays until tenants can be created through the product.
 
 ## Use
-Needs minikube, kubectl, helm, openssl, python3 and curl; `make e2e` also builds the TypeScript and Java SDKs (Node 22+, JDK 17+ and Maven). kubectl's current context must be the minikube profile (`minikube`, or `MINIKUBE_PROFILE`); `up.sh` refuses any other cluster.
+Needs minikube, kubectl, helm, openssl, python3 and curl; `make e2e` also builds the TypeScript and Java SDKs (Node 22+, JDK 17+ and Maven), and the SDK journeys use kubectl on that context (`E2E_KUBE_CONTEXT`, default `minikube`) to set up a ServiceAccount for the Kubernetes lease stores. kubectl's current context must be the minikube profile (`minikube`, or `MINIKUBE_PROFILE`); `up.sh` refuses any other cluster.
 
 ```sh
 minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress

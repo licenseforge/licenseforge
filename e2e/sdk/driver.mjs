@@ -9,8 +9,14 @@
 // steps. Prints one JSON line: the claims, or the request or receipt text
 // (text), or the error's code (and HTTP status online), with any warnings the
 // online client recorded (a store that failed, a stored lease that didn't
-// verify). Needs sdk/ts built.
-import { Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet } from "../../sdk/ts/dist/src/index.js";
+// verify). With LF_K8S_STORE (configmap or secret), the lease is kept in
+// that Kubernetes object (LF_K8S_NAME) through the API at LF_K8S_HOST,
+// LF_K8S_PORT (CA file LF_K8S_CA, namespace LF_K8S_NAMESPACE, token
+// LF_K8S_TOKEN) instead of a file. Needs sdk/ts built.
+import { readFileSync } from "node:fs";
+import {
+  Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, KubernetesConfigMapStore, KubernetesSecretStore, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet,
+} from "../../sdk/ts/dist/src/index.js";
 
 const env = (k) => process.env[k] ?? "";
 const op = process.argv[2];
@@ -20,6 +26,14 @@ const claimsOf = ({ claims, status }) => {
   const e = claims.entitlements;
   return { iat: claims.issuedAt.toISOString(), lid: claims.licenseId, tenant: claims.tenant, product: claims.product, plan: claims.plan, status, sso: e.hasFeature("sso"), nope: e.hasFeature("nope"), seats: e.limit("seats") };
 };
+
+function leaseStore() {
+  const kind = env("LF_K8S_STORE");
+  if (!kind) return new FileLeaseStore(env("LF_STORE"));
+  const api = { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => env("LF_K8S_TOKEN") };
+  const opts = { name: env("LF_K8S_NAME"), api };
+  return kind === "secret" ? new KubernetesSecretStore(opts) : new KubernetesConfigMapStore(opts);
+}
 
 let out;
 if (op.startsWith("offline-")) {
@@ -55,7 +69,7 @@ if (op.startsWith("offline-")) {
     fingerprint,
     hostname: env("LF_MACHINE"),
     appVersion: "1.0.0",
-    store: new FileLeaseStore(env("LF_STORE")),
+    store: leaseStore(),
     maxAttempts: 1,
   });
   try {

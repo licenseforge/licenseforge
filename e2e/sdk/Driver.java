@@ -8,6 +8,7 @@ import io.licenseforge.sdk.LicenseFile;
 import io.licenseforge.sdk.OfflineClient;
 import io.licenseforge.sdk.Online;
 import io.licenseforge.sdk.PublicKey;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,16 @@ public class Driver {
         + ",\"nope\":" + c.entitlements().hasFeature("nope") + ",\"seats\":" + c.entitlements().limit("seats");
   }
 
+  /** A file, or with LF_K8S_STORE a ConfigMap or Secret through the API the LF_K8S_* variables name (driver.mjs). */
+  static Online.LeaseStore leaseStore() throws Exception {
+    String kind = env("LF_K8S_STORE");
+    if (kind.isEmpty()) return new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE")));
+    LeaseStores.KubernetesApi api = new LeaseStores.KubernetesApi(env("LF_K8S_HOST"), Integer.parseInt(env("LF_K8S_PORT")),
+        Files.readAllBytes(Path.of(env("LF_K8S_CA"))), env("LF_K8S_NAMESPACE"), () -> env("LF_K8S_TOKEN"));
+    return kind.equals("secret") ? new LeaseStores.KubernetesSecretStore(env("LF_K8S_NAME"), null, null, api)
+        : new LeaseStores.KubernetesConfigMapStore(env("LF_K8S_NAME"), null, null, api);
+  }
+
   public static void main(String[] args) throws Exception {
     String op = args[0];
     Fingerprints.Fingerprint fp = Fingerprints.compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), new Fingerprints.Options(() -> env("LF_MACHINE"), false));
@@ -73,7 +84,7 @@ public class Driver {
       Online.Client client = Online.Client.create(Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp)
           .hostname(env("LF_MACHINE"))
           .appVersion("1.0.0")
-          .store(new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE"))))
+          .store(leaseStore())
           .maxAttempts(1));
       try {
         switch (op) {
