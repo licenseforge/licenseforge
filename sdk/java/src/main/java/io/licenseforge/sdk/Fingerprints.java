@@ -323,7 +323,7 @@ public final class Fingerprints {
 
   // --- OS machine IDs ---
 
-  private static String osMachineId() throws FingerprintException {
+  static String osMachineId() throws FingerprintException {
     String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
     if (os.startsWith("linux")) return linuxMachineId(LinuxFs.REAL);
     if (os.startsWith("windows")) return windowsMachineGuid();
