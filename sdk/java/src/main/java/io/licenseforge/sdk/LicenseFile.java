@@ -179,7 +179,9 @@ public final class LicenseFile {
     } catch (NoSuchAlgorithmException | NoSuchProviderException x) {
       throw new IllegalStateException("licenseforge: no SunEC Ed25519 (a jlinked image on JDK 17-21 needs the jdk.crypto.ec module)", x);
     } catch (GeneralSecurityException | RuntimeException x) {
-      ok = false; // a 32-byte value that isn't a curve point can't verify anything
+      // A 32-byte value that isn't a curve point can't verify anything. SunEC throws
+      // checked exceptions for it; RuntimeException is defence in depth (no test reaches it).
+      ok = false;
     }
     if (!ok) throw new LicenseException(Code.BAD_SIGNATURE);
     return new Verified(e.payload(), kid);
