@@ -147,13 +147,16 @@ public final class Fingerprints {
 
     /** Whether the JVM decodes the environment as UTF-8 (sun.jnu.encoding; always on Windows, which has UTF-16). */
     default boolean utf8Environment() {
-      String enc = System.getProperty("sun.jnu.encoding", "");
-      return System.getProperty("os.name", "").startsWith("Windows") || enc.equalsIgnoreCase("UTF-8") || enc.equalsIgnoreCase("UTF8");
+      return Fingerprints.utf8Environment(System.getProperty("os.name", ""), System.getProperty("sun.jnu.encoding", ""));
     }
 
     String kubernetes() throws FingerprintException;
 
     String machineId() throws FingerprintException;
+  }
+
+  static boolean utf8Environment(String osName, String jnuEncoding) {
+    return osName.startsWith("Windows") || jnuEncoding.equalsIgnoreCase("UTF-8") || jnuEncoding.equalsIgnoreCase("UTF8");
   }
 
   private static final Env DEFAULT_ENV = new Env() {
@@ -208,11 +211,11 @@ public final class Fingerprints {
       String v = env.getenv(ENV_OVERRIDE);
       String raw = trim(v == null ? "" : v);
       // The JVM decodes invalid UTF-8 in the environment as U+FFFD: refused, as Go refuses invalid UTF-8.
-      if (raw.indexOf('\uFFFD') >= 0) throw err(FingerprintException.Code.INVALID, ENV_OVERRIDE + " isn't valid UTF-8");
       // In a C/POSIX or Latin-1 locale the JVM misreads UTF-8 bytes: a different fingerprint than Go/TS.
       if (!env.utf8Environment() && raw.chars().anyMatch(c -> c > 0x7f)) {
         throw err(FingerprintException.Code.INVALID, ENV_OVERRIDE + " has non-ASCII characters and the JVM's locale isn't UTF-8: set a UTF-8 locale (LANG=C.UTF-8) or use an ASCII value");
       }
+      if (raw.indexOf('\uFFFD') >= 0) throw err(FingerprintException.Code.INVALID, ENV_OVERRIDE + " isn't valid UTF-8");
       if (!raw.isEmpty()) return new Fingerprint(hash(tenant, product, raw), FingerprintSource.ENV, BindingType.MACHINE);
     }
     String k8s = env.getenv("KUBERNETES_SERVICE_HOST");

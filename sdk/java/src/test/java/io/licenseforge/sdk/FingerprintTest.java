@@ -316,9 +316,9 @@ class FingerprintTest {
   }
 
   @Test
-  void handshakeCutOffIsTransient() throws Exception {
+  void handshakeCutOffIsTransient(@TempDir Path dir) throws Exception {
     // An API server restarting: the connection is accepted, then closed during the handshake.
-    try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress())) {
+    try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))) {
       Thread acceptor = new Thread(() -> {
         while (!ss.isClosed()) {
           try {
@@ -330,7 +330,7 @@ class FingerprintTest {
       });
       acceptor.setDaemon(true);
       acceptor.start();
-      Tls t = tls(Files.createTempDirectory("lf-k8s"), "dns:localhost,ip:127.0.0.1");
+      Tls t = tls(dir, "dns:localhost,ip:127.0.0.1");
       assertEquals("transient", code(() -> Fingerprints.namespaceUid("127.0.0.1", ss.getLocalPort(), "t", t.certPem(), List.of(Duration.ofMillis(1)))));
     }
   }
@@ -361,7 +361,10 @@ class FingerprintTest {
       }
     };
     Options allow = new Options(null, true);
-    assertEquals("invalid", code(() -> Fingerprints.compute("t", "p", allow, latin1)), "non-ASCII under a non-UTF-8 locale");
+    FingerprintException hint = assertThrows(FingerprintException.class, () -> Fingerprints.compute("t", "p", allow, latin1));
+    assertTrue(hint.getMessage().contains("LANG=C.UTF-8"), "the hint, not 'invalid UTF-8': " + hint.getMessage());
+    assertTrue(Fingerprints.utf8Environment("Linux", "UTF-8") && Fingerprints.utf8Environment("Windows 11", "Cp1252"));
+    assertFalse(Fingerprints.utf8Environment("Linux", "ANSI_X3.4-1968") || Fingerprints.utf8Environment("Linux", "ISO-8859-1"));
     assertEquals(Fingerprints.hash("t", "p", "caf\u00e9"), Fingerprints.compute("t", "p", allow, env(m(Fingerprints.ENV_OVERRIDE, "caf\u00e9"), read)).fingerprint(), "UTF-8 locale");
   }
 
