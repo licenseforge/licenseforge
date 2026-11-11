@@ -31,7 +31,7 @@ export {
   parseReceipt,
   parseRequest,
 } from "./offline.js";
-export { OfflineClient, type OfflineConfig, OfflineError, type OfflineErrorCode } from "./offline-client.js";
+export { OfflineClient, type OfflineConfig, OfflineError, type OfflineErrorCode } from "./offlineclient.js";
 export {
   compute,
   ENV_OVERRIDE,
