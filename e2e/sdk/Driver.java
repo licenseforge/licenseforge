@@ -1,9 +1,13 @@
 import io.licenseforge.sdk.Claims;
+import io.licenseforge.sdk.Clock;
 import io.licenseforge.sdk.Fingerprints;
 import io.licenseforge.sdk.KeySet;
 import io.licenseforge.sdk.LeaseStores;
+import io.licenseforge.sdk.LicenseException;
 import io.licenseforge.sdk.LicenseFile;
+import io.licenseforge.sdk.OfflineClient;
 import io.licenseforge.sdk.Online;
+import io.licenseforge.sdk.PublicKey;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,8 +15,8 @@ import java.util.Locale;
 
 /**
  * One step of a customer's app built on the Java SDK, for the SDK journeys (sdk_test.go):
- * java -cp sdk/java/target/classes e2e/sdk/Driver.java activate|refresh|deactivate|current (current: the saved lease
- * alone, no request). The same contract as driver.mjs: LF_* variables in, one JSON line out. Needs sdk/java compiled.
+ * java -cp sdk/java/target/classes e2e/sdk/Driver.java <step>, the steps and contract of driver.mjs:
+ * LF_* variables in, one JSON line out. Needs sdk/java compiled.
  */
 public class Driver {
   static String env(String k) {
@@ -31,36 +35,58 @@ public class Driver {
     return b.append('"').toString();
   }
 
+  static String claims(LicenseFile.Opened o) {
+    Claims c = o.claims();
+    return ",\"lid\":" + q(c.licenseId()) + ",\"tenant\":" + q(c.tenant()) + ",\"product\":" + q(c.product()) + ",\"plan\":" + q(c.plan())
+        + ",\"status\":" + q(o.status().name().toLowerCase(Locale.ROOT)) + ",\"sso\":" + c.entitlements().hasFeature("sso")
+        + ",\"nope\":" + c.entitlements().hasFeature("nope") + ",\"seats\":" + c.entitlements().limit("seats");
+  }
+
   public static void main(String[] args) throws Exception {
+    String op = args[0];
     Fingerprints.Fingerprint fp = Fingerprints.compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), new Fingerprints.Options(() -> env("LF_MACHINE"), false));
-    Online.Config cfg = Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), KeySet.parse(env("LF_KEYS")), fp)
-        .hostname(env("LF_MACHINE"))
-        .appVersion("1.0.0")
-        .store(new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE"))))
-        .maxAttempts(1);
-    Online.Client client = Online.Client.create(cfg);
+    List<PublicKey> keys = KeySet.parse(env("LF_KEYS"));
     String out;
-    try {
-      switch (args[0]) {
-        case "activate" -> client.activate();
-        case "refresh" -> client.refresh();
-        case "deactivate" -> client.deactivate();
-        case "current" -> {}
-        default -> throw new IllegalArgumentException("unknown step " + args[0]);
-      }
-      out = "\"ok\":true";
-      if (!args[0].equals("deactivate")) {
-        LicenseFile.Opened o = client.current();
-        Claims c = o.claims();
-        out += ",\"lid\":" + q(c.licenseId()) + ",\"tenant\":" + q(c.tenant()) + ",\"product\":" + q(c.product()) + ",\"plan\":" + q(c.plan())
-            + ",\"status\":" + q(o.status().name().toLowerCase(Locale.ROOT)) + ",\"sso\":" + c.entitlements().hasFeature("sso")
-            + ",\"nope\":" + c.entitlements().hasFeature("nope") + ",\"seats\":" + c.entitlements().limit("seats");
-      }
-    } catch (Online.OnlineException e) {
-      out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"http\":" + e.status() + ",\"detail\":" + q(e.getMessage());
-    }
     List<String> w = new ArrayList<>();
-    for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
+    if (op.startsWith("offline-")) {
+      OfflineClient client = new OfflineClient(OfflineClient.Config.builder(env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp,
+              new Clock.FileStore(Path.of(env("LF_STORE") + ".offline")))
+          .hostname(env("LF_MACHINE"))
+          .appVersion("1.0.0")
+          .clock(new Clock.Guard(new Clock.FileStore(Path.of(env("LF_STORE") + ".clock")), env("LF_LICENSE_KEY"))));
+      try {
+        out = switch (op) {
+          case "offline-request" -> "\"ok\":true,\"text\":" + q(client.request());
+          case "offline-install" -> "\"ok\":true" + claims(client.install(env("LF_FILE")));
+          case "offline-current" -> "\"ok\":true" + claims(client.current());
+          case "offline-deactivate" -> "\"ok\":true,\"text\":" + q(client.deactivate());
+          default -> throw new IllegalArgumentException("unknown step " + op);
+        };
+      } catch (OfflineClient.OfflineException e) {
+        out = "\"ok\":false,\"code\":" + q(e.code().name().toLowerCase(Locale.ROOT)) + ",\"detail\":" + q(e.getMessage());
+      } catch (LicenseException e) {
+        out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"detail\":" + q(e.getMessage());
+      }
+    } else {
+      Online.Client client = Online.Client.create(Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp)
+          .hostname(env("LF_MACHINE"))
+          .appVersion("1.0.0")
+          .store(new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE"))))
+          .maxAttempts(1));
+      try {
+        switch (op) {
+          case "activate" -> client.activate();
+          case "refresh" -> client.refresh();
+          case "deactivate" -> client.deactivate();
+          case "current" -> {}
+          default -> throw new IllegalArgumentException("unknown step " + op);
+        }
+        out = "\"ok\":true" + (op.equals("deactivate") ? "" : claims(client.current()));
+      } catch (Online.OnlineException e) {
+        out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"http\":" + e.status() + ",\"detail\":" + q(e.getMessage());
+      }
+      for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
+    }
     System.out.println("{" + out + ",\"warnings\":[" + String.join(",", w) + "]}");
   }
 }

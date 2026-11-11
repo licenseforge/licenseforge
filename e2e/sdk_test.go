@@ -16,8 +16,9 @@ import (
 
 // The TypeScript and Java SDKs against the deployed server: the license
 // journey's customer app, one process per step (driver.mjs, Driver.java).
-// "current" is a restart without the network: the saved lease alone. Needs
-// sdk/ts built and sdk/java compiled (make e2e does both).
+// "current" is a restart without the network: the saved lease alone. Then
+// the offline journey's air-gapped machine with each SDK's OfflineClient.
+// Needs sdk/ts built and sdk/java compiled (make e2e does both).
 func TestSDKJourneys(t *testing.T) {
 	e := loadEnv(t)
 	b, tn := owner(t, e)
@@ -64,19 +65,21 @@ func TestSDKJourneys(t *testing.T) {
 			type result struct {
 				OK                         bool
 				Code, Lid, Tenant, Product string
-				Plan, Status, Detail       string
+				Plan, Status, Detail, Text string
 				HTTP                       int
 				SSO, Nope                  bool
 				Seats                      int64
 				Warnings                   []string
 			}
-			step := func(machine, op string, keys []byte) result {
+			// run is one step of machine's app on license l of product p; extra
+			// is more environment (LF_FILE).
+			run1 := func(p catalog, l issued, machine, op string, keys []byte, extra ...string) result {
 				t.Helper()
 				c := exec.Command(cmd[0], append(cmd[1:], op)...)
-				c.Env = append(os.Environ(),
-					"LF_BASE_URL="+e.BaseURL, "LF_TENANT_ID="+tn.ID, "LF_PRODUCT="+product.Slug, "LF_LICENSE_KEY="+lic.Key,
+				c.Env = append(append(os.Environ(),
+					"LF_BASE_URL="+e.BaseURL, "LF_TENANT_ID="+tn.ID, "LF_PRODUCT="+p.Slug, "LF_LICENSE_KEY="+l.Key,
 					"LF_KEYS="+string(keys), "LF_MACHINE="+machine, "LF_STORE="+filepath.Join(dir, machine+".lease"),
-					"NODE_EXTRA_CA_CERTS="+e.CAFile)
+					"NODE_EXTRA_CA_CERTS="+e.CAFile), extra...)
 				out, err := c.Output()
 				var r result
 				if err != nil || json.Unmarshal(out, &r) != nil {
@@ -93,6 +96,7 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				return r
 			}
+			step := func(machine, op string, keys []byte) result { t.Helper(); return run1(product, lic, machine, op, keys) }
 			ok := func(machine, op string) result {
 				t.Helper()
 				r := step(machine, op, keySet)
@@ -160,6 +164,60 @@ func TestSDKJourneys(t *testing.T) {
 
 			b.do("POST", api+"/licenses/"+lic.ID+"/revoke", nil, 200, nil)
 			refused(m2, "refresh", "license_revoked", 403)
+
+			// Offline (ADR-0043): request, the vendor's answer, install, a
+			// restart, a renewal and the older file, the receipt, the returned file.
+			offProduct, ol, _ := newLicense(t, b, tn, map[string]any{"offline_allowed": true, "max_offline_seconds": 30 * 86400})
+			mo := "e2e-" + sdk.name + "-offline-" + run
+			off := func(op2 string, extra ...string) result { t.Helper(); return run1(offProduct, ol, mo, op2, keySet, extra...) }
+			offOK := func(op2 string, extra ...string) result {
+				t.Helper()
+				r := off(op2, extra...)
+				if !r.OK {
+					t.Fatalf("%s: %s (%s)", op2, r.Code, r.Detail)
+				}
+				return r
+			}
+			offRefused := func(code, op2 string, extra ...string) {
+				t.Helper()
+				if r := off(op2, extra...); r.OK || r.Code != code {
+					t.Fatalf("%s: %+v, want %s", op2, r, code)
+				}
+			}
+			answer := func(request string) (a struct {
+				LicenseFile  string `json:"license_file"`
+				ActivationID string `json:"activation_id"`
+			}) {
+				t.Helper()
+				b.do("POST", api+"/activation-requests", map[string]string{"request": request}, 201, &a)
+				return a
+			}
+			offRefused("no_license", "offline-current")
+			first := answer(offOK("offline-request").Text)
+			in := offOK("offline-install", "LF_FILE="+first.LicenseFile)
+			if in.Lid != ol.ID || in.Tenant != tn.ID || in.Product != offProduct.Slug || in.Status != "valid" || !in.SSO || in.Seats != 25 {
+				t.Errorf("installed claims %+v", in)
+			}
+			if c := offOK("offline-current"); fmt.Sprint(c) != fmt.Sprint(in) {
+				t.Errorf("after a restart: %+v, want %+v", c, in)
+			}
+			renewed := answer(offOK("offline-request").Text)
+			if renewed.ActivationID != first.ActivationID {
+				t.Errorf("the renewal took another seat: %s, want %s", renewed.ActivationID, first.ActivationID)
+			}
+			offOK("offline-install", "LF_FILE="+renewed.LicenseFile)
+			offRefused("older_file", "offline-install", "LF_FILE="+first.LicenseFile)
+			receipt := offOK("offline-deactivate").Text
+			var act struct {
+				ID, Mode      string
+				DeactivatedAt *string `json:"deactivated_at"`
+			}
+			b.do("POST", api+"/deactivation-receipts", map[string]string{"receipt": receipt}, 200, &act)
+			if act.ID != first.ActivationID || act.Mode != "offline" || act.DeactivatedAt == nil {
+				t.Errorf("returned seat %+v", act)
+			}
+			offRefused("no_license", "offline-current")
+			offRefused("returned", "offline-install", "LF_FILE="+renewed.LicenseFile)
 		})
 	}
 }
