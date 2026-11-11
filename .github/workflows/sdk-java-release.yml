@@ -1,0 +1,139 @@
+name: Java SDK release
+# io.licenseforge:licenseforge-sdk to Maven Central from an sdk/java/vX.Y.Z tag
+# (ADR-0023 and ADR-0021, amended). `build` builds and tests the jars with a
+# read-only token and lays out the Maven bundle; `publish` runs only on the tag,
+# in the protected `maven-central` environment, builds nothing: it signs the
+# built files with the release PGP key (Central requires PGP signatures),
+# attests their SLSA provenance, and uploads the bundle to the Central Portal as
+# USER_MANAGED: a maintainer presses Publish after checking it, since a Central
+# release can never be removed. PRs touching the SDK run `build` alone.
+# Verification for users: docs/verifying-releases.md.
+on:
+  push:
+    tags: ["sdk/java/v*"]
+  pull_request:
+    paths: [sdk/java/**, LICENSE, NOTICE, .github/workflows/sdk-java-release.yml]
+permissions: {}
+defaults:
+  run:
+    shell: bash # -eo pipefail
+env:
+  MAVEN_VERSION: 3.9.16
+  MAVEN_SHA512: 831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with: { distribution: temurin, java-version: "17" } # the oldest supported: class files run on 17+
+      - name: Maven, pinned and checksum-verified
+        run: |
+          curl -fsSL -o maven.tgz "https://archive.apache.org/dist/maven/maven-3/$MAVEN_VERSION/binaries/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+          echo "$MAVEN_SHA512  maven.tgz" | sha512sum -c
+          mkdir -p "$RUNNER_TEMP/maven" && tar -xzf maven.tgz -C "$RUNNER_TEMP/maven" --strip-components=1 && rm maven.tgz
+          echo "$RUNNER_TEMP/maven/bin" >> "$GITHUB_PATH"
+      - name: Version from the pom; the tag must name it
+        id: version
+        working-directory: sdk/java
+        run: |
+          v=$(sed -n 's:^  <version>\(.*\)</version>$:\1:p' pom.xml | head -1)
+          echo "$v" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?' || { echo "pom version is not X.Y.Z[-(alpha|beta|rc).N]: $v"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "sdk/java/v$v" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match pom version $v"; exit 1
+          fi
+          grep -q "SDK_VERSION = \"java/$v\"" src/main/java/io/licenseforge/sdk/Online.java || { echo "Online.SDK_VERSION isn't java/$v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build and test (jar, sources, javadoc)
+        working-directory: sdk/java
+        run: mvn -B -ntp --strict-checksums -Prelease verify
+      - name: The Maven bundle layout, with checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          d="out/bundle/io/licenseforge/licenseforge-sdk/$VERSION"
+          mkdir -p "$d"
+          a=licenseforge-sdk-$VERSION
+          cp "sdk/java/target/$a.jar" "sdk/java/target/$a-sources.jar" "sdk/java/target/$a-javadoc.jar" "$d/"
+          cp sdk/java/pom.xml "$d/$a.pom"
+          # The jar holds the SDK's classes, the license, notice and Maven metadata, nothing else.
+          unzip -tq "$d/$a.jar"
+          unzip -Z1 "$d/$a.jar" > "$RUNNER_TEMP/jar-files"
+          grep -vE '^(META-INF/|META-INF/MANIFEST\.MF|META-INF/(LICENSE|NOTICE)|META-INF/maven/.*|io/|io/licenseforge/|io/licenseforge/sdk/|io/licenseforge/sdk/[A-Za-z0-9$]+\.class)$' "$RUNNER_TEMP/jar-files" && { echo "unexpected files in the jar"; exit 1; }
+          for f in META-INF/LICENSE META-INF/NOTICE io/licenseforge/sdk/LicenseFile.class io/licenseforge/sdk/Online.class; do
+            grep -qx "$f" "$RUNNER_TEMP/jar-files" || { echo "missing $f in the jar"; exit 1; }
+          done
+          unzip -p "$d/$a.jar" META-INF/MANIFEST.MF | grep -q '^Automatic-Module-Name: io.licenseforge.sdk' || { echo "no Automatic-Module-Name"; exit 1; }
+          (cd "$d" && for f in *.jar *.pom; do md5sum "$f" | cut -d' ' -f1 > "$f.md5"; sha1sum "$f" | cut -d' ' -f1 > "$f.sha1"; done)
+          (cd out && find bundle -type f | sort | xargs sha256sum > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: sdk-java, path: out/, if-no-files-found: error, retention-days: 7 }
+
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: maven-central # protected: required reviewer, sdk/java/v* tags only; holds the secrets below
+    permissions:
+      id-token: write # Sigstore, for the provenance attestation
+      attestations: write # GitHub attestation store
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: sdk-java, path: out }
+      - name: The bundle is the one built
+        run: cd out && sha256sum -c SHA256SUMS
+      - name: SLSA build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            out/bundle/io/licenseforge/licenseforge-sdk/*/*.jar
+            out/bundle/io/licenseforge/licenseforge-sdk/*/*.pom
+      - name: Sign with the release PGP key (the one whose fingerprint SECURITY.md publishes)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          FPR: ${{ vars.PGP_FINGERPRINT }} # environment variable: the release key's primary fingerprint
+        run: |
+          echo "$FPR" | grep -Eqx '[0-9A-F]{40}' || { echo "vars.PGP_FINGERPRINT must be the 40-hex-digit fingerprint"; exit 1; }
+          export GNUPGHOME="$RUNNER_TEMP/gnupg" && mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          cd "out/bundle/io/licenseforge/licenseforge-sdk/$VERSION"
+          for f in *.jar *.pom; do
+            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$FPR!" --armor --detach-sign "$f"
+            # Signed by that primary key (Central verifies against primary keys), not just by some key.
+            status=$(gpg --batch --status-fd 1 --verify "$f.asc" "$f")
+            printf '%s\n' "$status" | grep -E "^\[GNUPG:\] VALIDSIG $FPR " >/dev/null || { echo "$f: not signed by $FPR"; exit 1; }
+          done
+      - name: Upload to the Central Portal (USER_MANAGED; publish there after checking)
+        env:
+          CENTRAL_TOKEN: ${{ secrets.CENTRAL_TOKEN }} # base64 of the portal user token's "username:password"
+        run: |
+          (cd out/bundle && zip -qr ../bundle.zip .)
+          # The token goes through a file, not curl's argv. No --retry: a retried POST can make a second deployment.
+          hdr="$RUNNER_TEMP/auth" && printf 'Authorization: Bearer %s\n' "$CENTRAL_TOKEN" > "$hdr" && trap 'rm -f "$hdr"' EXIT
+          api=https://central.sonatype.com/api/v1/publisher
+          id=$(curl -sS --fail-with-body -H @"$hdr" -F "bundle=@out/bundle.zip" "$api/upload?name=licenseforge-sdk-$VERSION&publishingType=USER_MANAGED") || { echo "upload refused: $id"; exit 1; }
+          echo "$id" | grep -Eqx '[0-9a-fA-F-]{36}' || { echo "unexpected upload answer: $id"; exit 1; }
+          echo "deployment $id"
+          # Central validates asynchronously: the run fails if it does.
+          for _ in $(seq 60); do
+            st=$(curl -sS --fail-with-body -H @"$hdr" -X POST "$api/status?id=$id") || { echo "status refused: $st"; exit 1; }
+            state=$(printf '%s' "$st" | jq -r .deploymentState) || { echo "unexpected status answer: $st"; exit 1; }
+            echo "state $state"
+            case $state in
+              VALIDATED) echo "Validated: check it on central.sonatype.com and press Publish."; exit 0 ;;
+              FAILED) printf '%s' "$st" | jq .errors; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "still $state after 10 minutes: check the deployment on central.sonatype.com"; exit 1

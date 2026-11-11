@@ -61,7 +61,7 @@ public final class Online {
   // and IMF-fixdate only (the server sends seconds).
 
   /** Sent with activations and refreshes; kept with the pom's version (OnlineTest). */
-  public static final String SDK_VERSION = "java/0.1.0-SNAPSHOT";
+  public static final String SDK_VERSION = "java/0.1.0-alpha.1";
   /** The least run waits after a successful refresh, whatever refresh_after says (ADR-0034). */
   public static final Duration MIN_REFRESH_INTERVAL = Duration.ofMinutes(1);
 
