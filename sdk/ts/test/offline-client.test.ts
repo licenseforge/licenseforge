@@ -147,6 +147,8 @@ test("state: damaged counts as none; another kind's state fails loudly", () => {
   assert.equal(code(() => c.current(now)), "foreign_state");
   assert.equal(code(() => c.install(file(), now)), "foreign_state");
   assert.equal(Buffer.from(store.b!).toString(), '{"mark":"2026-11-09T12:00:00.000Z","mac":"x"}', "left as it was");
+  store.b = Buffer.from('{"offline":2}'); // another version's
+  assert.equal(code(() => c.current(now)), "foreign_state");
 });
 
 test("install refusals store nothing", () => {
