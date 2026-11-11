@@ -168,6 +168,11 @@ public final class Clock {
       return now(Instant.now());
     }
 
+    /** How far the system clock may be behind the mark before it is a rollback. */
+    public Duration tolerance() {
+      return tolerance;
+    }
+
     /**
      * Raises the mark to t, a time known to be genuine (the iat of a license
      * that passed its checks); capped at local + tolerance, so a fast vendor
