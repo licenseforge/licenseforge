@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.TrustManagerFactory;
 
 /**
@@ -102,6 +101,9 @@ public final class Fingerprints {
    * tenant or product.
    */
   public static String hash(String tenant, String product, String rawId) throws FingerprintException {
+    Objects.requireNonNull(tenant, "tenant");
+    Objects.requireNonNull(product, "product");
+    Objects.requireNonNull(rawId, "rawId");
     if (rawId.isEmpty()) throw err(FingerprintException.Code.INVALID, "empty raw ID");
     if (tenant.isEmpty() || product.isEmpty() || tenant.indexOf('\0') >= 0 || product.indexOf('\0') >= 0) {
       throw err(FingerprintException.Code.INVALID, "tenant and product IDs must be non-empty and contain no NUL");
@@ -143,6 +145,12 @@ public final class Fingerprints {
   interface Env {
     String getenv(String name);
 
+    /** Whether the JVM decodes the environment as UTF-8 (sun.jnu.encoding; always on Windows, which has UTF-16). */
+    default boolean utf8Environment() {
+      String enc = System.getProperty("sun.jnu.encoding", "");
+      return System.getProperty("os.name", "").startsWith("Windows") || enc.equalsIgnoreCase("UTF-8") || enc.equalsIgnoreCase("UTF8");
+    }
+
     String kubernetes() throws FingerprintException;
 
     String machineId() throws FingerprintException;
@@ -176,6 +184,7 @@ public final class Fingerprints {
 
   /** The fingerprint for a verified, bound license, with its tenant and product. */
   public static Fingerprint forLicense(Claims claims, Options opts) throws FingerprintException {
+    Objects.requireNonNull(claims, "claims");
     return compute(claims.tenant(), claims.product(), opts);
   }
 
@@ -186,6 +195,9 @@ public final class Fingerprints {
       String raw;
       try {
         raw = opts.override().call();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new FingerprintException(FingerprintException.Code.FAILED, "override: interrupted", e);
       } catch (Exception e) {
         throw new FingerprintException(FingerprintException.Code.FAILED, "override: " + e, e);
       }
@@ -197,6 +209,10 @@ public final class Fingerprints {
       String raw = trim(v == null ? "" : v);
       // The JVM decodes invalid UTF-8 in the environment as U+FFFD: refused, as Go refuses invalid UTF-8.
       if (raw.indexOf('\uFFFD') >= 0) throw err(FingerprintException.Code.INVALID, ENV_OVERRIDE + " isn't valid UTF-8");
+      // In a C/POSIX or Latin-1 locale the JVM misreads UTF-8 bytes: a different fingerprint than Go/TS.
+      if (!env.utf8Environment() && raw.chars().anyMatch(c -> c > 0x7f)) {
+        throw err(FingerprintException.Code.INVALID, ENV_OVERRIDE + " has non-ASCII characters and the JVM's locale isn't UTF-8: set a UTF-8 locale (LANG=C.UTF-8) or use an ASCII value");
+      }
       if (!raw.isEmpty()) return new Fingerprint(hash(tenant, product, raw), FingerprintSource.ENV, BindingType.MACHINE);
     }
     String k8s = env.getenv("KUBERNETES_SERVICE_HOST");
@@ -248,13 +264,17 @@ public final class Fingerprints {
       tmf.init(ks); // only the cluster's CA
       SSLContext tls = SSLContext.getInstance("TLS");
       tls.init(null, tmf.getTrustManagers(), null);
-      client = HttpClient.newBuilder().sslContext(tls).connectTimeout(REQUEST_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
+      javax.net.ssl.SSLParameters params = tls.getDefaultSSLParameters();
+      params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"}); // as Go and TS: never older, whatever java.security allows
+      client = HttpClient.newBuilder().sslContext(tls).sslParameters(params).connectTimeout(REQUEST_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
       String h = host.indexOf(':') >= 0 ? "[" + host + "]" : host; // an IPv6 service address
       req = HttpRequest.newBuilder(URI.create("https://" + h + ":" + port + "/api/v1/namespaces/kube-system"))
           .header("Authorization", "Bearer " + token).timeout(REQUEST_TIMEOUT).GET().build();
-    } catch (GeneralSecurityException | IOException | IllegalArgumentException e) {
-      // a bad CA, or a token or host that can't be sent (a line break): configuration errors
-      throw new FingerprintException(FingerprintException.Code.FAILED, "kubernetes: " + e.getMessage(), e);
+    } catch (IllegalArgumentException e) {
+      // The JDK's message would quote the header value: never the token, nor a cause carrying it.
+      throw err(FingerprintException.Code.FAILED, "kubernetes: the service account token or the API host can't be sent (a line break?)");
+    } catch (GeneralSecurityException | IOException e) {
+      throw new FingerprintException(FingerprintException.Code.FAILED, "kubernetes: unusable service account CA: " + e.getMessage(), e);
     }
     for (int attempt = 0; ; attempt++) {
       Attempt a = get(client, req);
@@ -303,8 +323,13 @@ public final class Fingerprints {
       return new Attempt(null, false, "interrupted");
     } catch (ExecutionException e) {
       Throwable c = e.getCause();
-      // Certificate and name problems are configuration errors: retrying won't help.
-      return new Attempt(null, c instanceof SSLHandshakeException, String.valueOf(c));
+      // Certificate and name problems are configuration errors: retrying won't help. A handshake
+      // cut off by the network (an API server restarting) is transient, as in Go and TS.
+      boolean cert = false;
+      for (Throwable t = c; t != null && !cert; t = t.getCause()) {
+        cert = t instanceof java.security.cert.CertificateException || t instanceof javax.net.ssl.SSLPeerUnverifiedException;
+      }
+      return new Attempt(null, cert, String.valueOf(c));
     }
   }
 

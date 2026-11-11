@@ -122,6 +122,9 @@ class FingerprintTest {
       assertEquals("no_fingerprint", code(() -> Fingerprints.parseMachineId(bad)), bad);
     }
     assertEquals("/my disk\\x", Fingerprints.unescapeMount("/my\\040disk\\134x"));
+    assertEquals("/a\\777b", Fingerprints.unescapeMount("/a\\777b"), "past 255: kept as is");
+    // A line with only four fields before the separator is ignored.
+    assertEquals(VALID, Fingerprints.linuxMachineId(fs(m("/etc/machine-id", VALID, "/proc/self/mountinfo", ROOT_EXT4 + "35 22 0:31 /x - tmpfs src rw\n"))));
   }
 
   static Fingerprints.Env env(Map<String, String> vars, boolean[] read) {
@@ -258,8 +261,14 @@ class FingerprintTest {
       seen.clear();
       assertEquals("failed", code(() -> Fingerprints.namespaceUid("127.0.0.1", port, "t", t.certPem(), TWO)));
       assertEquals(1, seen.size());
-      // A token with a line break can't be sent; a CA file without a certificate is unusable.
-      assertEquals("failed", code(() -> Fingerprints.namespaceUid("127.0.0.1", port, "a\nb", t.certPem(), TWO)));
+      // A token with a line break can't be sent, and never shows up in the error or its cause.
+      FingerprintException leak = assertThrows(FingerprintException.class, () -> Fingerprints.namespaceUid("127.0.0.1", port, "S3CRET\r\nX", t.certPem(), TWO));
+      assertEquals(FingerprintException.Code.FAILED, leak.code());
+      for (Throwable x = leak; x != null; x = x.getCause()) assertFalse(String.valueOf(x.getMessage()).contains("S3CRET"), x.toString());
+      // A redirect isn't followed.
+      answers.add(new Answer(302, ""));
+      assertEquals("failed", code(() -> Fingerprints.namespaceUid("127.0.0.1", port, "t", t.certPem(), TWO)));
+      // A CA file without a certificate is unusable.
       assertEquals("failed", code(() -> Fingerprints.namespaceUid("127.0.0.1", port, "t", "junk".getBytes(StandardCharsets.UTF_8), TWO)));
     } finally {
       s.stop(0);
@@ -304,6 +313,56 @@ class FingerprintTest {
     } finally {
       drip.stop(0);
     }
+  }
+
+  @Test
+  void handshakeCutOffIsTransient() throws Exception {
+    // An API server restarting: the connection is accepted, then closed during the handshake.
+    try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress())) {
+      Thread acceptor = new Thread(() -> {
+        while (!ss.isClosed()) {
+          try {
+            ss.accept().close();
+          } catch (java.io.IOException e) {
+            return;
+          }
+        }
+      });
+      acceptor.setDaemon(true);
+      acceptor.start();
+      Tls t = tls(Files.createTempDirectory("lf-k8s"), "dns:localhost,ip:127.0.0.1");
+      assertEquals("transient", code(() -> Fingerprints.namespaceUid("127.0.0.1", ss.getLocalPort(), "t", t.certPem(), List.of(Duration.ofMillis(1)))));
+    }
+  }
+
+  @Test
+  void envOverrideNeedsAUtf8Locale() throws Exception {
+    boolean[] read = {false};
+    Fingerprints.Env latin1 = new Fingerprints.Env() {
+      @Override
+      public String getenv(String n) {
+        return n.equals(Fingerprints.ENV_OVERRIDE) ? "caf\u00e9" : null;
+      }
+
+      @Override
+      public String kubernetes() {
+        return "x";
+      }
+
+      @Override
+      public String machineId() {
+        read[0] = true;
+        return VALID;
+      }
+
+      @Override
+      public boolean utf8Environment() {
+        return false;
+      }
+    };
+    Options allow = new Options(null, true);
+    assertEquals("invalid", code(() -> Fingerprints.compute("t", "p", allow, latin1)), "non-ASCII under a non-UTF-8 locale");
+    assertEquals(Fingerprints.hash("t", "p", "caf\u00e9"), Fingerprints.compute("t", "p", allow, env(m(Fingerprints.ENV_OVERRIDE, "caf\u00e9"), read)).fingerprint(), "UTF-8 locale");
   }
 
   @Test
