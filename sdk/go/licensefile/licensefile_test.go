@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/fips140"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,6 +93,26 @@ func buildVectors(t *testing.T) vectorFile {
 	sBig.Add(sBig, order)
 	malleated := append(append([]byte{}, sig[:32]...), reverse(sBig.FillBytes(make([]byte, 32)))...)
 
+	// A chosen R with S = k·a mod L, k = SHA-512(R || A || M) mod L: what the
+	// key's holder can make. With R = identity, Go's cofactorless check
+	// accepts it and OpenSSL refuses; the spec refuses every weak R.
+	expanded := sha512.Sum512(testSeed)
+	expanded[0] &= 248
+	expanded[31] &= 127
+	expanded[31] |= 64
+	scalar := new(big.Int).SetBytes(reverse(expanded[:32]))
+	chosenR := func(rHex string) string {
+		r := weakKey(rHex)
+		h := sha512.New()
+		h.Write(r)
+		h.Write(priv.Public().(ed25519.PublicKey))
+		h.Write([]byte(join(parts[0], parts[1], parts[2])))
+		k := new(big.Int).SetBytes(reverse(h.Sum(nil)))
+		s := k.Mul(k.Mod(k, order), scalar)
+		s.Mod(s, order)
+		return join(parts[0], parts[1], parts[2], b64.EncodeToString(append(r, reverse(s.FillBytes(make([]byte, 32)))...)))
+	}
+
 	// Unknown kid combined with a second fault, to pin error precedence.
 	missingTok := sign("test:missing", payload)
 	mp := strings.Split(missingTok, ".")
@@ -149,6 +170,10 @@ func buildVectors(t *testing.T) vectorFile {
 			{Name: "invalid_key_set_noncanonical_large_key", License: join("lf1", "test:weak-noncanonical-large", parts[2], parts[3]), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_order_8_key", License: join("lf1", "test:weak-order-8", parts[2], parts[3]), Expect: "invalid_key_set"},
 			{Name: "invalid_key_set_weak_key_before_signature_length", License: join("lf1", "test:weak-identity", parts[2], shortSig), Expect: "invalid_key_set"},
+			{Name: "bad_signature_small_order_r", License: chosenR("0100000000000000000000000000000000000000000000000000000000000000"), Expect: "bad_signature"},
+			{Name: "bad_signature_order_8_r", License: chosenR("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"), Expect: "bad_signature"},
+			{Name: "bad_signature_negative_zero_r", License: chosenR("0100000000000000000000000000000000000000000000000000000000000080"), Expect: "bad_signature"},
+			{Name: "bad_signature_noncanonical_r", License: chosenR("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"), Expect: "bad_signature"},
 			{Name: "bad_signature_payload_tampered", License: join(parts[0], parts[1], otherPayload, parts[3]), Expect: "bad_signature"},
 			{Name: "bad_signature_kid_swapped", License: join(parts[0], "test:other", parts[2], parts[3]), Expect: "bad_signature"},
 			{Name: "unknown_key", License: sign("test:missing", payload), Expect: "unknown_key"},
