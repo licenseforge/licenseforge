@@ -81,20 +81,17 @@ func trustedKeys(t *testing.T, b *browser, tenant string) licensefile.KeySet {
 	return ks
 }
 
-// The vendor's journey and its customer's app: a catalog, a license, a
-// machine that activates and checks entitlements offline from a verified
-// lease, the seat limit, a refresh, then revocation ending the license.
-func TestLicenseJourney(t *testing.T) {
-	e := loadEnv(t)
-	ctx := context.Background()
-	b, tn := owner(t, e)
-	api := "/api/v1/tenants/" + tn.Slug
-	run := strings.ToLower(rand.Text()[:8]) // this run's names: runs never depend on each other
-	keys := trustedKeys(t, b, tn.Slug)
+type issued struct{ ID, Key string }
 
-	// Catalog: a product, an on/off feature and a limit, a machine-bound plan
-	// with one seat that grants both.
-	var product struct{ ID, Slug string }
+type catalog struct{ ID, Slug string }
+
+// newLicense makes this run's catalog and a license: a product, an on/off
+// feature and a limit, a machine-bound plan with one seat that grants both.
+// run names this run's objects: runs never depend on each other.
+func newLicense(t *testing.T, b *browser, tn tenant) (product catalog, lic issued, run string) {
+	t.Helper()
+	api := "/api/v1/tenants/" + tn.Slug
+	run = strings.ToLower(rand.Text()[:8])
 	b.do("POST", api+"/products", map[string]string{"slug": "e2e-" + run, "name": "E2E " + run}, 201, &product)
 	for _, f := range []map[string]string{{"key": "sso", "name": "SSO", "type": "boolean"}, {"key": "seats", "name": "Seats", "type": "limit"}} {
 		f["product_id"] = product.ID
@@ -107,14 +104,23 @@ func TestLicenseJourney(t *testing.T) {
 	b.do("POST", api+"/customers", map[string]string{"name": "Customer " + run}, 201, &customer)
 
 	// Issue: the key is shown once.
-	var lic struct {
-		ID  string
-		Key string
-	}
 	b.do("POST", api+"/licenses", map[string]string{"product_id": product.ID, "plan_id": plan.ID, "customer_id": customer.ID, "type": "paid"}, 201, &lic)
 	if lic.Key == "" {
 		t.Fatal("issued without a key")
 	}
+	return product, lic, run
+}
+
+// The vendor's journey and its customer's app: a catalog, a license, a
+// machine that activates and checks entitlements offline from a verified
+// lease, the seat limit, a refresh, then revocation ending the license.
+func TestLicenseJourney(t *testing.T) {
+	e := loadEnv(t)
+	ctx := context.Background()
+	b, tn := owner(t, e)
+	api := "/api/v1/tenants/" + tn.Slug
+	keys := trustedKeys(t, b, tn.Slug)
+	product, lic, run := newLicense(t, b, tn)
 
 	// The customer's app: the SDK as a vendor configures it.
 	app := func(machine string) *online.Client {
