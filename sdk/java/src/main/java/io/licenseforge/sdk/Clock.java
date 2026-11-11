@@ -229,7 +229,8 @@ public final class Clock {
     private static final Duration LOCK_WAIT = Duration.ofSeconds(2);
     // ponytail: one monitor for every FileStore in this JVM. Per path, two paths to one file
     // (a symlink, a bind mount, case) would overlap, and closing one channel drops the
-    // process's fcntl lock for both. Contention is negligible (one short update per check).
+    // process's fcntl lock for both. Contention is negligible (one short update per check);
+    // the cost: another process holding one file's lock delays checks on other files up to 2 s.
     private static final Object LOCK = new Object();
     private final Path path;
 

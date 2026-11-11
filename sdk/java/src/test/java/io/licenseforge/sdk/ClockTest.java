@@ -239,4 +239,20 @@ class ClockTest {
     // Serialized: the highest raise survives.
     assertEquals(T0.plus(Duration.ofMinutes(14)), new Guard(new FileStore(p), "k").now(T0).now());
   }
+
+  @Test
+  void threadsSerializeWithoutOsLocking(@TempDir Path dir) throws Exception {
+    Path p = dir.resolve("clock.json");
+    Files.createDirectory(dir.resolve("clock.json.lock")); // no OS lock: only the JVM monitor serializes
+    for (int round = 0; round < 5; round++) {
+      Thread[] ts = new Thread[16];
+      for (int i = 0; i < ts.length; i++) {
+        Instant mine = T0.plus(Duration.ofMinutes(100L * round + 2L * i));
+        ts[i] = new Thread(() -> new Guard(new FileStore(p), "k").observe(mine, mine));
+        ts[i].start();
+      }
+      for (Thread t : ts) t.join();
+      assertEquals(T0.plus(Duration.ofMinutes(100L * round + 30)), new Guard(new FileStore(p), "k").now(T0).now(), "round " + round);
+    }
+  }
 }
