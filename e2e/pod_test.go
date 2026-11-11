@@ -136,7 +136,8 @@ subjects: [` + strings.TrimSuffix(subjects.String(), ", ") + `]
 	kube(t, e, manifest.String(), "apply", "-f", "-")
 	wait := exec.Command("kubectl", append([]string{"--context", e.KubeContext, "-n", ns, "wait", "--for=condition=Ready", "--timeout=300s"}, prefix("pod/", pods)...)...)
 	if out, err := wait.CombinedOutput(); err != nil { // an image pull that failed, most likely: say why
-		t.Fatalf("pods not ready: %v\n%s\n%s", err, out, kube(t, e, "", append([]string{"-n", ns, "describe"}, prefix("pod/", pods)...)...))
+		describe, _ := exec.Command("kubectl", append([]string{"--context", e.KubeContext, "-n", ns, "describe"}, prefix("pod/", pods)...)...).CombinedOutput()
+		t.Fatalf("pods not ready: %v\n%s\n%s", err, out, describe)
 	}
 	for _, p := range pods {
 		kube(t, e, "", "-n", ns, "cp", app, p+":/tmp/app")
