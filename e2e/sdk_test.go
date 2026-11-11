@@ -278,8 +278,10 @@ func TestSDKJourneys(t *testing.T) {
 			// A suspended license doesn't stop it: one run sees its refreshes
 			// refused (reported, the lease kept) while the license is
 			// suspended, then renews once the vendor reinstates it. A 20 s
-			// lease: refresh_after at 10 s, the reinstatement at 12 s, the
-			// retries backing off by 1-2 s, the run ending by about 17.5 s.
+			// lease: refresh_after at 10 s, the reinstatement at 12 s, retries
+			// backing off up to 4 s, the run ending 18 s after it loaded (a
+			// renewal comes before the first lease runs out; without one the
+			// run ends on the first lease, or none, and fails either way).
 			{
 				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 20})
 				mr := "e2e-" + sdk.name + "-run-suspended-" + run
@@ -292,7 +294,7 @@ func TestSDKJourneys(t *testing.T) {
 					t.Fatal(err)
 				}
 				b.do("POST", api+"/licenses/"+rl.ID+"/suspend", nil, 200, nil)
-				wait := start(rp, rl, mr, "run", "LF_RUN_MS=16000")
+				wait := start(rp, rl, mr, "run", "LF_RUN_MS=18000")
 				time.Sleep(time.Until(iat.Add(12 * time.Second)))
 				b.do("POST", api+"/licenses/"+rl.ID+"/reinstate", nil, 200, nil)
 				if r := wait(); !r.OK || r.Iat <= first.Iat || len(r.Errors) == 0 || slices.ContainsFunc(r.Errors, func(c string) bool { return c != "license_suspended" }) {
