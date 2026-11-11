@@ -368,6 +368,23 @@ func TestIdempotentActivateOneConnection(t *testing.T) {
 	}
 }
 
+// Activate and refresh without an Idempotency-Key sign in their own
+// transaction too (ADR-0034 as amended): one pool connection is enough.
+func TestActivateAndRefreshOneConnection(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	a.db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	withCtx := func(r *http.Request) { *r = *r.WithContext(ctx) }
+	body := actBody(newFP())
+	for _, op := range []string{"activate", "refresh"} {
+		if r := a.do(t, "POST", actPath(a.a.ID, op), body, licenseAuth(is.Key), withCtx); r.code != 200 {
+			t.Fatalf("%s: %d %s", op, r.code, r.raw)
+		}
+	}
+}
+
 // Past maxKeys distinct keys in a minute, new keys pass untracked (memory
 // stays bounded); keys already counted stay limited.
 func TestKeyLimiterBounded(t *testing.T) {
