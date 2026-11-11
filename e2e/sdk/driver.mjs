@@ -32,7 +32,9 @@ function leaseStore() {
   if (!kind) return new FileLeaseStore(env("LF_STORE"));
   const api = { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => env("LF_K8S_TOKEN") };
   const opts = { name: env("LF_K8S_NAME"), api };
-  return kind === "secret" ? new KubernetesSecretStore(opts) : new KubernetesConfigMapStore(opts);
+  if (kind === "secret") return new KubernetesSecretStore(opts);
+  if (kind === "configmap") return new KubernetesConfigMapStore(opts);
+  throw new Error(`LF_K8S_STORE ${kind}: configmap or secret`);
 }
 
 let out;

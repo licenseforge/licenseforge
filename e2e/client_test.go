@@ -7,6 +7,7 @@ package e2e
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -30,6 +31,9 @@ import (
 // up.sh), overridden by the process environment.
 type env struct {
 	BaseURL, CAFile, Tenant, InviteTokenFile string
+	// KubeContext and Namespace: kubectl's context for the cluster and the
+	// e2e namespace (default minikube, licenseforge-e2e: an older env file).
+	KubeContext, Namespace string
 }
 
 func loadEnv(t *testing.T) env {
@@ -54,7 +58,8 @@ func loadEnv(t *testing.T) env {
 		}
 		return vals[k]
 	}
-	e := env{BaseURL: get("E2E_BASE_URL"), CAFile: get("E2E_CA_FILE"), Tenant: get("E2E_TENANT"), InviteTokenFile: get("E2E_INVITE_TOKEN_FILE")}
+	e := env{BaseURL: get("E2E_BASE_URL"), CAFile: get("E2E_CA_FILE"), Tenant: get("E2E_TENANT"), InviteTokenFile: get("E2E_INVITE_TOKEN_FILE"),
+		KubeContext: cmp.Or(get("E2E_KUBE_CONTEXT"), "minikube"), Namespace: cmp.Or(get("E2E_NAMESPACE"), "licenseforge-e2e")}
 	if e.BaseURL == "" {
 		t.Fatalf("no e2e environment: run e2e/env/up.sh first (or set E2E_BASE_URL); read %s", path)
 	}

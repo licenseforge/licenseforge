@@ -49,8 +49,11 @@ public class Driver {
     if (kind.isEmpty()) return new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE")));
     LeaseStores.KubernetesApi api = new LeaseStores.KubernetesApi(env("LF_K8S_HOST"), Integer.parseInt(env("LF_K8S_PORT")),
         Files.readAllBytes(Path.of(env("LF_K8S_CA"))), env("LF_K8S_NAMESPACE"), () -> env("LF_K8S_TOKEN"));
-    return kind.equals("secret") ? new LeaseStores.KubernetesSecretStore(env("LF_K8S_NAME"), null, null, api)
-        : new LeaseStores.KubernetesConfigMapStore(env("LF_K8S_NAME"), null, null, api);
+    return switch (kind) {
+      case "secret" -> new LeaseStores.KubernetesSecretStore(env("LF_K8S_NAME"), null, null, api);
+      case "configmap" -> new LeaseStores.KubernetesConfigMapStore(env("LF_K8S_NAME"), null, null, api);
+      default -> throw new IllegalArgumentException("LF_K8S_STORE " + kind + ": configmap or secret");
+    };
   }
 
   public static void main(String[] args) throws Exception {

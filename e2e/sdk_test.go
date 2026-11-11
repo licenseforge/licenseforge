@@ -45,7 +45,8 @@ func TestSDKJourneys(t *testing.T) {
 		configMaps = append(configMaps, kubeNames[n+"-configmap"])
 		secrets = append(secrets, kubeNames[n+"-secret"])
 	}
-	kubeEnv := kubeLeaseStores(t, kubeRun, configMaps, secrets)
+	missing := "e2e-lease-missing-" + kubeRun // in the Role, never created
+	kubeEnv := kubeLeaseStores(t, e, kubeRun, configMaps, secrets, []string{missing})
 
 	for _, sdk := range []struct {
 		name, version string // version: the sdk_version prefix
@@ -238,7 +239,7 @@ func TestSDKJourneys(t *testing.T) {
 			// restart reads it from there, deactivate removes it; an object the
 			// Role doesn't name can't be written (a warning, the lease still in use).
 			for _, kind := range []string{"configmap", "secret"} {
-				kp, kl, _ := newLicense(t, b, tn, nil)
+				kp, kl, _ := newLicense(t, b, tn, map[string]any{"max_activations": 3}) // this machine and the two refused stores
 				mk := "e2e-" + sdk.name + "-" + kind + "-" + run
 				store := []string{"LF_K8S_STORE=" + kind, "LF_K8S_NAME=" + kubeNames[sdk.name+"-"+kind]}
 				k8s := append(append([]string{}, kubeEnv...), store...)
@@ -246,7 +247,7 @@ func TestSDKJourneys(t *testing.T) {
 				if !first.OK || first.Lid != kl.ID {
 					t.Fatalf("%s activate: %+v", kind, first)
 				}
-				if v := kubeValue(t, kind, kubeNames[sdk.name+"-"+kind], "lease"); !strings.Contains(v, "\nlf1.") { // the lease as the server armored it
+				if v := kubeValue(t, e, kind, kubeNames[sdk.name+"-"+kind], "lease"); !strings.Contains(v, "\nlf1.") { // the lease as the server armored it
 					t.Errorf("%s holds %q, want the lease", kind, v)
 				}
 				if r := run1(kp, kl, mk, "current", keySet, k8s...); !r.OK || r.Iat != first.Iat {
@@ -255,12 +256,19 @@ func TestSDKJourneys(t *testing.T) {
 				if r := run1(kp, kl, mk, "deactivate", keySet, k8s...); !r.OK {
 					t.Fatalf("%s deactivate: %+v", kind, r)
 				}
-				if v := kubeValue(t, kind, kubeNames[sdk.name+"-"+kind], "lease"); v != "" {
+				if v := kubeValue(t, e, kind, kubeNames[sdk.name+"-"+kind], "lease"); v != "" {
 					t.Errorf("%s still holds %q after deactivate", kind, v)
 				}
-				denied := append(append([]string{}, kubeEnv...), "LF_K8S_STORE="+kind, "LF_K8S_NAME=e2e-not-allowed-"+run, "LF_EXPECT_WARNINGS=1")
-				if r := run1(kp, kl, mk+"-denied", "activate", keySet, denied...); !r.OK || len(r.Warnings) == 0 || !strings.Contains(strings.Join(r.Warnings, " "), "403") {
-					t.Errorf("%s outside the Role: %+v, want activated with a warning naming the 403", kind, r)
+				// Refused writes are warnings: the lease stays in use. An object the
+				// Role doesn't name is refused at get; one it names but nobody
+				// created, at create, which it can't grant by name: hence "create it
+				// beforehand".
+				for _, c := range []struct{ name, why string }{{"e2e-not-allowed-" + run, "cannot get"}, {missing, "cannot create"}} {
+					denied := append(append([]string{}, kubeEnv...), "LF_K8S_STORE="+kind, "LF_K8S_NAME="+c.name, "LF_EXPECT_WARNINGS=1")
+					r := run1(kp, kl, mk+"-"+c.why[7:], "activate", keySet, denied...)
+					if w := strings.Join(r.Warnings, " "); !r.OK || r.Lid != kl.ID || !strings.Contains(w, "forbidden") || !strings.Contains(w, c.why) {
+						t.Errorf("%s %s: %+v, want activated with a warning that the store %s", kind, c.name, r, c.why)
+					}
 				}
 			}
 
