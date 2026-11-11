@@ -100,7 +100,7 @@ export function verify(license: string, keys: readonly PublicKey[]): { payload: 
   const key = found[0]!;
   if (key.alg !== "ed25519") fail("unsupported_alg");
   if (key.key.length !== 32) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} has length ${key.key.length}`);
-  if (weakEd25519(key.key)) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} is not a canonical, full-order point`);
+  if (weakEd25519(key.key) || mixedOrderEd25519(key.key)) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} is not a canonical, prime-order point`);
   if (sig.length !== 64) fail("malformed", "signature length");
   // A weak R (spec): with R = identity and S = k·a, Go's cofactorless check accepts and OpenSSL refuses.
   if (weakEd25519(sig.subarray(0, 32))) fail("bad_signature");
@@ -138,6 +138,53 @@ export function weakEd25519(key: Uint8Array): boolean {
     if (key[0] === 0xec && high) return true;
   }
   return false;
+}
+
+// edwards25519 over p = 2^255 − 19 in extended coordinates (x = X/Z, y = Y/Z, x·y = T/Z); L is the base point's prime order.
+const P = 2n ** 255n - 19n;
+const L = 2n ** 252n + 27742317777372353535851937790883648493n;
+const m = (v: bigint): bigint => ((v % P) + P) % P;
+const pow = (b: bigint, e: bigint): bigint => {
+  let r = 1n;
+  for (b = m(b); e > 0n; e >>= 1n, b = m(b * b)) if (e & 1n) r = m(r * b);
+  return r;
+};
+const D = m(-121665n * pow(121666n, P - 2n));
+const SQRT_M1 = pow(2n, (P - 1n) / 4n);
+type Point = readonly [bigint, bigint, bigint, bigint];
+
+// The complete addition for a = −1 (add-2008-hwcd-3); it also doubles.
+function add([x1, y1, z1, t1]: Point, [x2, y2, z2, t2]: Point): Point {
+  const a = m((y1 - x1) * (y2 - x2)), b = m((y1 + x1) * (y2 + x2));
+  const c = m(2n * D * t1 * t2), d = m(2n * z1 * z2);
+  const e = b - a, f = d - c, g = d + c, h = b + a;
+  return [m(e * f), m(g * h), m(f * g), m(e * h)];
+}
+
+/**
+ * A canonical curve point outside the prime-order subgroup, [L]·A ≠ identity (spec: weak keys).
+ * Its holder can sign so that cofactorless verification accepts, while FIPS 186-5 key validation
+ * (Bouncy Castle FIPS) refuses the key. A value that isn't a point is not reported: it can't verify
+ * anything (bad_signature). The caller has refused non-canonical encodings. Variable time: keys are public.
+ */
+export function mixedOrderEd25519(key: Uint8Array): boolean {
+  const e = Buffer.from(key).reverse();
+  const sign = e[0]! >> 7;
+  e[0]! &= 0x7f;
+  const y = BigInt("0x" + e.toString("hex"));
+  const y2 = m(y * y);
+  const x2 = m((y2 - 1n) * pow(D * y2 + 1n, P - 2n));
+  let x = pow(x2, (P + 3n) / 8n);
+  if (m(x * x) !== x2) x = m(x * SQRT_M1);
+  if (m(x * x) !== x2) return false;
+  if (Number(x & 1n) !== sign) x = m(-x);
+  const p: Point = [x, y, 1n, m(x * y)];
+  let q: Point = [0n, 1n, 1n, 0n];
+  for (let i = BigInt(L.toString(2).length - 1); i >= 0n; i--) {
+    q = add(q, q);
+    if ((L >> i) & 1n) q = add(q, p);
+  }
+  return q[1] !== q[2]; // y = 1 only at the identity
 }
 
 export type BindingType = "none" | "machine" | "cluster";

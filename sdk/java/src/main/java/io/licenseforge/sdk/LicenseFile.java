@@ -3,6 +3,7 @@ package io.licenseforge.sdk;
 import io.licenseforge.sdk.Claims.Binding;
 import io.licenseforge.sdk.Claims.BindingType;
 import io.licenseforge.sdk.LicenseException.Code;
+import java.math.BigInteger;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -169,7 +170,7 @@ public final class LicenseFile {
     if (!key.alg().equals("ed25519")) throw new LicenseException(Code.UNSUPPORTED_ALG);
     byte[] raw = key.key();
     if (raw.length != 32) throw new LicenseException(Code.INVALID_KEY_SET, "ed25519 key for " + kid + " has length " + raw.length);
-    if (weakEd25519(raw)) throw new LicenseException(Code.INVALID_KEY_SET, "ed25519 key for " + kid + " is not a canonical, full-order point");
+    if (weakEd25519(raw) || mixedOrderEd25519(raw)) throw new LicenseException(Code.INVALID_KEY_SET, "ed25519 key for " + kid + " is not a canonical, prime-order point");
     if (e.sig().length != 64) throw new LicenseException(Code.MALFORMED, "signature length");
     // A weak R (spec): with R = identity and S = k·a, cofactorless verification (Go) accepts and OpenSSL refuses.
     if (weakEd25519(java.util.Arrays.copyOf(e.sig(), 32))) throw new LicenseException(Code.BAD_SIGNATURE);
@@ -226,6 +227,50 @@ public final class LicenseFile {
       if (first == 0xec && high) return true;
     }
     return false;
+  }
+
+  // edwards25519 over p = 2^255 − 19 in extended coordinates {X, Y, Z, T}
+  // (x = X/Z, y = Y/Z, x·y = T/Z); L is the base point's prime order.
+  private static final BigInteger P = BigInteger.TWO.pow(255).subtract(BigInteger.valueOf(19));
+  private static final BigInteger L = BigInteger.TWO.pow(252).add(new BigInteger("27742317777372353535851937790883648493"));
+  private static final BigInteger D = BigInteger.valueOf(-121665).multiply(BigInteger.valueOf(121666).modInverse(P)).mod(P);
+  private static final BigInteger SQRT_M1 = BigInteger.TWO.modPow(P.subtract(BigInteger.ONE).shiftRight(2), P);
+
+  /**
+   * A canonical curve point outside the prime-order subgroup, [L]·A ≠ identity (spec: weak keys).
+   * Its holder can sign so that cofactorless verification accepts, while FIPS 186-5 key validation
+   * (Bouncy Castle FIPS) refuses the key. A value that isn't a point is not reported: it can't verify
+   * anything (bad_signature). The caller has refused non-canonical encodings. Variable time: keys are public.
+   */
+  static boolean mixedOrderEd25519(byte[] key) {
+    byte[] e = new byte[33]; // big-endian with a zero sign byte
+    for (int i = 0; i < 32; i++) e[32 - i] = key[i];
+    int sign = (e[1] & 0x80) >> 7;
+    e[1] &= 0x7f;
+    BigInteger y = new BigInteger(e);
+    BigInteger y2 = y.multiply(y).mod(P);
+    BigInteger x2 = y2.subtract(BigInteger.ONE).multiply(D.multiply(y2).add(BigInteger.ONE).modInverse(P)).mod(P);
+    BigInteger x = x2.modPow(P.add(BigInteger.valueOf(3)).shiftRight(3), P);
+    if (!x.multiply(x).mod(P).equals(x2)) x = x.multiply(SQRT_M1).mod(P);
+    if (!x.multiply(x).mod(P).equals(x2)) return false;
+    if ((x.testBit(0) ? 1 : 0) != sign) x = x.negate().mod(P);
+    BigInteger[] p = {x, y, BigInteger.ONE, x.multiply(y).mod(P)};
+    BigInteger[] q = {BigInteger.ZERO, BigInteger.ONE, BigInteger.ONE, BigInteger.ZERO};
+    for (int i = L.bitLength() - 1; i >= 0; i--) {
+      q = edAdd(q, q);
+      if (L.testBit(i)) q = edAdd(q, p);
+    }
+    return !q[1].equals(q[2]); // y = 1 only at the identity
+  }
+
+  // The complete addition for a = −1 (add-2008-hwcd-3); it also doubles.
+  private static BigInteger[] edAdd(BigInteger[] p, BigInteger[] q) {
+    BigInteger a = p[1].subtract(p[0]).multiply(q[1].subtract(q[0])).mod(P);
+    BigInteger b = p[1].add(p[0]).multiply(q[1].add(q[0])).mod(P);
+    BigInteger c = p[3].multiply(D).shiftLeft(1).multiply(q[3]).mod(P);
+    BigInteger d = p[2].shiftLeft(1).multiply(q[2]).mod(P);
+    BigInteger e = b.subtract(a), f = d.subtract(c), g = d.add(c), h = b.add(a);
+    return new BigInteger[] {e.multiply(f).mod(P), g.multiply(h).mod(P), f.multiply(g).mod(P), e.multiply(h).mod(P)};
   }
 
   private static final Pattern INT = Pattern.compile("-?(0|[1-9][0-9]*)");

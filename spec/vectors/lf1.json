@@ -189,9 +189,9 @@
       "expect": "bad_signature"
     },
     {
-      "name": "bad_signature_order_8_r_mixed_order_key",
-      "license": "lf1.test:mixed-order.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwibiI6OH0.xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3qssfA9CRxxlLjHnZZdgHgi_hNvEJuYCwyWLlA4GJt_Dg",
-      "expect": "bad_signature"
+      "name": "invalid_key_set_mixed_order_key",
+      "license": "lf1.test:mixed-order.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwibiI6M30.eyl2mdFD7PPrI2RBaY3RNmArL7yUDIvcTZaWwqLfkx5XY9qPLJXvtR9zPoyriuW-RyllL7WKox_nZ71200e1DQ",
+      "expect": "invalid_key_set"
     },
     {
       "name": "bad_signature_noncanonical_r",

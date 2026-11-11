@@ -189,10 +189,35 @@ class StrictTest {
     }
     for (byte[] k : weak) assertTrue(LicenseFile.weakEd25519(k), hex.formatHex(k));
     for (String h : List.of(
-        "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 3: a full-order point
+        "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 3: a point, not small-order
         "0300000000000000000000000000000000000000000000000000000000000000", // y = 3
         "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9")) { // the vectors' test key
       assertFalse(LicenseFile.weakEd25519(hex.parseHex(h)), h);
+    }
+  }
+
+  @Test
+  void mixedOrderEd25519() throws Exception {
+    HexFormat hex = HexFormat.of();
+    for (String h : List.of(
+        "66bc0b83ea748e9e68b3e9e947370667010dcedc6949846f1144d16c77af1166", // the vectors' test key + a point of order 8
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f")) {
+      assertTrue(LicenseFile.mixedOrderEd25519(hex.parseHex(h)), h);
+    }
+    for (String h : List.of(
+        "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9", // the vectors' test key
+        "0100000000000000000000000000000000000000000000000000000000000000", // the identity: the weak-key list refuses it
+        "0200000000000000000000000000000000000000000000000000000000000000")) { // y = 2: not a point
+      assertFalse(LicenseFile.mixedOrderEd25519(hex.parseHex(h)), h);
+    }
+    java.security.KeyPairGenerator g = java.security.KeyPairGenerator.getInstance("Ed25519", "SunEC");
+    for (int i = 0; i < 16; i++) {
+      byte[] spki = g.generateKeyPair().getPublic().getEncoded();
+      byte[] raw = java.util.Arrays.copyOfRange(spki, spki.length - 32, spki.length);
+      assertFalse(LicenseFile.mixedOrderEd25519(raw), hex.formatHex(raw));
     }
   }
 }

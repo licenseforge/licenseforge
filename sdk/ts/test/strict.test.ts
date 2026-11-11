@@ -1,9 +1,10 @@
 // What the shared vectors don't cover: strict JSON and timestamp details,
 // the entitlement lookups and the check options.
 import assert from "node:assert/strict";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import { test } from "node:test";
 import { check, Entitlements, LicenseError, parseClaims, UNLIMITED, verify } from "../src/index.js";
-import { parseTime, weakEd25519 } from "../src/licensefile.js";
+import { mixedOrderEd25519, parseTime, weakEd25519 } from "../src/licensefile.js";
 
 const base = { v: 1, lid: "lic_1", product: "p", iat: "2026-11-01T00:00:00Z" };
 const claims = (json: string) => parseClaims(new TextEncoder().encode(json));
@@ -107,9 +108,32 @@ test("weak ed25519 keys: every small-order and non-canonical encoding, and no or
   }
   for (const k of weak) assert.equal(weakEd25519(k), true, Buffer.from(k).toString("hex"));
   const strong = [
-    "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 3: a full-order point
-    "0300000000000000000000000000000000000000000000000000000000000000", // y = 3: a full-order point
+    "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", // y = p − 3: a point, not small-order
+    "0300000000000000000000000000000000000000000000000000000000000000", // y = 3: a point, not small-order
     "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9", // the vectors' test key
   ].map(hex);
   for (const k of strong) assert.equal(weakEd25519(k), false, Buffer.from(k).toString("hex"));
+});
+
+test("mixed-order keys: every small-order point but the identity, a real key plus one; never a real key or a non-point", () => {
+  const hex = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
+  const mixed = [
+    "66bc0b83ea748e9e68b3e9e947370667010dcedc6949846f1144d16c77af1166", // the vectors' test key + a point of order 8
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  ];
+  for (const k of mixed) assert.equal(mixedOrderEd25519(hex(k)), true, k);
+  const not = [
+    "2b57583dbe767c93f76025809070aaf98b68ffc231df60a3df6dba5383ea23a9", // the vectors' test key
+    "0100000000000000000000000000000000000000000000000000000000000000", // the identity: the weak-key list refuses it
+    "0200000000000000000000000000000000000000000000000000000000000000", // y = 2: not a point
+  ];
+  for (const k of not) assert.equal(mixedOrderEd25519(hex(k)), false, k);
+  for (let i = 0; i < 16; i++) {
+    const pub = createPublicKey(createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, i)]), format: "der", type: "pkcs8" }));
+    const raw = Buffer.from(pub.export({ format: "jwk" }).x!, "base64url");
+    assert.equal(mixedOrderEd25519(raw), false, raw.toString("hex"));
+  }
 });
