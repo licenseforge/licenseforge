@@ -496,6 +496,8 @@ function checkPEM(ca: string | Buffer): void {
   const blocks = String(ca).match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
   try {
     if (blocks.length === 0) throw new Error("no certificate");
+    // Certificates only, as Java's CertificateFactory: a key in a "CA" file is a mistake to report, not to ship.
+    for (const [, label] of String(ca).matchAll(/-----BEGIN ([^-]*)-----/g)) if (label !== "CERTIFICATE") throw new Error(`a ${label} block`);
     for (const b of blocks) new X509Certificate(b);
   } catch (e) {
     throw new TypeError(`licenseforge online: ca must be PEM certificates (${String(e)})`);

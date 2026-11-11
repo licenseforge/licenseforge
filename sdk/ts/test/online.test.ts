@@ -324,7 +324,7 @@ test("create validates its config", async () => {
   ]) {
     await assert.rejects(Client.create(bad), TypeError, JSON.stringify(bad.baseURL));
   }
-  for (const ca of ["", "not pem", Buffer.from("x"), "-----BEGIN CERTIFICATE-----\nnotbase64!!\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "x -----BEGIN CERTIFICATE-----"]) await assert.rejects(Client.create({ ...good, ca }), TypeError, `ca ${String(ca)}`);
+  for (const ca of ["", "not pem", Buffer.from("x"), "-----BEGIN CERTIFICATE-----\nnotbase64!!\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "x -----BEGIN CERTIFICATE-----", `-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----\n${certs().server.cert}`]) await assert.rejects(Client.create({ ...good, ca }), TypeError, `ca ${String(ca)}`);
   for (const timeoutMs of [0, -1, Number.NaN]) await assert.rejects(Client.create({ ...good, timeoutMs }), RangeError, String(timeoutMs));
   await Client.create({ ...good, baseURL: "http://localhost:8080/lf/" }); // loopback http is fine
 });
