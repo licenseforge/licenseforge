@@ -9,7 +9,7 @@ on:
   schedule: [{ cron: "17 3 * * *" }]
   workflow_dispatch:
   pull_request:
-    paths: [e2e/**, deploy/**, Dockerfile, Makefile, web/e2e/**, web/playwright.config.ts, .github/workflows/e2e.yml]
+    paths: [e2e/**, deploy/**, Dockerfile, compose.yaml, Makefile, web/e2e/**, web/playwright.config.ts, .github/workflows/e2e.yml]
 permissions:
   contents: read
 concurrency:
@@ -74,3 +74,19 @@ jobs:
           kubectl -n licenseforge-e2e describe pods || true
           kubectl -n licenseforge-e2e logs deploy/licenseforge --all-containers --tail=300 || true
           kubectl -n licenseforge-e2e get events --sort-by=.lastTimestamp | tail -50 || true
+  compose:
+    # The dev stack of CONTRIBUTING.md (docker compose up --build) starts and
+    # answers /readyz. It broke once without anyone noticing (#215).
+    if: github.event_name != 'schedule' || github.repository == 'licenseforge/licenseforge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Start the stack
+        run: docker compose up --build --wait --wait-timeout 300
+      - name: Ready
+        run: curl -fsS http://127.0.0.1:8080/readyz
+      - name: Logs
+        if: failure()
+        run: docker compose logs --tail=100 || true
