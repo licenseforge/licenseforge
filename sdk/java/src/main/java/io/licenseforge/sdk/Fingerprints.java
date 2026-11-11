@@ -253,25 +253,38 @@ public final class Fingerprints {
 
   private record Attempt(String uid, boolean permanent, String detail) {}
 
+  /**
+   * An HTTP client for the Kubernetes API: trusts only the cluster's CA (PEM),
+   * TLS 1.2 or later, no redirects. Shared with the Kubernetes lease stores.
+   */
+  static HttpClient clusterClient(byte[] ca, Duration connectTimeout) throws GeneralSecurityException, IOException {
+    KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+    ks.load(null, null);
+    int n = 0;
+    for (Certificate c : CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(ca))) ks.setCertificateEntry("ca" + n++, c);
+    if (n == 0) throw new GeneralSecurityException("no certificate in the CA file");
+    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+    tmf.init(ks); // only the cluster's CA
+    SSLContext tls = SSLContext.getInstance("TLS");
+    tls.init(null, tmf.getTrustManagers(), null);
+    javax.net.ssl.SSLParameters params = tls.getDefaultSSLParameters();
+    params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"}); // as Go and TS: never older, whatever java.security allows
+    return HttpClient.newBuilder().sslContext(tls).sslParameters(params).connectTimeout(connectTimeout)
+        .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
+  }
+
+  /** https://host:port, an IPv6 service address bracketed. */
+  static String clusterBase(String host, int port) {
+    return "https://" + (host.indexOf(':') >= 0 ? "[" + host + "]" : host) + ":" + port;
+  }
+
   /** Fetches the UID, retrying transient failures (network, timeout, 429, 5xx) after each backoff. */
   static String namespaceUid(String host, int port, String token, byte[] ca, List<Duration> backoff) throws FingerprintException {
     HttpClient client;
     HttpRequest req;
     try {
-      KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
-      ks.load(null, null);
-      int n = 0;
-      for (Certificate c : CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(ca))) ks.setCertificateEntry("ca" + n++, c);
-      if (n == 0) throw new GeneralSecurityException("no certificate in the CA file");
-      TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-      tmf.init(ks); // only the cluster's CA
-      SSLContext tls = SSLContext.getInstance("TLS");
-      tls.init(null, tmf.getTrustManagers(), null);
-      javax.net.ssl.SSLParameters params = tls.getDefaultSSLParameters();
-      params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"}); // as Go and TS: never older, whatever java.security allows
-      client = HttpClient.newBuilder().sslContext(tls).sslParameters(params).connectTimeout(REQUEST_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
-      String h = host.indexOf(':') >= 0 ? "[" + host + "]" : host; // an IPv6 service address
-      req = HttpRequest.newBuilder(URI.create("https://" + h + ":" + port + "/api/v1/namespaces/kube-system"))
+      client = clusterClient(ca, REQUEST_TIMEOUT);
+      req = HttpRequest.newBuilder(URI.create(clusterBase(host, port) + "/api/v1/namespaces/kube-system"))
           .header("Authorization", "Bearer " + token).timeout(REQUEST_TIMEOUT).GET().build();
     } catch (IllegalArgumentException e) {
       // The JDK's message would quote the header value: never the token, nor a cause carrying it.
