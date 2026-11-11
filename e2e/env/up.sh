@@ -68,6 +68,9 @@ apply create configmap db-setup --from-file=setup.sql="$REPO/deploy/database-set
 render postgres.yaml | kubectl apply -f - >/dev/null
 apply create configmap keycloak-realm --from-file=licenseforge-realm.json=<(render realm.json)
 render keycloak.yaml | kubectl apply -f - >/dev/null
+# The ingress addon's admission webhook refuses connections until its
+# controller is up (a freshly started minikube, as in CI).
+kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s >/dev/null
 render ingress.yaml | kubectl apply -f - >/dev/null
 
 # 3. LicenseForge's Secrets: the database logins of database-setup.sql, a
