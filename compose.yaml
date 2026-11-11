@@ -26,6 +26,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       LICENSEFORGE_OWNER_DATABASE_URL: postgres://licenseforge_owner:change-me-owner@db:5432/licenseforge?sslmode=disable
+      LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT: "true" # the db container serves no TLS; development only (SC-8)
     depends_on:
       db: {condition: service_healthy}
 
@@ -36,6 +37,7 @@ services:
       LICENSEFORGE_PLATFORM_DATABASE_URL: postgres://licenseforge_admin:change-me-admin@db:5432/licenseforge?sslmode=disable
       LICENSEFORGE_IDENTITY_DATABASE_URL: postgres://licenseforge_login:change-me-login@db:5432/licenseforge?sslmode=disable
       LICENSEFORGE_MASTER_KEYS: dev=ZGV2LW9ubHktbWFzdGVyLWtleS1kby1ub3QtdXNlISE=
+      LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT: "true"
     ports: ["127.0.0.1:8080:8080"]
     read_only: true
     cap_drop: [ALL]
