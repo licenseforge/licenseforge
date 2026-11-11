@@ -64,6 +64,7 @@ const en = {
   "nav.webhooks": "Webhooks",
   "nav.keys": "Signing keys",
   "keys.title": "Signing keys",
+  "keys.tenantId": "Tenant ID (the SDKs' TenantID / tenantId setting), used together with these keys:",
   "keys.testTenant": "These are a test-mode tenant's keys: trust them in development and CI builds only, never in release builds.",
   "keys.body": "Every license file and lease is signed with your active key. Your builds trust the public keys below. To rotate: generate a pending key, ship builds that trust it, and promote it once your customers run those builds.",
   "keys.noActive": "No key is active: licenses and leases can't be signed until an owner promotes a pending key.",
