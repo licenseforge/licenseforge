@@ -945,3 +945,46 @@ func payload(details string, l *ent.License, mode string) bool {
 	ok := d["license_id"] == l.ID && d["product_id"] == l.ProductID && d["customer_id"] == l.CustomerID && d["binding"] == string(l.BindType)
 	return ok && (mode == "" || d["mode"] == mode)
 }
+
+// noKey is tenant keys with none active, as a tenant has before its owner
+// creates the first signing key.
+type noKey struct{ signing.Local }
+
+func (noKey) Active(context.Context, string) (string, error) { return "", signing.ErrNoActiveKey }
+
+// An activation that can't be signed changes nothing: no seat, no term
+// started, no activation.create entry (so no webhook), and the error says
+// why. A retry once the key exists starts from scratch.
+func TestUnsignableActivationChangesNothing(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	is := f.issue(t, "presold")
+	before := len(f.events(t))
+	broken := f.s
+	broken.Issuer.Keys = noKey{f.keys}
+	machine := fp()
+	if _, err := broken.Activate(ctx, f.req(is.Key, machine)); !errors.Is(err, signing.ErrNoActiveKey) {
+		t.Fatalf("activate without a key: %v, want ErrNoActiveKey", err)
+	}
+	if l := f.license(t, is.License.ID); l.FirstActivatedAt != nil || l.ExpiresAt != nil {
+		t.Errorf("the term started: %+v", l)
+	}
+	if as := f.activations(t, is.License.ID); len(as) != 0 {
+		t.Errorf("seats taken: %+v", as)
+	}
+	if es := f.events(t); len(es) != before {
+		t.Errorf("audit entries %v, want none added", es[before:])
+	}
+	// Refreshing an existing seat without a key leaves it as it was.
+	got, err := f.s.Activate(ctx, f.req(is.Key, machine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := f.activations(t, is.License.ID)[0].LastSeenAt
+	if _, err := broken.Refresh(ctx, f.req(is.Key, machine)); !errors.Is(err, signing.ErrNoActiveKey) {
+		t.Fatalf("refresh without a key: %v, want ErrNoActiveKey", err)
+	}
+	if as := f.activations(t, is.License.ID); len(as) != 1 || !as[0].LastSeenAt.Equal(seen) || got.ActivationID != as[0].ID {
+		t.Errorf("after a failed refresh: %+v, want the seat untouched", as)
+	}
+}
