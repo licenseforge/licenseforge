@@ -1,0 +1,76 @@
+name: e2e
+# The end-to-end suite (ADR-0041, amended): e2e/env/up.sh deploys the
+# checkout's chart and image on minikube with PostgreSQL and Keycloak, then
+# make e2e (API and SDK journeys) and make e2e-browser (Playwright). Nightly on
+# main, and on PRs that change the suite or the deployment. Every secret in
+# the environment is a dev value generated on the runner. No artifacts are
+# uploaded: a failed run's traces hold session cookies and license keys.
+on:
+  schedule: [{ cron: "17 3 * * *" }]
+  workflow_dispatch:
+  pull_request:
+    paths: [e2e/**, deploy/**, Dockerfile, .github/workflows/e2e.yml]
+permissions:
+  contents: read
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  # Pinned and checksum-verified (the published SHA-256 / SHA-512), not the runner's.
+  MINIKUBE_VERSION: v1.39.0
+  MINIKUBE_SHA256: b738496da01be06bbaf80c688f57ce25acd3849fbb518155f3a88e03ef555aa4
+  KUBECTL_VERSION: v1.37.1
+  KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+  MAVEN_VERSION: 3.9.16
+  MAVEN_SHA512: 831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6
+jobs:
+  e2e:
+    if: github.event_name != 'schedule' || github.repository == 'licenseforge/licenseforge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: web/.nvmrc }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with: { distribution: temurin, java-version: "21" }
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v4.3.1 }
+      - name: minikube, kubectl and Maven
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/bin" && mkdir -p "$bin"
+          curl -fsSLo "$bin/minikube" "https://github.com/kubernetes/minikube/releases/download/$MINIKUBE_VERSION/minikube-linux-amd64"
+          echo "$MINIKUBE_SHA256  $bin/minikube" | sha256sum -c
+          curl -fsSLo "$bin/kubectl" "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+          echo "$KUBECTL_SHA256  $bin/kubectl" | sha256sum -c
+          chmod +x "$bin/minikube" "$bin/kubectl"
+          curl -fsSL -o maven.tgz "https://archive.apache.org/dist/maven/maven-3/$MAVEN_VERSION/binaries/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+          echo "$MAVEN_SHA512  maven.tgz" | sha512sum -c
+          mkdir -p "$RUNNER_TEMP/maven" && tar -xzf maven.tgz -C "$RUNNER_TEMP/maven" --strip-components=1 && rm maven.tgz
+          printf '%s\n' "$bin" "$RUNNER_TEMP/maven/bin" >> "$GITHUB_PATH"
+      - name: Start minikube
+        run: minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress --wait=all
+      - name: Deploy the environment (e2e/env/up.sh)
+        run: e2e/env/up.sh
+      - name: API and SDK journeys
+        run: make e2e MVN=mvn
+      - name: Dashboard smoke test
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - name: State of the cluster
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n licenseforge-e2e describe pods || true
+          kubectl -n licenseforge-e2e logs deploy/licenseforge --all-containers --tail=300 || true
+          kubectl -n licenseforge-e2e get events --sort-by=.lastTimestamp | tail -50 || true

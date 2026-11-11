@@ -1,6 +1,6 @@
 # e2e environment
 
-The deployment the end-to-end tests run against (ADR-0041). It runs locally on minikube and isn't part of CI yet. **Every secret here is a dev value: never reuse this setup outside your machine.**
+The deployment the end-to-end tests run against (ADR-0041). It runs on minikube, locally and in CI: `.github/workflows/e2e.yml` runs `up.sh`, `make e2e` and `make e2e-browser` every night on main and on pull requests that change `e2e/`, `deploy/`, the Dockerfile or the workflow. **Every secret here is a dev value: never reuse this setup outside your machine.**
 
 What `up.sh` deploys, in namespace `licenseforge-e2e`:
 
