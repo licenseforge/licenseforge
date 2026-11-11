@@ -18,8 +18,8 @@
 | Server (API, dashboard, workers) | in progress |
 | CLI ([docs](docs/cli.md)) | `licenseforge api`, `offline` and `tenant` |
 | Go SDK ([`sdk/go`](sdk/go/README.md)) | in progress: offline verification, fingerprints, clock guard, online client |
-| TypeScript SDK ([`sdk/ts`](sdk/ts/README.md)) | in progress: offline verification |
-| Java SDK | planned (v0.2) |
+| TypeScript SDK ([`sdk/ts`](sdk/ts/README.md)) | feature parity with Go; release workflow ready, first release pending |
+| Java SDK ([`sdk/java`](sdk/java/README.md)) | in progress: lf1 verification, claims, key sets |
 | In-cluster agent | planned (v0.3) |
 | Helm chart | planned (v0.1) |
 

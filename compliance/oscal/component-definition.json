@@ -1552,7 +1552,7 @@
               {
                 "uuid": "90a2381c-3fcc-50e7-a282-7ef5f767468c",
                 "control-id": "si-7",
-                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md). The Go SDK and the TypeScript SDK (not published yet) verify license files against Ed25519 keys embedded in the build and refuse weak trusted keys (small-order points, non-canonical encodings) before the signature check, so a tampered key set can't make a forged license verify (spec, conformance vectors). Offline activation (ADR-0043): requests and deactivation receipts are unsigned but strictly parsed (canonical encoding, no unknown fields, 4 KiB limit, a bound fingerprint and a 16-byte nonce); a receipt frees a seat only when its file_sha256 is the activation's current offline file, and every request's and receipt's SHA-256 is in the audit trail.",
+                "description": "Applied migrations are checksummed, and a changed or unknown migration stops the migrator. Base images and Actions are pinned by digest, and Go modules are verified against go.sum. Audit entries are hash-chained (AU-9). Every release is cosign-signed with SLSA provenance, and SBOM attestations for images and binaries, so users verify what they deploy (docs/verifying-releases.md). The Go, TypeScript and Java SDKs (TypeScript and Java not published yet) verify license files against Ed25519 keys embedded in the build and refuse weak trusted keys (small-order points, non-canonical encodings) before the signature check, so a tampered key set can't make a forged license verify (spec, conformance vectors). Offline activation (ADR-0043): requests and deactivation receipts are unsigned but strictly parsed (canonical encoding, no unknown fields, 4 KiB limit, a bound fingerprint and a 16-byte nonce); a receipt frees a seat only when its file_sha256 is the activation's current offline file, and every request's and receipt's SHA-256 is in the audit trail.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1589,6 +1589,10 @@
                   },
                   {
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/ts/test/vectors.test.ts",
+                    "rel": "reference"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/java/src/test/java/io/licenseforge/sdk/VectorsTest.java",
                     "rel": "reference"
                   },
                   {
