@@ -171,6 +171,8 @@ public final class LicenseFile {
     if (raw.length != 32) throw new LicenseException(Code.INVALID_KEY_SET, "ed25519 key for " + kid + " has length " + raw.length);
     if (weakEd25519(raw)) throw new LicenseException(Code.INVALID_KEY_SET, "ed25519 key for " + kid + " is not a canonical, full-order point");
     if (e.sig().length != 64) throw new LicenseException(Code.MALFORMED, "signature length");
+    // A weak R (spec): with R = identity and S = k·a, cofactorless verification (Go) accepts and OpenSSL refuses.
+    if (weakEd25519(java.util.Arrays.copyOf(e.sig(), 32))) throw new LicenseException(Code.BAD_SIGNATURE);
     byte[] spki = new byte[ED25519_SPKI.length + 32];
     System.arraycopy(ED25519_SPKI, 0, spki, 0, ED25519_SPKI.length);
     System.arraycopy(raw, 0, spki, ED25519_SPKI.length, 32);

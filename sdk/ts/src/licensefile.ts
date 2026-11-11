@@ -102,6 +102,8 @@ export function verify(license: string, keys: readonly PublicKey[]): { payload: 
   if (key.key.length !== 32) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} has length ${key.key.length}`);
   if (weakEd25519(key.key)) fail("invalid_key_set", `ed25519 key for ${JSON.stringify(kid)} is not a canonical, full-order point`);
   if (sig.length !== 64) fail("malformed", "signature length");
+  // A weak R (spec): with R = identity and S = k·a, Go's cofactorless check accepts and OpenSSL refuses.
+  if (weakEd25519(sig.subarray(0, 32))) fail("bad_signature");
   const pub = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(key.key).toString("base64url") }, format: "jwk" });
   // OpenSSL's Ed25519 refuses a non-canonical S (S ≥ L), as the spec requires.
   if (!cryptoVerify(null, Buffer.from(`lf1.${kid}.${body}`, "ascii"), pub, sig)) fail("bad_signature");

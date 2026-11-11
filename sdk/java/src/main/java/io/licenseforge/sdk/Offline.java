@@ -277,16 +277,20 @@ public final class Offline {
   public static String encodeRequest(ActivationRequest r) throws LicenseException {
     if (r.binding().type() == BindingType.NONE) throw malformed("bind type must be machine or cluster");
     StringBuilder j = new StringBuilder("{");
-    if (r.appVersion().isPresent()) j.append("\"app_version\":").append(quote(r.appVersion().get())).append(',');
+    // An empty optional is left out, as in the Go and TypeScript SDKs.
+    Optional<String> appVersion = r.appVersion().filter(s -> !s.isEmpty());
+    Optional<String> hostname = r.hostname().filter(s -> !s.isEmpty());
+    Optional<String> sdkVersion = r.sdkVersion().filter(s -> !s.isEmpty());
+    if (appVersion.isPresent()) j.append("\"app_version\":").append(quote(appVersion.get())).append(',');
     j.append("\"bind\":{\"fp\":").append(quote(r.binding().fingerprint())).append(",\"type\":")
-        .append(quote(r.binding().type() == BindingType.MACHINE ? "machine" : "cluster")).append("},");
+        .append(quote(r.binding().type() == BindingType.MACHINE ? "machine" : "cluster")).append("},"); // NONE refused above
     j.append("\"created\":").append(quote(timestamp(r.created()))).append(',');
     j.append("\"fp_source\":").append(quote(r.fpSource().spec())).append(',');
-    if (r.hostname().isPresent()) j.append("\"hostname\":").append(quote(r.hostname().get())).append(',');
+    if (hostname.isPresent()) j.append("\"hostname\":").append(quote(hostname.get())).append(',');
     j.append("\"key\":").append(quote(stripSpace(r.key()))).append(',');
     j.append("\"nonce\":").append(quote(b64(r.nonce()))).append(',');
     j.append("\"product\":").append(quote(r.product())).append(',');
-    if (r.sdkVersion().isPresent()) j.append("\"sdk_version\":").append(quote(r.sdkVersion().get())).append(',');
+    if (sdkVersion.isPresent()) j.append("\"sdk_version\":").append(quote(sdkVersion.get())).append(',');
     j.append("\"tenant\":").append(quote(r.tenant())).append(",\"v\":1}");
     String t = token("lfreq1", j.toString());
     parseRequest(t); // an SDK can't write what the server refuses

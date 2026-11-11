@@ -18,7 +18,8 @@ public enum FingerprintSource {
     return name().toLowerCase(Locale.ROOT).replace('_', '-');
   }
 
-  static FingerprintSource fromSpec(String s) {
+  /** The source with this spec name, or null. */
+  public static FingerprintSource fromSpec(String s) {
     for (FingerprintSource f : values()) if (f.spec().equals(s)) return f;
     return null;
   }

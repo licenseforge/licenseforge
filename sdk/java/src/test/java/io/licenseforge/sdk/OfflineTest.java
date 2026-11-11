@@ -96,12 +96,18 @@ class OfflineTest {
         req("tnt_acme", "acme-db", FingerprintSource.KUBERNETES, NONCE, Optional.empty()),
         req("tnt_acme", "acme-db", FingerprintSource.MACHINE_ID, NONCE, Optional.of("bad host")),
         req("tnt_acme", "acme-db", FingerprintSource.MACHINE_ID, new byte[15], Optional.empty()),
+        req("tnt_acme", "acme-db", FingerprintSource.MACHINE_ID, new byte[17], Optional.empty()),
+        new ActivationRequest("t", "p", "k", new Binding(BindingType.NONE, FP), FingerprintSource.KUBERNETES, NONCE, Instant.EPOCH, Optional.empty(), Optional.empty(), Optional.empty()),
         req("t\0x", "acme-db", FingerprintSource.MACHINE_ID, NONCE, Optional.empty()),
         req("tnt_acme", "\uD800", FingerprintSource.MACHINE_ID, NONCE, Optional.empty()),
         new ActivationRequest("t", "p", "k", Binding.NONE, FingerprintSource.MACHINE_ID, NONCE, Instant.EPOCH, Optional.empty(), Optional.empty(), Optional.empty()),
         new ActivationRequest("t", "p", "k", new Binding(BindingType.MACHINE, FP), FingerprintSource.MACHINE_ID, NONCE, Instant.parse("1969-12-31T23:59:59Z"), Optional.empty(), Optional.empty(), Optional.empty()))) {
       assertEquals(LicenseException.Code.MALFORMED, assertThrows(LicenseException.class, () -> Offline.encodeRequest(bad)).code());
     }
+    // An empty optional is left out, as Go and TypeScript do.
+    ActivationRequest empty = new ActivationRequest("t", "p", "k", new Binding(BindingType.MACHINE, FP), FingerprintSource.MACHINE_ID, NONCE, Instant.EPOCH, Optional.of(""), Optional.of(""), Optional.of(""));
+    ActivationRequest back = Offline.parseRequest(Offline.encodeRequest(empty));
+    assertTrue(back.hostname().isEmpty() && back.appVersion().isEmpty() && back.sdkVersion().isEmpty());
     DeactivationReceipt rc = new DeactivationReceipt("tnt_acme", "lic_1", FP, "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", NONCE, Instant.parse("2026-11-08T10:00:00Z"));
     assertEquals(rc, Offline.parseReceipt(Offline.encodeReceipt(rc)));
     assertThrows(LicenseException.class, () -> Offline.encodeReceipt(new DeactivationReceipt("t", "l", FP, "ABC", NONCE, Instant.EPOCH)));
