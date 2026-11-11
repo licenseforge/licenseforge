@@ -60,6 +60,11 @@
       "public_key": "8P_______________________________________38"
     },
     {
+      "kid": "test:mixed-order",
+      "alg": "ed25519",
+      "public_key": "ZrwLg-p0jp5os-npRzcGZwENztxpSYRvEUTRbHevEWY"
+    },
+    {
       "kid": "test:weak-order-8",
       "alg": "ed25519",
       "public_key": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o"
@@ -181,6 +186,11 @@
     {
       "name": "bad_signature_negative_zero_r",
       "license": "lf1.test:2026-11.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwiZXhwIjoiMjAyNy0wMS0wMVQwMDowMDowMFoifQ.AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICfZ3uX7FvwIhWLMJXsitWR-s65M_CinmyGYpCPNSPbDA",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "bad_signature_order_8_r_mixed_order_key",
+      "license": "lf1.test:mixed-order.eyJ2IjoxLCJsaWQiOiJsaWNfdGVzdCIsInByb2R1Y3QiOiJhY21lLWRiIiwibiI6OH0.xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3qssfA9CRxxlLjHnZZdgHgi_hNvEJuYCwyWLlA4GJt_Dg",
       "expect": "bad_signature"
     },
     {
