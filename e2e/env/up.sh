@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The e2e environment (ADR-0041): LicenseForge on minikube with PostgreSQL 17,
 # Keycloak (OIDC) and HTTPS ingresses on nip.io hostnames signed by a local
-# CA. Local only: every secret here is a dev value. Re-runnable.
+# CA. For a developer's machine or a CI runner: every secret here is a dev
+# value. Re-runnable.
 #
 #   e2e/env/up.sh --local              chart and image built from this checkout (default)
 #   e2e/env/up.sh --release VERSION    a published release, e.g. 0.1.0-alpha.1

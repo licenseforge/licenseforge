@@ -3,18 +3,18 @@ name: e2e
 # checkout's chart and image on minikube with PostgreSQL and Keycloak, then
 # make e2e (API and SDK journeys) and make e2e-browser (Playwright). Nightly on
 # main, and on PRs that change the suite or the deployment. Every secret in
-# the environment is a dev value generated on the runner. No artifacts are
+# the environment is a dev value: fixed passwords, keys generated on the runner. No artifacts are
 # uploaded: a failed run's traces hold session cookies and license keys.
 on:
   schedule: [{ cron: "17 3 * * *" }]
   workflow_dispatch:
   pull_request:
-    paths: [e2e/**, deploy/**, Dockerfile, .github/workflows/e2e.yml]
+    paths: [e2e/**, deploy/**, Dockerfile, Makefile, web/e2e/**, web/playwright.config.ts, .github/workflows/e2e.yml]
 permissions:
   contents: read
 concurrency:
-  group: e2e-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: e2e-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 defaults:
   run:
     shell: bash

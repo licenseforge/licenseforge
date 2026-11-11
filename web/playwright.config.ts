@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { defineConfig } from "@playwright/test";
 
 // Browser smoke tests (ADR-0041) against the environment e2e/env/up.sh
-// deploys; local only, not part of `npm test` or CI.
+// deploys; not part of `npm test`. CI runs them in .github/workflows/e2e.yml.
 function e2eEnv(): Record<string, string> {
   const path = process.env.E2E_ENV_FILE ?? "../e2e/env/.state/env";
   let text: string;

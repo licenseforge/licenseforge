@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Changed
-- End-to-end **in CI**: `e2e.yml` deploys the checkout on minikube with `e2e/env/up.sh` and runs `make e2e` and `make e2e-browser`, every night on main and on pull requests that change `e2e/`, `deploy/`, the Dockerfile or the workflow (ADR-0041 amended: minikube, not kind, so CI runs the same script). minikube, kubectl and Maven are pinned and checksum-verified; no artifacts are uploaded, since a failed run's traces hold session cookies and license keys.
+- End-to-end **in CI**: `e2e.yml` deploys the checkout on minikube with `e2e/env/up.sh` and runs `make e2e` and `make e2e-browser`, every night on main and on pull requests that change `e2e/`, `deploy/`, the Dockerfile, the Makefile, the browser tests or the workflow (ADR-0041 amended: minikube, not kind, so CI runs the same script). minikube, kubectl and Maven are pinned and checksum-verified; no artifacts are uploaded, since a failed run's traces hold session cookies and license keys.
 - End-to-end: `TestSDKInPod` runs the TypeScript and Java SDKs **inside the cluster**, as a vendor's cluster-bound app runs. The setup:
   - Each SDK's driver runs in a pod.
   - There is no fingerprint override and there are no API server settings: the SDK finds both itself.
