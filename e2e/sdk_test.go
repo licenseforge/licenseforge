@@ -67,7 +67,7 @@ func TestSDKJourneys(t *testing.T) {
 				Code, Lid, Tenant, Product string
 				Plan, Status, Detail, Text string
 				HTTP                       int
-				SSO, Nope                  bool
+				SSO, Nope, Forgot          bool
 				Seats                      int64
 				Warnings                   []string
 			}
@@ -164,6 +164,34 @@ func TestSDKJourneys(t *testing.T) {
 
 			b.do("POST", api+"/licenses/"+lic.ID+"/revoke", nil, 200, nil)
 			refused(m2, "refresh", "license_revoked", 403)
+
+			// run(), the background loop most apps use, on 4-second leases
+			// (refresh_after 2 s in): it stops, forgetting the lease, when the
+			// vendor revokes the license, and when the vendor deactivates the
+			// machine from the dashboard.
+			for _, c := range []struct{ name, code string }{{"revoked", "license_revoked"}, {"deactivated", "not_activated"}} {
+				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 4})
+				mr := "e2e-" + sdk.name + "-run-" + c.name + "-" + run
+				if r := run1(rp, rl, mr, "activate", keySet); !r.OK {
+					t.Fatalf("%s activate: %+v", c.name, r)
+				}
+				if c.name == "revoked" {
+					b.do("POST", api+"/licenses/"+rl.ID+"/revoke", nil, 200, nil)
+				} else {
+					var acts struct{ Items []struct{ ID string } }
+					b.do("GET", api+"/licenses/"+rl.ID+"/activations", nil, 200, &acts)
+					if len(acts.Items) != 1 {
+						t.Fatalf("activations %+v", acts.Items)
+					}
+					b.do("POST", api+"/licenses/"+rl.ID+"/activations/"+acts.Items[0].ID+"/deactivate", nil, 200, nil)
+				}
+				if r := run1(rp, rl, mr, "run", keySet); r.OK || r.Code != c.code || !r.Forgot {
+					t.Errorf("run after the license was %s: %+v, want %s and the lease forgotten", c.name, r, c.code)
+				}
+				if r := run1(rp, rl, mr, "current", keySet); r.OK || r.Code != "no_lease" {
+					t.Errorf("after run stopped (%s): %+v, want no_lease (the stored lease was forgotten too)", c.name, r)
+				}
+			}
 
 			// Offline (ADR-0043): request, the vendor's answer, install, a
 			// restart, a renewal and the older file, the receipt, the returned file.

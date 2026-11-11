@@ -79,11 +79,35 @@ public class Driver {
           case "refresh" -> client.refresh();
           case "deactivate" -> client.deactivate();
           case "current" -> {}
+          case "run" -> {
+            Thread main = Thread.currentThread();
+            Thread stop = new Thread(() -> {
+              try {
+                Thread.sleep(30_000);
+                main.interrupt(); // 30 s at most: the step then fails loudly
+              } catch (InterruptedException x) {
+                // the step ended
+              }
+            });
+            stop.setDaemon(true);
+            stop.start();
+            client.run(x -> {});
+          }
           default -> throw new IllegalArgumentException("unknown step " + op);
         }
         out = "\"ok\":true" + (op.equals("deactivate") ? "" : claims(client.current()));
       } catch (Online.OnlineException e) {
         out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"http\":" + e.status() + ",\"detail\":" + q(e.getMessage());
+        if (op.equals("run")) {
+          boolean forgot;
+          try {
+            client.current();
+            forgot = false;
+          } catch (Online.OnlineException x) {
+            forgot = x.code() == Online.OnlineException.Code.NO_LEASE;
+          }
+          out += ",\"forgot\":" + forgot;
+        }
       }
       for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
     }

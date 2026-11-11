@@ -1,6 +1,7 @@
 // One step of a customer's app built on the TypeScript SDK, for the SDK
 // journeys (sdk_test.go): node e2e/sdk/driver.mjs <step>.
 //   online:  activate | refresh | deactivate | current (the saved lease alone, no request)
+//            | run (the background loop until it stops, 30 s at most; forgot: the lease is gone)
 //   offline: offline-request | offline-install (LF_FILE) | offline-current | offline-deactivate
 // Configured as a vendor would, from LF_* variables (sdk_test.go sets them);
 // the lease, the offline state and the clock guard are kept in files between
@@ -60,11 +61,20 @@ if (op.startsWith("offline-")) {
     if (op === "activate") await client.activate();
     else if (op === "refresh") await client.refresh();
     else if (op === "deactivate") await client.deactivate();
+    else if (op === "run") await client.run(AbortSignal.timeout(30_000)); // only ever rejects
     else if (op !== "current") throw new Error(`unknown step ${op}`);
     out = { ok: true, ...(op === "deactivate" ? {} : claimsOf(client.current())) };
   } catch (e) {
     if (!(e instanceof OnlineError)) throw e;
     out = { ok: false, code: e.code, http: e.status, detail: `${e.message}${e.cause ? `: ${e.cause}` : ""}` };
+    if (op === "run") {
+      try {
+        client.current();
+        out.forgot = false;
+      } catch (x) {
+        out.forgot = x instanceof OnlineError && x.code === "no_lease";
+      }
+    }
   }
   out.warnings = client.takeWarnings().map(String);
 }
