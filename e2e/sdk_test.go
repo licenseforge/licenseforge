@@ -59,7 +59,7 @@ func TestSDKJourneys(t *testing.T) {
 	} {
 		t.Run(sdk.name, func(t *testing.T) {
 			cmd := sdk.cmd(t)
-			product, lic, run := newLicense(t, b, tn)
+			product, lic, run := newLicense(t, b, tn, nil)
 			dir := t.TempDir()
 			type result struct {
 				OK                         bool

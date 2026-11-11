@@ -188,7 +188,7 @@ func (b *browser) try(method, path string, body any, want int, out any) error {
 		req.Header.Set("X-CSRF-Token", b.csrf)
 		req.Header.Set("Origin", b.base)
 	}
-	if method == "POST" && strings.HasSuffix(path, "/licenses") {
+	if method == "POST" && (strings.HasSuffix(path, "/licenses") || strings.HasSuffix(path, "/activation-requests")) {
 		req.Header.Set("Idempotency-Key", rand.Text())
 	}
 	resp, err := b.c.Do(req)
