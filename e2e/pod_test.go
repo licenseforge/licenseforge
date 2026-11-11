@@ -14,10 +14,11 @@ import (
 	"testing"
 )
 
-// The images the drivers run in, inside the cluster.
+// The images the drivers run in, inside the cluster (pinned by digest, as
+// the environment's postgres image is).
 const (
-	podNodeImage = "node:22.20.0-alpine"
-	podJavaImage = "eclipse-temurin:21.0.8_9-jre-alpine"
+	podNodeImage = "node:22.20.0-alpine@sha256:dbcedd8aeab47fbc0f4dd4bffa55b7c3c729a707875968d467aaaea42d6225af"
+	podJavaImage = "eclipse-temurin:21.0.8_9-jre-alpine@sha256:990397e0495ac088ab6ee3d949a2e97b715a134d8b96c561c5d130b3786a489d"
 )
 
 // The SDKs inside the cluster, as a vendor's cluster-bound app runs: the
