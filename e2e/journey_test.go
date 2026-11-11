@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -87,8 +88,9 @@ type catalog struct{ ID, Slug string }
 
 // newLicense makes this run's catalog and a license: a product, an on/off
 // feature and a limit, a machine-bound plan with one seat that grants both.
-// run names this run's objects: runs never depend on each other.
-func newLicense(t *testing.T, b *browser, tn tenant) (product catalog, lic issued, run string) {
+// terms are added to the plan's. run names this run's objects: runs never
+// depend on each other.
+func newLicense(t *testing.T, b *browser, tn tenant, terms map[string]any) (product catalog, lic issued, run string) {
 	t.Helper()
 	api := "/api/v1/tenants/" + tn.Slug
 	run = strings.ToLower(rand.Text()[:8])
@@ -98,7 +100,9 @@ func newLicense(t *testing.T, b *browser, tn tenant) (product catalog, lic issue
 		b.do("POST", api+"/features", f, 201, nil)
 	}
 	var plan struct{ ID string }
-	b.do("POST", api+"/plans", map[string]any{"product_id": product.ID, "slug": "pro", "name": "Pro", "duration_months": 12, "max_activations": 1}, 201, &plan)
+	p := map[string]any{"product_id": product.ID, "slug": "pro", "name": "Pro", "duration_months": 12, "max_activations": 1}
+	maps.Copy(p, terms)
+	b.do("POST", api+"/plans", p, 201, &plan)
 	b.do("PATCH", api+"/plans/"+plan.ID+"/features", map[string]any{"sso": true, "seats": 25}, 200, nil)
 	var customer struct{ ID string }
 	b.do("POST", api+"/customers", map[string]string{"name": "Customer " + run}, 201, &customer)
@@ -120,7 +124,7 @@ func TestLicenseJourney(t *testing.T) {
 	b, tn := owner(t, e)
 	api := "/api/v1/tenants/" + tn.Slug
 	keys := trustedKeys(t, b, tn.Slug)
-	product, lic, run := newLicense(t, b, tn)
+	product, lic, run := newLicense(t, b, tn, nil)
 
 	// The customer's app: the SDK as a vendor configures it.
 	app := func(machine string) *online.Client {
