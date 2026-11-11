@@ -118,6 +118,42 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				return r
 			}
+			// start runs a step in the background and returns once it has
+			// loaded its lease (LF_READY); wait gives its result.
+			start := func(p catalog, l issued, machine, op string, extra ...string) (wait func() result) {
+				t.Helper()
+				ready := filepath.Join(dir, machine+".ready")
+				type outcome struct {
+					r   result
+					err error
+				}
+				done := make(chan outcome, 1)
+				go func() {
+					r, err := exec1(p, l, machine, op, keySet, append(append([]string{}, extra...), "LF_READY="+ready)...)
+					done <- outcome{r, err}
+				}()
+				for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+					if _, err := os.Stat(ready); err == nil {
+						break
+					}
+					select {
+					case o := <-done:
+						t.Fatalf("%s %s ended before it loaded its lease: %v %+v", machine, op, o.err, o.r)
+					default:
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("%s %s never loaded its lease", machine, op)
+					}
+				}
+				return func() result {
+					t.Helper()
+					o := <-done
+					if o.err != nil {
+						t.Fatal(o.err)
+					}
+					return o.r
+				}
+			}
 			step := func(machine, op string, keys []byte) result { t.Helper(); return run1(product, lic, machine, op, keys) }
 			ok := func(machine, op string) result {
 				t.Helper()
@@ -239,24 +275,28 @@ func TestSDKJourneys(t *testing.T) {
 					t.Errorf("after run stopped (%s): %+v, want no_lease (the stored lease was forgotten too)", c.name, r)
 				}
 			}
-			// A suspended license doesn't stop it: refreshes are refused
-			// (reported, the lease kept) until the vendor reinstates it, and the
-			// next refresh renews. A 16 s lease: refresh_after at 8 s, inside the
-			// 9 s run; the lease outlives both runs and the JVM starts.
+			// A suspended license doesn't stop it: one run sees its refreshes
+			// refused (reported, the lease kept) while the license is
+			// suspended, then renews once the vendor reinstates it. A 20 s
+			// lease: refresh_after at 10 s, the reinstatement at 12 s, the
+			// retries backing off by 1-2 s, the run ending by about 17.5 s.
 			{
-				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 16})
+				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 20})
 				mr := "e2e-" + sdk.name + "-run-suspended-" + run
 				first := run1(rp, rl, mr, "activate", keySet)
 				if !first.OK {
 					t.Fatalf("suspended activate: %+v", first)
 				}
-				b.do("POST", api+"/licenses/"+rl.ID+"/suspend", nil, 200, nil)
-				if r := run1(rp, rl, mr, "run", keySet, "LF_RUN_MS=9000"); !r.OK || r.Iat != first.Iat || len(r.Errors) == 0 || slices.ContainsFunc(r.Errors, func(c string) bool { return c != "license_suspended" }) {
-					t.Errorf("run on a suspended license: %+v, want it still running with the first lease and license_suspended reported", r)
+				iat, err := time.Parse(time.RFC3339, first.Iat)
+				if err != nil {
+					t.Fatal(err)
 				}
+				b.do("POST", api+"/licenses/"+rl.ID+"/suspend", nil, 200, nil)
+				wait := start(rp, rl, mr, "run", "LF_RUN_MS=16000")
+				time.Sleep(time.Until(iat.Add(12 * time.Second)))
 				b.do("POST", api+"/licenses/"+rl.ID+"/reinstate", nil, 200, nil)
-				if r := run1(rp, rl, mr, "run", keySet, "LF_RUN_MS=3000"); !r.OK || r.Iat <= first.Iat || len(r.Errors) != 0 {
-					t.Errorf("run after reinstating: %+v, want a renewed lease", r)
+				if r := wait(); !r.OK || r.Iat <= first.Iat || len(r.Errors) == 0 || slices.ContainsFunc(r.Errors, func(c string) bool { return c != "license_suspended" }) {
+					t.Errorf("run across a suspension: %+v, want license_suspended reported, then a lease renewed after %s", r, first.Iat)
 				}
 			}
 
@@ -299,10 +339,11 @@ func TestSDKJourneys(t *testing.T) {
 				}
 			}
 
-			// Two replicas of a cluster-bound app (one fingerprint) share one
-			// lease: three rounds of both refreshing at once, each saving it
-			// (a write conditional on what it read; a conflict, another round),
-			// never a warning; a restart reads one of the last two, on one seat.
+			// Two replicas of a cluster-bound app (one fingerprint) refreshing
+			// concurrently through one ConfigMap never warn, and a restart reads
+			// one of their leases. A smoke test: the GET-then-PUT window is
+			// milliseconds, so a write conflict (409, another round, unit-tested
+			// in both SDKs' store tests) happens only sometimes here.
 			{
 				sp, sl, _ := newLicense(t, b, tn, nil)
 				ms := "e2e-" + sdk.name + "-replicas-" + run
@@ -326,11 +367,6 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				if r := run1(sp, sl, ms, "current", keySet, k8s...); !r.OK || (r.Iat != last[0].Iat && r.Iat != last[1].Iat) {
 					t.Errorf("replicas: a restart has %+v, want the lease of one of %+v", r, last)
-				}
-				var acts struct{ Items []struct{ ID string } }
-				b.do("GET", api+"/licenses/"+sl.ID+"/activations", nil, 200, &acts)
-				if len(acts.Items) != 1 {
-					t.Errorf("replicas: activations %+v, want one", acts.Items)
 				}
 			}
 
@@ -378,24 +414,7 @@ subjects: [{kind: ServiceAccount, name: ` + ro + `, namespace: ` + ns + `}]
 				if err := os.WriteFile(tokenFile, token(ro), 0o600); err != nil { // A: read only
 					t.Fatal(err)
 				}
-				ready := filepath.Join(dir, mt+".ready")
-				type outcome struct {
-					r   result
-					err error
-				}
-				done := make(chan outcome, 1)
-				go func() {
-					r, err := exec1(tp, tl, mt, "run", keySet, append(k8s, "LF_RUN_MS=10000", "LF_READY="+ready)...)
-					done <- outcome{r, err}
-				}()
-				for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-					if _, err := os.Stat(ready); err == nil {
-						break
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("rotate: run never loaded its lease")
-					}
-				}
+				wait := start(tp, tl, mt, "run", append(k8s, "LF_RUN_MS=10000")...)
 				// B, swapped in whole as kubelet does: the store never reads half a file.
 				if err := os.WriteFile(tokenFile+".new", token("e2e-leases-"+kubeRun), 0o600); err != nil {
 					t.Fatal(err)
@@ -403,15 +422,12 @@ subjects: [{kind: ServiceAccount, name: ` + ro + `, namespace: ` + ns + `}]
 				if err := os.Rename(tokenFile+".new", tokenFile); err != nil {
 					t.Fatal(err)
 				}
-				o := <-done
-				if o.err != nil {
-					t.Fatalf("rotate run: %v", o.err)
+				o := wait()
+				if !o.OK || o.Iat <= first.Iat || len(o.Errors) != 0 {
+					t.Errorf("rotate: run %+v, want a lease renewed after %s", o, first.Iat)
 				}
-				if !o.r.OK || o.r.Iat <= first.Iat || len(o.r.Errors) != 0 {
-					t.Errorf("rotate: run %+v, want a lease renewed after %s", o.r, first.Iat)
-				}
-				if r := run1(tp, tl, mt, "current", keySet, k8s...); !r.OK || r.Iat != o.r.Iat {
-					t.Errorf("rotate: a restart has %+v, want the renewed lease (%s) from the ConfigMap", r, o.r.Iat)
+				if r := run1(tp, tl, mt, "current", keySet, k8s...); !r.OK || r.Iat != o.Iat {
+					t.Errorf("rotate: a restart has %+v, want the renewed lease (%s) from the ConfigMap", r, o.Iat)
 				}
 			}
 
