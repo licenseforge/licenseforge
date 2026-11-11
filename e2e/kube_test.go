@@ -79,7 +79,7 @@ subjects: [{kind: ServiceAccount, name: ` + sa + `, namespace: ` + ns + `}]
 	caData := kube(t, e, "", "config", "view", "--minify", "--flatten", "--raw", "-o", "jsonpath={.clusters[0].cluster.certificate-authority-data}")
 	pem, err := base64.StdEncoding.DecodeString(caData)
 	if err != nil || len(pem) == 0 {
-		t.Fatalf("the kubeconfig's cluster CA: %v", err)
+		t.Fatalf("the kubeconfig's cluster has no certificate-authority(-data) (%v)", err)
 	}
 	ca := filepath.Join(t.TempDir(), "kube-ca.crt")
 	if err := os.WriteFile(ca, pem, 0o600); err != nil {
