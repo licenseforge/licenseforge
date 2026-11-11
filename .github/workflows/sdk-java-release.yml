@@ -111,7 +111,8 @@ jobs:
           for f in *.jar *.pom; do
             printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$FPR!" --armor --detach-sign "$f"
             # Signed by that primary key (Central verifies against primary keys), not just by some key.
-            gpg --batch --status-fd 1 --verify "$f.asc" "$f" | grep -Eq "^\[GNUPG:\] VALIDSIG $FPR " || { echo "$f: not signed by $FPR"; exit 1; }
+            status=$(gpg --batch --status-fd 1 --verify "$f.asc" "$f")
+            printf '%s\n' "$status" | grep -E "^\[GNUPG:\] VALIDSIG $FPR " >/dev/null || { echo "$f: not signed by $FPR"; exit 1; }
           done
       - name: Upload to the Central Portal (USER_MANAGED; publish there after checking)
         env:
@@ -121,12 +122,13 @@ jobs:
           # The token goes through a file, not curl's argv. No --retry: a retried POST can make a second deployment.
           hdr="$RUNNER_TEMP/auth" && printf 'Authorization: Bearer %s\n' "$CENTRAL_TOKEN" > "$hdr" && trap 'rm -f "$hdr"' EXIT
           api=https://central.sonatype.com/api/v1/publisher
-          id=$(curl -sS --fail-with-body -H @"$hdr" -F "bundle=@out/bundle.zip" "$api/upload?name=licenseforge-sdk-$VERSION&publishingType=USER_MANAGED")
+          id=$(curl -sS --fail-with-body -H @"$hdr" -F "bundle=@out/bundle.zip" "$api/upload?name=licenseforge-sdk-$VERSION&publishingType=USER_MANAGED") || { echo "upload refused: $id"; exit 1; }
+          echo "$id" | grep -Eqx '[0-9a-fA-F-]{36}' || { echo "unexpected upload answer: $id"; exit 1; }
           echo "deployment $id"
           # Central validates asynchronously: the run fails if it does.
           for _ in $(seq 60); do
-            st=$(curl -sS --fail-with-body -H @"$hdr" -X POST "$api/status?id=$id")
-            state=$(printf '%s' "$st" | jq -r .deploymentState)
+            st=$(curl -sS --fail-with-body -H @"$hdr" -X POST "$api/status?id=$id") || { echo "status refused: $st"; exit 1; }
+            state=$(printf '%s' "$st" | jq -r .deploymentState) || { echo "unexpected status answer: $st"; exit 1; }
             echo "state $state"
             case $state in
               VALIDATED) echo "Validated: check it on central.sonatype.com and press Publish."; exit 0 ;;

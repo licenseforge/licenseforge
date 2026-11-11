@@ -87,7 +87,7 @@ npm audit signatures                 # in your project, after npm ci or npm inst
 ```sh
 V=0.1.0-alpha.1
 B=https://repo1.maven.org/maven2/io/licenseforge/licenseforge-sdk/$V
-FPR=…   # the release key's fingerprint, from SECURITY.md
+FPR=…   # the release key's fingerprint from SECURITY.md: 40 uppercase hex digits, no spaces
 curl -fsSLO "$B/licenseforge-sdk-$V.jar" -fsSLO "$B/licenseforge-sdk-$V.jar.asc"
 gpg --keyserver hkps://keys.openpgp.org --recv-keys "$FPR"
 gpg --status-fd 1 --verify "licenseforge-sdk-$V.jar.asc" "licenseforge-sdk-$V.jar" | grep "VALIDSIG $FPR "   # that key, not any key you have
@@ -117,7 +117,7 @@ npm attaches a trusted publisher only to a package that exists, so the first ver
 
 1. In GitHub, create the environment `maven-central` (a required reviewer; deployment tags `sdk/java/v*`) and add `refs/tags/sdk/java/v*` to the release-tag ruleset.
 2. On the Central Portal (central.sonatype.com), with 2FA on the account, verify the namespace `io.licenseforge` with the DNS TXT record it gives for `licenseforge.io`, and generate a user token. Store `printf %s 'username:password' | base64 -w0` (no newline, no wrapping) as the environment secret `CENTRAL_TOKEN`.
-3. Create the release PGP key: RSA 4096, the primary key itself signing (Central verifies against primary keys: no signing subkey), with an expiry. Publish it to keys.openpgp.org (verify the email so the user ID is kept) and keyserver.ubuntu.com, and add its fingerprint to `SECURITY.md`. Store the armored private key and its passphrase as the environment secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`, and the 40-hex-digit fingerprint (uppercase) as the environment variable `PGP_FINGERPRINT`; keep an offline, encrypted backup of the key.
+3. Create the release PGP key: RSA 4096, the primary key itself signing (Central verifies against primary keys: no signing subkey), with an expiry. Publish it to keys.openpgp.org (verify the email so the user ID is kept) and keyserver.ubuntu.com, and add its fingerprint to `SECURITY.md` as one string of 40 uppercase hex digits without spaces. Store the armored private key and its passphrase as the environment secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`, and the 40-hex-digit fingerprint (uppercase) as the environment variable `PGP_FINGERPRINT`; keep an offline, encrypted backup of the key.
 4. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. The run fails unless Central validates the bundle; then check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
 
 ## For maintainers: a release that failed halfway
