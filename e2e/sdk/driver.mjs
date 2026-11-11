@@ -16,7 +16,10 @@
 // token is) instead of a file. LF_CA: the server's private CA (PEM file),
 // given to the client's ca option. run also prints the codes of the errors
 // it reported and went on from (errors); with LF_READY, the file it creates
-// once the client has loaded the stored lease. Needs sdk/ts built.
+// once the client has loaded the stored lease. Without LF_MACHINE the SDK
+// finds the fingerprint itself (in a pod: the cluster's), and without
+// LF_K8S_HOST a Kubernetes store uses the pod's service account; online
+// steps print the fingerprint's binding. Needs sdk/ts built.
 import { readFileSync, writeFileSync } from "node:fs";
 import {
   Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, KubernetesConfigMapStore, KubernetesSecretStore, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet,
@@ -24,7 +27,7 @@ import {
 
 const env = (k) => process.env[k] ?? "";
 const op = process.argv[2];
-const fingerprint = await compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), { override: () => env("LF_MACHINE") });
+const fingerprint = await compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_MACHINE") ? { override: () => env("LF_MACHINE") } : {});
 const keys = parseKeySet(new TextEncoder().encode(env("LF_KEYS")));
 const claimsOf = ({ claims, status }) => {
   const e = claims.entitlements;
@@ -34,8 +37,8 @@ const claimsOf = ({ claims, status }) => {
 function leaseStore() {
   const kind = env("LF_K8S_STORE");
   if (!kind) return new FileLeaseStore(env("LF_STORE"));
-  const api = { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => (env("LF_K8S_TOKEN_FILE") ? readFileSync(env("LF_K8S_TOKEN_FILE"), "utf8").trim() : env("LF_K8S_TOKEN")) };
-  const opts = { name: env("LF_K8S_NAME"), api };
+  const api = !env("LF_K8S_HOST") ? undefined : { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => (env("LF_K8S_TOKEN_FILE") ? readFileSync(env("LF_K8S_TOKEN_FILE"), "utf8").trim() : env("LF_K8S_TOKEN")) };
+  const opts = { name: env("LF_K8S_NAME"), ...(api && { api }) };
   if (kind === "secret") return new KubernetesSecretStore(opts);
   if (kind === "configmap") return new KubernetesConfigMapStore(opts);
   throw new Error(`LF_K8S_STORE ${kind}: configmap or secret`);
@@ -109,6 +112,7 @@ if (op.startsWith("offline-")) {
     }
   }
   if (op === "run") out.errors = errors;
+  out.binding = fingerprint.binding;
   out.warnings = client.takeWarnings().map(String);
 }
 console.log(JSON.stringify(out));

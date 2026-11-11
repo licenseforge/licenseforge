@@ -19,6 +19,17 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Changed
+- End-to-end: `TestSDKInPod` runs the TypeScript and Java SDKs **inside the cluster**, as a vendor's cluster-bound app runs. The setup:
+  - Each SDK's driver runs in a pod.
+  - Nothing is configured beyond the license, the keys and the server's CA.
+  - The pod's ServiceAccount has only the RBAC the READMEs ask for: get and update on its ConfigMap, and get on the `kube-system` namespace.
+
+  What the test checks:
+  - The SDK finds the cluster's fingerprint itself (binding `cluster`).
+  - It keeps the lease in the ConfigMap through the pod's own token, CA and namespace files.
+  - A restart reads the lease back.
+  - A second pod is the same machine: it uses the same lease and the same single seat.
+  - A deactivate from either pod clears the ConfigMap for both.
 - End-to-end: three more SDK journeys, in the TypeScript and Java SDKs:
   - **`run()` across a suspension:** one run keeps going on the lease it holds, reporting `license_suspended` at each refused refresh, and renews once the vendor reinstates the license.
   - **Two replicas sharing one ConfigMap lease:** concurrent refreshes through the one object never warn, and a restart reads one of their leases. A smoke test: the store's write-conflict retry is unit-tested, since a conflict here happens only sometimes.

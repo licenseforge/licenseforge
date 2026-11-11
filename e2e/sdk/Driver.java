@@ -47,7 +47,7 @@ public class Driver {
   static Online.LeaseStore leaseStore() throws Exception {
     String kind = env("LF_K8S_STORE");
     if (kind.isEmpty()) return new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE")));
-    LeaseStores.KubernetesApi api = new LeaseStores.KubernetesApi(env("LF_K8S_HOST"), Integer.parseInt(env("LF_K8S_PORT")),
+    LeaseStores.KubernetesApi api = env("LF_K8S_HOST").isEmpty() ? null : new LeaseStores.KubernetesApi(env("LF_K8S_HOST"), Integer.parseInt(env("LF_K8S_PORT")),
         Files.readAllBytes(Path.of(env("LF_K8S_CA"))), env("LF_K8S_NAMESPACE"), () -> {
           if (env("LF_K8S_TOKEN_FILE").isEmpty()) return env("LF_K8S_TOKEN");
           try {
@@ -65,7 +65,7 @@ public class Driver {
 
   public static void main(String[] args) throws Exception {
     String op = args[0];
-    Fingerprints.Fingerprint fp = Fingerprints.compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), new Fingerprints.Options(() -> env("LF_MACHINE"), false));
+    Fingerprints.Fingerprint fp = Fingerprints.compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), new Fingerprints.Options(env("LF_MACHINE").isEmpty() ? null : () -> env("LF_MACHINE"), false));
     List<PublicKey> keys = KeySet.parse(env("LF_KEYS"));
     String out;
     List<String> w = new ArrayList<>();
@@ -145,6 +145,7 @@ public class Driver {
         }
       }
       if (op.equals("run")) out += ",\"errors\":[" + String.join(",", errors) + "]";
+      out += ",\"binding\":" + q(fp.binding().name().toLowerCase(Locale.ROOT));
       for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
     }
     System.out.println("{" + out + ",\"warnings\":[" + String.join(",", w) + "]}");
