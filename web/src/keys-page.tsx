@@ -47,7 +47,7 @@ export function KeysPage() {
       </div>
       {caller && (
         <p className="mt-4 text-sm">
-          {t("keys.tenantId")} <code className="rounded border px-1 font-mono text-xs">{caller.id}</code>
+          {t("keys.tenantId")} <code className="select-all rounded border px-1 font-mono text-xs">{caller.id}</code>
         </p>
       )}
       {caller?.test && <p className="mt-4 text-sm font-medium">{t("keys.testTenant")}</p>}
