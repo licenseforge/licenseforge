@@ -9,7 +9,7 @@
 // (text), or the error's code (and HTTP status online), with any warnings the
 // online client recorded (a store that failed, a stored lease that didn't
 // verify). Needs sdk/ts built.
-import { Client, compute, FileClockStore, FileLeaseStore, Guard, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet } from "../../sdk/ts/dist/src/index.js";
+import { Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet } from "../../sdk/ts/dist/src/index.js";
 
 const env = (k) => process.env[k] ?? "";
 const op = process.argv[2];
@@ -40,7 +40,7 @@ if (op.startsWith("offline-")) {
     else if (op === "offline-deactivate") out = { ok: true, text: client.deactivate() };
     else throw new Error(`unknown step ${op}`);
   } catch (e) {
-    if (!(e instanceof OfflineError || e instanceof LicenseError)) throw e;
+    if (!(e instanceof OfflineError || e instanceof LicenseError || e instanceof ClockError)) throw e;
     out = { ok: false, code: e.code, detail: e.message };
   }
   out.warnings = [];

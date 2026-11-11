@@ -66,6 +66,8 @@ public class Driver {
         out = "\"ok\":false,\"code\":" + q(e.code().name().toLowerCase(Locale.ROOT)) + ",\"detail\":" + q(e.getMessage());
       } catch (LicenseException e) {
         out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"detail\":" + q(e.getMessage());
+      } catch (Clock.ClockException e) {
+        out = "\"ok\":false,\"code\":" + q(e.code().name().toLowerCase(Locale.ROOT)) + ",\"detail\":" + q(e.getMessage());
       }
     } else {
       Online.Client client = Online.Client.create(Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp)

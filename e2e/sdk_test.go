@@ -225,8 +225,15 @@ func TestSDKJourneys(t *testing.T) {
 			}
 			offRefused("no_license", "offline-current")
 			first := answer(offOK("offline-request").Text)
+			// The file is for this machine and these keys only.
+			if r := run1(offProduct, ol, mo+"-other", "offline-install", keySet, "LF_FILE="+first.LicenseFile); r.OK || r.Code != "bad_file" {
+				t.Errorf("another machine installing the file: %+v, want bad_file", r)
+			}
+			if r := run1(offProduct, ol, mo, "offline-install", wrongKeys, "LF_FILE="+first.LicenseFile); r.OK || r.Code != "bad_file" {
+				t.Errorf("the file under other keys: %+v, want bad_file", r)
+			}
 			in := offOK("offline-install", "LF_FILE="+first.LicenseFile)
-			if in.Lid != ol.ID || in.Tenant != tn.ID || in.Product != offProduct.Slug || in.Status != "valid" || !in.SSO || in.Seats != 25 {
+			if in.Lid != ol.ID || in.Tenant != tn.ID || in.Product != offProduct.Slug || in.Plan != "pro" || in.Status != "valid" || !in.SSO || in.Nope || in.Seats != 25 {
 				t.Errorf("installed claims %+v", in)
 			}
 			if c := offOK("offline-current"); fmt.Sprint(c) != fmt.Sprint(in) {
@@ -240,11 +247,14 @@ func TestSDKJourneys(t *testing.T) {
 			offRefused("older_file", "offline-install", "LF_FILE="+first.LicenseFile)
 			receipt := offOK("offline-deactivate").Text
 			var act struct {
-				ID, Mode      string
-				DeactivatedAt *string `json:"deactivated_at"`
+				ID, Mode, Hostname string
+				AppVersion         string  `json:"app_version"`
+				SDKVersion         string  `json:"sdk_version"`
+				DeactivatedAt      *string `json:"deactivated_at"`
 			}
 			b.do("POST", api+"/deactivation-receipts", map[string]string{"receipt": receipt}, 200, &act)
-			if act.ID != first.ActivationID || act.Mode != "offline" || act.DeactivatedAt == nil {
+			// The seat carries what the SDK's request said about the machine.
+			if act.ID != first.ActivationID || act.Mode != "offline" || act.DeactivatedAt == nil || act.Hostname != mo || act.AppVersion != "1.0.0" || !strings.HasPrefix(act.SDKVersion, sdk.version+"/") {
 				t.Errorf("returned seat %+v", act)
 			}
 			offRefused("no_license", "offline-current")
