@@ -4,12 +4,14 @@ package e2e
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,6 +35,18 @@ func TestSDKJourneys(t *testing.T) {
 		k["public_key"] = base64.RawURLEncoding.EncodeToString(other)
 	}
 	wrongKeys, _ := json.Marshal(keys)
+
+	kubeRun := strings.ToLower(rand.Text()[:8])
+	kubeNames := map[string]string{}
+	var configMaps, secrets []string
+	for _, n := range []string{"typescript", "java"} {
+		kubeNames[n+"-configmap"] = "e2e-lease-" + n + "-" + kubeRun
+		kubeNames[n+"-secret"] = "e2e-lease-" + n + "-" + kubeRun
+		configMaps = append(configMaps, kubeNames[n+"-configmap"])
+		secrets = append(secrets, kubeNames[n+"-secret"])
+	}
+	missing := "e2e-lease-missing-" + kubeRun // in the Role, never created
+	kubeEnv := kubeLeaseStores(t, e, kubeRun, configMaps, secrets, []string{missing})
 
 	for _, sdk := range []struct {
 		name, version string // version: the sdk_version prefix
@@ -92,7 +106,7 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				// A store that failed or a stored lease that didn't verify is
 				// only a warning to the app: none is expected with the right keys.
-				if len(r.Warnings) > 0 && string(keys) == string(keySet) {
+				if len(r.Warnings) > 0 && string(keys) == string(keySet) && !slices.Contains(extra, "LF_EXPECT_WARNINGS=1") {
 					t.Fatalf("%s %s: warnings %q", machine, op, r.Warnings)
 				}
 				return r
@@ -216,6 +230,45 @@ func TestSDKJourneys(t *testing.T) {
 				}
 				if r := run1(rp, rl, mr, "current", keySet); r.OK || r.Code != "no_lease" {
 					t.Errorf("after run stopped (%s): %+v, want no_lease (the stored lease was forgotten too)", c.name, r)
+				}
+			}
+
+			// The Kubernetes lease stores against the cluster's real API server,
+			// with only the RBAC the READMEs ask for (get and update on the named,
+			// pre-created ConfigMap or Secret): the lease lands in the object, a
+			// restart reads it from there, deactivate removes it; an object the
+			// Role doesn't name can't be written (a warning, the lease still in use).
+			for _, kind := range []string{"configmap", "secret"} {
+				kp, kl, _ := newLicense(t, b, tn, map[string]any{"max_activations": 3}) // this machine and the two refused stores
+				mk := "e2e-" + sdk.name + "-" + kind + "-" + run
+				store := []string{"LF_K8S_STORE=" + kind, "LF_K8S_NAME=" + kubeNames[sdk.name+"-"+kind]}
+				k8s := append(append([]string{}, kubeEnv...), store...)
+				first := run1(kp, kl, mk, "activate", keySet, k8s...)
+				if !first.OK || first.Lid != kl.ID {
+					t.Fatalf("%s activate: %+v", kind, first)
+				}
+				if v := kubeValue(t, e, kind, kubeNames[sdk.name+"-"+kind], "lease"); !strings.Contains(v, "\nlf1.") { // the lease as the server armored it
+					t.Errorf("%s holds %q, want the lease", kind, v)
+				}
+				if r := run1(kp, kl, mk, "current", keySet, k8s...); !r.OK || r.Iat != first.Iat {
+					t.Errorf("%s: after a restart: %+v, want the stored lease", kind, r)
+				}
+				if r := run1(kp, kl, mk, "deactivate", keySet, k8s...); !r.OK {
+					t.Fatalf("%s deactivate: %+v", kind, r)
+				}
+				if v := kubeValue(t, e, kind, kubeNames[sdk.name+"-"+kind], "lease"); v != "" {
+					t.Errorf("%s still holds %q after deactivate", kind, v)
+				}
+				// Refused writes are warnings: the lease stays in use. An object the
+				// Role doesn't name is refused at get; one it names but nobody
+				// created, at create, which it can't grant by name: hence "create it
+				// beforehand".
+				for _, c := range []struct{ name, why string }{{"e2e-not-allowed-" + run, "cannot get"}, {missing, "cannot create"}} {
+					denied := append(append([]string{}, kubeEnv...), "LF_K8S_STORE="+kind, "LF_K8S_NAME="+c.name, "LF_EXPECT_WARNINGS=1")
+					r := run1(kp, kl, mk+"-"+c.why[7:], "activate", keySet, denied...)
+					if w := strings.Join(r.Warnings, " "); !r.OK || r.Lid != kl.ID || !strings.Contains(w, "forbidden") || !strings.Contains(w, c.why) {
+						t.Errorf("%s %s: %+v, want activated with a warning that the store %s", kind, c.name, r, c.why)
+					}
 				}
 			}
 
