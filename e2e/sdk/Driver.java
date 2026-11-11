@@ -37,7 +37,7 @@ public class Driver {
 
   static String claims(LicenseFile.Opened o) {
     Claims c = o.claims();
-    return ",\"lid\":" + q(c.licenseId()) + ",\"tenant\":" + q(c.tenant()) + ",\"product\":" + q(c.product()) + ",\"plan\":" + q(c.plan())
+    return ",\"iat\":" + q(c.issuedAt().toString()) + ",\"lid\":" + q(c.licenseId()) + ",\"tenant\":" + q(c.tenant()) + ",\"product\":" + q(c.product()) + ",\"plan\":" + q(c.plan())
         + ",\"status\":" + q(o.status().name().toLowerCase(Locale.ROOT)) + ",\"sso\":" + c.entitlements().hasFeature("sso")
         + ",\"nope\":" + c.entitlements().hasFeature("nope") + ",\"seats\":" + c.entitlements().limit("seats");
   }
@@ -81,11 +81,43 @@ public class Driver {
           case "refresh" -> client.refresh();
           case "deactivate" -> client.deactivate();
           case "current" -> {}
+          case "run" -> {
+            // 30 s at most (the step then fails loudly), or LF_RUN_MS, then the lease it holds.
+            long forMs = env("LF_RUN_MS").isEmpty() ? 0 : Long.parseLong(env("LF_RUN_MS"));
+            Thread main = Thread.currentThread();
+            Thread stop = new Thread(() -> {
+              try {
+                Thread.sleep(forMs > 0 ? forMs : 30_000);
+                main.interrupt();
+              } catch (InterruptedException x) {
+                // the step ended
+              }
+            });
+            stop.setDaemon(true);
+            stop.start();
+            try {
+              client.run(x -> {});
+            } catch (InterruptedException e) {
+              if (forMs == 0) throw e;
+            } finally {
+              stop.interrupt();
+            }
+          }
           default -> throw new IllegalArgumentException("unknown step " + op);
         }
         out = "\"ok\":true" + (op.equals("deactivate") ? "" : claims(client.current()));
       } catch (Online.OnlineException e) {
         out = "\"ok\":false,\"code\":" + q(e.code().spec()) + ",\"http\":" + e.status() + ",\"detail\":" + q(e.getMessage());
+        if (op.equals("run")) {
+          boolean forgot;
+          try {
+            client.current();
+            forgot = false;
+          } catch (Online.OnlineException x) {
+            forgot = x.code() == Online.OnlineException.Code.NO_LEASE;
+          }
+          out += ",\"forgot\":" + forgot;
+        }
       }
       for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
     }

@@ -1,6 +1,8 @@
 // One step of a customer's app built on the TypeScript SDK, for the SDK
 // journeys (sdk_test.go): node e2e/sdk/driver.mjs <step>.
 //   online:  activate | refresh | deactivate | current (the saved lease alone, no request)
+//            | run (the background loop until it stops, 30 s at most; forgot: the lease is gone;
+//              with LF_RUN_MS, stopped after that long, then the lease it holds)
 //   offline: offline-request | offline-install (LF_FILE) | offline-current | offline-deactivate
 // Configured as a vendor would, from LF_* variables (sdk_test.go sets them);
 // the lease, the offline state and the clock guard are kept in files between
@@ -16,7 +18,7 @@ const fingerprint = await compute(env("LF_TENANT_ID"), env("LF_PRODUCT"), { over
 const keys = parseKeySet(new TextEncoder().encode(env("LF_KEYS")));
 const claimsOf = ({ claims, status }) => {
   const e = claims.entitlements;
-  return { lid: claims.licenseId, tenant: claims.tenant, product: claims.product, plan: claims.plan, status, sso: e.hasFeature("sso"), nope: e.hasFeature("nope"), seats: e.limit("seats") };
+  return { iat: claims.issuedAt.toISOString(), lid: claims.licenseId, tenant: claims.tenant, product: claims.product, plan: claims.plan, status, sso: e.hasFeature("sso"), nope: e.hasFeature("nope"), seats: e.limit("seats") };
 };
 
 let out;
@@ -60,11 +62,28 @@ if (op.startsWith("offline-")) {
     if (op === "activate") await client.activate();
     else if (op === "refresh") await client.refresh();
     else if (op === "deactivate") await client.deactivate();
+    else if (op === "run") {
+      const forMs = Number(env("LF_RUN_MS") || 0);
+      const stop = AbortSignal.timeout(forMs || 30_000);
+      try {
+        await client.run(stop); // only ever rejects
+      } catch (e) {
+        if (!(forMs && stop.aborted)) throw e;
+      }
+    }
     else if (op !== "current") throw new Error(`unknown step ${op}`);
     out = { ok: true, ...(op === "deactivate" ? {} : claimsOf(client.current())) };
   } catch (e) {
     if (!(e instanceof OnlineError)) throw e;
     out = { ok: false, code: e.code, http: e.status, detail: `${e.message}${e.cause ? `: ${e.cause}` : ""}` };
+    if (op === "run") {
+      try {
+        client.current();
+        out.forgot = false;
+      } catch (x) {
+        out.forgot = x instanceof OnlineError && x.code === "no_lease";
+      }
+    }
   }
   out.warnings = client.takeWarnings().map(String);
 }
