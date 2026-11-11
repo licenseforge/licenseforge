@@ -134,6 +134,11 @@ func Verify(license string, keys KeySet) (payload []byte, kid string, err error)
 		if len(sig) != ed25519.SignatureSize {
 			return nil, "", fmt.Errorf("%w: signature length", ErrMalformed)
 		}
+		// A weak R (spec): with R = identity and S = k·a, cofactorless
+		// verification (crypto/ed25519) accepts and OpenSSL refuses.
+		if weakEd25519(sig[:32]) {
+			return nil, "", ErrBadSignature
+		}
 		// crypto/ed25519 rejects non-canonical S (S >= L), as the spec requires.
 		if !ed25519.Verify(ed25519.PublicKey(key.Key), msg, sig) {
 			return nil, "", ErrBadSignature
