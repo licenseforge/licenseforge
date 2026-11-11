@@ -169,7 +169,10 @@ func TestSDKJourneys(t *testing.T) {
 			// restart, a renewal and the older file, the receipt, the returned file.
 			offProduct, ol, _ := newLicense(t, b, tn, map[string]any{"offline_allowed": true, "max_offline_seconds": 30 * 86400})
 			mo := "e2e-" + sdk.name + "-offline-" + run
-			off := func(op2 string, extra ...string) result { t.Helper(); return run1(offProduct, ol, mo, op2, keySet, extra...) }
+			off := func(op2 string, extra ...string) result {
+				t.Helper()
+				return run1(offProduct, ol, mo, op2, keySet, extra...)
+			}
 			offOK := func(op2 string, extra ...string) result {
 				t.Helper()
 				r := off(op2, extra...)
