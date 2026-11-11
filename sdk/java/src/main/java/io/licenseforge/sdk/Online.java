@@ -166,6 +166,7 @@ public final class Online {
     Optional<Instant> buildDate = Optional.empty();
     int maxAttempts = 4;
     Duration timeout = Duration.ofSeconds(30);
+    byte[] ca;
 
     private Config(URI base, String tenantId, String product, String licenseKey, List<PublicKey> keys, Fingerprint fingerprint) {
       this.base = base;
@@ -217,6 +218,7 @@ public final class Online {
       c.buildDate = buildDate;
       c.maxAttempts = maxAttempts;
       c.timeout = timeout;
+      c.ca = ca;
       return c;
     }
 
@@ -265,6 +267,21 @@ public final class Online {
       timeout = v;
       return this;
     }
+
+    /**
+     * A server behind a private CA: its certificate(s), PEM. The client then
+     * trusts only these, not the JVM's trust store.
+     */
+    public Config ca(byte[] pem) {
+      byte[] v = Objects.requireNonNull(pem, "ca").clone();
+      try {
+        Fingerprints.trustOnly(v);
+      } catch (GeneralSecurityException | IOException e) {
+        throw new IllegalArgumentException("licenseforge online: ca must be PEM certificates", e);
+      }
+      ca = v;
+      return this;
+    }
   }
 
   private static final Pattern IPV4_LOOPBACK = Pattern.compile("127(\\.[0-9]{1,3}){3}");
@@ -297,13 +314,13 @@ public final class Online {
     private Client(Config cfg) {
       this.cfg = cfg.copy(); // later changes to the caller's Config don't reach a live client
       try {
-        SSLContext tls = SSLContext.getInstance("TLS");
-        tls.init(null, null, null); // the JVM's trust store
+        SSLContext tls = this.cfg.ca == null ? SSLContext.getInstance("TLS") : Fingerprints.trustOnly(this.cfg.ca);
+        if (this.cfg.ca == null) tls.init(null, null, null); // the JVM's trust store
         SSLParameters params = tls.getDefaultSSLParameters();
         params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"});
         // No redirects: the license key is in a header.
         http = HttpClient.newBuilder().sslContext(tls).sslParameters(params).followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).connectTimeout(cfg.timeout).build();
-      } catch (GeneralSecurityException e) {
+      } catch (GeneralSecurityException | IOException e) {
         throw new IllegalStateException(e);
       }
     }

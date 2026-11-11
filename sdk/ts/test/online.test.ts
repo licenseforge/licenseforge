@@ -1,8 +1,13 @@
 // The online client: the Go SDK's online tests, ported to a local server.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createPrivateKey, sign } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createTLSServer } from "node:https";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { Client, ClockError, Guard, type LeaseStore, MemoryClockStore, OnlineError, type PublicKey, SDK_VERSION } from "../src/index.js";
 
@@ -319,6 +324,72 @@ test("create validates its config", async () => {
   ]) {
     await assert.rejects(Client.create(bad), TypeError, JSON.stringify(bad.baseURL));
   }
+  for (const ca of ["", "not pem", Buffer.from("x"), "-----BEGIN CERTIFICATE-----\nnotbase64!!\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "x -----BEGIN CERTIFICATE-----", `-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----\n${certs().server.cert}`]) await assert.rejects(Client.create({ ...good, ca }), TypeError, `ca ${String(ca)}`);
   for (const timeoutMs of [0, -1, Number.NaN]) await assert.rejects(Client.create({ ...good, timeoutMs }), RangeError, String(timeoutMs));
   await Client.create({ ...good, baseURL: "http://localhost:8080/lf/" }); // loopback http is fine
+});
+
+/** A self-signed certificate for 127.0.0.1, and a second one the client is never told about. */
+function certs() {
+  const dir = mkdtempSync(join(tmpdir(), "lf-online-"));
+  try {
+    const one = (n: string) => {
+      execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-days", "1", "-subj", "/CN=localhost",
+        "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", join(dir, `${n}k.pem`), "-out", join(dir, `${n}c.pem`)], { stdio: "ignore" });
+      return { key: readFileSync(join(dir, `${n}k.pem`)), cert: readFileSync(join(dir, `${n}c.pem`)) };
+    };
+    return { server: one("s"), other: one("o") };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("ca: a server behind a private CA is trusted with it, and only with it", { timeout: 10_000 }, async () => {
+  const { server: tls, other } = certs();
+  const srv = createTLSServer(tls, (_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ lease: lease({ iatMs: now }), activation_id: "act_1" }));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  try {
+    const base = `https://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const pem = Buffer.from(tls.cert);
+    const c = await client(base, { ca: pem, maxAttempts: 1 });
+    pem.fill(0x41); // the client keeps its own copy
+    await c.activate();
+    assert.equal(c.current().claims.licenseId, "lic_1");
+    assert.equal(await code((await client(base, { maxAttempts: 1 })).activate()), "network", "not in Node's CAs");
+    assert.equal(await code((await client(base, { ca: other.cert, maxAttempts: 1 })).activate()), "network", "another CA");
+    assert.equal(await code((await client(base, { ca: String(tls.cert), maxAttempts: 1 })).activate()), "ok", "a PEM string");
+  } finally {
+    srv.close();
+  }
+});
+
+test("an answer over 1 MiB, cut off, or stalled past timeoutMs is a network error", { timeout: 10_000 }, async () => {
+  let n = 0;
+  const srv = createServer((_req, res) => {
+    const i = n++;
+    if (i === 0) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("x".repeat((1 << 20) + 1));
+    } else if (i === 1) {
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
+      res.write("{", () => res.destroy()); // cut off mid-answer
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.write("{"); // and never more
+    }
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  try {
+    const c = await client(`http://127.0.0.1:${(srv.address() as AddressInfo).port}`, { maxAttempts: 1, timeoutMs: 300 });
+    assert.equal(await code(c.activate()), "network", "over 1 MiB");
+    assert.equal(await code(c.activate()), "network", "cut off");
+    const t = Date.now();
+    assert.equal(await code(c.activate()), "network", "stalled");
+    assert.ok(Date.now() - t < 5000);
+  } finally {
+    srv.closeAllConnections();
+    srv.close();
+  }
 });

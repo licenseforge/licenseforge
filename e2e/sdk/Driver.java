@@ -84,11 +84,13 @@ public class Driver {
         out = "\"ok\":false,\"code\":" + q(e.code().name().toLowerCase(Locale.ROOT)) + ",\"detail\":" + q(e.getMessage());
       }
     } else {
-      Online.Client client = Online.Client.create(Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp)
+      Online.Config cfg = Online.Config.builder(env("LF_BASE_URL"), env("LF_TENANT_ID"), env("LF_PRODUCT"), env("LF_LICENSE_KEY"), keys, fp)
           .hostname(env("LF_MACHINE"))
           .appVersion("1.0.0")
           .store(leaseStore())
-          .maxAttempts(1));
+          .maxAttempts(1);
+      if (!env("LF_CA").isEmpty()) cfg.ca(Files.readAllBytes(Path.of(env("LF_CA"))));
+      Online.Client client = Online.Client.create(cfg);
       try {
         switch (op) {
           case "activate" -> client.activate();

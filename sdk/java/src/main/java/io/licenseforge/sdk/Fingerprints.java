@@ -258,19 +258,25 @@ public final class Fingerprints {
    * TLS 1.2 or later, no redirects. Shared with the Kubernetes lease stores.
    */
   static HttpClient clusterClient(byte[] ca, Duration connectTimeout) throws GeneralSecurityException, IOException {
+    SSLContext tls = trustOnly(ca);
+    javax.net.ssl.SSLParameters params = tls.getDefaultSSLParameters();
+    params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"}); // as Go and TS: never older, whatever java.security allows
+    return HttpClient.newBuilder().sslContext(tls).sslParameters(params).connectTimeout(connectTimeout)
+        .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
+  }
+
+  /** A TLS context that trusts only the CA certificate(s) in ca (PEM); shared with Online's ca option. */
+  static SSLContext trustOnly(byte[] ca) throws GeneralSecurityException, IOException {
     KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
     ks.load(null, null);
     int n = 0;
     for (Certificate c : CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(ca))) ks.setCertificateEntry("ca" + n++, c);
     if (n == 0) throw new GeneralSecurityException("no certificate in the CA file");
     TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-    tmf.init(ks); // only the cluster's CA
+    tmf.init(ks); // only these CAs
     SSLContext tls = SSLContext.getInstance("TLS");
     tls.init(null, tmf.getTrustManagers(), null);
-    javax.net.ssl.SSLParameters params = tls.getDefaultSSLParameters();
-    params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"}); // as Go and TS: never older, whatever java.security allows
-    return HttpClient.newBuilder().sslContext(tls).sslParameters(params).connectTimeout(connectTimeout)
-        .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
+    return tls;
   }
 
   /** https://host:port, an IPv6 service address bracketed. */

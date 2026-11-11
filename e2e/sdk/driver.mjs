@@ -12,7 +12,8 @@
 // verify). With LF_K8S_STORE (configmap or secret), the lease is kept in
 // that Kubernetes object (LF_K8S_NAME) through the API at LF_K8S_HOST,
 // LF_K8S_PORT (CA file LF_K8S_CA, namespace LF_K8S_NAMESPACE, token
-// LF_K8S_TOKEN) instead of a file. Needs sdk/ts built.
+// LF_K8S_TOKEN) instead of a file. LF_CA: the server's private CA (PEM
+// file), given to the client's ca option. Needs sdk/ts built.
 import { readFileSync } from "node:fs";
 import {
   Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, KubernetesConfigMapStore, KubernetesSecretStore, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet,
@@ -73,6 +74,7 @@ if (op.startsWith("offline-")) {
     appVersion: "1.0.0",
     store: leaseStore(),
     maxAttempts: 1,
+    ...(env("LF_CA") && { ca: readFileSync(env("LF_CA")) }),
   });
   try {
     if (op === "activate") await client.activate();
