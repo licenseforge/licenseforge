@@ -56,6 +56,10 @@ import javax.net.ssl.SSLParameters;
 public final class Online {
   private Online() {}
 
+  // Differences from Go/TS, all failing safe: a problem answer with duplicate keys or a
+  // non-string detail reads as no code / "" (strict JSON); Retry-After takes delay-seconds
+  // and IMF-fixdate only (the server sends seconds).
+
   /** Sent with activations and refreshes; kept with the pom's version (OnlineTest). */
   public static final String SDK_VERSION = "java/0.1.0-SNAPSHOT";
   /** The least run waits after a successful refresh, whatever refresh_after says (ADR-0034). */
@@ -134,9 +138,9 @@ public final class Online {
 
   /** Keeps the verified lease across restarts; leases are verified again when loaded. "" means none / delete. */
   public interface LeaseStore {
-    String load() throws Exception;
+    String load() throws IOException;
 
-    void save(String lease) throws Exception;
+    void save(String lease) throws IOException;
   }
 
   /** A verified lease: the license file, its claims, and the activation's ID. */
@@ -144,7 +148,7 @@ public final class Online {
 
   /** The client's settings. Build with {@link #builder}. */
   public static final class Config {
-    final URI base;
+    final URI base; // the fields below the required ones are set by the chained setters; the client copies them
     final String tenantId;
     final String product;
     final String licenseKey;
@@ -186,17 +190,30 @@ public final class Online {
       }
       boolean https = "https".equalsIgnoreCase(u.getScheme());
       boolean http = "http".equalsIgnoreCase(u.getScheme()) && u.getHost() != null && loopback(u.getHost());
-      if (!(https || http) || u.getHost() == null || u.getRawUserInfo() != null || u.getRawQuery() != null || u.getRawFragment() != null) {
+      if (!(https || http) || u.getHost() == null || u.getPort() > 65535 || u.getRawUserInfo() != null || u.getRawQuery() != null || u.getRawFragment() != null) {
         throw new IllegalArgumentException("licenseforge online: baseUrl must be an https URL (http only for loopback hosts) without credentials, query or fragment: the license key travels with each request");
       }
       if (tenantId == null || tenantId.isEmpty() || product == null || product.isEmpty() || licenseKey == null || licenseKey.isEmpty()
           || keys == null || keys.isEmpty() || fingerprint == null || fingerprint.fingerprint().isEmpty()) {
         throw new IllegalArgumentException("licenseforge online: tenantId, product, licenseKey, keys and fingerprint are required");
       }
-      // A key with a control character can't go in a header, and the JDK's error would quote it.
-      if (licenseKey.chars().anyMatch(c -> c < 0x20 || c == 0x7f)) throw new IllegalArgumentException("licenseforge online: licenseKey has control characters");
+      // Keys are printable ASCII (ADR-0004); anything else can't go in a header, and the JDK's error would quote the key.
+      if (licenseKey.chars().anyMatch(c -> c < 0x21 || c > 0x7e)) throw new IllegalArgumentException("licenseforge online: licenseKey must be printable ASCII (remove spaces, dashes pasted as en dashes, smart quotes)");
       if (fingerprint.binding() == BindingType.NONE) throw new IllegalArgumentException("licenseforge online: fingerprint binding must be machine or cluster");
       return new Config(u, tenantId, product, licenseKey, List.copyOf(keys), fingerprint);
+    }
+
+    Config copy() {
+      Config c = new Config(base, tenantId, product, licenseKey, keys, fingerprint);
+      c.hostname = hostname;
+      c.appVersion = appVersion;
+      c.store = store;
+      c.clock = clock;
+      c.clockTolerance = clockTolerance;
+      c.buildDate = buildDate;
+      c.maxAttempts = maxAttempts;
+      c.timeout = timeout;
+      return c;
     }
 
     public Config hostname(String v) {
@@ -274,14 +291,14 @@ public final class Online {
     LongUnaryOperator rand = n -> n <= 0 ? 0 : ThreadLocalRandom.current().nextLong(n);
 
     private Client(Config cfg) {
-      this.cfg = cfg;
+      this.cfg = cfg.copy(); // later changes to the caller's Config don't reach a live client
       try {
         SSLContext tls = SSLContext.getInstance("TLS");
         tls.init(null, null, null); // the JVM's trust store
         SSLParameters params = tls.getDefaultSSLParameters();
         params.setProtocols(new String[] {"TLSv1.3", "TLSv1.2"});
         // No redirects: the license key is in a header.
-        http = HttpClient.newBuilder().sslContext(tls).sslParameters(params).followRedirects(HttpClient.Redirect.NEVER).connectTimeout(cfg.timeout).build();
+        http = HttpClient.newBuilder().sslContext(tls).sslParameters(params).followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).connectTimeout(cfg.timeout).build();
       } catch (GeneralSecurityException e) {
         throw new IllegalStateException(e);
       }
@@ -297,7 +314,7 @@ public final class Online {
       String s = "";
       try {
         s = cfg.store.load();
-      } catch (Exception e) {
+      } catch (IOException e) {
         c.warn(new IOException("licenseforge online: loading the stored lease: " + e, e));
       }
       if (s != null && !s.isEmpty()) {
@@ -339,18 +356,19 @@ public final class Online {
       return leaseCall("refresh", "", cfg.maxAttempts);
     }
 
-    /** Frees this machine's seat and drops the cached lease; a machine already not activated is success too. */
-    public void deactivate() throws OnlineException, InterruptedException {
+    /**
+     * Frees this machine's seat and drops the cached lease; a machine already
+     * not activated is success too. An IOException: the seat is freed and the
+     * cache dropped, but the stored lease wasn't cleared (it would load again
+     * on restart until a refresh says not_activated): retry forget.
+     */
+    public void deactivate() throws OnlineException, InterruptedException, IOException {
       try {
         call("deactivate", "{\"fingerprint\":" + quote(cfg.fingerprint.fingerprint()) + "}", "", 204, cfg.maxAttempts);
       } catch (OnlineException e) {
         if (e.code() != OnlineException.Code.NOT_ACTIVATED) throw e;
       }
-      try {
-        forget();
-      } catch (Exception e) {
-        warn(new IOException("licenseforge online: the seat is freed but the stored lease wasn't cleared: " + e, e)); // the cache is dropped anyway
-      }
+      forget();
     }
 
     /**
@@ -358,14 +376,14 @@ public final class Online {
      * out of a lease that can't be replaced (one with a far-future iat makes
      * every later lease look like a replay). Then refresh or activate.
      *
-     * @throws Exception from the store; the cache is dropped anyway
+     * @throws IOException from the store; the cache is dropped anyway
      */
-    public void forget() throws Exception {
+    public void forget() throws IOException {
       forgetIf(-1);
     }
 
     /** Forgets only if nothing was committed or forgotten since ver (-1: always). */
-    private void forgetIf(long since) throws Exception {
+    void forgetIf(long since) throws IOException {
       commit.lock();
       try {
         if (since >= 0 && ver != since) return;
@@ -429,7 +447,7 @@ public final class Online {
         if (cfg.store != null) {
           try {
             cfg.store.save(file);
-          } catch (Exception e) {
+          } catch (IOException e) {
             warn(new IOException("licenseforge online: lease not stored: " + e, e));
           }
         }
@@ -579,7 +597,7 @@ public final class Online {
           if ((e.status() == 403 && c == OnlineException.Code.LICENSE_REVOKED) || (e.status() == 404 && c == OnlineException.Code.NOT_ACTIVATED)) {
             try {
               forgetIf(since);
-            } catch (Exception fe) {
+            } catch (IOException fe) {
               report.accept(fe);
             }
             throw e;

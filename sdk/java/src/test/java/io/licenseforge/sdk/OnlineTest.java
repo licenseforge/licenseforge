@@ -165,8 +165,17 @@ class OnlineTest {
   Client client(Config cfg) {
     Client c = Client.create(cfg);
     c.now = () -> NOW;
-    c.sleeper = ms -> {}; // no real waits in tests
+    c.sleeper = bounded(ms -> {}); // no real waits in tests
     return c;
+  }
+
+  /** A sleeper that fails after 50 calls: a run that never stops fails instead of hanging the build. */
+  static Online.Sleeper bounded(Online.Sleeper inner) {
+    int[] n = {0};
+    return ms -> {
+      if (++n[0] > 50) throw new AssertionError("run didn't stop");
+      inner.sleep(ms);
+    };
   }
 
   Config cfg() {
@@ -324,7 +333,10 @@ class OnlineTest {
     AtomicReference<String> result = new AtomicReference<>();
     Thread t = new Thread(() -> result.set(code(c::activate)));
     t.start();
-    while (seen.isEmpty()) Thread.sleep(5);
+    for (int i = 0; seen.isEmpty(); i++) {
+      assertTrue(i < 2000, "the request never arrived");
+      Thread.sleep(5);
+    }
     c.forget();
     release.countDown();
     t.join(10_000);
@@ -379,7 +391,7 @@ class OnlineTest {
   void runRefreshesThenStopsOnRevocation() throws Exception {
     Client c = client(cfg());
     List<Long> waits = new ArrayList<>();
-    c.sleeper = waits::add;
+    c.sleeper = bounded(waits::add);
     c.rand = n -> 0;
     answers.add(ok(L.at(NOW).sign()));
     answers.add(ok(L.at(NOW + 1000).refreshAfter(NOW + 1000).sign()));
@@ -401,7 +413,7 @@ class OnlineTest {
   void runKeepsTheLeaseOnUnauthenticatedAndStopsOnInterrupt() throws Exception {
     Client c = client(cfg());
     List<Long> waits = new ArrayList<>();
-    c.sleeper = waits::add;
+    c.sleeper = bounded(waits::add);
     c.rand = n -> 0;
     answers.add(ok(L.at(NOW).maxOffline("PT0S").sign()));
     answers.add(problem(401, "unauthenticated"));
@@ -424,7 +436,6 @@ class OnlineTest {
   void runStopsOnBindingMismatchAndOfflineSeatKeepingTheLease() throws Exception {
     for (String stop : List.of("binding_mismatch", "offline_seat")) {
       Client c = client(cfg());
-      c.sleeper = ms -> {};
       c.rand = n -> 0;
       answers.add(ok(L.at(NOW).sign()));
       answers.add(problem(409, stop));
@@ -438,6 +449,125 @@ class OnlineTest {
   }
 
   @Test
+  void runForgetsOnNotActivated() throws Exception {
+    Client c = client(cfg());
+    c.rand = n -> 0;
+    answers.add(ok(L.at(NOW).sign()));
+    answers.add(problem(404, "not_activated"));
+    c.activate();
+    assertEquals("not_activated", code(() -> {
+      c.run(null);
+      return null;
+    }));
+    assertEquals("no_lease", code(c::current), "the activation is gone");
+  }
+
+  @Test
+  void forgetIfKeepsANewerCommit() throws Exception {
+    Client c = client(cfg());
+    answers.add(ok(L.at(NOW).sign()));
+    c.activate(); // ver 1
+    c.forgetIf(0); // what run does after a refusal, if nothing was committed since it started
+    assertEquals("lic_1", c.current().claims().licenseId(), "a newer commit is kept");
+    c.forgetIf(1);
+    assertEquals("no_lease", code(c::current));
+  }
+
+  @Test
+  void aServerBehindDoesNotSlowTheLocalClock() throws Exception {
+    Client c = client(cfg());
+    answers.add(ok(L.at(NOW - 3_600_000).exp(NOW + 30_000).sign()));
+    c.activate(); // the server is an hour behind
+    c.now = () -> NOW + 60_000;
+    assertEquals("expired", code(c::current), "max(local, local + offset): the local clock wins");
+  }
+
+  @Test
+  void answersAreCappedAndBoundedInTime() throws Exception {
+    Client c = client(cfg().maxAttempts(1).timeout(Duration.ofMillis(500)));
+    answers.add(new Answer(200, "{\"lease\":\"" + "x".repeat(1 << 20) + "\"}", "application/json", Map.of(), null));
+    assertEquals("network", code(c::refresh), "over 1 MiB");
+    // A body dripping a byte every 100 ms: the whole request has the deadline.
+    srv.createContext("/drip", ex -> {
+      ex.sendResponseHeaders(200, 0);
+      try (OutputStream o = ex.getResponseBody()) {
+        for (int i = 0; i < 50; i++) {
+          o.write(' ');
+          o.flush();
+          Thread.sleep(100);
+        }
+      } catch (Exception e) {
+        // the client went away
+      }
+    });
+    Client drip = client(Config.builder(base + "/drip", "tnt_acme", "acme-db", "LF-KEY", KEYS, FINGERPRINT).maxAttempts(1).timeout(Duration.ofMillis(500)));
+    long start = System.nanoTime();
+    assertEquals("network", code(drip::refresh));
+    assertTrue((System.nanoTime() - start) / 1_000_000 < 3000);
+  }
+
+  @Test
+  void aStoredLeaseRaisesTheClockMark() throws Exception {
+    String file = L.at(NOW).sign();
+    Online.LeaseStore s = new Online.LeaseStore() {
+      @Override
+      public String load() {
+        return file;
+      }
+
+      @Override
+      public void save(String l) {}
+    };
+    Clock.Guard clock = new Clock.Guard(new Clock.MemoryStore(), "LF-KEY");
+    Client c = client(cfg().store(s).clock(clock));
+    // Checked before current(), which would raise the mark itself.
+    assertEquals("clock:rollback", code(() -> clock.now(Instant.ofEpochMilli(NOW - 2 * DAY))), "observe(iat) on create: an old lease can't pass for new");
+    assertEquals("lic_1", c.current().claims().licenseId());
+  }
+
+  @Test
+  void deactivateReportsAStoreThatWontClear() throws Exception {
+    Online.LeaseStore s = new Online.LeaseStore() {
+      @Override
+      public String load() {
+        return "";
+      }
+
+      @Override
+      public void save(String l) throws java.io.IOException {
+        if (l.isEmpty()) throw new java.io.IOException("EROFS");
+      }
+    };
+    Client c = client(cfg().store(s));
+    answers.add(ok(L.at(NOW).sign()));
+    answers.add(Answer.of(204));
+    c.activate();
+    assertThrows(java.io.IOException.class, c::deactivate);
+    assertEquals("no_lease", code(c::current), "the cache is dropped anyway");
+  }
+
+  @Test
+  void laterConfigChangesDontReachALiveClient() throws Exception {
+    Config cfg = cfg();
+    Client c = client(cfg);
+    AtomicReference<String> stored = new AtomicReference<>("");
+    cfg.store(new Online.LeaseStore() {
+      @Override
+      public String load() {
+        return "";
+      }
+
+      @Override
+      public void save(String l) {
+        stored.set(l);
+      }
+    });
+    answers.add(ok(L.at(NOW).sign()));
+    c.activate();
+    assertEquals("", stored.get());
+  }
+
+  @Test
   void configIsValidated() {
     for (String bad : List.of("http://api.example", "https://u:p@api.example", "https://api.example?x=1", "not a url", "ftp://localhost")) {
       assertThrows(IllegalArgumentException.class, () -> Config.builder(bad, "t", "p", "k", KEYS, FINGERPRINT), bad);
@@ -445,8 +575,13 @@ class OnlineTest {
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "", "p", "k", KEYS, FINGERPRINT));
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", List.of(), FINGERPRINT));
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, new Fingerprint(FP, FingerprintSource.OVERRIDE, BindingType.NONE)));
-    IllegalArgumentException leak = assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "S3CRET\r\nX", KEYS, FINGERPRINT));
-    assertFalse(leak.getMessage().contains("S3CRET"));
+    for (String key : List.of("S3CRET\r\nX", "LF-S3CRET\u20ac", "LF-S3CRET\u00e9", "LF S3CRET", "LF\u2013S3CRET")) {
+      IllegalArgumentException leak = assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", key, KEYS, FINGERPRINT));
+      assertFalse(leak.getMessage().contains("S3CRET"), key);
+    }
+    for (String bad : List.of("https://api.example#x", "https://api.example:99999")) {
+      assertThrows(IllegalArgumentException.class, () -> Config.builder(bad, "t", "p", "k", KEYS, FINGERPRINT), bad);
+    }
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, FINGERPRINT).timeout(Duration.ZERO));
     assertThrows(IllegalArgumentException.class, () -> Config.builder("https://api.example", "t", "p", "k", KEYS, FINGERPRINT).maxAttempts(0));
     Config.builder("http://localhost:8080/lf/", "t", "p", "k", KEYS, FINGERPRINT); // loopback http is fine
