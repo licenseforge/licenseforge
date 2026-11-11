@@ -110,15 +110,17 @@ npm attaches a trusted publisher only to a package that exists, so the first ver
 2. Create the npm organization `licenseforge`, with 2FA required for its members.
 3. Publish a placeholder `@licenseforge/sdk@0.0.0` (a `package.json` and a README pointing to `@next`) from your own `npm login` session: `npm publish --access public` (a scoped package is otherwise restricted, which a free organization can't publish). No token is needed. Then `npm deprecate @licenseforge/sdk@0.0.0 "placeholder: install @licenseforge/sdk@next"`.
 4. In the package settings, add the trusted publisher (GitHub Actions; `licenseforge/licenseforge`; workflow `sdk-ts-release.yml`; environment `npm`), and set Publishing access to "Require two-factor authentication and disallow tokens".
-5. Within two days, tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`. npm expires a trusted publisher configuration that hasn't published within two days; if that happens, delete it and add it again.
-6. Check `npm dist-tag ls @licenseforge/sdk`: `next` is the alpha, and `latest` stays on the placeholder until the first stable version.
+5. On the commit to tag, run the end-to-end journeys (`e2e/env/up.sh`, then `make e2e`, which runs the SDK as built there against the server): every journey passes.
+6. Within two days, tag a commit on `main`: `git tag -s sdk/ts/v0.1.0-alpha.1 <commit> && git push origin sdk/ts/v0.1.0-alpha.1`. npm expires a trusted publisher configuration that hasn't published within two days; if that happens, delete it and add it again.
+7. Check `npm dist-tag ls @licenseforge/sdk`: `next` is the alpha, and `latest` stays on the placeholder until the first stable version.
 
 ## For maintainers: first Maven Central release of the Java SDK
 
 1. In GitHub, create the environment `maven-central` (a required reviewer; deployment tags `sdk/java/v*`) and add `refs/tags/sdk/java/v*` to the release-tag ruleset.
 2. On the Central Portal (central.sonatype.com), with 2FA on the account, verify the namespace `io.licenseforge` with the DNS TXT record it gives for `licenseforge.io`, and generate a user token. Store `printf %s 'username:password' | base64 -w0` (no newline, no wrapping) as the environment secret `CENTRAL_TOKEN`.
 3. Create the release PGP key: RSA 4096, the primary key itself signing (Central verifies against primary keys: no signing subkey), with an expiry. Publish it to keys.openpgp.org (verify the email so the user ID is kept) and keyserver.ubuntu.com, and add its fingerprint to `SECURITY.md` as one string of 40 uppercase hex digits without spaces. Store the armored private key and its passphrase as the environment secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`, and the 40-hex-digit fingerprint (uppercase) as the environment variable `PGP_FINGERPRINT`; keep an offline, encrypted backup of the key.
-4. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. The run fails unless Central validates the bundle; then check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
+4. On the commit to tag, run the end-to-end journeys (`e2e/env/up.sh`, then `make e2e`): every journey passes.
+5. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. The run fails unless Central validates the bundle; then check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
 
 ## For maintainers: a release that failed halfway
 
