@@ -17,12 +17,10 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -129,7 +127,7 @@ public final class Clock {
         if (!(m.get("mark") instanceof String mark) || !(m.get("mac") instanceof String mac)) return null;
         if (!MessageDigest.isEqual(Base64.getDecoder().decode(mac), mac(mark))) return null;
         return Instant.parse(mark);
-      } catch (Json.JsonException | IOException | IllegalArgumentException | DateTimeParseException e) {
+      } catch (Json.JsonException | IOException | IllegalArgumentException | java.time.DateTimeException e) {
         return null;
       }
     }
@@ -144,15 +142,20 @@ public final class Clock {
       Objects.requireNonNull(local, "local");
       Instant[] now = {local};
       boolean[] rollback = {false};
+      boolean[] ran = {false};
       boolean persisted = store.update(cur -> {
+        ran[0] = true;
         Instant mark = decode(cur);
-        if (mark != null && local.isBefore(mark.minus(tolerance))) {
+        // Overflow-free (a mark near Instant.MIN or MAX): local is more than the tolerance behind the mark.
+        if (mark != null && Duration.between(local, mark).compareTo(tolerance) > 0) {
           rollback[0] = true;
           return null;
         }
         if (mark != null && mark.isAfter(local)) now[0] = mark;
         return mark == null || Duration.between(mark, local).compareTo(PERSIST_EVERY) >= 0 ? encode(local) : null;
       });
+      // A store that never runs the check is broken: fail closed, as the Go SDK does.
+      if (!ran[0]) throw new IllegalStateException("licenseforge clock: the store didn't run the check");
       if (rollback[0]) {
         throw new ClockException(ClockException.Code.ROLLBACK,
             "system clock is behind the last trusted time; fix the clock, refresh the license online, or (offline) delete the clock state");
@@ -218,11 +221,16 @@ public final class Clock {
    * write is skipped (not persisted); if locking is unavailable (read-only
    * directory, network filesystem) the write is attempted without it, since
    * rename is atomic. A missing file is no state; an unreadable one counts as
-   * none and is reported as not persisted.
+   * none and is reported as not persisted. The OS lock is POSIX (fcntl) on
+   * Unix: it serializes Java processes, not a Go SDK process (flock) sharing
+   * the same file.
    */
   public static final class FileStore implements Store {
     private static final Duration LOCK_WAIT = Duration.ofSeconds(2);
-    private static final Map<Path, Object> LOCKS = new ConcurrentHashMap<>();
+    // ponytail: one monitor for every FileStore in this JVM. Per path, two paths to one file
+    // (a symlink, a bind mount, case) would overlap, and closing one channel drops the
+    // process's fcntl lock for both. Contention is negligible (one short update per check).
+    private static final Object LOCK = new Object();
     private final Path path;
 
     public FileStore(Path path) {
@@ -231,13 +239,13 @@ public final class Clock {
 
     @Override
     public boolean update(UnaryOperator<byte[]> fn) {
-      // Per path in this JVM too: the OS lock may be unavailable (then only this serializes).
-      synchronized (LOCKS.computeIfAbsent(path, p -> new Object())) {
+      // In this JVM too: the OS lock may be unavailable (then only this serializes).
+      synchronized (LOCK) {
         FileChannel lockFile = null;
         FileLock lock = null;
         boolean held = false; // another process holds the lock: skip the write
         try {
-          lockFile = FileChannel.open(Path.of(path + ".lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+          lockFile = openLock(Path.of(path + ".lock"));
           long deadline = System.nanoTime() + LOCK_WAIT.toNanos();
           while ((lock = tryLock(lockFile)) == null) {
             if (System.nanoTime() > deadline) {
@@ -279,6 +287,15 @@ public final class Clock {
             // released when the process exits anyway
           }
         }
+      }
+    }
+
+    private static FileChannel openLock(Path p) throws IOException {
+      try {
+        return FileChannel.open(p, java.util.Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+      } catch (UnsupportedOperationException e) {
+        return FileChannel.open(p, StandardOpenOption.CREATE, StandardOpenOption.WRITE); // no POSIX permissions (Windows)
       }
     }
 

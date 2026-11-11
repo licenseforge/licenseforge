@@ -160,14 +160,13 @@ class ClockTest {
 
   @Test
   void fileStoreFailures(@TempDir Path dir) throws Exception {
-    assumeFalse("root".equals(System.getProperty("user.name")));
     Path p = dir.resolve("clock.json");
     Files.createDirectory(p); // the rename onto a directory and the read fail
     assertFalse(new Guard(new FileStore(p), "k").now(T0).persisted());
     try (Stream<Path> s = Files.list(dir)) {
       assertEquals(List.of("clock.json", "clock.json.lock"), s.map(x -> x.getFileName().toString()).sorted().toList(), "no temp file left");
     }
-    if (System.getProperty("os.name").startsWith("Windows")) return;
+    if (System.getProperty("os.name").startsWith("Windows") || "root".equals(System.getProperty("user.name"))) return;
     Path ro = Files.createDirectory(dir.resolve("ro"));
     Files.setPosixFilePermissions(ro, PosixFilePermissions.fromString("r-x------"));
     try {
@@ -181,18 +180,50 @@ class ClockTest {
   void lockHeldOrStateUnreadable(@TempDir Path dir) throws Exception {
     assumeFalse("root".equals(System.getProperty("user.name")));
     Path p = dir.resolve("clock.json");
-    // Another holder of the lock for the whole wait: the check runs, the write is skipped.
+    // Another holder of the lock for the whole wait: the check still runs; the write is skipped.
     try (java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(dir.resolve("clock.json.lock"),
         java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE); java.nio.channels.FileLock l = ch.lock()) {
       assertTrue(l.isValid());
       assertEquals(new Now(T0, false), new Guard(new FileStore(p), "k").now(T0));
     }
     assertFalse(Files.exists(p));
+    Instant late = at(Duration.ofDays(30));
+    new Guard(new FileStore(p), "k").now(late);
+    try (java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(dir.resolve("clock.json.lock"),
+        java.nio.file.StandardOpenOption.WRITE); java.nio.channels.FileLock l = ch.lock()) {
+      assertTrue(l.isValid());
+      rollback(new Guard(new FileStore(p), "k"), T0);
+      assertEquals(new Now(late.plus(H), false), new Guard(new FileStore(p), "k").now(late.plus(H)));
+    }
+    Files.delete(p);
     // An unreadable file counts as no state and is reported as not persisted, even when the write works.
     new Guard(new FileStore(p), "k").now(T0);
     if (System.getProperty("os.name").startsWith("Windows")) return;
     Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("---------"));
     assertFalse(new Guard(new FileStore(p), "k").now(T0.plus(H)).persisted());
+  }
+
+  @Test
+  void writesWhenLockingIsUnavailable(@TempDir Path dir) throws Exception {
+    Path p = dir.resolve("clock.json");
+    Files.createDirectory(dir.resolve("clock.json.lock")); // can't be opened as a lock file
+    assertEquals(new Now(T0, true), new Guard(new FileStore(p), "k").now(T0));
+    assertTrue(Files.exists(p));
+    if (!System.getProperty("os.name").startsWith("Windows")) {
+      Path q = dir.resolve("other.json");
+      new Guard(new FileStore(q), "k").now(T0);
+      assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(dir.resolve("other.json.lock"))));
+    }
+  }
+
+  @Test
+  void extremeMarksAndABrokenStore() throws Exception {
+    Guard g = new Guard(new MemoryStore(), "k");
+    g.reset(Instant.MIN);
+    assertEquals(T0, g.now(T0).now(), "a mark at Instant.MIN doesn't overflow");
+    g.reset(Instant.MAX);
+    rollback(g, T0);
+    assertThrows(IllegalStateException.class, () -> new Guard(fn -> false, "k").now(T0), "a store that never runs the check");
   }
 
   @Test
