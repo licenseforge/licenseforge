@@ -26,6 +26,7 @@
   <scm>
     <url>https://github.com/licenseforge/licenseforge</url>
     <connection>scm:git:https://github.com/licenseforge/licenseforge.git</connection>
+    <developerConnection>scm:git:https://github.com/licenseforge/licenseforge.git</developerConnection>
   </scm>
 
   <profiles>
@@ -83,6 +84,17 @@
   </dependencies>
 
   <build>
+    <resources>
+      <!-- Apache-2.0 §4(a)(d): the license and notice travel with the jars. -->
+      <resource>
+        <directory>../..</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE</include>
+          <include>NOTICE</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <artifactId>maven-clean-plugin</artifactId>

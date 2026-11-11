@@ -12,7 +12,7 @@ on:
   push:
     tags: ["sdk/java/v*"]
   pull_request:
-    paths: [sdk/java/**, LICENSE, .github/workflows/sdk-java-release.yml]
+    paths: [sdk/java/**, LICENSE, NOTICE, .github/workflows/sdk-java-release.yml]
 permissions: {}
 defaults:
   run:
@@ -62,8 +62,13 @@ jobs:
           a=licenseforge-sdk-$VERSION
           cp "sdk/java/target/$a.jar" "sdk/java/target/$a-sources.jar" "sdk/java/target/$a-javadoc.jar" "$d/"
           cp sdk/java/pom.xml "$d/$a.pom"
-          # The jar holds the SDK's classes and the Maven metadata, nothing else.
-          unzip -Z1 "$d/$a.jar" | grep -vE '^(META-INF/|META-INF/MANIFEST\.MF|META-INF/maven/.*|io/|io/licenseforge/|io/licenseforge/sdk/|io/licenseforge/sdk/[A-Za-z0-9$]+\.class)$' && { echo "unexpected files in the jar"; exit 1; }
+          # The jar holds the SDK's classes, the license, notice and Maven metadata, nothing else.
+          unzip -tq "$d/$a.jar"
+          unzip -Z1 "$d/$a.jar" > "$RUNNER_TEMP/jar-files"
+          grep -vE '^(META-INF/|META-INF/MANIFEST\.MF|META-INF/(LICENSE|NOTICE)|META-INF/maven/.*|io/|io/licenseforge/|io/licenseforge/sdk/|io/licenseforge/sdk/[A-Za-z0-9$]+\.class)$' "$RUNNER_TEMP/jar-files" && { echo "unexpected files in the jar"; exit 1; }
+          for f in META-INF/LICENSE META-INF/NOTICE io/licenseforge/sdk/LicenseFile.class io/licenseforge/sdk/Online.class; do
+            grep -qx "$f" "$RUNNER_TEMP/jar-files" || { echo "missing $f in the jar"; exit 1; }
+          done
           unzip -p "$d/$a.jar" META-INF/MANIFEST.MF | grep -q '^Automatic-Module-Name: io.licenseforge.sdk' || { echo "no Automatic-Module-Name"; exit 1; }
           (cd "$d" && for f in *.jar *.pom; do md5sum "$f" | cut -d' ' -f1 > "$f.md5"; sha1sum "$f" | cut -d' ' -f1 > "$f.sha1"; done)
           (cd out && find bundle -type f | sort | xargs sha256sum > SHA256SUMS && cat SHA256SUMS)
@@ -89,26 +94,44 @@ jobs:
       - name: SLSA build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: out/bundle/io/licenseforge/licenseforge-sdk/*/*.jar
-      - name: Sign with the release PGP key
+          subject-path: |
+            out/bundle/io/licenseforge/licenseforge-sdk/*/*.jar
+            out/bundle/io/licenseforge/licenseforge-sdk/*/*.pom
+      - name: Sign with the release PGP key (the one whose fingerprint SECURITY.md publishes)
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          FPR: ${{ vars.PGP_FINGERPRINT }} # environment variable: the release key's primary fingerprint
         run: |
+          echo "$FPR" | grep -Eqx '[0-9A-F]{40}' || { echo "vars.PGP_FINGERPRINT must be the 40-hex-digit fingerprint"; exit 1; }
           export GNUPGHOME="$RUNNER_TEMP/gnupg" && mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent; rm -rf "$GNUPGHOME"' EXIT
           printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
           cd "out/bundle/io/licenseforge/licenseforge-sdk/$VERSION"
           for f in *.jar *.pom; do
-            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --armor --detach-sign "$f"
-            gpg --batch --verify "$f.asc" "$f"
+            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$FPR!" --armor --detach-sign "$f"
+            # Signed by that primary key (Central verifies against primary keys), not just by some key.
+            gpg --batch --status-fd 1 --verify "$f.asc" "$f" | grep -Eq "^\[GNUPG:\] VALIDSIG $FPR " || { echo "$f: not signed by $FPR"; exit 1; }
           done
-          rm -rf "$GNUPGHOME"
       - name: Upload to the Central Portal (USER_MANAGED; publish there after checking)
         env:
           CENTRAL_TOKEN: ${{ secrets.CENTRAL_TOKEN }} # base64 of the portal user token's "username:password"
         run: |
           (cd out/bundle && zip -qr ../bundle.zip .)
-          curl -fsS --retry 3 -H "Authorization: Bearer $CENTRAL_TOKEN" \
-            -F "bundle=@out/bundle.zip" \
-            "https://central.sonatype.com/api/v1/publisher/upload?name=licenseforge-sdk-$VERSION&publishingType=USER_MANAGED"
-          echo
+          # The token goes through a file, not curl's argv. No --retry: a retried POST can make a second deployment.
+          hdr="$RUNNER_TEMP/auth" && printf 'Authorization: Bearer %s\n' "$CENTRAL_TOKEN" > "$hdr" && trap 'rm -f "$hdr"' EXIT
+          api=https://central.sonatype.com/api/v1/publisher
+          id=$(curl -sS --fail-with-body -H @"$hdr" -F "bundle=@out/bundle.zip" "$api/upload?name=licenseforge-sdk-$VERSION&publishingType=USER_MANAGED")
+          echo "deployment $id"
+          # Central validates asynchronously: the run fails if it does.
+          for _ in $(seq 60); do
+            st=$(curl -sS --fail-with-body -H @"$hdr" -X POST "$api/status?id=$id")
+            state=$(printf '%s' "$st" | jq -r .deploymentState)
+            echo "state $state"
+            case $state in
+              VALIDATED) echo "Validated: check it on central.sonatype.com and press Publish."; exit 0 ;;
+              FAILED) printf '%s' "$st" | jq .errors; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "still $state after 10 minutes: check the deployment on central.sonatype.com"; exit 1

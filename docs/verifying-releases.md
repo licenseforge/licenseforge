@@ -87,13 +87,16 @@ npm audit signatures                 # in your project, after npm ci or npm inst
 ```sh
 V=0.1.0-alpha.1
 B=https://repo1.maven.org/maven2/io/licenseforge/licenseforge-sdk/$V
+FPR=…   # the release key's fingerprint, from SECURITY.md
 curl -fsSLO "$B/licenseforge-sdk-$V.jar" -fsSLO "$B/licenseforge-sdk-$V.jar.asc"
-gpg --verify "licenseforge-sdk-$V.jar.asc" "licenseforge-sdk-$V.jar"   # the key's fingerprint is in SECURITY.md once published
+gpg --keyserver hkps://keys.openpgp.org --recv-keys "$FPR"
+gpg --status-fd 1 --verify "licenseforge-sdk-$V.jar.asc" "licenseforge-sdk-$V.jar" | grep "VALIDSIG $FPR "   # that key, not any key you have
 gh attestation verify "licenseforge-sdk-$V.jar" --repo licenseforge/licenseforge \
-  --cert-identity "https://github.com/licenseforge/licenseforge/.github/workflows/sdk-java-release.yml@refs/tags/sdk/java/v$V"
+  --cert-identity "https://github.com/licenseforge/licenseforge/.github/workflows/sdk-java-release.yml@refs/tags/sdk/java/v$V" \
+  --source-ref "refs/tags/sdk/java/v$V" --deny-self-hosted-runners
 ```
 
-In a build, pin the version, and check signatures with your build tool where it can (Gradle's dependency verification, or Maven's checksum and PGP verification plugins).
+A "Good signature" from another key proves nothing: Central accepts any key on a public keyserver, so only the fingerprint ties a release to LicenseForge. In a build, pin the version, and check signatures with your build tool where it can (Gradle's dependency verification with the key's fingerprint, or Maven's PGP verification plugin).
 
 ## Air-gapped verification
 
@@ -113,9 +116,9 @@ npm attaches a trusted publisher only to a package that exists, so the first ver
 ## For maintainers: first Maven Central release of the Java SDK
 
 1. In GitHub, create the environment `maven-central` (a required reviewer; deployment tags `sdk/java/v*`) and add `refs/tags/sdk/java/v*` to the release-tag ruleset.
-2. On the Central Portal (central.sonatype.com), verify the namespace `io.licenseforge` with the DNS TXT record it gives for `licenseforge.io`, and generate a user token. Store base64 of `username:password` as the environment secret `CENTRAL_TOKEN`.
-3. Create the release PGP key (Ed25519, with an expiry), publish the public key to keys.openpgp.org, and add its fingerprint to `SECURITY.md`. Store the armored private key and its passphrase as `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` in the environment only; keep an offline backup.
-4. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. After the run, check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
+2. On the Central Portal (central.sonatype.com), with 2FA on the account, verify the namespace `io.licenseforge` with the DNS TXT record it gives for `licenseforge.io`, and generate a user token. Store `printf %s 'username:password' | base64 -w0` (no newline, no wrapping) as the environment secret `CENTRAL_TOKEN`.
+3. Create the release PGP key: RSA 4096, the primary key itself signing (Central verifies against primary keys: no signing subkey), with an expiry. Publish it to keys.openpgp.org (verify the email so the user ID is kept) and keyserver.ubuntu.com, and add its fingerprint to `SECURITY.md`. Store the armored private key and its passphrase as the environment secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`, and the 40-hex-digit fingerprint (uppercase) as the environment variable `PGP_FINGERPRINT`; keep an offline, encrypted backup of the key.
+4. Tag a commit on `main`: `git tag -s sdk/java/v0.1.0-alpha.1 <commit> && git push origin sdk/java/v0.1.0-alpha.1`. The run fails unless Central validates the bundle; then check the deployment on the Central Portal (files, signatures) and press Publish. Central releases can't be removed: a mistake means a new version.
 
 ## For maintainers: a release that failed halfway
 
