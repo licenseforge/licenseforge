@@ -449,6 +449,40 @@ class OnlineTest {
   }
 
   @Test
+  void runWaitsAtMostHalfTheTimeToExp() throws Exception {
+    Client c = client(cfg());
+    List<Long> waits = new ArrayList<>();
+    c.sleeper = bounded(waits::add);
+    c.rand = n -> 0;
+    answers.add(ok(L.at(NOW).exp(NOW + 600_000).refreshAfter(NOW + 540_000).sign()));
+    answers.add(problem(401, "unauthenticated"));
+    c.activate();
+    assertEquals("unauthenticated", code(() -> {
+      c.run(null);
+      return null;
+    }));
+    assertEquals(300_000L, waits.get(0), "half of the 10 minutes to exp, not refresh_after's 9");
+  }
+
+  @Test
+  void runWakesBeforeTheLeaseFailsLocally() throws Exception {
+    Clock.Guard clock = new Clock.Guard(new Clock.MemoryStore(), "LF-KEY");
+    Client c = client(cfg().clock(clock));
+    List<Long> waits = new ArrayList<>();
+    c.sleeper = bounded(waits::add);
+    c.rand = n -> 0;
+    answers.add(ok(L.at(NOW).maxOffline("PT10M").refreshAfter(NOW + 3_600_000).sign()));
+    answers.add(problem(401, "unauthenticated"));
+    c.activate();
+    clock.now(Instant.ofEpochMilli(NOW + 480_000)); // the trusted time is 8 minutes on: 2 left by it
+    assertEquals("unauthenticated", code(() -> {
+      c.run(null);
+      return null;
+    }));
+    assertEquals(108_000L, waits.get(0), "2 minutes left, less a tenth: before max_offline runs out locally");
+  }
+
+  @Test
   void runForgetsOnNotActivated() throws Exception {
     Client c = client(cfg());
     c.rand = n -> 0;

@@ -136,7 +136,11 @@ public final class Online {
     }
   }
 
-  /** Keeps the verified lease across restarts; leases are verified again when loaded. "" means none / delete. */
+  /**
+   * Keeps the verified lease across restarts; leases are verified again when
+   * loaded. "" means none / delete. Report failures as IOException: unchecked
+   * exceptions propagate to the caller.
+   */
   public interface LeaseStore {
     String load() throws IOException;
 
