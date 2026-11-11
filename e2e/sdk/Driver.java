@@ -48,7 +48,14 @@ public class Driver {
     String kind = env("LF_K8S_STORE");
     if (kind.isEmpty()) return new LeaseStores.FileLeaseStore(Path.of(env("LF_STORE")));
     LeaseStores.KubernetesApi api = new LeaseStores.KubernetesApi(env("LF_K8S_HOST"), Integer.parseInt(env("LF_K8S_PORT")),
-        Files.readAllBytes(Path.of(env("LF_K8S_CA"))), env("LF_K8S_NAMESPACE"), () -> env("LF_K8S_TOKEN"));
+        Files.readAllBytes(Path.of(env("LF_K8S_CA"))), env("LF_K8S_NAMESPACE"), () -> {
+          if (env("LF_K8S_TOKEN_FILE").isEmpty()) return env("LF_K8S_TOKEN");
+          try {
+            return Files.readString(Path.of(env("LF_K8S_TOKEN_FILE"))).trim();
+          } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+          }
+        });
     return switch (kind) {
       case "secret" -> new LeaseStores.KubernetesSecretStore(env("LF_K8S_NAME"), null, null, api);
       case "configmap" -> new LeaseStores.KubernetesConfigMapStore(env("LF_K8S_NAME"), null, null, api);
@@ -91,6 +98,8 @@ public class Driver {
           .maxAttempts(1);
       if (!env("LF_CA").isEmpty()) cfg.ca(Files.readAllBytes(Path.of(env("LF_CA"))));
       Online.Client client = Online.Client.create(cfg);
+      if (!env("LF_READY").isEmpty()) Files.writeString(Path.of(env("LF_READY")), "");
+      List<String> errors = new ArrayList<>();
       try {
         switch (op) {
           case "activate" -> client.activate();
@@ -112,7 +121,7 @@ public class Driver {
             stop.setDaemon(true);
             stop.start();
             try {
-              client.run(x -> {});
+              client.run(x -> errors.add(x instanceof Online.OnlineException o ? q(o.code().spec()) : q(x.toString())));
             } catch (InterruptedException e) {
               if (forMs == 0) throw e;
             } finally {
@@ -135,6 +144,7 @@ public class Driver {
           out += ",\"forgot\":" + forgot;
         }
       }
+      if (op.equals("run")) out += ",\"errors\":[" + String.join(",", errors) + "]";
       for (Exception x : client.takeWarnings()) w.add(q(x.toString()));
     }
     System.out.println("{" + out + ",\"warnings\":[" + String.join(",", w) + "]}");

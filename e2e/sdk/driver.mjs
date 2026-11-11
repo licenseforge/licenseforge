@@ -12,9 +12,12 @@
 // verify). With LF_K8S_STORE (configmap or secret), the lease is kept in
 // that Kubernetes object (LF_K8S_NAME) through the API at LF_K8S_HOST,
 // LF_K8S_PORT (CA file LF_K8S_CA, namespace LF_K8S_NAMESPACE, token
-// LF_K8S_TOKEN) instead of a file. LF_CA: the server's private CA (PEM
-// file), given to the client's ca option. Needs sdk/ts built.
-import { readFileSync } from "node:fs";
+// LF_K8S_TOKEN, or LF_K8S_TOKEN_FILE read at every request, as a projected
+// token is) instead of a file. LF_CA: the server's private CA (PEM file),
+// given to the client's ca option. run also prints the codes of the errors
+// it reported and went on from (errors); with LF_READY, the file it creates
+// once the client has loaded the stored lease. Needs sdk/ts built.
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   Client, ClockError, compute, FileClockStore, FileLeaseStore, Guard, KubernetesConfigMapStore, KubernetesSecretStore, LicenseError, OfflineClient, OfflineError, OnlineError, parseKeySet,
 } from "../../sdk/ts/dist/src/index.js";
@@ -31,7 +34,7 @@ const claimsOf = ({ claims, status }) => {
 function leaseStore() {
   const kind = env("LF_K8S_STORE");
   if (!kind) return new FileLeaseStore(env("LF_STORE"));
-  const api = { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => env("LF_K8S_TOKEN") };
+  const api = { host: env("LF_K8S_HOST"), port: Number(env("LF_K8S_PORT")), ca: readFileSync(env("LF_K8S_CA")), namespace: env("LF_K8S_NAMESPACE"), token: () => (env("LF_K8S_TOKEN_FILE") ? readFileSync(env("LF_K8S_TOKEN_FILE"), "utf8").trim() : env("LF_K8S_TOKEN")) };
   const opts = { name: env("LF_K8S_NAME"), api };
   if (kind === "secret") return new KubernetesSecretStore(opts);
   if (kind === "configmap") return new KubernetesConfigMapStore(opts);
@@ -76,6 +79,8 @@ if (op.startsWith("offline-")) {
     maxAttempts: 1,
     ...(env("LF_CA") && { ca: readFileSync(env("LF_CA")) }),
   });
+  if (env("LF_READY")) writeFileSync(env("LF_READY"), "");
+  const errors = [];
   try {
     if (op === "activate") await client.activate();
     else if (op === "refresh") await client.refresh();
@@ -84,7 +89,7 @@ if (op.startsWith("offline-")) {
       const forMs = Number(env("LF_RUN_MS") || 0);
       const stop = AbortSignal.timeout(forMs || 30_000);
       try {
-        await client.run(stop); // only ever rejects
+        await client.run(stop, (e) => errors.push(e instanceof OnlineError ? e.code : String(e))); // only ever rejects
       } catch (e) {
         if (!(forMs && stop.aborted)) throw e;
       }
@@ -103,6 +108,7 @@ if (op.startsWith("offline-")) {
       }
     }
   }
+  if (op === "run") out.errors = errors;
   out.warnings = client.takeWarnings().map(String);
 }
 console.log(JSON.stringify(out));

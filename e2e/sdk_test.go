@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The TypeScript and Java SDKs against the deployed server: the license
@@ -44,6 +46,10 @@ func TestSDKJourneys(t *testing.T) {
 		kubeNames[n+"-secret"] = "e2e-lease-" + n + "-" + kubeRun
 		configMaps = append(configMaps, kubeNames[n+"-configmap"])
 		secrets = append(secrets, kubeNames[n+"-secret"])
+		for _, use := range []string{"shared", "rotate"} {
+			kubeNames[n+"-"+use] = "e2e-lease-" + n + "-" + use + "-" + kubeRun
+			configMaps = append(configMaps, kubeNames[n+"-"+use])
+		}
 	}
 	missing := "e2e-lease-missing-" + kubeRun // in the Role, never created
 	kubeEnv := kubeLeaseStores(t, e, kubeRun, configMaps, secrets, []string{missing})
@@ -78,12 +84,11 @@ func TestSDKJourneys(t *testing.T) {
 				HTTP                       int
 				SSO, Nope, Forgot          bool
 				Seats                      int64
-				Warnings                   []string
+				Warnings, Errors           []string
 			}
-			// run is one step of machine's app on license l of product p; extra
-			// is more environment (LF_FILE).
-			run1 := func(p catalog, l issued, machine, op string, keys []byte, extra ...string) result {
-				t.Helper()
+			// exec1 is one step of machine's app on license l of product p;
+			// extra is more environment (LF_FILE). Safe from other goroutines.
+			exec1 := func(p catalog, l issued, machine, op string, keys []byte, extra ...string) (result, error) {
 				c := exec.Command(cmd[0], append(cmd[1:], op)...)
 				c.Env = append(append(os.Environ(),
 					"LF_BASE_URL="+e.BaseURL, "LF_TENANT_ID="+tn.ID, "LF_PRODUCT="+p.Slug, "LF_LICENSE_KEY="+l.Key,
@@ -96,12 +101,20 @@ func TestSDKJourneys(t *testing.T) {
 					if x, ok := err.(*exec.ExitError); ok {
 						stderr = string(x.Stderr)
 					}
-					t.Fatalf("%s %s: %v\n%s%s", machine, op, err, out, stderr)
+					return r, fmt.Errorf("%s %s: %v\n%s%s", machine, op, err, out, stderr)
 				}
 				// A store that failed or a stored lease that didn't verify is
 				// only a warning to the app: none is expected with the right keys.
 				if len(r.Warnings) > 0 && string(keys) == string(keySet) && !slices.Contains(extra, "LF_EXPECT_WARNINGS=1") {
-					t.Fatalf("%s %s: warnings %q", machine, op, r.Warnings)
+					return r, fmt.Errorf("%s %s: warnings %q", machine, op, r.Warnings)
+				}
+				return r, nil
+			}
+			run1 := func(p catalog, l issued, machine, op string, keys []byte, extra ...string) result {
+				t.Helper()
+				r, err := exec1(p, l, machine, op, keys, extra...)
+				if err != nil {
+					t.Fatal(err)
 				}
 				return r
 			}
@@ -226,6 +239,26 @@ func TestSDKJourneys(t *testing.T) {
 					t.Errorf("after run stopped (%s): %+v, want no_lease (the stored lease was forgotten too)", c.name, r)
 				}
 			}
+			// A suspended license doesn't stop it: refreshes are refused
+			// (reported, the lease kept) until the vendor reinstates it, and the
+			// next refresh renews. A 16 s lease: refresh_after at 8 s, inside the
+			// 9 s run; the lease outlives both runs and the JVM starts.
+			{
+				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 16})
+				mr := "e2e-" + sdk.name + "-run-suspended-" + run
+				first := run1(rp, rl, mr, "activate", keySet)
+				if !first.OK {
+					t.Fatalf("suspended activate: %+v", first)
+				}
+				b.do("POST", api+"/licenses/"+rl.ID+"/suspend", nil, 200, nil)
+				if r := run1(rp, rl, mr, "run", keySet, "LF_RUN_MS=9000"); !r.OK || r.Iat != first.Iat || len(r.Errors) == 0 || slices.ContainsFunc(r.Errors, func(c string) bool { return c != "license_suspended" }) {
+					t.Errorf("run on a suspended license: %+v, want it still running with the first lease and license_suspended reported", r)
+				}
+				b.do("POST", api+"/licenses/"+rl.ID+"/reinstate", nil, 200, nil)
+				if r := run1(rp, rl, mr, "run", keySet, "LF_RUN_MS=3000"); !r.OK || r.Iat <= first.Iat || len(r.Errors) != 0 {
+					t.Errorf("run after reinstating: %+v, want a renewed lease", r)
+				}
+			}
 
 			// The Kubernetes lease stores against the cluster's real API server,
 			// with only the RBAC the READMEs ask for (get and update on the named,
@@ -263,6 +296,122 @@ func TestSDKJourneys(t *testing.T) {
 					if w := strings.Join(r.Warnings, " "); !r.OK || r.Lid != kl.ID || !strings.Contains(w, "forbidden") || !strings.Contains(w, c.why) {
 						t.Errorf("%s %s: %+v, want activated with a warning that the store %s", kind, c.name, r, c.why)
 					}
+				}
+			}
+
+			// Two replicas of a cluster-bound app (one fingerprint) share one
+			// lease: three rounds of both refreshing at once, each saving it
+			// (a write conditional on what it read; a conflict, another round),
+			// never a warning; a restart reads one of the last two, on one seat.
+			{
+				sp, sl, _ := newLicense(t, b, tn, nil)
+				ms := "e2e-" + sdk.name + "-replicas-" + run
+				k8s := append(append([]string{}, kubeEnv...), "LF_K8S_STORE=configmap", "LF_K8S_NAME="+kubeNames[sdk.name+"-shared"])
+				if r := run1(sp, sl, ms, "activate", keySet, k8s...); !r.OK {
+					t.Fatalf("replicas activate: %+v", r)
+				}
+				var last [2]result
+				for round := range 3 {
+					var errs [2]error
+					var wg sync.WaitGroup
+					for i := range 2 {
+						wg.Go(func() { last[i], errs[i] = exec1(sp, sl, ms, "refresh", keySet, k8s...) })
+					}
+					wg.Wait()
+					for i := range 2 {
+						if errs[i] != nil || !last[i].OK {
+							t.Fatalf("round %d, replica %d: %v %+v", round, i, errs[i], last[i])
+						}
+					}
+				}
+				if r := run1(sp, sl, ms, "current", keySet, k8s...); !r.OK || (r.Iat != last[0].Iat && r.Iat != last[1].Iat) {
+					t.Errorf("replicas: a restart has %+v, want the lease of one of %+v", r, last)
+				}
+				var acts struct{ Items []struct{ ID string } }
+				b.do("GET", api+"/licenses/"+sl.ID+"/activations", nil, 200, &acts)
+				if len(acts.Items) != 1 {
+					t.Errorf("replicas: activations %+v, want one", acts.Items)
+				}
+			}
+
+			// A token rotated under a running app, as kubelet rotates a
+			// projected one (the store reads it at every request): run loads the
+			// lease with token A, whose ServiceAccount may only read the
+			// ConfigMap; then B, allowed to write it, replaces A in the file, and
+			// the renewal at refresh_after (8 s into a 16 s lease) is saved with
+			// it. A store still using A would leave a warning (forbidden).
+			{
+				tp, tl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 16})
+				mt := "e2e-" + sdk.name + "-rotate-" + run
+				ns := e.Namespace
+				name := kubeNames[sdk.name+"-rotate"]
+				ro := "e2e-leases-ro-" + sdk.name + "-" + kubeRun
+				roManifest := `apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ` + ro + `, namespace: ` + ns + `}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ` + ro + `, namespace: ` + ns + `}
+rules: [{apiGroups: [""], resources: [configmaps], resourceNames: [` + name + `], verbs: [get]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ` + ro + `, namespace: ` + ns + `}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ` + ro + `}
+subjects: [{kind: ServiceAccount, name: ` + ro + `, namespace: ` + ns + `}]
+`
+				t.Cleanup(func() { kube(t, e, roManifest, "delete", "--ignore-not-found", "-f", "-") })
+				kube(t, e, roManifest, "apply", "-f", "-")
+				token := func(sa string) []byte {
+					return []byte(strings.TrimSpace(kube(t, e, "", "-n", ns, "create", "token", sa, "--duration", "10m")))
+				}
+				tokenFile := filepath.Join(dir, sdk.name+"-token")
+				if err := os.WriteFile(tokenFile, token("e2e-leases-"+kubeRun), 0o600); err != nil { // activate writes the ConfigMap
+					t.Fatal(err)
+				}
+				k8s := append(append([]string{}, kubeEnv...), "LF_K8S_STORE=configmap", "LF_K8S_NAME="+name, "LF_K8S_TOKEN_FILE="+tokenFile)
+				first := run1(tp, tl, mt, "activate", keySet, k8s...)
+				if !first.OK {
+					t.Fatalf("rotate activate: %+v", first)
+				}
+				if err := os.WriteFile(tokenFile, token(ro), 0o600); err != nil { // A: read only
+					t.Fatal(err)
+				}
+				ready := filepath.Join(dir, mt+".ready")
+				type outcome struct {
+					r   result
+					err error
+				}
+				done := make(chan outcome, 1)
+				go func() {
+					r, err := exec1(tp, tl, mt, "run", keySet, append(k8s, "LF_RUN_MS=10000", "LF_READY="+ready)...)
+					done <- outcome{r, err}
+				}()
+				for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+					if _, err := os.Stat(ready); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("rotate: run never loaded its lease")
+					}
+				}
+				// B, swapped in whole as kubelet does: the store never reads half a file.
+				if err := os.WriteFile(tokenFile+".new", token("e2e-leases-"+kubeRun), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(tokenFile+".new", tokenFile); err != nil {
+					t.Fatal(err)
+				}
+				o := <-done
+				if o.err != nil {
+					t.Fatalf("rotate run: %v", o.err)
+				}
+				if !o.r.OK || o.r.Iat <= first.Iat || len(o.r.Errors) != 0 {
+					t.Errorf("rotate: run %+v, want a lease renewed after %s", o.r, first.Iat)
+				}
+				if r := run1(tp, tl, mt, "current", keySet, k8s...); !r.OK || r.Iat != o.r.Iat {
+					t.Errorf("rotate: a restart has %+v, want the renewed lease (%s) from the ConfigMap", r, o.r.Iat)
 				}
 			}
 
