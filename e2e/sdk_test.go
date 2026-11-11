@@ -66,6 +66,7 @@ func TestSDKJourneys(t *testing.T) {
 				OK                         bool
 				Code, Lid, Tenant, Product string
 				Plan, Status, Detail, Text string
+				Iat                        string
 				HTTP                       int
 				SSO, Nope, Forgot          bool
 				Seats                      int64
@@ -165,11 +166,35 @@ func TestSDKJourneys(t *testing.T) {
 			b.do("POST", api+"/licenses/"+lic.ID+"/revoke", nil, 200, nil)
 			refused(m2, "refresh", "license_revoked", 403)
 
-			// run(), the background loop most apps use, on 4-second leases
-			// (refresh_after 2 s in): it stops, forgetting the lease, when the
-			// vendor revokes the license, and when the vendor deactivates the
-			// machine from the dashboard.
-			for _, c := range []struct{ name, code string }{{"revoked", "license_revoked"}, {"deactivated", "not_activated"}} {
+			// run(), the background loop most apps use, on short leases so that
+			// refresh_after (half the lease) comes soon; its scheduling is
+			// unit-tested. It renews the lease (kept in its store): a 10 s lease
+			// refreshed at 5 s, still valid when a JVM has started for the restart
+			// step. A wrong license key stops it without forgetting the lease.
+			{
+				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 10})
+				mr := "e2e-" + sdk.name + "-run-renews-" + run
+				first := run1(rp, rl, mr, "activate", keySet)
+				if !first.OK {
+					t.Fatalf("activate: %+v", first)
+				}
+				if r := run1(rp, issued{ID: rl.ID, Key: "LF-WRONG-WRONG-WRONG"}, mr, "run", keySet); r.OK || r.Code != "unauthenticated" || r.HTTP != 401 || r.Forgot {
+					t.Errorf("run with a wrong key: %+v, want unauthenticated (401), the lease kept", r)
+				}
+				renewed := run1(rp, rl, mr, "run", keySet, "LF_RUN_MS=7000")
+				if !renewed.OK || renewed.Iat <= first.Iat || renewed.Lid != rl.ID {
+					t.Errorf("run for 7 s: %+v, want a lease issued after %s", renewed, first.Iat)
+				}
+				if r := run1(rp, rl, mr, "current", keySet); !r.OK || r.Iat != renewed.Iat {
+					t.Errorf("after a restart: %+v, want the renewed lease (%s) from the store", r, renewed.Iat)
+				}
+			}
+			// It stops, forgetting the lease, when the vendor revokes the
+			// license, and when the vendor deactivates the machine from the dashboard.
+			for _, c := range []struct {
+				name, code string
+				http       int
+			}{{"revoked", "license_revoked", 403}, {"deactivated", "not_activated", 404}} {
 				rp, rl, _ := newLicense(t, b, tn, map[string]any{"lease_seconds": 4})
 				mr := "e2e-" + sdk.name + "-run-" + c.name + "-" + run
 				if r := run1(rp, rl, mr, "activate", keySet); !r.OK {
@@ -185,7 +210,7 @@ func TestSDKJourneys(t *testing.T) {
 					}
 					b.do("POST", api+"/licenses/"+rl.ID+"/activations/"+acts.Items[0].ID+"/deactivate", nil, 200, nil)
 				}
-				if r := run1(rp, rl, mr, "run", keySet); r.OK || r.Code != c.code || !r.Forgot {
+				if r := run1(rp, rl, mr, "run", keySet); r.OK || r.Code != c.code || r.HTTP != c.http || !r.Forgot {
 					t.Errorf("run after the license was %s: %+v, want %s and the lease forgotten", c.name, r, c.code)
 				}
 				if r := run1(rp, rl, mr, "current", keySet); r.OK || r.Code != "no_lease" {
