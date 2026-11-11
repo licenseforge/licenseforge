@@ -71,13 +71,17 @@ func TestSDKInPod(t *testing.T) {
 	run := strings.ToLower(rand.Text()[:8])
 	sa := "e2e-pod-" + run
 	stores := map[string]string{"typescript": "e2e-pod-lease-typescript-" + run, "java": "e2e-pod-lease-java-" + run}
-	pod := func(name, image string) string {
+	// One ServiceAccount per SDK, allowed get and update on its own ConfigMap
+	// only, and get on the kube-system namespace (the READMEs' RBAC). The
+	// cluster-scoped objects carry a label: an interrupted run leaves them
+	// behind after the namespace is gone (see e2e/env/README.md).
+	pod := func(name, account, image string) string {
 		return `---
 apiVersion: v1
 kind: Pod
 metadata: {name: ` + name + `, namespace: ` + ns + `}
 spec:
-  serviceAccountName: ` + sa + `
+  serviceAccountName: ` + account + `
   restartPolicy: Never
   terminationGracePeriodSeconds: 0
   securityContext: {runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: RuntimeDefault}}
@@ -88,44 +92,51 @@ spec:
     securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
 `
 	}
-	manifest := `apiVersion: v1
+	var manifest, subjects strings.Builder
+	var pods []string
+	for _, x := range []struct{ name, short, image string }{{"typescript", "ts", podNodeImage}, {"java", "java", podJavaImage}} {
+		account := sa + "-" + x.short
+		subjects.WriteString(`{kind: ServiceAccount, name: ` + account + `, namespace: ` + ns + `}, `)
+		manifest.WriteString(`---
+apiVersion: v1
 kind: ServiceAccount
-metadata: {name: ` + sa + `, namespace: ` + ns + `}
+metadata: {name: ` + account + `, namespace: ` + ns + `}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
-metadata: {name: ` + sa + `, namespace: ` + ns + `}
-rules: [{apiGroups: [""], resources: [configmaps], resourceNames: ["` + stores["typescript"] + `", "` + stores["java"] + `"], verbs: [get, update]}]
+metadata: {name: ` + account + `, namespace: ` + ns + `}
+rules: [{apiGroups: [""], resources: [configmaps], resourceNames: [` + stores[x.name] + `], verbs: [get, update]}]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
-metadata: {name: ` + sa + `, namespace: ` + ns + `}
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ` + sa + `}
-subjects: [{kind: ServiceAccount, name: ` + sa + `, namespace: ` + ns + `}]
+metadata: {name: ` + account + `, namespace: ` + ns + `}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ` + account + `}
+subjects: [{kind: ServiceAccount, name: ` + account + `, namespace: ` + ns + `}]
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ` + stores[x.name] + `, namespace: ` + ns + `}
+` + pod(account+"-a", account, x.image) + pod(account+"-b", account, x.image))
+		pods = append(pods, account+"-a", account+"-b")
+	}
+	manifest.WriteString(`---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
-metadata: {name: ` + sa + `}
+metadata: {name: ` + sa + `, labels: {licenseforge.io/e2e: "true"}}
 rules: [{apiGroups: [""], resources: [namespaces], resourceNames: [kube-system], verbs: [get]}]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
-metadata: {name: ` + sa + `}
+metadata: {name: ` + sa + `, labels: {licenseforge.io/e2e: "true"}}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ` + sa + `}
-subjects: [{kind: ServiceAccount, name: ` + sa + `, namespace: ` + ns + `}]
----
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: ` + stores["typescript"] + `, namespace: ` + ns + `}
----
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: ` + stores["java"] + `, namespace: ` + ns + `}
-` + pod(sa+"-ts-a", podNodeImage) + pod(sa+"-ts-b", podNodeImage) + pod(sa+"-java-a", podJavaImage) + pod(sa+"-java-b", podJavaImage)
-	t.Cleanup(func() { kube(t, e, manifest, "delete", "--ignore-not-found", "--wait=false", "-f", "-") })
-	kube(t, e, manifest, "apply", "-f", "-")
-	pods := []string{sa + "-ts-a", sa + "-ts-b", sa + "-java-a", sa + "-java-b"}
-	kube(t, e, "", append([]string{"-n", ns, "wait", "--for=condition=Ready", "--timeout=300s"}, prefix("pod/", pods)...)...)
+subjects: [` + strings.TrimSuffix(subjects.String(), ", ") + `]
+`)
+	t.Cleanup(func() { kube(t, e, manifest.String(), "delete", "--ignore-not-found", "--wait=false", "-f", "-") })
+	kube(t, e, manifest.String(), "apply", "-f", "-")
+	wait := exec.Command("kubectl", append([]string{"--context", e.KubeContext, "-n", ns, "wait", "--for=condition=Ready", "--timeout=300s"}, prefix("pod/", pods)...)...)
+	if out, err := wait.CombinedOutput(); err != nil { // an image pull that failed, most likely: say why
+		t.Fatalf("pods not ready: %v\n%s\n%s", err, out, kube(t, e, "", append([]string{"-n", ns, "describe"}, prefix("pod/", pods)...)...))
+	}
 	for _, p := range pods {
 		kube(t, e, "", "-n", ns, "cp", app, p+":/tmp/app")
 	}
@@ -175,7 +186,7 @@ metadata: {name: ` + stores["java"] + `, namespace: ` + ns + `}
 				t.Errorf("a restart: %+v, want the lease from the ConfigMap", r)
 			}
 			// The other pod: the same cluster, so the same machine.
-			if r := step("b", "current"); !r.OK || r.Iat != first.Iat {
+			if r := step("b", "current"); !r.OK || r.Iat != first.Iat || r.Binding != "cluster" {
 				t.Errorf("another pod: %+v, want the lease from the ConfigMap", r)
 			}
 			if r := step("b", "refresh"); !r.OK || r.Lid != lic.ID {
