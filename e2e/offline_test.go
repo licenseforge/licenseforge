@@ -106,7 +106,15 @@ func TestOfflineJourney(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	renewed := answer(req2).LicenseFile
+	renewKey := "e2e-offline-renewal-" + run
+	b.idem = renewKey
+	renewal := answer(req2)
+	renewed := renewal.LicenseFile
+	// A retry with the same key gets the stored answer: the same seat and file.
+	b.idem = renewKey
+	if again := answer(req2); again != renewal {
+		t.Errorf("replayed renewal: %+v, want %+v", again, renewal)
+	}
 	if _, _, err := a.Install(renewed); err != nil {
 		t.Fatalf("install the renewal: %v", err)
 	}
@@ -131,8 +139,11 @@ func TestOfflineJourney(t *testing.T) {
 		t.Errorf("after deactivate: %v", err)
 	}
 	b.do("POST", api+"/deactivation-receipts", map[string]string{"receipt": receipt}, 200, nil) // the same receipt again: unchanged, not audited
-	// The first request replayed with its Idempotency-Key gets no file: its
-	// seat was returned since.
+	// Replays get no file once the seat is returned: the renewal's file was
+	// current when it was returned, so only the returned seat stops it; the
+	// first request's file was superseded by the renewal too.
+	b.idem = renewKey
+	b.refused("POST", api+"/activation-requests", map[string]string{"request": req2}, 404, "not_activated")
 	b.idem = firstKey + "-" + run
 	b.refused("POST", api+"/activation-requests", map[string]string{"request": req}, 404, "not_activated")
 	if _, _, err := a.Install(renewed); !errors.Is(err, offline.ErrReturned) {
