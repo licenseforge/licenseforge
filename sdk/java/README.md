@@ -2,7 +2,7 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Java application, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Java 17 or later, no runtime dependencies: Ed25519 comes from the JDK (ADR-0010).
 
-Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json`, `offline.json` and `fingerprint.json`. Next: the online client and lease stores, as in the Go and TypeScript SDKs.
+Status: in progress, not published yet (Maven Central `io.licenseforge:licenseforge-sdk`, module `io.licenseforge.sdk`). It passes the shared conformance vectors `spec/vectors/lf1.json`, `lf1-claims.json`, `offline.json` and `fingerprint.json`. Next: lease stores (file, Kubernetes ConfigMap/Secret), FIPS mode and the first release.
 
 ```java
 import io.licenseforge.sdk.*;
@@ -40,6 +40,7 @@ try {
   4. the OS machine ID: `/etc/machine-id` (refused on tmpfs, and in containers unless the host's file is mounted in), `MachineGuid` or `IOPlatformUUID`.
 
   A `FingerprintException` says why there is none: `NO_FINGERPRINT`, `TRANSIENT` (retry), `INVALID` or `FAILED`. A non-ASCII `LICENSEFORGE_FINGERPRINT` needs a UTF-8 locale (`LANG=C.UTF-8`): under a C or Latin-1 locale the JVM misreads it, so it is refused.
+- `Online.Client` talks to the activation API (ADR-0004, ADR-0034): `activate()`, `refresh()`, `deactivate()`, `forget()`, `current()` (the cached lease checked now: claims and `VALID`/`GRACE`), and `run(onError)` to keep the lease fresh on a thread of its own (interrupt it to stop). Every lease is verified (signature, claims, product, tenant, this machine's fingerprint and binding) before it is used or stored; an older lease than the one held is refused as a replay. `Config.builder(baseUrl, tenantId, product, licenseKey, keys, fingerprint)` takes an https URL (http only for loopback), and optionally a `LeaseStore`, a `Clock.Guard` (reset to each lease's iat) and retry settings. Network errors, 429, 5xx and `idempotency_in_progress` are retried with backoff and `Retry-After`; one Idempotency-Key per `activate` means retries never take a second seat; redirects are never followed. A `LeaseStore` reports failures as `IOException`; `deactivate` rethrows one when the stored lease can't be cleared (the seat is freed: retry `forget`).
 - `Clock.Guard` protects against the system clock being turned back (ADR-0018): `guard.now()` is the time to check licenses with (max of the system clock and the last trusted time), and throws `ClockException` `ROLLBACK` when the clock is more than the tolerance (24 h) behind. `observe(iat, now)` raises the mark after a license passes; `reset(leaseIat)` lowers it after an online refresh. The state is HMAC-authenticated under the license key; `Clock.FileStore` writes it atomically under a cross-process lock (`MemoryStore` resets on restart). Offline recovery after fixing the clock: delete the state file.
 - Offline activation (ADR-0043), in `Offline`:
   - `encodeRequest(request)` writes the `lfreq1` request an air-gapped machine hands over; `parseRequest` reads one.
