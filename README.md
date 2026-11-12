@@ -24,6 +24,7 @@
 | In-cluster agent | planned (v0.3) |
 
 ## Docs
+- **[Getting started](docs/getting-started.md)**: install, first tenant, first license, your app
 - [Architecture Decision Records](docs/adr/README.md)
 - [License file format (`lf1`)](spec/license-format.md)
 - [Installing with Helm](deploy/helm/licenseforge/README.md), then the [Secure Configuration Guide](compliance/secure-configuration-guide.md) (OIDC client, TLS, backups)
