@@ -1,6 +1,6 @@
 # Command line
 
-The `licenseforge` binary is also the CLI (ADR-0048). Commands that talk to a running LicenseForge use the REST API with an API token, and read three environment variables:
+The `licenseforge` binary is also the CLI (ADR-0048). Each release attaches it for Linux, macOS and Windows ([verify it](verifying-releases.md#server-binaries)). Commands that talk to a running LicenseForge use the REST API with an API token, and read three environment variables:
 
 | Variable | Value |
 |---|---|
@@ -8,7 +8,7 @@ The `licenseforge` binary is also the CLI (ADR-0048). Commands that talk to a ru
 | `LICENSEFORGE_TENANT` | The tenant's slug, filled in for `{tenant}` in paths |
 | `LICENSEFORGE_TOKEN` | An API token (dashboard: Settings → API tokens), with the role and product scope the commands need. Or `LICENSEFORGE_TOKEN_FILE`, the path of a file holding it (a mounted Secret, a CI secret file) |
 
-Keep the token in a secret manager or your CI's secrets, never in a script.
+Keep the token in a secret manager or your CI's secrets, never in a script. The examples are POSIX shell; in PowerShell set the variables with `$env:LICENSEFORGE_URL = "https://…"` and run `licenseforge.exe` (or the downloaded file name).
 
 ## `licenseforge api`
 

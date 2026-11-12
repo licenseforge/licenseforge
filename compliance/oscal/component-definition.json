@@ -740,7 +740,7 @@
                     "rel": "reference"
                   }
                 ],
-                "remarks": "SBOMs are generated from the linux/amd64 build and attested to every platform (arm64 has the same Go modules and distroless packages). The chart has provenance but no SBOM of its own: it holds templates, and the images it deploys carry theirs. The operator's inventory of the deployment (PostgreSQL, ingress, IdP, cluster) is theirs; these SBOMs feed it."
+                "remarks": "SBOMs are generated from the linux/amd64 build and attested to every platform: arm64 has the same Go modules and distroless packages, and the macOS and Windows CLI binaries the same Go modules minus the Linux-only `prometheus/procfs`, so their SBOM lists one module more. The chart has provenance but no SBOM of its own: it holds templates, and the images it deploys carry theirs. The operator's inventory of the deployment (PostgreSQL, ingress, IdP, cluster) is theirs; these SBOMs feed it."
               },
               {
                 "uuid": "21b9d3a2-153b-5d0a-a776-87f258ac0efd",
