@@ -137,6 +137,15 @@ func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRe
 	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
+// ExportLicenseFile returns a site license's signed file (issue.OfflineFile).
+func (s *server) ExportLicenseFile(ctx context.Context, req apigen.ExportLicenseFileRequestObject) (apigen.ExportLicenseFileResponseObject, error) {
+	file, err := s.Activations.Issuer.OfflineFile(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ExportLicenseFile201JSONResponse{LicenseFile: file}, nil
+}
+
 func (s *server) SetLicenseExpiresAt(ctx context.Context, req apigen.SetLicenseExpiresAtRequestObject) (apigen.SetLicenseExpiresAtResponseObject, error) {
 	if req.Body.ExpiresAt.IsZero() { // absent or null decode to the zero time
 		return nil, invalid(fieldError{"/expires_at", "required: a date-time"})
