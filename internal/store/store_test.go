@@ -409,18 +409,18 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"identity_audit":                `ALL licenseforge_identity ((tenant_id)::text = app_tenant_id()) ((tenant_id)::text = app_tenant_id())`,
 		},
 		"features": { // ADR-0015: archive is one-way, at the database clock
-			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"insert_unarchived (restrictive)":  `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
+			"archive_or_restore (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM features.archived_at))))) (EXISTS ( SELECT 1 FROM features o WHERE (((o.id)::text = (features.id)::text) AND ((NOT (features.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((features.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (features.archived_at <= (clock_timestamp() + '00:05:00'::interval)))) OR ((o.archived_at IS NOT NULL) AND (features.archived_at IS NULL))))))`,
 		},
 		"products": { // ADR-0015: archive is one-way, at the database clock
-			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"insert_unarchived (restrictive)":  `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
+			"archive_or_restore (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM products.archived_at))))) (EXISTS ( SELECT 1 FROM products o WHERE (((o.id)::text = (products.id)::text) AND ((NOT (products.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((products.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (products.archived_at <= (clock_timestamp() + '00:05:00'::interval)))) OR ((o.archived_at IS NOT NULL) AND (products.archived_at IS NULL))))))`,
 		},
 		// One-way states start unset: no insert of an archived, suspended or
 		// revoked row.
 		"plans": {
-			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM plans.archived_at))))) (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND ((NOT (plans.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((plans.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (plans.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"insert_unarchived (restrictive)":  `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
+			"archive_or_restore (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM plans.archived_at))))) (EXISTS ( SELECT 1 FROM plans o WHERE (((o.id)::text = (plans.id)::text) AND ((NOT (plans.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((plans.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (plans.archived_at <= (clock_timestamp() + '00:05:00'::interval)))) OR ((o.archived_at IS NOT NULL) AND (plans.archived_at IS NULL))))))`,
 		},
 		"activations": {"insert_active (restrictive)": `INSERT licenseforge_app,licenseforge_platform (deactivated_at IS NULL)`},
 		"licenses": {
@@ -429,8 +429,8 @@ func TestEveryRelationHasCanonicalRLS(t *testing.T) {
 			"license_transitions (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (revoked_at IS NULL) (((revoked_at IS NULL) OR ((revoked_at >= (clock_timestamp() - '00:05:00'::interval)) AND (revoked_at <= (clock_timestamp() + '00:05:00'::interval)))) AND ((suspended_at IS NULL) OR ((suspended_at >= (clock_timestamp() - '00:05:00'::interval)) AND (suspended_at <= (clock_timestamp() + '00:05:00'::interval))) OR (EXISTS ( SELECT 1 FROM licenses o WHERE (((o.id)::text = (licenses.id)::text) AND (o.suspended_at = licenses.suspended_at))))))`,
 		},
 		"customers": { // ADR-0015: as for products
-			"insert_unarchived (restrictive)": `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
-			"archive_once (restrictive)":      `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval))))))))`,
+			"insert_unarchived (restrictive)":  `INSERT licenseforge_app,licenseforge_platform (archived_at IS NULL)`,
+			"archive_or_restore (restrictive)": `UPDATE licenseforge_app,licenseforge_platform (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND (NOT (o.archived_at IS DISTINCT FROM customers.archived_at))))) (EXISTS ( SELECT 1 FROM customers o WHERE (((o.id)::text = (customers.id)::text) AND ((NOT (customers.archived_at IS DISTINCT FROM o.archived_at)) OR ((o.archived_at IS NULL) AND ((customers.archived_at >= (clock_timestamp() - '00:05:00'::interval)) AND (customers.archived_at <= (clock_timestamp() + '00:05:00'::interval)))) OR ((o.archived_at IS NOT NULL) AND (customers.archived_at IS NULL))))))`,
 		},
 		"invitations": {
 			"identity_mark_accepted":          `UPDATE licenseforge_identity ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (expires_at > clock_timestamp())) ((accepted_by IS NOT NULL) AND (EXISTS ( SELECT 1 FROM memberships m WHERE (((m.invitation_id)::text = (invitations.id)::text) AND ((m.user_id)::text = (invitations.accepted_by)::text)))))`,
@@ -782,7 +782,7 @@ func TestAuditExportPrivileges(t *testing.T) {
 }
 
 // archivable is a table whose rows are archived, never deleted, with a
-// one-way archive_once policy (ADR-0015).
+// archive_or_restore policy (ADR-0015).
 type archivable struct {
 	table     string
 	updatable []string // the serving pools' UPDATE columns
@@ -914,9 +914,10 @@ func tableACL(t *testing.T, owner *sql.DB, table string) []string {
 	return got
 }
 
-// Archive is one-way and at the database clock (archive_once): the serving
-// pools can't un-archive a row or set another time; renaming an active or an
-// archived row still works.
+// Archive and restore are at the database clock (archive_or_restore, ADR-0015
+// amended): the serving pools can archive a row now, restore it, and archive
+// it again, but never set another time or move an archived row's date;
+// renaming an active or an archived row still works.
 func TestArchiveIsOneWay(t *testing.T) {
 	d := openDB(t)
 	ctx := context.Background()
@@ -954,10 +955,10 @@ func TestArchiveIsOneWay(t *testing.T) {
 			t.Fatalf("%s archive: %v", a.table, err)
 		}
 		for _, platform := range []bool{false, true} {
+			// An archived row's date never moves.
 			for name, q := range map[string]string{
-				"un-archive": `UPDATE %s SET archived_at = NULL WHERE id = $1`,
-				"re-archive": `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`,
-				"backdate":   `UPDATE %s SET archived_at = archived_at - interval '1 hour' WHERE id = $1`,
+				"re-date":  `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`,
+				"backdate": `UPDATE %s SET archived_at = archived_at - interval '1 hour' WHERE id = $1`,
 			} {
 				if err := exec(platform, q); err == nil {
 					t.Errorf("%s platform=%v %s: allowed", a.table, platform, name)
@@ -966,11 +967,21 @@ func TestArchiveIsOneWay(t *testing.T) {
 			if err := exec(platform, `UPDATE %s SET name = 'Old', updated_at = clock_timestamp() WHERE id = $1`); err != nil {
 				t.Errorf("%s platform=%v rename archived: %v", a.table, platform, err)
 			}
+			// Restore, then archive again: both at the database clock.
+			if err := exec(platform, `UPDATE %s SET archived_at = NULL WHERE id = $1`); err != nil {
+				t.Errorf("%s platform=%v restore: %v", a.table, platform, err)
+			}
+			if err := exec(platform, `UPDATE %s SET archived_at = clock_timestamp() - interval '1 day' WHERE id = $1`); err == nil {
+				t.Errorf("%s platform=%v backdated archive after restore: allowed", a.table, platform)
+			}
+			if err := exec(platform, `UPDATE %s SET archived_at = clock_timestamp() WHERE id = $1`); err != nil {
+				t.Errorf("%s platform=%v archive again: %v", a.table, platform, err)
+			}
 		}
 	}
 }
 
-// archive_once holds under concurrency: an update that waited for a
+// archive_or_restore holds under concurrency: an update that waited for a
 // concurrent archive (READ COMMITTED rechecks it against the newer row)
 // changes nothing, and an upsert is refused, so the archive is neither
 // erased nor re-dated.
@@ -1074,7 +1085,7 @@ func TestArchiveRace(t *testing.T) {
 				if upsert && err == nil {
 					t.Errorf("%s %s: allowed", a.table, c.name)
 				}
-				if upsert && err != nil && !strings.Contains(err.Error(), "archive_once") {
+				if upsert && err != nil && !strings.Contains(err.Error(), "archive_or_restore") {
 					t.Errorf("%s upsert refused for another reason: %v", a.table, err)
 				}
 				if !upsert && err != nil {

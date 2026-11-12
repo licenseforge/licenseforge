@@ -130,6 +130,7 @@ func TestProductArchiveEndpoint(t *testing.T) {
 	other := f.do(t, "POST", p, `{"slug":"cache","name":"Cache"}`, owner).body["id"].(string)
 	scoped := f.session(t, f.scoped, true) // admin of prodA only
 	f.do(t, "POST", p+"/"+f.prodA+"/archive", "", f.session(t, f.join(t, f.a.ID, invitation.RoleManager, f.ownerA), true)).problem(t, 403, "forbidden")
+	ids2 := struct{ Product func() string }{ids.Product}
 	missing := f.do(t, "POST", p+"/"+ids.Product()+"/archive", "", owner).problem(t, 404, "not_found")
 	if got := f.do(t, "POST", p+"/"+other+"/archive", "", scoped).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
 		t.Errorf("hidden: %v, missing %v", got, missing)
@@ -155,4 +156,16 @@ func TestProductArchiveEndpoint(t *testing.T) {
 		t.Errorf("archived: %v", got)
 	}
 	f.do(t, "GET", p+"?archived=maybe", "", owner).problem(t, 400, "invalid_request")
+	// Restore (ADR-0015, amended): same rights; hidden is missing; once.
+	missingRestore := f.do(t, "POST", p+"/"+ids2.Product()+"/restore", "", owner).problem(t, 404, "not_found")
+	if got := f.do(t, "POST", p+"/"+other+"/restore", "", scoped).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missingRestore) {
+		t.Errorf("hidden restore: %v, missing %v", got, missingRestore)
+	}
+	if r := f.do(t, "POST", p+"/"+f.prodA+"/restore", "", scoped); r.code != 200 || r.body["archived_at"] != nil {
+		t.Fatalf("restore: %d %s", r.code, r.raw)
+	}
+	f.do(t, "POST", p+"/"+f.prodA+"/restore", "", owner).problem(t, 409, "invalid_state")
+	if got := ids("?archived=true"); len(got) != 0 {
+		t.Errorf("archived after restore: %v", got)
+	}
 }

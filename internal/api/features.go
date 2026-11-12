@@ -74,6 +74,14 @@ func (s *server) ArchiveFeature(ctx context.Context, req apigen.ArchiveFeatureRe
 	return apigen.ArchiveFeature200JSONResponse(featureView(f)), nil
 }
 
+func (s *server) RestoreFeature(ctx context.Context, req apigen.RestoreFeatureRequestObject) (apigen.RestoreFeatureResponseObject, error) {
+	f, err := s.Features.Restore(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RestoreFeature200JSONResponse(featureView(f)), nil
+}
+
 func featureView(f *ent.Feature) apigen.Feature {
 	v := apigen.Feature{Id: f.ID, ProductId: f.ProductID, Key: f.Key, Name: f.Name, Description: f.Description,
 		Type: apigen.FeatureType(f.Type), Unit: f.Unit, CreatedAt: f.CreatedAt.UTC()}

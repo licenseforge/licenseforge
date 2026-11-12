@@ -61,3 +61,11 @@ Tables `features`, `plans`, `plan_features` (`internal/store/schema`), revised a
 ## Alternatives considered
 - **Free-form JSON entitlements** (previous plan): simplest, but no validation or discoverability.
 - **Feature bundles / add-ons shared across plans**: useful later ("Security pack" add-on); plans + license overrides cover v0.1.
+
+## Amendment 2026-11-12: archive is reversible
+Requested by the maintainer ("soft delete … hidden in the UI, but recoverable"). A product archived by mistake used to retire its slug forever, and apps embedding the slug could never get new licenses.
+- **Restore** (`POST …/{products|features|plans|customers}/{id}/restore`) clears `archived_at`. It has the same rights as archive and is audited (`product.restore`, `feature.restore`, `plan.restore`, `customer.restore`). Restoring something that isn't archived answers 409 `invalid_state`.
+- After a restore, the row is usable again as before. Licenses already sold were never affected either way.
+- Nothing is ever deleted: rows are still archived, never deleted, because licenses carry keys and slugs.
+- **Database:** the restrictive policy `archive_once` becomes `archive_or_restore`. An update keeps `archived_at`, sets it from NULL to the database clock (archive), or clears it (restore). It never moves an archived date and never sets a made-up date, and the snapshot match is unchanged.
+- **Dashboard:** archived rows stay listed, marked Archived and with a Restore button, for **30 days**. After that they're hidden behind "Show N archived more than 30 days ago", still restorable. The API always lists them with `archived_at` (and `?archived=` where it exists). 30 days is a dashboard constant, not a setting.

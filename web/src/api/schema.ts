@@ -968,9 +968,33 @@ export interface paths {
         put?: never;
         /**
          * Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
-         * @description Needs catalog:write on the product. Products are archived, never deleted (ADR-0015). An archived product answers 409 invalid_state.
+         * @description Needs catalog:write on the product. Products are archived, never deleted, and can be restored (ADR-0015). An archived product answers 409 invalid_state.
          */
         post: operations["archiveProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/products/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived product (ADR-0015, amended); it is usable again as before it was archived.
+         * @description Same rights as archive. Audited as product.restore. A product that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         */
+        post: operations["restoreProduct"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1047,6 +1071,30 @@ export interface paths {
          * @description Needs catalog:write on its product. An archived feature answers 409 invalid_state.
          */
         post: operations["archiveFeature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/features/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived feature (ADR-0015, amended); it is usable again as before it was archived.
+         * @description Same rights as archive. Audited as feature.restore. A feature that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         */
+        post: operations["restoreFeature"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1164,6 +1212,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/plans/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived plan (ADR-0015, amended); it is usable again as before it was archived.
+         * @description Same rights as archive. Audited as plan.restore. A plan that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         */
+        post: operations["restorePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/customers": {
         parameters: {
             query?: never;
@@ -1234,6 +1306,30 @@ export interface paths {
          * @description Needs customer:write. An archived customer answers 409 invalid_state.
          */
         post: operations["archiveCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/customers/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived customer (ADR-0015, amended); it is usable again as before it was archived.
+         * @description Same rights as archive. Audited as customer.restore. A customer that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         */
+        post: operations["restoreCustomer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3763,6 +3859,35 @@ export interface operations {
             409: components["responses"]["Problem"];
         };
     };
+    restoreProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
     listFeatures: {
         parameters: {
             query?: {
@@ -3892,6 +4017,35 @@ export interface operations {
         };
     };
     archiveFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["FeatureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Feature"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    restoreFeature: {
         parameters: {
             query?: never;
             header?: never;
@@ -4137,6 +4291,35 @@ export interface operations {
             409: components["responses"]["Problem"];
         };
     };
+    restorePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
     listCustomers: {
         parameters: {
             query?: {
@@ -4264,6 +4447,35 @@ export interface operations {
         };
     };
     archiveCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["CustomerId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    restoreCustomer: {
         parameters: {
             query?: never;
             header?: never;

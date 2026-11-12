@@ -260,7 +260,7 @@ func (s Service) issue(ctx context.Context, tx *ent.Tx, tenantID string, p authz
 	pr, err := lock()
 	if ent.IsNotFound(err) {
 		// Locked after waiting for a concurrent archive, the row is rechecked
-		// as its newer version, which archive_once filters (its subquery reads
+		// as its newer version, which archive_or_restore filters (its subquery reads
 		// this statement's snapshot): a second statement sees it archived.
 		pr, err = lock()
 	}
@@ -394,7 +394,7 @@ func entitlements(ctx context.Context, tx *ent.Tx, pl *ent.Plan, overrides map[s
 		catalog, err := lock()
 		if err == nil && len(catalog) < len(overrides) {
 			// A feature locked after waiting for a concurrent archive is
-			// rechecked as its newer version, which archive_once filters: a
+			// rechecked as its newer version, which archive_or_restore filters: a
 			// second statement sees it (archived), or it is really unknown.
 			catalog, err = lock()
 		}

@@ -367,3 +367,17 @@ export const canCreateProducts = (m: Membership) => atLeast(m, "admin") && m.sco
 export const canRenameProducts = (m: Membership) => atLeast(m, "admin");
 /** customer:write, tenant-wide: managers and up with every product. */
 export const canWriteCustomers = (m: Membership) => atLeast(m, "manager") && m.scope.all;
+
+/** Restores an archived product, feature, plan or customer (ADR-0015, amended). */
+export async function restoreProduct(tenant: string, id: string): Promise<Product> {
+  return unwrap(await api.POST("/tenants/{tenant}/products/{id}/restore", { params: { path: { tenant, id } } }));
+}
+export async function restoreFeature(tenant: string, id: string): Promise<Feature> {
+  return unwrap(await api.POST("/tenants/{tenant}/features/{id}/restore", { params: { path: { tenant, id } } }));
+}
+export async function restorePlan(tenant: string, id: string): Promise<Plan> {
+  return unwrap(await api.POST("/tenants/{tenant}/plans/{id}/restore", { params: { path: { tenant, id } } }));
+}
+export async function restoreCustomer(tenant: string, id: string): Promise<Customer> {
+  return unwrap(await api.POST("/tenants/{tenant}/customers/{id}/restore", { params: { path: { tenant, id } } }));
+}

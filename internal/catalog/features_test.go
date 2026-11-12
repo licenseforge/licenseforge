@@ -284,7 +284,7 @@ func TestFeatureCreateWaitsForArchive(t *testing.T) {
 }
 
 // A feature change that waits for a concurrent archive of the feature sees
-// it archived (it looks again after archive_once filters the row it waited
+// it archived (it looks again after archive_or_restore filters the row it waited
 // for): a second archive is ErrState, an update succeeds.
 func TestFeatureChangeWaitsForArchive(t *testing.T) {
 	f := setup(t)

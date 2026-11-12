@@ -78,6 +78,14 @@ func (s *server) ArchiveProduct(ctx context.Context, req apigen.ArchiveProductRe
 	return apigen.ArchiveProduct200JSONResponse(productView(p)), nil
 }
 
+func (s *server) RestoreProduct(ctx context.Context, req apigen.RestoreProductRequestObject) (apigen.RestoreProductResponseObject, error) {
+	p, err := s.Products.Restore(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RestoreProduct200JSONResponse(productView(p)), nil
+}
+
 func (s *server) ListCustomers(ctx context.Context, req apigen.ListCustomersRequestObject) (apigen.ListCustomersResponseObject, error) {
 	limit, at, after, err := pageParams(req.Params.Limit, req.Params.Cursor, "cus")
 	if err != nil {
@@ -141,6 +149,14 @@ func (s *server) ArchiveCustomer(ctx context.Context, req apigen.ArchiveCustomer
 		return nil, err
 	}
 	return apigen.ArchiveCustomer200JSONResponse(customerView(c)), nil
+}
+
+func (s *server) RestoreCustomer(ctx context.Context, req apigen.RestoreCustomerRequestObject) (apigen.RestoreCustomerResponseObject, error) {
+	c, err := s.Customers.Restore(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RestoreCustomer200JSONResponse(customerView(c)), nil
 }
 
 func productView(p *ent.Product) apigen.Product {

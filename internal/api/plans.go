@@ -100,6 +100,14 @@ func (s *server) ArchivePlan(ctx context.Context, req apigen.ArchivePlanRequestO
 	return apigen.ArchivePlan200JSONResponse(planView(p)), nil
 }
 
+func (s *server) RestorePlan(ctx context.Context, req apigen.RestorePlanRequestObject) (apigen.RestorePlanResponseObject, error) {
+	p, err := s.Plans.Restore(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RestorePlan200JSONResponse(planView(p)), nil
+}
+
 func planView(p *ent.Plan) apigen.Plan {
 	v := apigen.Plan{Id: p.ID, ProductId: p.ProductID, Slug: p.Slug, Name: p.Name,
 		DurationMonths: p.DurationMonths, DurationSeconds: p.DurationSeconds, ExpiryBasis: apigen.PlanExpiryBasis(p.ExpiryBasis),
