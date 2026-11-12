@@ -222,10 +222,12 @@ spec:
 - **Audit log**: kept in full unless audit retention is on (`auditRetention.enabled` in the chart, off by default; ADR-0036). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.
 
 ## Recovery
-These commands are the way out of states the product can't leave by itself. They run by hand on the owner login, like `migrate`: set `LICENSEFORGE_OWNER_DATABASE_URL` (or `_FILE`) in a one-off pod or shell, never in the server's environment. Each is audited on the platform chain as the system, `via: cli`.
+These commands are the way out of states the product can't leave by itself. They run by hand: the first two on the owner login, like `migrate` (set `LICENSEFORGE_OWNER_DATABASE_URL` or `_FILE` in a one-off pod or shell, never in the server's environment), the tenant ones on the platform login, like `tenant create` (`kubectl exec` into a server pod). Each is audited on the platform chain as the system, `via: cli`.
 
 - **No platform admin can sign in** (ADR-0031): the admin left, or their IdP account is gone.
   1. Point `bootstrapAdmin` (`LICENSEFORGE_BOOTSTRAP_ADMIN`) at a person who can sign in, and roll the pods so every server has the new value. Until then, a server could still bootstrap the old value: whoever now holds that email at your IdP.
   2. Run `licenseforge admin reset --yes`. It removes every platform admin.
   3. That person's next sign-in becomes the platform admin.
 - **A SIEM sink you no longer export to** (ADR-0036): remove it from `audit.export`, roll the pods, then run `licenseforge audit remove-sink --name NAME`. Until then audit retention waits for the sink and prunes nothing. Its entries not yet exported become prunable. A server still configured with the sink registers it again at start; one still running with it only logs export errors until it is restarted.
+- **A tenant whose owners can't sign in** (ADR-0042, platform login): run `licenseforge tenant recover-owner --tenant SLUG --email E`. A member with E as a verified email becomes an owner; otherwise an owner invitation for E is printed once. The tenant's audit log shows it.
+- **A tenant locked out by its MFA policy** (ADR-0038, platform login): when its members can no longer meet the policy (the IdP stopped sending the assurance), run `licenseforge tenant set-mfa-policy --tenant SLUG --policy mfa` (or `none`). It only lowers the policy; the owners raise it again once they can meet it.

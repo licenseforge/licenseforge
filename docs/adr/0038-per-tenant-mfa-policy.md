@@ -33,7 +33,7 @@
 
 ### Platform admins
 - `LICENSEFORGE_PLATFORM_MFA_POLICY` (default `none`, so a self-hosted install without IdP MFA can't lock out its operator; the hosted and FedRAMP chart values set `phishing_resistant`). The bootstrap grant isn't gated.
-- Platform access inside a tenant must meet the stricter of the platform and tenant policies. A platform admin may lower a tenant's policy to recover a locked-out tenant, audited on that tenant's chain.
+- Platform access inside a tenant must meet the stricter of the platform and tenant policies. A tenant locked out by its policy is recovered by lowering it: `licenseforge tenant set-mfa-policy --tenant T --policy none|mfa` on the platform login (built 2026-11-12, ADR-0042's recovery amendment). It only lowers, never from the API, and it is audited on the tenant's chain (`tenant.mfa_policy.update`, `recovery: true`) and the platform chain.
 
 ## Consequences
 - One migration (column, grant, policy) and new session columns; the login path records claims it ignored before.
