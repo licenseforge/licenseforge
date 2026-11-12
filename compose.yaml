@@ -1,6 +1,7 @@
-# Local development only: `docker compose up --build`, then
-# http://127.0.0.1:8080/readyz. Passwords and the master key below are public
-# dev values; never use them anywhere else. The setup script runs only on an
+# Local development and evaluation only: `docker compose up --build`, then
+# http://localhost:8080 and sign in as demo / demo (Keycloak, the realm in
+# deploy/compose/). Passwords, the client secret and the master key below are
+# public dev values; never use them anywhere else. The setup script runs only on an
 # empty volume: after changing deploy/database-setup.sql, `docker compose down -v`.
 services:
   db:
@@ -38,9 +39,38 @@ services:
       LICENSEFORGE_IDENTITY_DATABASE_URL: postgres://licenseforge_login:change-me-login@db:5432/licenseforge?sslmode=disable
       LICENSEFORGE_MASTER_KEYS: dev=ZGV2LW9ubHktbWFzdGVyLWtleS1kby1ub3QtdXNlISE=
       LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT: "true"
-    ports: ["127.0.0.1:8080:8080"]
+      # Sign-in through the keycloak service. The server shares its network
+      # namespace (network_mode below), so http://localhost:8081 is the same
+      # issuer for the browser and the server; plain http is accepted on
+      # loopback hosts only.
+      LICENSEFORGE_OIDC_ISSUER: http://localhost:8081/realms/licenseforge
+      LICENSEFORGE_OIDC_CLIENT_ID: licenseforge
+      LICENSEFORGE_OIDC_CLIENT_SECRET: dev-client-secret
+      LICENSEFORGE_OIDC_REDIRECT_URL: http://localhost:8080/auth/callback
+      LICENSEFORGE_BOOTSTRAP_ADMIN: demo@licenseforge.local # platform admin at first sign-in: create a tenant from the Tenants screen
+    network_mode: service:keycloak # its ports (8080 here) are published by the keycloak service
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     depends_on:
       migrate: {condition: service_completed_successfully}
+      keycloak: {condition: service_healthy}
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7@sha256:4388e2379b7e870a447adbe7b80bd61f5fbf04e925832b19669fda4957f05a81
+    command: [start-dev, --import-realm]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin # Keycloak's own console, http://localhost:8081/admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8081
+      KC_HTTP_PORT: "8081"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/compose/keycloak-realm.json:/opt/keycloak/data/import/licenseforge-realm.json:ro
+    # The server's port too: it runs in this service's network namespace.
+    ports: ["127.0.0.1:8080:8080", "127.0.0.1:8081:8081"]
+    healthcheck:
+      # No curl in the image: bash's /dev/tcp against the management port.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 3s
+      retries: 60
