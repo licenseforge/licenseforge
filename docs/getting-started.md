@@ -67,7 +67,7 @@ Everything here also works through the API (`api/openapi.yaml`) with an API toke
 
 ## 7. Your app
 
-Your app takes the license key from its user, activates once per machine or cluster, and then checks the signed lease before licensed work. The SDKs do all of it, retries and offline verification included. **They aren't published yet** (alpha): the Go module isn't tagged, and the npm and Maven Central releases are pending. Until then, build them from this repository.
+Your app takes the license key from its user, activates once per machine or cluster, and then checks the signed lease before licensed work. The SDKs do all of it, retries and offline verification included. **They aren't published yet** (alpha): the Go module isn't tagged, and the npm and Maven Central releases are pending. Until then, build them from this repository: each SDK's README says how.
 
 - [Go](../sdk/go/README.md#online-activation)
 - [TypeScript](../sdk/ts/README.md) (Node 22+)

@@ -1,6 +1,10 @@
 # LicenseForge Go SDK
 
-Module `licenseforge.io/licenseforge/sdk/go`, standard library only (ADR-0023, ADR-0030).
+Module `licenseforge.io/licenseforge/sdk/go`, standard library only (ADR-0023, ADR-0030). It isn't tagged or fetchable yet. Use a checkout with a `replace`:
+
+```sh
+go mod edit -require=licenseforge.io/licenseforge/sdk/go@v0.0.0 -replace=licenseforge.io/licenseforge/sdk/go=../licenseforge/sdk/go
+```
 
 | Package | Does |
 |---|---|
