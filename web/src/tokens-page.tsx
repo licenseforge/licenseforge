@@ -109,7 +109,10 @@ export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string;
   const [all, setAll] = useState(true);
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const fields = fieldErrors(error);
+  // Not while the request runs: the server may create the token and its secret,
+  // shown once, after the dialog is gone.
   const close = () => {
+    if (busy) return;
     setCreated(null);
     onClose();
   };
@@ -249,7 +252,7 @@ export function CreateTokenDialog({ tenant, member, onClose }: { tenant: string;
           </p>
         )}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="ghost" disabled={busy} onClick={close}>
             {t("tokens.cancel")}
           </Button>
           <Button type="submit" disabled={busy}>

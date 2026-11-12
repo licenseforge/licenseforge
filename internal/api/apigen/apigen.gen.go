@@ -2217,7 +2217,7 @@ type ServerInterface interface {
 	// DisableWebhook Stop deliveries (the position stays). 409 if already disabled.
 	// (POST /tenants/{tenant}/webhooks/{id}/disable)
 	DisableWebhook(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
-	// EnableWebhook Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
+	// EnableWebhook Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first).
 	// (POST /tenants/{tenant}/webhooks/{id}/enable)
 	EnableWebhook(w http.ResponseWriter, r *http.Request, tenant Tenant, id WebhookID)
 	// RotateWebhookSecret A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret).
@@ -15433,7 +15433,7 @@ type StrictServerInterface interface {
 	// DisableWebhook Stop deliveries (the position stays). 409 if already disabled.
 	// (POST /tenants/{tenant}/webhooks/{id}/disable)
 	DisableWebhook(ctx context.Context, request DisableWebhookRequestObject) (DisableWebhookResponseObject, error)
-	// EnableWebhook Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
+	// EnableWebhook Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first).
 	// (POST /tenants/{tenant}/webhooks/{id}/enable)
 	EnableWebhook(ctx context.Context, request EnableWebhookRequestObject) (EnableWebhookResponseObject, error)
 	// RotateWebhookSecret A new signing secret, in this response only. The previous one keeps signing for 24 hours (one previous secret).

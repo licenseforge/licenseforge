@@ -510,7 +510,11 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
   const plans = useQuery({ ...productPlansQuery(tenant, product), enabled: product !== "" });
   const issuablePlans = (plans.data?.items ?? []).filter((p) => !p.archived_at).map((p) => ({ id: p.id, name: `${p.name} (${p.slug})` }));
   const fields = fieldErrors(error);
+  // Not while the request runs: the server may create the license and its key,
+  // shown once, after the dialog is gone (and a new dialog's retry would make
+  // another).
   const close = () => {
+    if (busy) return;
     setIssued(null);
     onClose();
   };
@@ -618,7 +622,7 @@ export function IssueDialog({ tenant, names, onClose }: { tenant: string; names:
         </div>
         {error != null && <p role="alert" className="text-sm font-medium">{errorText(error)}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={close}>{t("tokens.cancel")}</Button>
+          <Button type="button" variant="ghost" disabled={busy} onClick={close}>{t("tokens.cancel")}</Button>
           <Button type="submit" disabled={busy}>{t("licenses.issue")}</Button>
         </div>
       </form>

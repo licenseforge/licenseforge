@@ -1311,7 +1311,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled. */
+        /** Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first). */
         post: operations["enableWebhook"];
         delete?: never;
         options?: never;
