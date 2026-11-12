@@ -11,6 +11,7 @@ import (
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
 	"licenseforge.io/licenseforge/internal/secrets"
+	"licenseforge.io/licenseforge/internal/store/ids"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
 )
@@ -114,9 +115,24 @@ func TestEnableUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	corrupt := func(id string, p secrets.Purpose, set func(*ent.WebhookEndpointUpdateOne, []byte) *ent.WebhookEndpointUpdateOne) {
+	// How the ciphertext goes bad: another master key (ErrUnknownKey), this
+	// key but another row's binding (ErrDecrypt, what the dispatcher disables
+	// on), or readable but unusable (what Send would refuse).
+	type spoil func(id string, p secrets.Purpose) (string, error)
+	unknownKey := func(id string, p secrets.Purpose) (string, error) {
+		return other.Encrypt([]byte("x"), secrets.Binding{Purpose: p, TenantID: f.a, RowID: id})
+	}
+	wrongBinding := func(_ string, p secrets.Purpose) (string, error) {
+		return f.s.Keys.Encrypt([]byte("x"), secrets.Binding{Purpose: p, TenantID: f.a, RowID: ids.WebhookEndpoint()})
+	}
+	readable := func(plain string) spoil {
+		return func(id string, p secrets.Purpose) (string, error) {
+			return f.s.Keys.Encrypt([]byte(plain), secrets.Binding{Purpose: p, TenantID: f.a, RowID: id})
+		}
+	}
+	corrupt := func(id string, p secrets.Purpose, how spoil, set func(*ent.WebhookEndpointUpdateOne, []byte) *ent.WebhookEndpointUpdateOne) {
 		t.Helper()
-		bad, err := other.Encrypt([]byte("x"), secrets.Binding{Purpose: p, TenantID: f.a, RowID: id})
+		bad, err := how(id, p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,17 +140,23 @@ func TestEnableUnreadable(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	rotate := func(id string) error { _, _, err := f.s.RotateSecret(ctx, id); return err }
+	update := func(id string) error { u := hookURL; _, err := f.s.Update(ctx, id, &u, nil); return err }
+	secret, url := (*ent.WebhookEndpointUpdateOne).SetSecretCiphertext, (*ent.WebhookEndpointUpdateOne).SetURLCiphertext
 	for _, tc := range []struct {
 		name string
 		p    secrets.Purpose
+		how  spoil
 		set  func(*ent.WebhookEndpointUpdateOne, []byte) *ent.WebhookEndpointUpdateOne
 		want error
 		fix  func(id string) error
 	}{
-		{"secret", secrets.PurposeWebhookSecret, (*ent.WebhookEndpointUpdateOne).SetSecretCiphertext, ErrSecretUnreadable,
-			func(id string) error { _, _, err := f.s.RotateSecret(ctx, id); return err }},
-		{"url", secrets.PurposeWebhookURL, (*ent.WebhookEndpointUpdateOne).SetURLCiphertext, ErrURLUnreadable,
-			func(id string) error { u := hookURL; _, err := f.s.Update(ctx, id, &u, nil); return err }},
+		{"secret, unknown key", secrets.PurposeWebhookSecret, unknownKey, secret, ErrSecretUnreadable, rotate},
+		{"secret, wrong binding", secrets.PurposeWebhookSecret, wrongBinding, secret, ErrSecretUnreadable, rotate},
+		{"secret, not a whsec_ secret", secrets.PurposeWebhookSecret, readable("not-a-secret"), secret, ErrSecretUnreadable, rotate},
+		{"url, unknown key", secrets.PurposeWebhookURL, unknownKey, url, ErrURLUnreadable, update},
+		{"url, wrong binding", secrets.PurposeWebhookURL, wrongBinding, url, ErrURLUnreadable, update},
+		{"url, not https", secrets.PurposeWebhookURL, readable("http://hooks.example.com/x"), url, ErrURLUnreadable, update},
 	} {
 		c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
 		if err != nil {
@@ -143,12 +165,15 @@ func TestEnableUnreadable(t *testing.T) {
 		if _, err := f.s.Disable(ctx, c.ID); err != nil {
 			t.Fatal(err)
 		}
-		corrupt(c.ID, tc.p, tc.set)
+		corrupt(c.ID, tc.p, tc.how, tc.set)
 		if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, tc.want) || !errors.Is(err, ErrState) {
 			t.Errorf("%s: enable = %v, want %v", tc.name, err, tc.want)
 		}
 		if row := f.raw(t, f.a, c.ID); row.Enabled {
 			t.Errorf("%s: enabled although unusable", tc.name)
+		}
+		if ev := f.events(t, f.a, "webhook.enable"); ev[len(ev)-1].Outcome != auditevent.OutcomeFailure {
+			t.Errorf("%s: refusal audited as %s", tc.name, ev[len(ev)-1].Outcome)
 		}
 		if err := tc.fix(c.ID); err != nil {
 			t.Fatalf("%s: fix: %v", tc.name, err)
