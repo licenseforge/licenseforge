@@ -26,6 +26,18 @@
       }
     },
     "trustedProxies": {"type": "string"},
+    "apiHost": {"type": "string"},
+    "bootstrapAdmin": {"type": "string"},
+    "platformMFAPolicy": {"type": "string", "enum": ["", "none", "mfa", "phishing_resistant"]},
+    "loginBanner": {"type": "string", "maxLength": 4096},
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idleTimeout": {"type": "string"},
+        "maxAge": {"type": "string"}
+      }
+    },
     "databaseAllowPlaintext": {"type": "boolean"},
     "extraCA": {
       "type": "object",

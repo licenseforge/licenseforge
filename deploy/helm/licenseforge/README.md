@@ -87,7 +87,7 @@ URL, or without a port.
 Every server pod delivers tenants' webhooks (ADR-0044; receivers: [Webhooks](../../../docs/webhooks.md)); `webhooks.workers` (default 8, `0` for none) sets how many at once per pod. The server refuses internal, link-local and cloud metadata addresses whatever the NetworkPolicy allows, and connects only on `webhooks.ports` (443). The NetworkPolicy allows egress on those ports to any destination (on upgrade too: this widens a release's egress); narrow it with `webhooks.egress.to`, or set `webhooks.workers: 0` to deliver none and add no rule. For a self-hosted, single-vendor install with receivers on a private network, list their ranges in `webhooks.allowCIDRs` (every tenant can then reach them; loopback, link-local and metadata addresses stay refused). On an IPv6-only cluster with an operator-chosen NAT64 prefix, add the prefix to `webhooks.denyCIDRs`.
 
 ## The first tenant
-A platform admin creates tenants on the dashboard's **Tenants** screen (`/platform`; a platform admin without tenants lands there), or with `POST /api/v1/platform/tenants` (ADR-0042). Without a platform admin yet, or without a browser, create one from a server pod, which already has the platform login:
+A platform admin creates tenants on the dashboard's **Tenants** screen (`/platform`; a platform admin without tenants lands there), or with `POST /api/v1/platform/tenants` (ADR-0042). Name the first platform admin with `bootstrapAdmin` (`issuer|subject`, or an email your IdP marks verified): that user becomes platform admin at their first login, while there is none. Without a platform admin yet, or without a browser, create a tenant from a server pod, which already has the platform login:
 
 ```sh
 kubectl -n licenseforge exec deploy/licenseforge -- /licenseforge tenant create \
@@ -97,6 +97,18 @@ kubectl -n licenseforge exec deploy/licenseforge -- /licenseforge tenant create 
 It prints the invite path once (`/invite#token=…`). Send `https://<host>` plus that path to the owner, who signs in with that email (verified by your IdP) and accepts. The platform admin or operator never becomes a member of the tenant.
 
 Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal, and a Job would keep it in the pod logs. The audit entry names the system with `via: cli` (every exec runs as the same container user), so who ran it is in your Kubernetes API audit log of the `exec`.
+
+## Platform and session settings
+
+| Value | Server setting | Default |
+|---|---|---|
+| `apiHost` | `LICENSEFORGE_API_HOST`: the host that serves the API alone (API tokens and license keys only there, sessions only elsewhere) | one host for both |
+| `bootstrapAdmin` | `LICENSEFORGE_BOOTSTRAP_ADMIN`: the first platform admin (ADR-0031) | none |
+| `platformMFAPolicy` | `LICENSEFORGE_PLATFORM_MFA_POLICY`: `none`, `mfa` or `phishing_resistant` for platform admins' sessions (ADR-0038). Set `mfa` or stronger in production | `none` |
+| `loginBanner` | `LICENSEFORGE_LOGIN_BANNER`: shown before login (AC-8) | none |
+| `session.idleTimeout`, `session.maxAge` | `LICENSEFORGE_SESSION_IDLE_TIMEOUT`, `_MAX_AGE` (AC-12) | `1h`, `12h` |
+
+The [Secure Configuration Guide](../../../compliance/secure-configuration-guide.md) describes each. Your customers' apps call `https://<host>/api/v1/activation/...` (or `apiHost`'s): expose it through your ingress with TLS.
 
 ## Notes
 

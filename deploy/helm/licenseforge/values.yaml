@@ -45,6 +45,26 @@ extraEnv: []   # e.g. [{name: LICENSEFORGE_ADDR, value: ":8080"}]; not for secre
 # entries. List proxies only, never client networks.
 trustedProxies: ""
 
+# The host that serves the API alone (api.example.com), when you split it
+# from the dashboard's: API tokens and license keys are accepted only there,
+# sessions only on the other hosts. Empty: one host serves both.
+apiHost: ""
+
+# The first platform admin (ADR-0031): "issuer|subject", or an email the IdP
+# marks verified. Granted at that user's login while there is no platform
+# admin, then ignored. Empty: create tenants with `licenseforge tenant create`
+# (kubectl exec) instead.
+bootstrapAdmin: ""
+# What platform admins' sessions need on the platform routes (ADR-0038):
+# none (empty: the default), mfa or phishing_resistant.
+platformMFAPolicy: ""
+# System use notification shown before login (AC-8), plain text up to 4 KB.
+loginBanner: ""
+# Dashboard sessions (AC-12), as Go durations. Empty: the server's defaults.
+session:
+  idleTimeout: ""   # default 1h (5m to 24h)
+  maxAge: ""        # default 12h (1h to 24h, at least idleTimeout)
+
 # Dashboard login through your OIDC provider (ADR-0003). Off: no login.
 oidc:
   enabled: false
