@@ -1,0 +1,32 @@
+{
+  "realm": "licenseforge",
+  "enabled": true,
+  "sslRequired": "external",
+  "clients": [
+    {
+      "clientId": "licenseforge",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "dev-client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:8080/auth/callback"],
+      "webOrigins": ["http://localhost:8080"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8080/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "email": "demo@licenseforge.local",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Vendor",
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "demo", "temporary": false}]
+    }
+  ]
+}

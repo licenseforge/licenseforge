@@ -2,6 +2,8 @@
 
 From an empty cluster to an app that checks its license. Every step links to the reference that covers it in full. Alpha: see the [README](../README.md) for what isn't released yet.
 
+Just evaluating? `docker compose up --build` runs everything on your machine, sign-in included: see [Try it locally](../README.md#try-it-locally), then continue here from step 5.
+
 ## 1. What you need
 
 - **Kubernetes** with an ingress controller (or a load balancer) that terminates TLS for one public host, say `licenses.vendor.example`. Your customers' apps call it, as do you and your team.
