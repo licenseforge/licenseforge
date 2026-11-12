@@ -567,6 +567,15 @@ func TestCodesOnlyFromProblems(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+	// A 5xx problem's code is still reported (a tenant without a signing
+	// key), as a server error.
+	f.respond = func(_ string, _ int, w http.ResponseWriter) bool { problem(w, 503, "no_signing_key"); return true }
+	c, _ := f.client(t, f.iat, func(cfg *Config) { cfg.MaxAttempts = 1 })
+	_, err := c.Activate(context.Background())
+	var ae *APIError
+	if !errors.Is(err, ErrServer) || !errors.As(err, &ae) || ae.Code != "no_signing_key" || !strings.Contains(err.Error(), "no_signing_key") {
+		t.Errorf("503 no_signing_key: %v", err)
+	}
 }
 
 // A refusal of an older refresh doesn't drop a lease an Activate committed

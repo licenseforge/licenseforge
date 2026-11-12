@@ -485,7 +485,22 @@ export class Client {
         if (e instanceof OnlineError) throw e;
       }
     }
-    if (res.status >= 500) throw new OnlineError("server_error", `status ${res.status}`, res.status, "", retryAfterMs);
+    if (res.status >= 500) {
+      // Never a refusal (above), but its code and detail (e.g. no_signing_key) are worth reporting.
+      let detail = `status ${res.status}`;
+      let requestId = "";
+      if (type === "application/problem+json") {
+        try {
+          const p = JSON.parse(raw);
+          // Server text in a log line: one line, bounded.
+          if (typeof p?.code === "string") detail += `: ${p.code}${typeof p.detail === "string" && p.detail ? `: ${p.detail}` : ""}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 300);
+          if (typeof p?.request_id === "string") requestId = p.request_id;
+        } catch {
+          // not a problem answer after all
+        }
+      }
+      throw new OnlineError("server_error", detail, res.status, requestId, retryAfterMs);
+    }
     if (res.status === 429) throw new OnlineError("rate_limited", "status 429", res.status, "", retryAfterMs);
     throw new OnlineError("unexpected_status", `status ${res.status}`, res.status, "", retryAfterMs);
   }

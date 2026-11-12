@@ -125,6 +125,9 @@ test("problem codes count only from a 4xx problem answer; retries only for netwo
     const once = await client(s.base, { maxAttempts: 1 });
     s.answers.push({ status: 503, type: "application/problem+json", body: JSON.stringify({ code: "license_revoked" }) });
     assert.equal(await code(once.activate()), "server_error", "a 5xx problem never reads as revoked");
+    s.answers.push({ status: 503, type: "application/problem+json", body: JSON.stringify({ code: "no_signing_key", detail: "No key.\nforged: line", request_id: "R5" }) });
+    const e5 = await once.activate().catch((x) => x);
+    assert.ok(e5 instanceof OnlineError && e5.code === "server_error" && e5.requestId === "R5" && e5.message.includes("no_signing_key: No key. forged: line"), "a 5xx problem's code is reported, on one line");
     s.answers.push({ status: 503, type: "application/problem+json", body: JSON.stringify({ code: "license_revoked" }) }, { status: 503 }, { status: 503 });
     assert.equal(await code(c.activate()), "server_error", "a 5xx never reads as revoked; retried to the limit");
     s.answers.push(problem(409, "idempotency_in_progress"), problem(429, "rate_limited"), ok(lease({ iatMs: now })));
