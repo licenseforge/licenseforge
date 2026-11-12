@@ -1,15 +1,19 @@
 package webhooks
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store/ent"
 	"licenseforge.io/licenseforge/internal/store/ent/auditevent"
+	"licenseforge.io/licenseforge/internal/store/ids"
 )
 
 func TestEventType(t *testing.T) {
@@ -98,6 +102,85 @@ func TestDisableEnable(t *testing.T) {
 	var d map[string]any
 	if err := json.Unmarshal([]byte(ev[1].Details), &d); err != nil || ev[1].Outcome != auditevent.OutcomeSuccess || d["disabled_reason"] != UserDisabled {
 		t.Errorf("enable audited as %s %s", ev[1].Outcome, ev[1].Details)
+	}
+}
+
+// Enable refuses an endpoint whose secret or URL can't be read (a lost
+// master key, a disable by the dispatcher): it would only be disabled again.
+// Rotating the secret or updating the URL is the way out, then Enable works.
+func TestEnableUnreadable(t *testing.T) {
+	f := setup(t)
+	ctx := f.as(f.a, f.ownerA, authz.Owner)
+	other, err := secrets.ParseKeyring("k9=" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// How the ciphertext goes bad: another master key (ErrUnknownKey), this
+	// key but another row's binding (ErrDecrypt, what the dispatcher disables
+	// on), or readable but unusable (what Send would refuse).
+	type spoil func(id string, p secrets.Purpose) (string, error)
+	unknownKey := func(id string, p secrets.Purpose) (string, error) {
+		return other.Encrypt([]byte("x"), secrets.Binding{Purpose: p, TenantID: f.a, RowID: id})
+	}
+	wrongBinding := func(_ string, p secrets.Purpose) (string, error) {
+		return f.s.Keys.Encrypt([]byte("x"), secrets.Binding{Purpose: p, TenantID: f.a, RowID: ids.WebhookEndpoint()})
+	}
+	readable := func(plain string) spoil {
+		return func(id string, p secrets.Purpose) (string, error) {
+			return f.s.Keys.Encrypt([]byte(plain), secrets.Binding{Purpose: p, TenantID: f.a, RowID: id})
+		}
+	}
+	corrupt := func(id string, p secrets.Purpose, how spoil, set func(*ent.WebhookEndpointUpdateOne, []byte) *ent.WebhookEndpointUpdateOne) {
+		t.Helper()
+		bad, err := how(id, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.db.WithTenant(ctx, f.a, func(tx *ent.Tx) error { return set(tx.WebhookEndpoint.UpdateOneID(id), []byte(bad)).Exec(ctx) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rotate := func(id string) error { _, _, err := f.s.RotateSecret(ctx, id); return err }
+	update := func(id string) error { u := hookURL; _, err := f.s.Update(ctx, id, &u, nil); return err }
+	secret, url := (*ent.WebhookEndpointUpdateOne).SetSecretCiphertext, (*ent.WebhookEndpointUpdateOne).SetURLCiphertext
+	for _, tc := range []struct {
+		name string
+		p    secrets.Purpose
+		how  spoil
+		set  func(*ent.WebhookEndpointUpdateOne, []byte) *ent.WebhookEndpointUpdateOne
+		want error
+		fix  func(id string) error
+	}{
+		{"secret, unknown key", secrets.PurposeWebhookSecret, unknownKey, secret, ErrSecretUnreadable, rotate},
+		{"secret, wrong binding", secrets.PurposeWebhookSecret, wrongBinding, secret, ErrSecretUnreadable, rotate},
+		{"secret, not a whsec_ secret", secrets.PurposeWebhookSecret, readable("not-a-secret"), secret, ErrSecretUnreadable, rotate},
+		{"url, unknown key", secrets.PurposeWebhookURL, unknownKey, url, ErrURLUnreadable, update},
+		{"url, wrong binding", secrets.PurposeWebhookURL, wrongBinding, url, ErrURLUnreadable, update},
+		{"url, not https", secrets.PurposeWebhookURL, readable("http://hooks.example.com/x"), url, ErrURLUnreadable, update},
+	} {
+		c, err := f.s.Create(ctx, hookURL, []string{"license.issued"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.s.Disable(ctx, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		corrupt(c.ID, tc.p, tc.how, tc.set)
+		if _, err := f.s.Enable(ctx, c.ID); !errors.Is(err, tc.want) || !errors.Is(err, ErrState) {
+			t.Errorf("%s: enable = %v, want %v", tc.name, err, tc.want)
+		}
+		if row := f.raw(t, f.a, c.ID); row.Enabled {
+			t.Errorf("%s: enabled although unusable", tc.name)
+		}
+		if ev := f.events(t, f.a, "webhook.enable"); ev[0].Outcome != auditevent.OutcomeFailure { // newest first
+			t.Errorf("%s: refusal audited as %s", tc.name, ev[0].Outcome)
+		}
+		if err := tc.fix(c.ID); err != nil {
+			t.Fatalf("%s: fix: %v", tc.name, err)
+		}
+		if e, err := f.s.Enable(ctx, c.ID); err != nil || !e.Enabled {
+			t.Errorf("%s: enable after the fix = %+v, %v", tc.name, e, err)
+		}
 	}
 }
 

@@ -255,6 +255,10 @@ class OnlineTest {
     Client once = client(cfg().maxAttempts(1));
     answers.add(new Answer(503, "{\"code\":\"license_revoked\"}", "application/problem+json", Map.of(), null));
     assertEquals("server_error", code(once::activate), "a 5xx problem never reads as revoked");
+    answers.add(new Answer(503, "{\"code\":\"no_signing_key\",\"detail\":\"No key.\\nforged: line\",\"request_id\":\"R5\"}", "application/problem+json", Map.of(), null));
+    OnlineException e5 = assertThrows(OnlineException.class, once::activate);
+    assertEquals(List.of(OnlineException.Code.SERVER_ERROR, "R5"), List.of(e5.code(), e5.requestId()));
+    assertTrue(e5.getMessage().contains("no_signing_key: No key. forged: line"), e5.getMessage());
     answers.add(new Answer(503, "{\"code\":\"license_revoked\"}", "application/problem+json", Map.of(), null));
     answers.add(Answer.of(503));
     answers.add(Answer.of(503));

@@ -401,6 +401,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/expires-at": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move a license's expiry (renew or correct it).
+         * @description ADR-0049. Sets the end of the license's term: a renewal (later) or a correction (earlier, even in the past; the license's grace period still follows it). Stored in whole seconds; it must be after the license's issue, year 9999 or earlier in UTC. The license key, its machines and its plan terms stay. Needs license:write on the license's product. A revoked license answers 409 invalid_state; a perpetual license, or one whose term starts at a first activation that hasn't happened, answers 409 no_term. Online leases carry the new date from their next refresh, an expired license's included; offline files already issued keep theirs until replaced. Audited as license.expires_at with the previous value.
+         */
+        post: operations["setLicenseExpiresAt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses/{id}/reinstate": {
         parameters: {
             query?: never;
@@ -1322,7 +1346,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled. */
+        /** Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first). */
         post: operations["enableWebhook"];
         delete?: never;
         options?: never;
@@ -2955,6 +2979,43 @@ export interface operations {
             403: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    setLicenseExpiresAt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date-time */
+                    expires_at: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The license. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["License"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     reinstateLicense: {

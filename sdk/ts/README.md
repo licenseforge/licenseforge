@@ -2,6 +2,8 @@
 
 Verifies LicenseForge license files (`lf1`, [spec](../../spec/license-format.md)) in a Node.js service, offline: the envelope, the Ed25519 signature against keys built into your app, the claims and the claim checks. Server-side only, Node 22 or later, with no runtime dependencies (ADR-0010).
 
+Before the first release, build the package from a checkout: `cd sdk/ts && npm ci && npm pack`, then `npm install ./licenseforge-sdk-0.1.0-alpha.1.tgz` in your app.
+
 Status: alpha. `npm install @licenseforge/sdk@next` once `0.1.0-alpha.1` is out; releases carry npm provenance ([verifying releases](../../docs/verifying-releases.md#typescript-sdk-npm)). It passes the shared conformance vectors (`spec/vectors/lf1.json`, `lf1-claims.json`, `fingerprint.json`, `offline.json`).
 
 ```ts

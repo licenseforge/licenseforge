@@ -316,7 +316,10 @@ export function InviteDialog({ tenant, roles, onClose }: { tenant: string; roles
   const [all, setAll] = useState(true);
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const fields = fieldErrors(error);
+  // Not while the request runs: the server may create the invitation and its link,
+  // shown once, after the dialog is gone.
   const close = () => {
+    if (busy) return;
     setCreated(null);
     onClose();
   };
@@ -414,7 +417,7 @@ export function InviteDialog({ tenant, roles, onClose }: { tenant: string; roles
           </p>
         )}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="ghost" disabled={busy} onClick={close}>
             {t("tokens.cancel")}
           </Button>
           <Button type="submit" disabled={busy}>

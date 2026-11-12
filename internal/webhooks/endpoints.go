@@ -51,6 +51,11 @@ var (
 	// ErrState means the endpoint's state doesn't allow the action (enable
 	// an enabled endpoint, skip an event that isn't the one held back).
 	ErrState = errors.New("webhooks: the endpoint's state doesn't allow this")
+	// ErrSecretUnreadable and ErrURLUnreadable refuse an Enable that would
+	// fail at once (the dispatcher would disable it again): rotate the
+	// secret, or update the URL, first. Both are ErrState too.
+	ErrSecretUnreadable = fmt.Errorf("%w: the signing secret can't be read", ErrState)
+	ErrURLUnreadable    = fmt.Errorf("%w: the URL can't be read", ErrState)
 	// ErrLimit means the tenant already has MaxEndpoints endpoints.
 	ErrLimit = fmt.Errorf("webhooks: at most %d endpoints per tenant", MaxEndpoints)
 )

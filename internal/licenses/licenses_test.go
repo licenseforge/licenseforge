@@ -627,6 +627,9 @@ func TestTransitionRefusals(t *testing.T) {
 				bad := time.Unix(0, 0)
 				return f.s.SetUpdatesUntil(ctx, p, id, &bad)
 			},
+			"expires_at": func(ctx context.Context, p authz.Principal, id string) (Changed, error) {
+				return f.s.SetExpiresAt(ctx, p, id, time.Unix(0, 0))
+			},
 		} {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
 				if _, err := op(ctx, tc.p, tc.id); !errors.Is(err, tc.want) {
@@ -1400,6 +1403,117 @@ func TestSetUpdatesUntil(t *testing.T) {
 	}
 	if s := f.get(t, f.a.id, l.ID); s.UpdatesUntil == nil || !s.UpdatesUntil.Equal(until.Truncate(time.Second)) {
 		t.Errorf("revoked license changed: %v", s.UpdatesUntil)
+	}
+}
+
+// A renewal moves the end of the term (ADR-0049): later or earlier, after
+// the rights and before the state, audited with the previous value. Only a
+// term that has an end can move.
+func TestSetExpiresAt(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	m := as(f.a.id, authz.Manager, all)
+	var firstAct, perpetual string
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		mk := func(slug string, c func(*ent.PlanCreate)) string {
+			pc := tx.Plan.Create().SetTenantID(f.a.id).SetProductID(f.a.prodP).SetSlug(slug).SetName(slug)
+			c(pc)
+			pl, err := pc.Save(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pl.ID
+		}
+		firstAct = mk("presold", func(c *ent.PlanCreate) { c.SetDurationMonths(12).SetExpiryBasis(plan.ExpiryBasisFromFirstActivation) })
+		perpetual = mk("forever", func(*ent.PlanCreate) {})
+		return nil
+	})
+	issue := func(planID string) *ent.License {
+		req := f.req(f.a)
+		if planID != "" {
+			req.PlanID = planID
+		}
+		got, err := f.s.Issue(ctx, m, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.License
+	}
+	l := issue("")
+	was := *l.ExpiresAt
+	at := l.IssuedAt.Add(800*24*time.Hour + 1500*time.Millisecond)
+	c, err := f.s.SetExpiresAt(ctx, m, l.ID, at)
+	if err != nil || c.ExpiresAt == nil || !c.ExpiresAt.Equal(at.Truncate(time.Second)) {
+		t.Fatalf("renew = %v, %v", c.ExpiresAt, err)
+	}
+	if s := f.get(t, f.a.id, l.ID); !s.ExpiresAt.Equal(at.Truncate(time.Second)) || s.DurationMonths == nil || *s.DurationMonths != 12 {
+		t.Errorf("stored %v, term %v", s.ExpiresAt, s.DurationMonths)
+	}
+	e := f.lastEvent(t, f.a.id)
+	if d := details(t, e); e.Action != "license.expires_at" || e.Outcome != auditevent.OutcomeSuccess ||
+		d["previous"] != was.UTC().Format(time.RFC3339Nano) || d["expires_at"] != at.UTC().Truncate(time.Second).Format(time.RFC3339Nano) || d["product_id"] != f.a.prodP {
+		t.Errorf("event %+v", d)
+	}
+	// Earlier, even in the past: a correction, or ending a term now.
+	past := l.IssuedAt.Add(time.Second)
+	if _, err := f.s.SetExpiresAt(ctx, m, l.ID, past); err != nil {
+		t.Errorf("past: %v", err)
+	}
+	for name, v := range map[string]time.Time{
+		"at issue":           l.IssuedAt,
+		"issue second":       l.IssuedAt.Truncate(time.Second),
+		"before issue":       l.IssuedAt.Add(-time.Hour),
+		"past year 9999 UTC": time.Date(9999, 12, 31, 23, 0, 0, 0, time.FixedZone("", -5*3600)),
+	} {
+		var inv *InvalidError
+		if _, err := f.s.SetExpiresAt(ctx, m, l.ID, v); !errors.As(err, &inv) || inv.Field != "/expires_at" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// No end to move: perpetual, or a term that starts at a first activation
+	// still to come. Once started, it moves like any other.
+	for name, id := range map[string]string{"perpetual": issue(perpetual).ID, "unstarted": issue(firstAct).ID} {
+		if _, err := f.s.SetExpiresAt(ctx, m, id, at); !errors.Is(err, ErrNoTerm) || !errors.Is(err, ErrState) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if s := f.get(t, f.a.id, id); s.ExpiresAt != nil {
+			t.Errorf("%s: expires %v", name, s.ExpiresAt)
+		}
+		if e := f.lastEvent(t, f.a.id); e.Outcome != auditevent.OutcomeFailure || e.Action != "license.expires_at" {
+			t.Errorf("%s: event %+v", name, e)
+		}
+	}
+	// Revocation is answered first: final, whatever the term.
+	rp := issue(perpetual)
+	if _, err := f.s.Revoke(ctx, m, rp.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetExpiresAt(ctx, m, rp.ID, at); !errors.Is(err, ErrState) || errors.Is(err, ErrNoTerm) {
+		t.Errorf("revoked perpetual: %v", err)
+	}
+	started := issue(firstAct)
+	f.tx(t, f.a.id, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET first_activated_at = clock_timestamp(), expires_at = clock_timestamp() + interval '1 year' WHERE id = $1`, started.ID)
+		return err
+	})
+	if _, err := f.s.SetExpiresAt(ctx, m, started.ID, at); err != nil {
+		t.Errorf("started: %v", err)
+	}
+	// Suspended: renewable. Revoked: final.
+	if _, err := f.s.Suspend(ctx, m, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetExpiresAt(ctx, m, l.ID, at); err != nil {
+		t.Errorf("suspended: %v", err)
+	}
+	if _, err := f.s.Revoke(ctx, m, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetExpiresAt(ctx, m, l.ID, at.Add(time.Hour)); !errors.Is(err, ErrState) || errors.Is(err, ErrNoTerm) {
+		t.Errorf("revoked: %v", err)
+	}
+	if s := f.get(t, f.a.id, l.ID); !s.ExpiresAt.Equal(at.Truncate(time.Second)) {
+		t.Errorf("revoked license changed: %v", s.ExpiresAt)
 	}
 }
 

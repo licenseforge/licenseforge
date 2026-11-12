@@ -510,6 +510,36 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/expires-at:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: setLicenseExpiresAt
+      summary: Move a license's expiry (renew or correct it).
+      description: "ADR-0049. Sets the end of the license's term: a renewal (later) or a correction (earlier, even in the past; the license's grace period still follows it). Stored in whole seconds; it must be after the license's issue, year 9999 or earlier in UTC. The license key, its machines and its plan terms stay. Needs license:write on the license's product. A revoked license answers 409 invalid_state; a perpetual license, or one whose term starts at a first activation that hasn't happened, answers 409 no_term. Online leases carry the new date from their next refresh, an expired license's included; offline files already issued keep theirs until replaced. Audited as license.expires_at with the previous value."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expires_at]
+              properties:
+                expires_at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The license.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/License" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses/{id}/reinstate:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1582,7 +1612,7 @@ paths:
       - $ref: "#/components/parameters/WebhookID"
     post:
       operationId: enableWebhook
-      summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
+      summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first).
       responses:
         "200": { description: Enabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
         "400": { $ref: "#/components/responses/Problem" }

@@ -151,10 +151,12 @@ The [Secure Configuration Guide](../../../compliance/secure-configuration-guide.
 - **Audit retention** (ADR-0036): set `auditRetention.enabled` and
   `auditRetention.secret` (a Secret with `retention-database-url`, the
   `licenseforge_pruner` login) to run `licenseforge audit prune` on
-  `auditRetention.schedule` (`concurrencyPolicy: Forbid`). Tenant owners set
-  their own retention (365 to 36,500 days); `auditRetention.platformDays` sets
-  the platform chain's (empty keeps everything). Nothing a registered SIEM
-  sink hasn't received is pruned.
+  `auditRetention.schedule` (`concurrencyPolicy: Forbid`).
+  `auditRetention.platformDays` sets the platform chain's retention (empty
+  keeps everything); tenants' chains are kept in full, since there is no
+  tenant setting yet. Nothing a registered SIEM sink hasn't received is
+  pruned: after removing a sink from `audit.export`, run
+  `licenseforge audit remove-sink` (Secure Configuration Guide, Recovery).
 - **Metrics**: Prometheus `/metrics` on its own port (`metrics.port`, 9090),
   never on the http port, and without auth: the NetworkPolicy lets only
   `metrics.scrapeFrom` reach it (default: pods in the `monitoring` namespace;

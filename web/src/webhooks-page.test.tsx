@@ -229,6 +229,22 @@ it("refreshes the list after a refused enable, and deletes with confirmation", a
   await vi.waitFor(() => expect(sent.some((x) => x.method === "DELETE" && x.path === "/api/v1/tenants/acme/webhooks/whe_1")).toBe(true));
 });
 
+it("says what to do when an endpoint can't be enabled until its secret or URL is fixed", async () => {
+  for (const [code, text] of [
+    ["webhook_secret_unreadable", "Rotate the secret, then enable the endpoint."],
+    ["webhook_url_unreadable", "Edit the endpoint and enter its URL again, then enable it."],
+  ] as const) {
+    const { el } = await open("owner", [hook({ enabled: false, disabled_reason: "the signing secret can't be read: rotate it" })], (req, u) =>
+      req.method === "POST" && u.pathname.endsWith("/enable") ? json({ code, title: "Conflict", status: 409 }, 409) : undefined,
+    );
+    await vi.waitFor(() => expect(button(el, "Enable")).toBeDefined());
+    await act(async () => button(el, "Enable")!.click());
+    await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toContain(text));
+    act(() => root?.unmount());
+    root = undefined;
+  }
+});
+
 it("shows the API's field errors on the URL and events", async () => {
   const { el } = await open("owner", [], (req) =>
     req.method === "POST"
