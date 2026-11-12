@@ -389,7 +389,10 @@ export interface paths {
          *     until the license's expiry plus grace and can't be revoked once
          *     handed out; each export is audited (`license.offline_file`).
          *     `not_issuable` (409): not a site license, not active, expired, or
-         *     offline use not allowed. `no_signing_key` (503).
+         *     offline use not allowed. `no_signing_key` (503). An unknown or
+         *     malformed ID, or another tenant's license, answers 403 `forbidden`
+         *     like a missing right, so the route reveals nothing. Each call is a
+         *     new file (its own `iat`) and a new audit entry.
          */
         post: operations["exportLicenseFile"];
         delete?: never;
@@ -2948,10 +2951,8 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

@@ -541,7 +541,8 @@ func mapErr(err error) *problem {
 	case webhookProblem(err) != nil:
 		p = webhookProblem(err)
 	case errors.Is(err, issue.ErrNotIssuable):
-		p = &problem{status: http.StatusConflict, code: "not_issuable", detail: "The license can't be exported as a file: " + strings.TrimPrefix(err.Error(), issue.ErrNotIssuable.Error()+": ") + "."}
+		// Fixed text: err may join an audit failure's database error (logged, never sent).
+		p = &problem{status: http.StatusConflict, code: "not_issuable", detail: "The license can't be exported as a file: it must be active, unexpired, and on a plan that binds nothing and allows offline use.", err: err}
 	case errors.Is(err, signing.ErrNoActiveKey):
 		// 503: nothing the caller can fix, and the SDKs retry it.
 		p = &problem{status: http.StatusServiceUnavailable, code: "no_signing_key", detail: "The tenant has no active signing key, so nothing can be signed; an owner generates one on the Signing keys page."}

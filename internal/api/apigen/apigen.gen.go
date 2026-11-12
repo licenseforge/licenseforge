@@ -10068,32 +10068,8 @@ func (response ExportLicenseFile201JSONResponse) VisitExportLicenseFileResponse(
 	return err
 }
 
-type ExportLicenseFile400ApplicationProblemPlusJSONResponse struct {
-	ProblemApplicationProblemPlusJSONResponse
-}
-
-func (response ExportLicenseFile400ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ExportLicenseFile401ResponseHeaders struct {
-	XRequestId *string
-}
-
 type ExportLicenseFile401ApplicationProblemPlusJSONResponse struct {
-	Body    Problem
-	Headers ExportLicenseFile401ResponseHeaders
+	ProblemApplicationProblemPlusJSONResponse
 }
 
 func (response ExportLicenseFile401ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
@@ -10131,30 +10107,6 @@ func (response ExportLicenseFile403ApplicationProblemPlusJSONResponse) VisitExpo
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ExportLicenseFile404ResponseHeaders struct {
-	XRequestId *string
-}
-
-type ExportLicenseFile404ApplicationProblemPlusJSONResponse struct {
-	Body    Problem
-	Headers ExportLicenseFile404ResponseHeaders
-}
-
-func (response ExportLicenseFile404ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }

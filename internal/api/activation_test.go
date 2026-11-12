@@ -1231,4 +1231,6 @@ func TestExportLicenseFile(t *testing.T) {
 	}
 	a.do(t, "POST", path(bound.License.ID), "", a.session(t, a.adminA, true)).problem(t, 409, "not_issuable")
 	a.do(t, "POST", path(site.License.ID), "", a.session(t, a.viewerA, true)).problem(t, 403, "forbidden")
+	a.do(t, "POST", path(site.License.ID), "", a.session(t, a.adminA, false)).problem(t, 403, "csrf_failed")
+	a.do(t, "POST", path("lic_"+strings.Repeat("a", 26)), "", a.session(t, a.adminA, true)).problem(t, 403, "forbidden") // unknown: no oracle
 }
