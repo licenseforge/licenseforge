@@ -141,7 +141,8 @@ async function productsPage(role: string, scopeAll = true) {
   const posts: string[] = [];
   const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
   const db = { id: "prd_1", slug: "db", name: "DB", archived_at: null, created_at: "2026-11-01T00:00:00Z" };
-  const old = { id: "prd_2", slug: "old", name: "Old", archived_at: "2026-11-02T00:00:00Z", created_at: "2026-10-01T00:00:00Z" };
+  const old = { id: "prd_2", slug: "old", name: "Old", archived_at: new Date(Date.now() - 3 * 86_400_000).toISOString(), created_at: "2026-10-01T00:00:00Z" };
+  const ancient = { id: "prd_3", slug: "ancient", name: "Ancient", archived_at: new Date(Date.now() - 45 * 86_400_000).toISOString(), created_at: "2026-01-01T00:00:00Z" };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (req: Request) => {
@@ -152,7 +153,7 @@ async function productsPage(role: string, scopeAll = true) {
       }
       if (path === "/auth/session") return json({ user: { id: "usr_1", email: "a@example.com", name: "A" }, csrf_token: "c" });
       if (path === "/api/v1/me/tenants") return json({ items: [{ tenant_id: "tnt_1", slug: "acme", name: "Acme", role, all_products: scopeAll, product_ids: scopeAll ? [] : ["prd_1"] }] });
-      if (path.endsWith("/products")) return json({ items: [db, old] });
+      if (path.endsWith("/products")) return json({ items: [db, old, ancient] });
       return json({ items: [] });
     }),
   );
@@ -175,22 +176,41 @@ async function productsPage(role: string, scopeAll = true) {
   return { el, root, posts, rowButtons };
 }
 
-it("archiving a product asks first, is one-way, and needs catalog:write", async () => {
+it("archiving a product asks first, restore undoes it, and both need catalog:write", async () => {
   const { el, root, posts, rowButtons } = await productsPage("admin");
   expect(el.textContent).toContain("Archived");
-  expect([...rowButtons("Old")].map((b) => b.textContent)).not.toContain("Archive"); // already archived: one-way
+  expect([...rowButtons("Old")].map((b) => b.textContent)).toEqual(expect.arrayContaining(["Restore"]));
+  expect([...rowButtons("Old")].map((b) => b.textContent)).not.toContain("Archive");
   const archive = [...rowButtons("DB")].find((b) => b.textContent === "Archive")!;
   await act(async () => archive.click());
-  expect(el.querySelector("dialog")?.textContent).toContain("This is one-way");
+  expect(el.querySelector("dialog")?.textContent).toContain("until it is restored");
   expect(posts).toHaveLength(0);
   const confirm = [...el.querySelectorAll<HTMLButtonElement>("dialog button")].find((b) => b.textContent === "Archive")!;
   await act(async () => confirm.click());
   await vi.waitFor(() => expect(posts).toEqual(["/api/v1/tenants/acme/products/prd_1/archive"]));
+  const restore = [...rowButtons("Old")].find((b) => b.textContent === "Restore")!;
+  expect(restore.getAttribute("aria-label")).toBe("Restore Old");
+  await act(async () => restore.click()); // no confirmation: archiving again undoes it
+  await vi.waitFor(() => expect(posts).toContain("/api/v1/tenants/acme/products/prd_2/restore"));
   act(() => root.unmount());
 
   const manager = await productsPage("manager");
   expect([...manager.rowButtons("DB")].map((b) => b.textContent)).not.toContain("Archive");
+  expect([...manager.rowButtons("Old")].map((b) => b.textContent)).not.toContain("Restore");
   act(() => manager.root.unmount());
+});
+
+it("hides what was archived more than 30 days ago until asked, still restorable", async () => {
+  const { el, root, rowButtons } = await productsPage("admin");
+  expect(el.textContent).not.toContain("Ancient");
+  const show = [...el.querySelectorAll("button")].find((b) => b.textContent === "Show 1 archived more than 30 days ago")!;
+  await act(async () => show.click());
+  expect(el.textContent).toContain("Ancient");
+  expect([...rowButtons("Ancient")].map((b) => b.textContent)).toContain("Restore");
+  const hide = [...el.querySelectorAll("button")].find((b) => b.textContent === "Hide what was archived more than 30 days ago")!;
+  await act(async () => hide.click());
+  expect(el.textContent).not.toContain("Ancient");
+  act(() => root.unmount());
 });
 
 it("names a Field with help by its label alone", async () => {

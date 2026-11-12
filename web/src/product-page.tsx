@@ -5,6 +5,9 @@ import { fieldErrors } from "@/api/client";
 import {
   archiveFeature,
   archivePlan,
+  restoreFeature,
+  restorePlan,
+  restoreProduct,
   canRenameProducts,
   createFeature,
   createPlan,
@@ -21,6 +24,7 @@ import {
   planTerm,
   productFeaturesQuery,
   productPlansQuery,
+  productsQuery,
   updatePlan,
 } from "@/api/catalog";
 import { Field, FormDialog, useCaller } from "@/catalog-pages";
@@ -28,6 +32,7 @@ import { errorText, input, Modal } from "@/components/modal";
 import { FeatureMatrix } from "@/feature-matrix";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
+import { RestoreButton, useArchivedFilter } from "./archived";
 
 const th = "px-2 py-2 font-medium";
 const td = "px-2 py-2";
@@ -50,7 +55,18 @@ export function ProductPage() {
   const features = useQuery(productFeaturesQuery(slug, id));
   const plans = useQuery(productPlansQuery(slug, id));
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const qc = useQueryClient();
+  const shownFeatures = useArchivedFilter(features.data?.items ?? []);
+  const shownPlans = useArchivedFilter(plans.data?.items ?? []);
   const write = canRenameProducts(caller) && product.data != null && product.data.archived_at == null;
+  // A restored feature or plan, or product, changes the lists, the matrix and the issue picker.
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["product", slug] });
+    await qc.invalidateQueries({ queryKey: productsQuery(slug).queryKey });
+    await qc.invalidateQueries({ queryKey: productFeaturesQuery(slug, id).queryKey });
+    await qc.invalidateQueries({ queryKey: productPlansQuery(slug, id).queryKey });
+    await qc.invalidateQueries({ queryKey: ["products-all", slug] });
+  };
   if (product.isError) return <p role="alert">{errorText(product.error)}</p>;
   if (!product.data) return <p role="status" className="text-muted-foreground">{t("product.loading")}</p>;
   const p = product.data;
@@ -61,7 +77,12 @@ export function ProductPage() {
       </Link>
       <h1 className="mt-2 text-2xl font-semibold">{p.name}</h1>
       <p className="mt-1 font-mono text-xs text-muted-foreground">{p.slug}</p>
-      {p.archived_at && <p className="mt-2 text-sm">{t("product.archived")}</p>}
+      {p.archived_at && (
+        <p className="mt-2 text-sm">
+          {t("product.archived")}
+          {canRenameProducts(caller) && <RestoreButton name={p.name} run={() => restoreProduct(slug, p.id)} onDone={refresh} />}
+        </p>
+      )}
 
       <section aria-labelledby="features-title" className="mt-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -70,7 +91,7 @@ export function ProductPage() {
         </div>
         {features.isError && <p role="alert" className="mt-2">{errorText(features.error)}</p>}
         {features.data && features.data.items.length === 0 && <p className="mt-2 text-muted-foreground">{t("product.noFeatures")}</p>}
-        {features.data && features.data.items.length > 0 && (
+        {shownFeatures.rows.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b text-muted-foreground">
@@ -83,7 +104,7 @@ export function ProductPage() {
                 </tr>
               </thead>
               <tbody>
-                {features.data.items.map((f) => (
+                {shownFeatures.rows.map((f) => (
                   <tr key={f.id} className="border-b">
                     <td className={`${td} font-mono text-xs`}>{f.key}</td>
                     <td className={`${td} font-medium`}>{f.name}</td>
@@ -93,6 +114,7 @@ export function ProductPage() {
                       {write && !f.archived_at && (
                         <Button variant="ghost" onClick={() => setDialog({ kind: "archive-feature", feature: f })}>{t("products.archive")}</Button>
                       )}
+                      {write && f.archived_at && <RestoreButton name={f.name} run={() => restoreFeature(slug, f.id)} onDone={refresh} />}
                     </td>
                   </tr>
                 ))}
@@ -100,6 +122,7 @@ export function ProductPage() {
             </table>
           </div>
         )}
+        {shownFeatures.toggle}
       </section>
 
       <section aria-labelledby="plans-title" className="mt-8">
@@ -109,7 +132,7 @@ export function ProductPage() {
         </div>
         {plans.isError && <p role="alert" className="mt-2">{errorText(plans.error)}</p>}
         {plans.data && plans.data.items.length === 0 && <p className="mt-2 text-muted-foreground">{t("product.noPlans")}</p>}
-        {plans.data && plans.data.items.length > 0 && (
+        {shownPlans.rows.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b text-muted-foreground">
@@ -124,7 +147,7 @@ export function ProductPage() {
                 </tr>
               </thead>
               <tbody>
-                {plans.data.items.map((pl) => (
+                {shownPlans.rows.map((pl) => (
                   <tr key={pl.id} className="border-b">
                     <td className={`${td} font-mono text-xs`}>{pl.slug}</td>
                     <td className={`${td} font-medium`}>{pl.name}</td>
@@ -142,6 +165,7 @@ export function ProductPage() {
                       {write && !pl.archived_at && (
                         <Button variant="ghost" onClick={() => setDialog({ kind: "archive-plan", plan: pl })}>{t("products.archive")}</Button>
                       )}
+                      {write && pl.archived_at && <RestoreButton name={pl.name} run={() => restorePlan(slug, pl.id)} onDone={refresh} />}
                     </td>
                   </tr>
                 ))}
@@ -149,6 +173,7 @@ export function ProductPage() {
             </table>
           </div>
         )}
+        {shownPlans.toggle}
       </section>
 
       {features.data && plans.data && features.data.items.length > 0 && plans.data.items.length > 0 && (

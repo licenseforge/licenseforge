@@ -1157,7 +1157,7 @@ func TestIssueWaitsForArchive(t *testing.T) {
 
 // An override of a feature racing that feature's archive: the issue waits
 // for the archive and then refuses the feature as archived (it looks again
-// after archive_once filters the row it waited for), not as unknown.
+// after archive_or_restore filters the row it waited for), not as unknown.
 func TestOverrideWaitsForFeatureArchive(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

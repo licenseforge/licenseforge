@@ -110,7 +110,7 @@ func (s Plans) Get(ctx context.Context, id string) (*ent.Plan, error) {
 // lookupPlan finds a visible plan (catalog:read on its product); one lookup,
 // then the scope. With lock, the product is locked FOR SHARE, then the plan
 // FOR UPDATE, each looked up again after waiting for a concurrent archive
-// (archive_once filters the row waited for).
+// (archive_or_restore filters the row waited for).
 func lookupPlan(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Plan, error) {
 	if !ids.Valid("pln", id) {
 		return nil, ErrNotFound
@@ -269,12 +269,38 @@ func (s Plans) Update(ctx context.Context, id string, patch PlanPatch) (*ent.Pla
 	})
 }
 
-// Archive archives a plan, once (ErrState after): no new license is issued
+// Archive archives a plan (ErrState if it already is; Restore undoes it): no new license is issued
 // from it; licenses already sold keep their terms.
 func (s Plans) Archive(ctx context.Context, id string) (*ent.Plan, error) {
 	return s.change(ctx, "plan.archive", id, func(tx *ent.Tx, p *ent.Plan) (*ent.Plan, map[string]any, error) {
 		// Atomic and counted: only an unarchived plan is archived, once.
 		res, err := tx.ExecContext(ctx, `UPDATE plans SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NULL`, p.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, nil, err
+		} else if n != 1 {
+			return nil, nil, ErrState
+		}
+		p, err = tx.Plan.Get(ctx, p.ID)
+		return p, nil, err
+	})
+}
+
+// Restore brings an archived plan back (ADR-0015, amended): it is usable
+// again where an archived one isn't. ErrState if it isn't archived.
+func (s Plans) Restore(ctx context.Context, id string) (*ent.Plan, error) {
+	return s.change(ctx, "plan.restore", id, func(tx *ent.Tx, p *ent.Plan) (*ent.Plan, map[string]any, error) {
+		// Not under an archived product: restore the product first (its
+		// features and plans don't change while it is archived). FOR SHARE: a
+		// concurrent archive or restore of the product waits.
+		if archived, err := tx.Product.Query().Where(product.ID(p.ProductID), product.ArchivedAtNotNil()).ForShare().Exist(ctx); err != nil {
+			return nil, nil, err
+		} else if archived {
+			return nil, nil, ErrState
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE plans SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NOT NULL`, p.ID)
 		if err != nil {
 			return nil, nil, err
 		}

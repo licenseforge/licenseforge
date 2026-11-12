@@ -1133,7 +1133,26 @@ paths:
     post:
       operationId: archiveProduct
       summary: Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
-      description: Needs catalog:write on the product. Products are archived, never deleted (ADR-0015). An archived product answers 409 invalid_state.
+      description: Needs catalog:write on the product. Products are archived, never deleted, and can be restored (ADR-0015). An archived product answers 409 invalid_state.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/products/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/ProductId"
+    post:
+      operationId: restoreProduct
+      summary: Restore an archived product (ADR-0015, amended); it is usable again as before it was archived.
+      description: Same rights as archive. Audited as product.restore. A product that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
       responses:
         "200":
           description: OK.
@@ -1234,6 +1253,25 @@ paths:
       operationId: archiveFeature
       summary: Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
       description: "Needs catalog:write on its product. An archived feature answers 409 invalid_state."
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Feature" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/features/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/FeatureId"
+    post:
+      operationId: restoreFeature
+      summary: Restore an archived feature (ADR-0015, amended); it is usable again as before it was archived.
+      description: Same rights as archive. Audited as feature.restore. A feature that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
       responses:
         "200":
           description: OK.
@@ -1390,6 +1428,25 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/plans/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/PlanId"
+    post:
+      operationId: restorePlan
+      summary: Restore an archived plan (ADR-0015, amended); it is usable again as before it was archived.
+      description: Same rights as archive. Audited as plan.restore. A plan that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Plan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/customers:
     parameters:
       - $ref: "#/components/parameters/Tenant"
@@ -1477,6 +1534,25 @@ paths:
       operationId: archiveCustomer
       summary: Archive a customer. Its licenses stay; no new license can be issued for it.
       description: Needs customer:write. An archived customer answers 409 invalid_state.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/customers/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/CustomerId"
+    post:
+      operationId: restoreCustomer
+      summary: Restore an archived customer (ADR-0015, amended); it is usable again as before it was archived.
+      description: Same rights as archive. Audited as customer.restore. A customer that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
       responses:
         "200":
           description: OK.

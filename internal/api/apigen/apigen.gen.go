@@ -2073,6 +2073,9 @@ type ServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
+	// RestoreCustomer Restore an archived customer (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/customers/{id}/restore)
+	RestoreCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId)
 	// ReturnOfflineSeat Return an offline seat on the machine's deactivation receipt (ADR-0043).
 	// (POST /tenants/{tenant}/deactivation-receipts)
 	ReturnOfflineSeat(w http.ResponseWriter, r *http.Request, tenant Tenant)
@@ -2091,6 +2094,9 @@ type ServerInterface interface {
 	// ArchiveFeature Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
 	// (POST /tenants/{tenant}/features/{id}/archive)
 	ArchiveFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId)
+	// RestoreFeature Restore an archived feature (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/features/{id}/restore)
+	RestoreFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId)
 	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
 	// (GET /tenants/{tenant}/invitations)
 	ListInvitations(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListInvitationsParams)
@@ -2169,6 +2175,9 @@ type ServerInterface interface {
 	// UpdatePlanFeatures Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
 	// (PATCH /tenants/{tenant}/plans/{id}/features)
 	UpdatePlanFeatures(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId)
+	// RestorePlan Restore an archived plan (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/plans/{id}/restore)
+	RestorePlan(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId)
 	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListProductsParams)
@@ -2184,6 +2193,9 @@ type ServerInterface interface {
 	// ArchiveProduct Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
 	// (POST /tenants/{tenant}/products/{id}/archive)
 	ArchiveProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
+	// RestoreProduct Restore an archived product (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/products/{id}/restore)
+	RestoreProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId)
 	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
 	// (GET /tenants/{tenant}/signing-keys)
 	ListSigningKeys(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListSigningKeysParams)
@@ -2905,6 +2917,41 @@ func (siw *ServerInterfaceWrapper) ArchiveCustomer(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// RestoreCustomer operation middleware
+func (siw *ServerInterfaceWrapper) RestoreCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id CustomerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreCustomer(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReturnOfflineSeat operation middleware
 func (siw *ServerInterfaceWrapper) ReturnOfflineSeat(w http.ResponseWriter, r *http.Request) {
 
@@ -3121,6 +3168,41 @@ func (siw *ServerInterfaceWrapper) ArchiveFeature(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveFeature(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreFeature operation middleware
+func (siw *ServerInterfaceWrapper) RestoreFeature(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id FeatureId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreFeature(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4298,6 +4380,41 @@ func (siw *ServerInterfaceWrapper) UpdatePlanFeatures(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// RestorePlan operation middleware
+func (siw *ServerInterfaceWrapper) RestorePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestorePlan(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProducts operation middleware
 func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.Request) {
 
@@ -4488,6 +4605,41 @@ func (siw *ServerInterfaceWrapper) ArchiveProduct(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveProduct(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreProduct operation middleware
+func (siw *ServerInterfaceWrapper) RestoreProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ProductId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreProduct(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5234,11 +5386,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.GetProduct)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/products/{id}", wrapper.UpdateProduct)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products/{id}/archive", wrapper.ArchiveProduct)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/products/{id}/restore", wrapper.RestoreProduct)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/features", wrapper.ListFeatures)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/features", wrapper.CreateFeature)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/features/{id}", wrapper.GetFeature)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/features/{id}", wrapper.UpdateFeature)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/features/{id}/archive", wrapper.ArchiveFeature)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/features/{id}/restore", wrapper.RestoreFeature)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/plans", wrapper.ListPlans)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/plans", wrapper.CreatePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}", wrapper.GetPlan)
@@ -5246,11 +5400,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/features", wrapper.GetPlanFeatures)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/features", wrapper.UpdatePlanFeatures)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/archive", wrapper.ArchivePlan)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/plans/{id}/restore", wrapper.RestorePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.ListCustomers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers", wrapper.CreateCustomer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}", wrapper.GetCustomer)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}", wrapper.UpdateCustomer)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}/archive", wrapper.ArchiveCustomer)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/customers/{id}/restore", wrapper.RestoreCustomer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/webhooks", wrapper.ListWebhooks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/webhooks", wrapper.CreateWebhook)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/tenants/{tenant}/webhooks/{id}", wrapper.DeleteWebhook)
@@ -8153,6 +8309,144 @@ func (response ArchiveCustomer409ApplicationProblemPlusJSONResponse) VisitArchiv
 	return err
 }
 
+type RestoreCustomerRequestObject struct {
+	Tenant Tenant     `json:"tenant"`
+	Id     CustomerId `json:"id"`
+}
+
+type RestoreCustomerResponseObject interface {
+	VisitRestoreCustomerResponse(w http.ResponseWriter) error
+}
+
+type RestoreCustomer200JSONResponse Customer
+
+func (response RestoreCustomer200JSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreCustomer400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreCustomer400ApplicationProblemPlusJSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreCustomer401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreCustomer401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreCustomer401ResponseHeaders
+}
+
+func (response RestoreCustomer401ApplicationProblemPlusJSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreCustomer403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreCustomer403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreCustomer403ResponseHeaders
+}
+
+func (response RestoreCustomer403ApplicationProblemPlusJSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreCustomer404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreCustomer404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreCustomer404ResponseHeaders
+}
+
+func (response RestoreCustomer404ApplicationProblemPlusJSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreCustomer409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreCustomer409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreCustomer409ResponseHeaders
+}
+
+func (response RestoreCustomer409ApplicationProblemPlusJSONResponse) VisitRestoreCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReturnOfflineSeatRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Body   *ReturnOfflineSeatJSONRequestBody
@@ -9040,6 +9334,144 @@ type ArchiveFeature409ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ArchiveFeature409ApplicationProblemPlusJSONResponse) VisitArchiveFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeatureRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     FeatureId `json:"id"`
+}
+
+type RestoreFeatureResponseObject interface {
+	VisitRestoreFeatureResponse(w http.ResponseWriter) error
+}
+
+type RestoreFeature200JSONResponse Feature
+
+func (response RestoreFeature200JSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeature400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreFeature400ApplicationProblemPlusJSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeature401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreFeature401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreFeature401ResponseHeaders
+}
+
+func (response RestoreFeature401ApplicationProblemPlusJSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeature403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreFeature403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreFeature403ResponseHeaders
+}
+
+func (response RestoreFeature403ApplicationProblemPlusJSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeature404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreFeature404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreFeature404ResponseHeaders
+}
+
+func (response RestoreFeature404ApplicationProblemPlusJSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreFeature409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreFeature409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreFeature409ResponseHeaders
+}
+
+func (response RestoreFeature409ApplicationProblemPlusJSONResponse) VisitRestoreFeatureResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -12565,6 +12997,144 @@ func (response UpdatePlanFeatures422ApplicationProblemPlusJSONResponse) VisitUpd
 	return err
 }
 
+type RestorePlanRequestObject struct {
+	Tenant Tenant `json:"tenant"`
+	Id     PlanId `json:"id"`
+}
+
+type RestorePlanResponseObject interface {
+	VisitRestorePlanResponse(w http.ResponseWriter) error
+}
+
+type RestorePlan200JSONResponse Plan
+
+func (response RestorePlan200JSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePlan400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestorePlan400ApplicationProblemPlusJSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePlan401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestorePlan401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestorePlan401ResponseHeaders
+}
+
+func (response RestorePlan401ApplicationProblemPlusJSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePlan403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestorePlan403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestorePlan403ResponseHeaders
+}
+
+func (response RestorePlan403ApplicationProblemPlusJSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePlan404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestorePlan404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestorePlan404ResponseHeaders
+}
+
+func (response RestorePlan404ApplicationProblemPlusJSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePlan409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestorePlan409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestorePlan409ResponseHeaders
+}
+
+func (response RestorePlan409ApplicationProblemPlusJSONResponse) VisitRestorePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListProductsRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListProductsParams
@@ -13266,6 +13836,144 @@ type ArchiveProduct409ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ArchiveProduct409ApplicationProblemPlusJSONResponse) VisitArchiveProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProductRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     ProductId `json:"id"`
+}
+
+type RestoreProductResponseObject interface {
+	VisitRestoreProductResponse(w http.ResponseWriter) error
+}
+
+type RestoreProduct200JSONResponse Product
+
+func (response RestoreProduct200JSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProduct400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreProduct400ApplicationProblemPlusJSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProduct401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreProduct401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreProduct401ResponseHeaders
+}
+
+func (response RestoreProduct401ApplicationProblemPlusJSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProduct403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreProduct403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreProduct403ResponseHeaders
+}
+
+func (response RestoreProduct403ApplicationProblemPlusJSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProduct404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreProduct404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreProduct404ResponseHeaders
+}
+
+func (response RestoreProduct404ApplicationProblemPlusJSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreProduct409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RestoreProduct409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RestoreProduct409ResponseHeaders
+}
+
+func (response RestoreProduct409ApplicationProblemPlusJSONResponse) VisitRestoreProductResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -15445,6 +16153,9 @@ type StrictServerInterface interface {
 	// ArchiveCustomer Archive a customer. Its licenses stay; no new license can be issued for it.
 	// (POST /tenants/{tenant}/customers/{id}/archive)
 	ArchiveCustomer(ctx context.Context, request ArchiveCustomerRequestObject) (ArchiveCustomerResponseObject, error)
+	// RestoreCustomer Restore an archived customer (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/customers/{id}/restore)
+	RestoreCustomer(ctx context.Context, request RestoreCustomerRequestObject) (RestoreCustomerResponseObject, error)
 	// ReturnOfflineSeat Return an offline seat on the machine's deactivation receipt (ADR-0043).
 	// (POST /tenants/{tenant}/deactivation-receipts)
 	ReturnOfflineSeat(ctx context.Context, request ReturnOfflineSeatRequestObject) (ReturnOfflineSeatResponseObject, error)
@@ -15463,6 +16174,9 @@ type StrictServerInterface interface {
 	// ArchiveFeature Archive a feature. Its key is kept and never reused; licenses keep what they were granted.
 	// (POST /tenants/{tenant}/features/{id}/archive)
 	ArchiveFeature(ctx context.Context, request ArchiveFeatureRequestObject) (ArchiveFeatureResponseObject, error)
+	// RestoreFeature Restore an archived feature (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/features/{id}/restore)
+	RestoreFeature(ctx context.Context, request RestoreFeatureRequestObject) (RestoreFeatureResponseObject, error)
 	// ListInvitations List the tenant's invitations (open, accepted, revoked, expired), newest first.
 	// (GET /tenants/{tenant}/invitations)
 	ListInvitations(ctx context.Context, request ListInvitationsRequestObject) (ListInvitationsResponseObject, error)
@@ -15541,6 +16255,9 @@ type StrictServerInterface interface {
 	// UpdatePlanFeatures Change what the plan grants (JSON Merge Patch keyed by feature key). Licenses already sold keep their entitlements.
 	// (PATCH /tenants/{tenant}/plans/{id}/features)
 	UpdatePlanFeatures(ctx context.Context, request UpdatePlanFeaturesRequestObject) (UpdatePlanFeaturesResponseObject, error)
+	// RestorePlan Restore an archived plan (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/plans/{id}/restore)
+	RestorePlan(ctx context.Context, request RestorePlanRequestObject) (RestorePlanResponseObject, error)
 	// ListProducts List products in the caller's product scope, newest first, archived ones included.
 	// (GET /tenants/{tenant}/products)
 	ListProducts(ctx context.Context, request ListProductsRequestObject) (ListProductsResponseObject, error)
@@ -15556,6 +16273,9 @@ type StrictServerInterface interface {
 	// ArchiveProduct Archive a product. Its licenses and activations keep working; no new license, plan or feature can be created on it.
 	// (POST /tenants/{tenant}/products/{id}/archive)
 	ArchiveProduct(ctx context.Context, request ArchiveProductRequestObject) (ArchiveProductResponseObject, error)
+	// RestoreProduct Restore an archived product (ADR-0015, amended); it is usable again as before it was archived.
+	// (POST /tenants/{tenant}/products/{id}/restore)
+	RestoreProduct(ctx context.Context, request RestoreProductRequestObject) (RestoreProductResponseObject, error)
 	// ListSigningKeys List the tenant's signing keys (ADR-0026), newest first. Public keys only.
 	// (GET /tenants/{tenant}/signing-keys)
 	ListSigningKeys(ctx context.Context, request ListSigningKeysRequestObject) (ListSigningKeysResponseObject, error)
@@ -16219,6 +16939,33 @@ func (sh *strictHandler) ArchiveCustomer(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// RestoreCustomer operation middleware
+func (sh *strictHandler) RestoreCustomer(w http.ResponseWriter, r *http.Request, tenant Tenant, id CustomerId) {
+	var request RestoreCustomerRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreCustomer(ctx, request.(RestoreCustomerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreCustomer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreCustomerResponseObject); ok {
+		if err := validResponse.VisitRestoreCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ReturnOfflineSeat operation middleware
 func (sh *strictHandler) ReturnOfflineSeat(w http.ResponseWriter, r *http.Request, tenant Tenant) {
 	var request ReturnOfflineSeatRequestObject
@@ -16393,6 +17140,33 @@ func (sh *strictHandler) ArchiveFeature(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveFeatureResponseObject); ok {
 		if err := validResponse.VisitArchiveFeatureResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreFeature operation middleware
+func (sh *strictHandler) RestoreFeature(w http.ResponseWriter, r *http.Request, tenant Tenant, id FeatureId) {
+	var request RestoreFeatureRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreFeature(ctx, request.(RestoreFeatureRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreFeature")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreFeatureResponseObject); ok {
+		if err := validResponse.VisitRestoreFeatureResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -17160,6 +17934,33 @@ func (sh *strictHandler) UpdatePlanFeatures(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// RestorePlan operation middleware
+func (sh *strictHandler) RestorePlan(w http.ResponseWriter, r *http.Request, tenant Tenant, id PlanId) {
+	var request RestorePlanRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestorePlan(ctx, request.(RestorePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestorePlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestorePlanResponseObject); ok {
+		if err := validResponse.VisitRestorePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListProducts operation middleware
 func (sh *strictHandler) ListProducts(w http.ResponseWriter, r *http.Request, tenant Tenant, params ListProductsParams) {
 	var request ListProductsRequestObject
@@ -17301,6 +18102,33 @@ func (sh *strictHandler) ArchiveProduct(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveProductResponseObject); ok {
 		if err := validResponse.VisitArchiveProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreProduct operation middleware
+func (sh *strictHandler) RestoreProduct(w http.ResponseWriter, r *http.Request, tenant Tenant, id ProductId) {
+	var request RestoreProductRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreProduct(ctx, request.(RestoreProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreProductResponseObject); ok {
+		if err := validResponse.VisitRestoreProductResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

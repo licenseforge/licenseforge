@@ -180,7 +180,7 @@ func lookup(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Custome
 	c, err := q()
 	if lock && ent.IsNotFound(err) {
 		// Locked after waiting for a concurrent archive, the row is rechecked
-		// as its newer version, which archive_once filters (its subquery reads
+		// as its newer version, which archive_or_restore filters (its subquery reads
 		// this statement's snapshot): a second statement sees it.
 		c, err = q()
 	}
@@ -277,8 +277,8 @@ func (s Service) Update(ctx context.Context, id string, patch Patch) (*ent.Custo
 	})
 }
 
-// Archive archives a customer, once (ErrState after): it keeps its
-// licenses, and no new license can be issued for it.
+// Archive archives a customer (ErrState if it already is; Restore undoes
+// it): it keeps its licenses, and no new license can be issued for it.
 func (s Service) Archive(ctx context.Context, id string) (*ent.Customer, error) {
 	return s.change(ctx, "customer.archive", id, func(tx *ent.Tx, c *ent.Customer) (*ent.Customer, map[string]any, error) {
 		if c.ArchivedAt != nil {
@@ -286,6 +286,21 @@ func (s Service) Archive(ctx context.Context, id string) (*ent.Customer, error) 
 		}
 		// The database clock, as license times.
 		if _, err := tx.ExecContext(ctx, `UPDATE customers SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, c.ID); err != nil {
+			return nil, nil, err
+		}
+		c, err := tx.Customer.Get(ctx, c.ID)
+		return c, nil, err
+	})
+}
+
+// Restore brings an archived customer back (ADR-0015, amended): licenses
+// can be issued for it again. ErrState if it isn't archived.
+func (s Service) Restore(ctx context.Context, id string) (*ent.Customer, error) {
+	return s.change(ctx, "customer.restore", id, func(tx *ent.Tx, c *ent.Customer) (*ent.Customer, map[string]any, error) {
+		if c.ArchivedAt == nil {
+			return nil, nil, ErrState
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE customers SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1`, c.ID); err != nil {
 			return nil, nil, err
 		}
 		c, err := tx.Customer.Get(ctx, c.ID)

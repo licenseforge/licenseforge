@@ -5,6 +5,8 @@ import { fieldErrors } from "@/api/client";
 import {
   archiveCustomer,
   archiveProduct,
+  restoreCustomer,
+  restoreProduct,
   canCreateProducts,
   canRenameProducts,
   canWriteCustomers,
@@ -26,6 +28,7 @@ import type { Membership } from "@/api/tokens";
 import { errorText, input, Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
+import { RestoreButton, useArchivedFilter } from "./archived";
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const th = "px-2 py-2 font-medium";
@@ -91,7 +94,8 @@ export function ProductsPage() {
   const caller = useCaller(slug);
   const list = useInfiniteQuery(productsQuery(slug));
   const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "rename" | "archive"; product: Product } | null>(null);
-  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const qc = useQueryClient();
+  const { rows, hidden, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -100,7 +104,7 @@ export function ProductsPage() {
       </div>
       {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("products.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
-      {list.isSuccess && rows.length === 0 && <p className="mt-6 text-muted-foreground">{t("products.empty")}</p>}
+      {list.isSuccess && rows.length === 0 && hidden === 0 && <p className="mt-6 text-muted-foreground">{t("products.empty")}</p>}
       {rows.length > 0 && (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -132,11 +136,14 @@ export function ProductsPage() {
                         {t("products.rename")}
                       </Button>
                     )}
-                    {/* catalog:write on the product, as rename; archiving is one-way */}
+                    {/* catalog:write on the product, as rename; restore undoes an archive */}
                     {canRenameProducts(caller) && !p.archived_at && (
                       <Button variant="ghost" onClick={() => setDialog({ kind: "archive", product: p })}>
                         {t("products.archive")}
                       </Button>
+                    )}
+                    {canRenameProducts(caller) && p.archived_at && (
+                      <RestoreButton name={p.name} run={() => restoreProduct(slug, p.id)} onDone={() => invalidateProducts(qc, slug)} />
                     )}
                   </td>
                 </tr>
@@ -145,6 +152,7 @@ export function ProductsPage() {
           </table>
         </div>
       )}
+      {toggle}
       {list.hasNextPage && (
         <Button variant="ghost" className="mt-2" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
           {t("tokens.more")}
@@ -198,7 +206,8 @@ export function CustomersPage() {
   const write = canWriteCustomers(caller);
   const list = useInfiniteQuery(customersQuery(slug));
   const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "edit" | "archive"; customer: Customer } | null>(null);
-  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const qc = useQueryClient();
+  const { rows, hidden, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -207,7 +216,7 @@ export function CustomersPage() {
       </div>
       {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("customers.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
-      {list.isSuccess && rows.length === 0 && caller.scope.all && <p className="mt-6 text-muted-foreground">{t("customers.empty")}</p>}
+      {list.isSuccess && rows.length === 0 && hidden === 0 && caller.scope.all && <p className="mt-6 text-muted-foreground">{t("customers.empty")}</p>}
       {rows.length > 0 && (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -234,6 +243,9 @@ export function CustomersPage() {
                     {write && !c.archived_at && (
                       <Button variant="ghost" onClick={() => setDialog({ kind: "archive", customer: c })}>{t("customers.archive")}</Button>
                     )}
+                    {write && c.archived_at && (
+                      <RestoreButton name={c.name} run={() => restoreCustomer(slug, c.id)} onDone={() => invalidateCustomers(qc, slug)} />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -241,6 +253,7 @@ export function CustomersPage() {
           </table>
         </div>
       )}
+      {toggle}
       {list.hasNextPage && (
         <Button variant="ghost" className="mt-2" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
           {t("tokens.more")}
@@ -322,7 +335,7 @@ function ArchiveDialog({ tenant, customer, onClose }: { tenant: string; customer
   const archive = useMutation({
     mutationFn: () => archiveCustomer(tenant, customer.id),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: customersQuery(tenant).queryKey });
+      await invalidateCustomers(qc, tenant); // the issue picker too
       onClose();
     },
   });
@@ -343,9 +356,7 @@ export function ArchiveProductDialog({ tenant, product, onClose }: { tenant: str
   const archive = useMutation({
     mutationFn: () => archiveProduct(tenant, product.id),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
-      await qc.invalidateQueries({ queryKey: ["products-all", tenant] }); // the issue picker
-      await qc.invalidateQueries({ queryKey: ["product", tenant] }); // the product page
+      await invalidateProducts(qc, tenant);
       onClose();
     },
   });
@@ -359,4 +370,17 @@ export function ArchiveProductDialog({ tenant, product, onClose }: { tenant: str
       </div>
     </Modal>
   );
+}
+
+/** What an archive or restore of a product changes: its list, the issue picker and its page. */
+async function invalidateProducts(qc: ReturnType<typeof useQueryClient>, tenant: string) {
+  await qc.invalidateQueries({ queryKey: productsQuery(tenant).queryKey });
+  await qc.invalidateQueries({ queryKey: ["products-all", tenant] });
+  await qc.invalidateQueries({ queryKey: ["product", tenant] });
+}
+
+/** What an archive or restore of a customer changes: its list and the issue picker. */
+async function invalidateCustomers(qc: ReturnType<typeof useQueryClient>, tenant: string) {
+  await qc.invalidateQueries({ queryKey: customersQuery(tenant).queryKey });
+  await qc.invalidateQueries({ queryKey: ["customers-all", tenant] });
 }

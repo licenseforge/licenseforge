@@ -128,7 +128,7 @@ func lookup(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.Product
 	p, err := q()
 	if lock && ent.IsNotFound(err) {
 		// Locked after waiting for a concurrent archive, the row is rechecked
-		// as its newer version, which archive_once filters (its subquery reads
+		// as its newer version, which archive_or_restore filters (its subquery reads
 		// this statement's snapshot): a second statement sees it.
 		p, err = q()
 	}
@@ -219,7 +219,7 @@ func (s Products) Update(ctx context.Context, id string, patch Patch) (*ent.Prod
 	return p, nil
 }
 
-// Archive archives a product, once (ErrState after). Order (ADR-0032):
+// Archive archives a product (ErrState if it already is; Restore undoes it). Order (ADR-0032):
 // visible (else ErrNotFound), catalog:write on it. Its licenses and their
 // activations keep working; no new license, plan or feature can be created
 // on it (ADR-0015).
@@ -247,6 +247,47 @@ func (s Products) Archive(ctx context.Context, id string) (*ent.Product, error) 
 		}
 		// The database clock, as license times.
 		if _, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1`, p.ID); err != nil {
+			return err
+		}
+		if p, err = tx.Product.Get(ctx, p.ID); err != nil {
+			return err
+		}
+		ev.Outcome = auditevent.OutcomeSuccess
+		_, err = audit.Record(ctx, tx, tenantID, ev)
+		return err
+	})
+	if err != nil {
+		return nil, audit.Refused(ctx, s.DB, tenantID, ev, err, ErrNotFound, ErrState)
+	}
+	return p, nil
+}
+
+// Restore brings an archived product back (ADR-0015, amended): licenses,
+// plans and features can be created on it again. ErrState if it isn't
+// archived. Same order and rights as Archive.
+func (s Products) Restore(ctx context.Context, id string) (*ent.Product, error) {
+	tenantID, err := authz.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pr, _ := authz.FromContext(ctx)
+	ev := audit.By(pr, "product.restore", "product", "")
+	var p *ent.Product
+	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
+		var err error
+		// FOR UPDATE: a feature or plan restore holds the product FOR SHARE,
+		// so this waits for it, as an archive does.
+		if p, err = lookup(ctx, tx, id, true); err != nil {
+			return err
+		}
+		ev.ObjectID = p.ID
+		if err := authz.Require(ctx, authz.CatalogWrite, p.ID); err != nil {
+			return err
+		}
+		if p.ArchivedAt == nil {
+			return ErrState
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE products SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1`, p.ID); err != nil {
 			return err
 		}
 		if p, err = tx.Product.Get(ctx, p.ID); err != nil {

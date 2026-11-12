@@ -285,7 +285,7 @@ func TestCounts(t *testing.T) {
 }
 
 // An archive or update that waits for a concurrent archive sees the archived
-// customer (lookup looks again after archive_once filters the row it waited
+// customer (lookup looks again after archive_or_restore filters the row it waited
 // for): a second archive is ErrState, an update succeeds.
 func TestChangeWaitsForArchive(t *testing.T) {
 	f := setup(t)

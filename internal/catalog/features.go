@@ -101,7 +101,7 @@ func lookupFeature(ctx context.Context, tx *ent.Tx, id string, lock bool) (*ent.
 	f, err := q()
 	if lock && (ent.IsNotFound(err) || err == nil && authz.Require(ctx, authz.CatalogRead, f.ProductID) != nil) {
 		// Locked after waiting for a concurrent archive, the row is rechecked
-		// as its newer version, which archive_once filters (its subquery reads
+		// as its newer version, which archive_or_restore filters (its subquery reads
 		// this statement's snapshot): a second statement sees it. Out-of-scope
 		// rows take the second statement too, so missing and hidden do the
 		// same work.
@@ -135,7 +135,7 @@ func activeProduct(ctx context.Context, tx *ent.Tx, id string) error {
 	p, err := lock()
 	if ent.IsNotFound(err) || !visible {
 		// Locked after waiting for a concurrent archive, the row is rechecked
-		// as its newer version, which archive_once filters (its subquery reads
+		// as its newer version, which archive_or_restore filters (its subquery reads
 		// this statement's snapshot): a second statement sees it archived.
 		// Out-of-scope products take the same two statements as missing
 		// ones, so timing doesn't tell them apart.
@@ -231,12 +231,38 @@ func (s Features) Update(ctx context.Context, id string, patch FeaturePatch) (*e
 	})
 }
 
-// Archive archives a feature, once (ErrState after). It can no longer be
+// Archive archives a feature (ErrState if it already is; Restore undoes it). It can no longer be
 // added to a license by override (internal/licenses); its key is kept.
 func (s Features) Archive(ctx context.Context, id string) (*ent.Feature, error) {
 	return s.change(ctx, "feature.archive", id, func(tx *ent.Tx, f *ent.Feature) (*ent.Feature, map[string]any, error) {
 		// Atomic and counted: only an unarchived feature is archived, once.
 		res, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NULL`, f.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, nil, err
+		} else if n != 1 {
+			return nil, nil, ErrState
+		}
+		f, err = tx.Feature.Get(ctx, f.ID)
+		return f, nil, err
+	})
+}
+
+// Restore brings an archived feature back (ADR-0015, amended): it is usable
+// again where an archived one isn't. ErrState if it isn't archived.
+func (s Features) Restore(ctx context.Context, id string) (*ent.Feature, error) {
+	return s.change(ctx, "feature.restore", id, func(tx *ent.Tx, f *ent.Feature) (*ent.Feature, map[string]any, error) {
+		// Not under an archived product: restore the product first (its
+		// features and plans don't change while it is archived). FOR SHARE: a
+		// concurrent archive or restore of the product waits.
+		if archived, err := tx.Product.Query().Where(product.ID(f.ProductID), product.ArchivedAtNotNil()).ForShare().Exist(ctx); err != nil {
+			return nil, nil, err
+		} else if archived {
+			return nil, nil, ErrState
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NOT NULL`, f.ID)
 		if err != nil {
 			return nil, nil, err
 		}

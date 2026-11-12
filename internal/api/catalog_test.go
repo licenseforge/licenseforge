@@ -138,21 +138,33 @@ func TestProductArchiveEndpoint(t *testing.T) {
 		t.Fatalf("archive: %d %s", r.code, r.raw)
 	}
 	f.do(t, "POST", p+"/"+f.prodA+"/archive", "", owner).problem(t, 409, "invalid_state")
-	ids := func(q string) []any {
+	listIDs := func(q string) []any {
 		var out []any
 		for _, it := range f.do(t, "GET", p+q, "", owner).body["items"].([]any) {
 			out = append(out, it.(map[string]any)["id"])
 		}
 		return out
 	}
-	if got := ids(""); !reflect.DeepEqual(got, []any{other, f.prodA}) {
+	if got := listIDs(""); !reflect.DeepEqual(got, []any{other, f.prodA}) {
 		t.Errorf("all: %v", got)
 	}
-	if got := ids("?archived=false"); !reflect.DeepEqual(got, []any{other}) {
+	if got := listIDs("?archived=false"); !reflect.DeepEqual(got, []any{other}) {
 		t.Errorf("active: %v", got)
 	}
-	if got := ids("?archived=true"); !reflect.DeepEqual(got, []any{f.prodA}) {
+	if got := listIDs("?archived=true"); !reflect.DeepEqual(got, []any{f.prodA}) {
 		t.Errorf("archived: %v", got)
 	}
 	f.do(t, "GET", p+"?archived=maybe", "", owner).problem(t, 400, "invalid_request")
+	// Restore (ADR-0015, amended): same rights; hidden is missing; once.
+	missingRestore := f.do(t, "POST", p+"/"+ids.Product()+"/restore", "", owner).problem(t, 404, "not_found")
+	if got := f.do(t, "POST", p+"/"+other+"/restore", "", scoped).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missingRestore) {
+		t.Errorf("hidden restore: %v, missing %v", got, missingRestore)
+	}
+	if r := f.do(t, "POST", p+"/"+f.prodA+"/restore", "", scoped); r.code != 200 || r.body["archived_at"] != nil {
+		t.Fatalf("restore: %d %s", r.code, r.raw)
+	}
+	f.do(t, "POST", p+"/"+f.prodA+"/restore", "", owner).problem(t, 409, "invalid_state")
+	if got := listIDs("?archived=true"); len(got) != 0 {
+		t.Errorf("archived after restore: %v", got)
+	}
 }

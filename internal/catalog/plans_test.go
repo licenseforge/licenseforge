@@ -232,7 +232,7 @@ func TestPlanRefusals(t *testing.T) {
 }
 
 // A plan change that waits for a concurrent archive of the plan sees it
-// archived (it looks again after archive_once filters the row it waited
+// archived (it looks again after archive_or_restore filters the row it waited
 // for): a second archive is ErrState, an update succeeds.
 func TestPlanChangeWaitsForArchive(t *testing.T) {
 	f := setup(t)
@@ -246,7 +246,7 @@ func TestPlanChangeWaitsForArchive(t *testing.T) {
 	defer func() { _ = adminDB.Close() }()
 	archivePlan := `UPDATE plans SET archived_at = clock_timestamp() WHERE id = $1`
 	// The product archived while the change waits on its lock: the product
-	// row it waited for is filtered (archive_once), and it looks again.
+	// row it waited for is filtered (archive_or_restore), and it looks again.
 	archiveProduct := `UPDATE products SET archived_at = clock_timestamp() WHERE id = (SELECT product_id FROM plans WHERE id = $1)`
 	for name, c := range map[string]struct {
 		slug, first string
