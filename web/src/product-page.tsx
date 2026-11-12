@@ -24,6 +24,7 @@ import {
   planTerm,
   productFeaturesQuery,
   productPlansQuery,
+  productsQuery,
   updatePlan,
 } from "@/api/catalog";
 import { Field, FormDialog, useCaller } from "@/catalog-pages";
@@ -61,6 +62,7 @@ export function ProductPage() {
   // A restored feature or plan, or product, changes the lists, the matrix and the issue picker.
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["product", slug] });
+    await qc.invalidateQueries({ queryKey: productsQuery(slug).queryKey });
     await qc.invalidateQueries({ queryKey: productFeaturesQuery(slug, id).queryKey });
     await qc.invalidateQueries({ queryKey: productPlansQuery(slug, id).queryKey });
     await qc.invalidateQueries({ queryKey: ["products-all", slug] });
@@ -89,7 +91,7 @@ export function ProductPage() {
         </div>
         {features.isError && <p role="alert" className="mt-2">{errorText(features.error)}</p>}
         {features.data && features.data.items.length === 0 && <p className="mt-2 text-muted-foreground">{t("product.noFeatures")}</p>}
-        {features.data && features.data.items.length > 0 && (
+        {shownFeatures.rows.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b text-muted-foreground">
@@ -130,7 +132,7 @@ export function ProductPage() {
         </div>
         {plans.isError && <p role="alert" className="mt-2">{errorText(plans.error)}</p>}
         {plans.data && plans.data.items.length === 0 && <p className="mt-2 text-muted-foreground">{t("product.noPlans")}</p>}
-        {plans.data && plans.data.items.length > 0 && (
+        {shownPlans.rows.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b text-muted-foreground">

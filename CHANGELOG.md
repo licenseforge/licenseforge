@@ -38,7 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Added
-- **Restore archived products, features, plans and customers** (ADR-0015, amended): `POST …/{id}/restore` and a Restore button. Archive is now a soft delete. The dashboard lists archived rows for 30 days, then hides them behind "Show older archived"; they stay restorable. The database still refuses made-up or moved archive dates.
+- **Restore archived products, features, plans and customers** (ADR-0015, amended): `POST …/{id}/restore` and a Restore button. Archive is now a soft delete. The dashboard lists archived rows for 30 days, then hides them behind "Show N archived more than 30 days ago"; they stay restorable. The database still refuses made-up or moved archive dates.
 - **Recovery commands on the owner login:**
   - `licenseforge admin reset --yes`: when no platform admin can sign in, it removes every admin so the bootstrap admin's next sign-in recovers the role (ADR-0031).
   - `licenseforge audit remove-sink --name N`: unregisters a SIEM sink you no longer export to, which until now held audit retention back for good (ADR-0036).

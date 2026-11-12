@@ -292,6 +292,14 @@ func (s Plans) Archive(ctx context.Context, id string) (*ent.Plan, error) {
 // again where an archived one isn't. ErrState if it isn't archived.
 func (s Plans) Restore(ctx context.Context, id string) (*ent.Plan, error) {
 	return s.change(ctx, "plan.restore", id, func(tx *ent.Tx, p *ent.Plan) (*ent.Plan, map[string]any, error) {
+		// Not under an archived product: restore the product first (its
+		// features and plans don't change while it is archived). FOR SHARE: a
+		// concurrent archive or restore of the product waits.
+		if archived, err := tx.Product.Query().Where(product.ID(p.ProductID), product.ArchivedAtNotNil()).ForShare().Exist(ctx); err != nil {
+			return nil, nil, err
+		} else if archived {
+			return nil, nil, ErrState
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE plans SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NOT NULL`, p.ID)
 		if err != nil {
 			return nil, nil, err

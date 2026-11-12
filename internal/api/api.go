@@ -559,7 +559,7 @@ func mapErr(err error) *problem {
 	case errors.As(err, &invalidCustomer):
 		p = invalid(fieldError{invalidCustomer.Field, invalidCustomer.Message})
 	case errors.Is(err, customers.ErrState), errors.Is(err, catalog.ErrState):
-		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "Already archived."}
+		p = &problem{status: http.StatusConflict, code: "invalid_state", detail: "Not possible in its current state: already archived, or not archived."}
 	case activationProblem(err) != nil:
 		p = activationProblem(err)
 	case errors.Is(err, authz.ErrDenied):

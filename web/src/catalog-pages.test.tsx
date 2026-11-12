@@ -204,7 +204,6 @@ it("hides what was archived more than 30 days ago until asked, still restorable"
   const { el, root, rowButtons } = await productsPage("admin");
   expect(el.textContent).not.toContain("Ancient");
   const show = [...el.querySelectorAll("button")].find((b) => b.textContent === "Show 1 archived more than 30 days ago")!;
-  expect(show.getAttribute("aria-pressed")).toBe("false");
   await act(async () => show.click());
   expect(el.textContent).toContain("Ancient");
   expect([...rowButtons("Ancient")].map((b) => b.textContent)).toContain("Restore");

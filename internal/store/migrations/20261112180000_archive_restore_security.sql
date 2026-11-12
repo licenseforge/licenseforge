@@ -1,6 +1,7 @@
 -- Archive becomes reversible (ADR-0015, amended 2026-11-12): an update keeps
 -- archived_at, sets it from NULL to the database clock (archive), or clears it
--- (restore). Still never to a made-up date; USING still admits only the row
+-- (restore). Never to a made-up date, and an archived date doesn't move within a
+-- statement (restore then archive again resets it to now, both audited); USING still admits only the row
 -- the statement's snapshot saw (snapshot match), so a stale writer changes nothing.
 ALTER POLICY archive_once ON "products" RENAME TO archive_or_restore;
 ALTER POLICY archive_or_restore ON "products"

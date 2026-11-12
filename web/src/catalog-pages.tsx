@@ -95,7 +95,7 @@ export function ProductsPage() {
   const list = useInfiniteQuery(productsQuery(slug));
   const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "rename" | "archive"; product: Product } | null>(null);
   const qc = useQueryClient();
-  const { rows, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
+  const { rows, hidden, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -104,7 +104,7 @@ export function ProductsPage() {
       </div>
       {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("products.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
-      {list.isSuccess && rows.length === 0 && <p className="mt-6 text-muted-foreground">{t("products.empty")}</p>}
+      {list.isSuccess && rows.length === 0 && hidden === 0 && <p className="mt-6 text-muted-foreground">{t("products.empty")}</p>}
       {rows.length > 0 && (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -207,7 +207,7 @@ export function CustomersPage() {
   const list = useInfiniteQuery(customersQuery(slug));
   const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "edit" | "archive"; customer: Customer } | null>(null);
   const qc = useQueryClient();
-  const { rows, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
+  const { rows, hidden, toggle } = useArchivedFilter(list.data?.pages.flatMap((p) => p.items) ?? []);
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -216,7 +216,7 @@ export function CustomersPage() {
       </div>
       {caller.loaded && !caller.scope.all && <p className="mt-2 text-sm text-muted-foreground">{t("customers.scoped")}</p>}
       {list.isError && <p role="alert" className="mt-4">{errorText(list.error)}</p>}
-      {list.isSuccess && rows.length === 0 && caller.scope.all && <p className="mt-6 text-muted-foreground">{t("customers.empty")}</p>}
+      {list.isSuccess && rows.length === 0 && hidden === 0 && caller.scope.all && <p className="mt-6 text-muted-foreground">{t("customers.empty")}</p>}
       {rows.length > 0 && (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full text-left text-sm">

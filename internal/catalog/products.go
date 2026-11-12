@@ -275,8 +275,8 @@ func (s Products) Restore(ctx context.Context, id string) (*ent.Product, error) 
 	var p *ent.Product
 	err = s.DB.WithTenant(ctx, tenantID, func(tx *ent.Tx) error {
 		var err error
-		// FOR UPDATE: a license issue holds the product FOR SHARE, so the
-		// archive waits for it (internal/licenses).
+		// FOR UPDATE: a feature or plan restore holds the product FOR SHARE,
+		// so this waits for it, as an archive does.
 		if p, err = lookup(ctx, tx, id, true); err != nil {
 			return err
 		}

@@ -30,22 +30,14 @@ func TestRestore(t *testing.T) {
 	type ops struct {
 		archive, restore func(id string) (archived bool, err error)
 	}
-	for name, c := range map[string]struct {
-		id, action string
-		op         ops
-		restoreAs  func(id string) error
+	// In order: the product last, so the plan and feature cases run under an
+	// active product; every row ends archived again.
+	for _, c := range []struct {
+		name, id, action string
+		op               ops
+		restoreAs        func(id string) error
 	}{
-		"product": {db.ID, "product", ops{
-			func(id string) (bool, error) {
-				p, err := f.s.Archive(admin, id)
-				return p != nil && p.ArchivedAt != nil, err
-			},
-			func(id string) (bool, error) {
-				p, err := f.s.Restore(admin, id)
-				return p != nil && p.ArchivedAt != nil, err
-			},
-		}, func(id string) error { _, err := f.s.Restore(as(f.a, authz.Manager), id); return err }},
-		"plan": {pro.ID, "plan", ops{
+		{"plan", pro.ID, "plan", ops{
 			func(id string) (bool, error) {
 				p, err := Plans{DB: f.db}.Archive(admin, id)
 				return p != nil && p.ArchivedAt != nil, err
@@ -55,7 +47,7 @@ func TestRestore(t *testing.T) {
 				return p != nil && p.ArchivedAt != nil, err
 			},
 		}, func(id string) error { _, err := Plans{DB: f.db}.Restore(as(f.a, authz.Manager), id); return err }},
-		"feature": {sso.ID, "feature", ops{
+		{"feature", sso.ID, "feature", ops{
 			func(id string) (bool, error) {
 				x, err := Features{DB: f.db}.Archive(admin, id)
 				return x != nil && x.ArchivedAt != nil, err
@@ -65,7 +57,18 @@ func TestRestore(t *testing.T) {
 				return x != nil && x.ArchivedAt != nil, err
 			},
 		}, func(id string) error { _, err := Features{DB: f.db}.Restore(as(f.a, authz.Manager), id); return err }},
+		{"product", db.ID, "product", ops{
+			func(id string) (bool, error) {
+				p, err := f.s.Archive(admin, id)
+				return p != nil && p.ArchivedAt != nil, err
+			},
+			func(id string) (bool, error) {
+				p, err := f.s.Restore(admin, id)
+				return p != nil && p.ArchivedAt != nil, err
+			},
+		}, func(id string) error { _, err := f.s.Restore(as(f.a, authz.Manager), id); return err }},
 	} {
+		name := c.name
 		if _, err := c.op.restore(c.id); !errors.Is(err, ErrState) {
 			t.Errorf("%s: restore of an active one: %v", name, err)
 		}
@@ -82,6 +85,20 @@ func TestRestore(t *testing.T) {
 		if archived, err := c.op.archive(c.id); err != nil || !archived {
 			t.Errorf("%s: archive again: %v", name, err)
 		}
+	}
+	// Every row is archived again now, the product too: a plan or feature
+	// of an archived product stays archived until the product is restored.
+	if _, err := (Plans{DB: f.db}).Restore(admin, pro.ID); !errors.Is(err, ErrState) {
+		t.Errorf("plan restore under an archived product: %v", err)
+	}
+	if _, err := (Features{DB: f.db}).Restore(admin, sso.ID); !errors.Is(err, ErrState) {
+		t.Errorf("feature restore under an archived product: %v", err)
+	}
+	if _, err := f.s.Restore(admin, db.ID); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := (Plans{DB: f.db}).Restore(admin, pro.ID); err != nil || p.ArchivedAt != nil {
+		t.Errorf("plan restore after the product's: %v", err)
 	}
 	// Hidden and missing are not found, as for archive.
 	if _, err := f.s.Restore(as(f.b, authz.Admin), db.ID); !errors.Is(err, ErrNotFound) {

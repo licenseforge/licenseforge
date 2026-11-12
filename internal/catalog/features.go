@@ -254,6 +254,14 @@ func (s Features) Archive(ctx context.Context, id string) (*ent.Feature, error) 
 // again where an archived one isn't. ErrState if it isn't archived.
 func (s Features) Restore(ctx context.Context, id string) (*ent.Feature, error) {
 	return s.change(ctx, "feature.restore", id, func(tx *ent.Tx, f *ent.Feature) (*ent.Feature, map[string]any, error) {
+		// Not under an archived product: restore the product first (its
+		// features and plans don't change while it is archived). FOR SHARE: a
+		// concurrent archive or restore of the product waits.
+		if archived, err := tx.Product.Query().Where(product.ID(f.ProductID), product.ArchivedAtNotNil()).ForShare().Exist(ctx); err != nil {
+			return nil, nil, err
+		} else if archived {
+			return nil, nil, ErrState
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE features SET archived_at = NULL, updated_at = clock_timestamp() WHERE id = $1 AND archived_at IS NOT NULL`, f.ID)
 		if err != nil {
 			return nil, nil, err

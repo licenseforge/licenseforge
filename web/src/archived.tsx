@@ -13,14 +13,15 @@ export function oldArchived(archivedAt: string | null | undefined, now = Date.no
 }
 
 /** A list without rows archived long ago, and the toggle that shows them. */
-export function useArchivedFilter<T extends { archived_at?: string | null }>(rows: T[]): { rows: T[]; toggle: ReactNode } {
+export function useArchivedFilter<T extends { archived_at?: string | null }>(rows: T[]): { rows: T[]; hidden: number; toggle: ReactNode } {
   const [all, setAll] = useState(false);
   const hidden = rows.filter((r) => oldArchived(r.archived_at)).length;
   return {
     rows: all ? rows : rows.filter((r) => !oldArchived(r.archived_at)),
+    hidden: all ? 0 : hidden,
     toggle:
       hidden > 0 || all ? (
-        <Button variant="ghost" className="mt-2" aria-pressed={all} onClick={() => setAll(!all)}>
+        <Button variant="ghost" className="mt-2" onClick={() => setAll(!all)}>
           {all ? t("archived.hideOld", { days: String(ARCHIVED_SHOWN_DAYS) }) : t("archived.showOld", { n: String(hidden), days: String(ARCHIVED_SHOWN_DAYS) })}
         </Button>
       ) : null,

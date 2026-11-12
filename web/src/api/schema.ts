@@ -992,7 +992,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an archived product (ADR-0015, amended); it is usable again as before it was archived.
-         * @description Same rights as archive. Audited as product.restore. A product that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         * @description Same rights as archive. Audited as product.restore. A product that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
          */
         post: operations["restoreProduct"];
         delete?: never;
@@ -1092,7 +1092,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an archived feature (ADR-0015, amended); it is usable again as before it was archived.
-         * @description Same rights as archive. Audited as feature.restore. A feature that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         * @description Same rights as archive. Audited as feature.restore. A feature that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
          */
         post: operations["restoreFeature"];
         delete?: never;
@@ -1227,7 +1227,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an archived plan (ADR-0015, amended); it is usable again as before it was archived.
-         * @description Same rights as archive. Audited as plan.restore. A plan that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         * @description Same rights as archive. Audited as plan.restore. A plan that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
          */
         post: operations["restorePlan"];
         delete?: never;
@@ -1327,7 +1327,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an archived customer (ADR-0015, amended); it is usable again as before it was archived.
-         * @description Same rights as archive. Audited as customer.restore. A customer that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show older archived"; the API always lists it with its archived_at.
+         * @description Same rights as archive. Audited as customer.restore. A customer that isn't archived answers 409 invalid_state. The dashboard hides what was archived more than 30 days ago behind "Show N archived more than 30 days ago"; the API always lists it with its archived_at.
          */
         post: operations["restoreCustomer"];
         delete?: never;
