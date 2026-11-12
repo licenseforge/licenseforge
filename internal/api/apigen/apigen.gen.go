@@ -6848,6 +6848,30 @@ func (response CreateOfflineActivation422ApplicationProblemPlusJSONResponse) Vis
 	return err
 }
 
+type CreateOfflineActivation503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation503ResponseHeaders
+}
+
+func (response CreateOfflineActivation503ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListApiTokensRequestObject struct {
 	Tenant Tenant `json:"tenant"`
 	Params ListApiTokensParams

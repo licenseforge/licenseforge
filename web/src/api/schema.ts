@@ -817,7 +817,8 @@ export interface paths {
          * Answer an offline activation request with a license file for that machine (ADR-0043).
          * @description The request is the `lfreq1` text an air-gapped machine's SDK wrote
          *     (license format spec, Offline activation); it carries the license
-         *     key, so treat it like the key. Needs activation:offline on the
+         *     key, so treat it like the key. `no_signing_key` (503): the tenant has
+         *     no active signing key; nothing was changed. Needs activation:offline on the
          *     license's product; an unknown key or a license outside the caller's
          *     scope answers 404. The license must be usable (403
          *     `license_suspended`, `license_revoked`, `license_expired`; no grace)
@@ -3474,6 +3475,7 @@ export interface operations {
             409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     listProducts: {

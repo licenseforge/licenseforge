@@ -1190,8 +1190,8 @@ type noKey struct{ signing.Local }
 func (noKey) Active(context.Context, string) (string, error) { return "", signing.ErrNoActiveKey }
 
 // A tenant without an active signing key answers 503 no_signing_key, on
-// both activation paths: a vendor can tell what to fix, and the SDKs retry
-// (5xx) until an owner generates the key.
+// both activation paths: the server log and raw callers say what to fix, and
+// the SDKs retry (5xx) until an owner generates the key.
 func TestActivateWithoutSigningKey(t *testing.T) {
 	a := actSetup(t)
 	is := a.issue(t, "pro")
