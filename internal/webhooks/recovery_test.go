@@ -172,8 +172,8 @@ func TestEnableUnreadable(t *testing.T) {
 		if row := f.raw(t, f.a, c.ID); row.Enabled {
 			t.Errorf("%s: enabled although unusable", tc.name)
 		}
-		if ev := f.events(t, f.a, "webhook.enable"); ev[len(ev)-1].Outcome != auditevent.OutcomeFailure {
-			t.Errorf("%s: refusal audited as %s", tc.name, ev[len(ev)-1].Outcome)
+		if ev := f.events(t, f.a, "webhook.enable"); ev[0].Outcome != auditevent.OutcomeFailure { // newest first
+			t.Errorf("%s: refusal audited as %s", tc.name, ev[0].Outcome)
 		}
 		if err := tc.fix(c.ID); err != nil {
 			t.Fatalf("%s: fix: %v", tc.name, err)
