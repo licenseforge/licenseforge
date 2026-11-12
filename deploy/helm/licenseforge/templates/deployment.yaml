@@ -100,6 +100,13 @@ spec:
             - name: LICENSEFORGE_TRUSTED_PROXIES
               value: {{ . | quote }}
             {{- end }}
+            {{- $session := .Values.session | default dict }}
+            {{- range list (list "LICENSEFORGE_API_HOST" .Values.apiHost) (list "LICENSEFORGE_BOOTSTRAP_ADMIN" .Values.bootstrapAdmin) (list "LICENSEFORGE_PLATFORM_MFA_POLICY" .Values.platformMFAPolicy) (list "LICENSEFORGE_LOGIN_BANNER" .Values.loginBanner) (list "LICENSEFORGE_SESSION_IDLE_TIMEOUT" $session.idleTimeout) (list "LICENSEFORGE_SESSION_MAX_AGE" $session.maxAge) }}
+            {{- if index . 1 }}
+            - name: {{ index . 0 }}
+              value: {{ index . 1 | quote }}
+            {{- end }}
+            {{- end }}
             {{- with $sys.host }}
             # SIEM export (ADR-0036): RFC 5424 over TLS, verification always on.
             - name: LICENSEFORGE_AUDIT_SYSLOG_ADDR
