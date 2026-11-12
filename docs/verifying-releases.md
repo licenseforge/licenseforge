@@ -67,7 +67,7 @@ gh attestation verify "licenseforge_${VERSION}_linux_amd64" --repo licenseforge/
   --cert-identity "$ID" --source-ref "refs/tags/v$VERSION" --deny-self-hosted-runners
 ```
 
-On macOS use `shasum -a 256 --ignore-missing -c SHA256SUMS`.
+On macOS use `shasum -a 256 --ignore-missing -c SHA256SUMS`. On Windows, step 1 and step 3 work the same in PowerShell with the `.exe` name (set `$VERSION`, `$ID` and `$ISSUER` as PowerShell variables). For step 2, compare `(Get-FileHash .\licenseforge_<version>_windows_amd64.exe -Algorithm SHA256).Hash.ToLower()` with that file's line in `SHA256SUMS`, or run the commands above in Git Bash.
 
 ## TypeScript SDK (npm)
 

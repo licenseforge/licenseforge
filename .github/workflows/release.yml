@@ -158,7 +158,9 @@ jobs:
               -o "spdx-json=out/sbom/image$suffix.spdx.json"
             merge "out/sbom/image$suffix.spdx.json"
           done
-          # Both binaries come from the same module graph; one SBOM covers them.
+          # One SBOM for every binary, from linux/amd64: the module graph is the same
+          # on every target except Linux-only github.com/prometheus/procfs, so for
+          # macOS and Windows it lists one module more than they hold.
           syft scan "file:out/bin/licenseforge_${VERSION}_linux_amd64" \
             --source-name licenseforge --source-version "$VERSION" \
             -o "spdx-json=out/bin/licenseforge_${VERSION}.spdx.json"
