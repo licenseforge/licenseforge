@@ -20,11 +20,11 @@ git clone https://github.com/licenseforge/licenseforge && cd licenseforge
 docker compose up --build
 ```
 
-1. Open http://localhost:8080 and sign in as **demo / demo** (a local Keycloak).
+1. Open http://localhost:8080 (`localhost`, not `127.0.0.1`: the sign-in cookies are per host) and sign in as **demo / demo** (a local Keycloak).
 2. You're the platform admin. **New tenant**, with `demo@licenseforge.local` as the owner, then open the invitation link and accept it.
 3. Follow [Getting started](docs/getting-started.md) from step 5: signing key, product, plan, customer, license. Point an SDK at `http://localhost:8080`; plain http is accepted for localhost only.
 
-`docker compose down -v` throws it all away. Every password and key in `compose.yaml` is a public dev value: never reuse them.
+After `docker compose restart keycloak`, also run `docker compose restart server` (it shares Keycloak's network). `docker compose down -v` throws it all away. Every password and key in `compose.yaml` is a public dev value: never reuse them.
 
 ## Planned components
 | Component | Status |

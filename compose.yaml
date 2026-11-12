@@ -48,7 +48,9 @@ services:
       LICENSEFORGE_OIDC_CLIENT_SECRET: dev-client-secret
       LICENSEFORGE_OIDC_REDIRECT_URL: http://localhost:8080/auth/callback
       LICENSEFORGE_BOOTSTRAP_ADMIN: demo@licenseforge.local # platform admin at first sign-in: create a tenant from the Tenants screen
-    network_mode: service:keycloak # its ports (8080 here) are published by the keycloak service
+    # Its ports (8080 here) are published by the keycloak service. After
+    # restarting keycloak, restart server too: it keeps the old namespace.
+    network_mode: service:keycloak
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
