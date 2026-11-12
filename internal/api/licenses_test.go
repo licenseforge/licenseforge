@@ -115,16 +115,20 @@ func TestLicenseEndpoints(t *testing.T) {
 		path string
 		o    opt
 	}{
-		"hidden":           {p + "/" + id, scoped},
-		"another tenant's": {Prefix + "/tenants/" + f.b.Slug + "/licenses/" + id, f.session(t, f.ownerB, true)},
-		"malformed":        {p + "/x", owner},
-		"hidden suspend":   {p + "/" + id + "/suspend", scoped},
+		"hidden":            {p + "/" + id, scoped},
+		"another tenant's":  {Prefix + "/tenants/" + f.b.Slug + "/licenses/" + id, f.session(t, f.ownerB, true)},
+		"malformed":         {p + "/x", owner},
+		"hidden suspend":    {p + "/" + id + "/suspend", scoped},
+		"hidden expires-at": {p + "/" + id + "/expires-at", scoped},
 	} {
-		method := "GET"
+		method, body := "GET", ""
 		if strings.HasSuffix(c.path, "/suspend") {
 			method = "POST"
 		}
-		if got := f.do(t, method, c.path, "", c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
+		if strings.HasSuffix(c.path, "/expires-at") {
+			method, body = "POST", `{"expires_at":"2100-01-01T00:00:00Z"}`
+		}
+		if got := f.do(t, method, c.path, body, c.o).problem(t, 404, "not_found"); !reflect.DeepEqual(got, missing) {
 			t.Errorf("%s: %v, missing %v", name, got, missing)
 		}
 	}

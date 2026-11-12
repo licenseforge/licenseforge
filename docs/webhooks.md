@@ -106,7 +106,7 @@ func verify(secret string, h http.Header, body []byte, now time.Time) bool {
 In the dashboard, or with the API (`POST /tenants/{tenant}/webhooks/{id}/…`):
 
 - **Disable** (`…/disable`): stop deliveries; events stay queued.
-- **Enable** (`…/enable`) a disabled endpoint: it resumes at the event it stopped on, with a fresh retry schedule.
+- **Enable** (`…/enable`) a disabled endpoint: it resumes at the event it stopped on, with a fresh retry schedule. An endpoint whose signing secret or URL can't be read (for example after a master key was lost) is refused with 409 `webhook_secret_unreadable` or `webhook_url_unreadable`: rotate the secret or update the URL first, since it would only be disabled again.
 - **Skip held event** (`…/skip-event` with `{"seq": N}`): pass over the one event your receiver will never accept; N is the endpoint's `delivery.next_seq`. The next one is sent.
 - **Skip to now** (`…/skip-to-now`): pass over everything not yet delivered.
 - **Rotate secret** (`…/rotate-secret`): a new secret, shown once; the previous one keeps signing alongside it for 24 hours. There is one previous secret: rotating again within 24 hours ends the older one at once. A secret LicenseForge can no longer read (its master key was retired) is replaced without keeping it.

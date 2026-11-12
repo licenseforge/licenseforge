@@ -17,3 +17,6 @@ node_modules/
 /e2e/env/.state/
 /web/test-results/
 /web/playwright-report/
+
+# Local scratch scripts (recordings, screenshots); never committed.
+/web/.demo/

@@ -106,6 +106,45 @@ describe("IssueDialog", () => {
   });
 });
 
+describe("IssueDialog while issuing", () => {
+  it("can't be closed until the answer is in, so the key shown once isn't lost", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method !== "POST") return plansOf(req) ?? json({ code: "internal" }, 500);
+        await held;
+        return json({ ...license, key: "LF-KEPT-KEY" }, 201);
+      }),
+    );
+    let closed = 0;
+    const { el, button } = await render(<IssueDialog tenant="acme" names={names} onClose={() => closed++} />);
+    const set = (name: string, value: string) => {
+      const f = el.querySelector<HTMLSelectElement>(`[name="${name}"]`)!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(f, value);
+      f.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    await act(async () => {
+      set("product_id", "prd_1");
+      set("customer_id", "cus_1");
+    });
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    await act(async () => set("plan_id", "pln_1"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(button("Cancel")!.disabled).toBe(true));
+    await act(async () => {
+      document.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })); // Esc
+      button("Cancel")!.click();
+    });
+    expect(closed).toBe(0);
+    await act(async () => release());
+    await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe("LF-KEPT-KEY"));
+    await act(async () => button("Close")!.click());
+    expect(closed).toBe(1);
+  });
+});
+
 describe("LicenseDialog", () => {
   function server() {
     const posts: string[] = [];
@@ -231,6 +270,36 @@ describe("LicenseDialog", () => {
     await vi.waitFor(() => expect(posts).toBe(1));
     await vi.waitFor(() => expect([button("Save maintenance")!.disabled, button("Cover every build")!.disabled]).toEqual([true, true]));
     await act(async () => release());
+  });
+
+  it("renews the expiry through the end of the picked day (UTC); a perpetual license has none to move", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method === "GET") return json({ items: [] });
+        const body = await req.json();
+        sent.push([new URL(req.url).pathname, body]);
+        return json({ ...license, expires_at: body.expires_at });
+      }),
+    );
+    function Holder() {
+      const [l, setL] = useState<License>({ ...license, expires_at: "2027-11-01T00:00:00Z" });
+      return <LicenseDialog tenant="acme" license={l} manage names={names} onClose={() => {}} onChanged={setL} />;
+    }
+    const { el, button } = await render(<Holder />);
+    const day = () => el.querySelector<HTMLInputElement>('section[aria-labelledby="renewal-title"] input[type="date"]')!;
+    expect([day().value, button("Save expiry")!.disabled]).toEqual(["2027-11-01", true]);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(day(), "2028-11-01");
+      day().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Save expiry")!.click());
+    await vi.waitFor(() => expect([day().value, button("Save expiry")!.disabled]).toEqual(["2028-11-01", true]));
+    expect(sent).toEqual([["/api/v1/tenants/acme/licenses/lic_1/expires-at", { expires_at: "2028-11-01T23:59:59Z" }]]);
+    act(() => root?.unmount());
+    const r = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    expect(r.button("Save expiry")).toBeUndefined(); // expires_at null: perpetual, or not started
   });
 
   it("shows the server's reason for a refused date on the field", async () => {

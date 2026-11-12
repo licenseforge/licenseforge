@@ -38,6 +38,11 @@ export async function setUpdatesUntil(tenant: string, id: string, until: string 
   return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/updates-until", { params: { path: { tenant, id } }, body: { updates_until: until } }));
 }
 
+/** Moves a license's expiry (ADR-0049): a renewal or a correction. */
+export async function setExpiresAt(tenant: string, id: string, at: string): Promise<License> {
+  return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/expires-at", { params: { path: { tenant, id } }, body: { expires_at: at } }));
+}
+
 /** A maintenance date picked in the dashboard covers builds through the end of that day, UTC. */
 export const endOfDayUTC = (day: string) => `${day}T23:59:59Z`;
 

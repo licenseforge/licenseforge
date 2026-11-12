@@ -12,7 +12,7 @@
 - **Bootstrap and grants** never involve a disabled or unknown user (target or granter) at the time of the check. Disabling a user is not under the admin-set lock, so a grant can race a concurrent disable (minor; the disabled user can't log in anyway).
 - Disabled admins still count: if every admin is disabled, the table isn't empty, bootstrap stays closed and recovery is the owner-login command.
 - **Erasure** (`licenseforge user erase`) removes the user's `platform_admins` row first and refuses while they are the last admin (hand over first), as it refuses a tenant's last owner.
-- **Recovery** when no admin can log in is an explicit operator action on the owner login (a `licenseforge admin` command, to be built with the CLI), never an empty table reopening bootstrap. The erase command (ADR-0029) is also still to be built; it must follow this ADR.
+- **Recovery** when no admin can log in is an explicit operator action on the owner login, never an empty table reopening bootstrap by itself: `licenseforge admin reset --yes` (built 2026-11-12) empties the admin set in one audited transaction, under the admin-set lock, so the next sign-in matching `LICENSEFORGE_BOOTSTRAP_ADMIN` becomes the platform admin. The erase command (ADR-0029) is also still to be built; it must follow this ADR.
 
 ## Consequences
 - Bootstrap fires once in an installation's life unless an operator deliberately empties the table with the owner login.
