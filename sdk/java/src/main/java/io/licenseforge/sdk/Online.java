@@ -723,7 +723,22 @@ public final class Online {
           // not a problem answer after all
         }
       }
-      if (a.status() >= 500) throw new OnlineException(OnlineException.Code.SERVER_ERROR, "status " + a.status(), a.status(), "", retryAfter);
+      if (a.status() >= 500) {
+        // Never a refusal (above), but its code and detail (e.g. no_signing_key) are worth reporting.
+        String detail = "status " + a.status();
+        String requestId = "";
+        if (type.equals("application/problem+json")) {
+          try {
+            if (Json.parseValue(a.body()) instanceof Map<?, ?> p) {
+              if (p.get("code") instanceof String code) detail += ": " + code + (p.get("detail") instanceof String d && !d.isEmpty() ? ": " + d : "");
+              if (p.get("request_id") instanceof String r) requestId = r;
+            }
+          } catch (Json.JsonException e) {
+            // not a problem answer after all
+          }
+        }
+        throw new OnlineException(OnlineException.Code.SERVER_ERROR, detail, a.status(), requestId, retryAfter);
+      }
       if (a.status() == 429) throw new OnlineException(OnlineException.Code.RATE_LIMITED, "status 429", a.status(), "", retryAfter);
       throw new OnlineException(OnlineException.Code.UNEXPECTED_STATUS, "status " + a.status(), a.status(), "", retryAfter);
     }
