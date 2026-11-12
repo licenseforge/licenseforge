@@ -102,13 +102,13 @@ Run it with `kubectl exec`, not as a Job: the invite token goes to your terminal
 
 | Value | Server setting | Default |
 |---|---|---|
-| `apiHost` | `LICENSEFORGE_API_HOST`: the host that serves the API alone (API tokens and license keys only there, sessions only elsewhere) | one host for both |
+| `apiHost` | `LICENSEFORGE_API_HOST`: the hostname (no scheme or path) that serves the API alone (API tokens and license keys only there, sessions only elsewhere) | one host for both |
 | `bootstrapAdmin` | `LICENSEFORGE_BOOTSTRAP_ADMIN`: the first platform admin (ADR-0031) | none |
 | `platformMFAPolicy` | `LICENSEFORGE_PLATFORM_MFA_POLICY`: `none`, `mfa` or `phishing_resistant` for platform admins' sessions (ADR-0038). Set `mfa` or stronger in production | `none` |
 | `loginBanner` | `LICENSEFORGE_LOGIN_BANNER`: shown before login (AC-8) | none |
 | `session.idleTimeout`, `session.maxAge` | `LICENSEFORGE_SESSION_IDLE_TIMEOUT`, `_MAX_AGE` (AC-12) | `1h`, `12h` |
 
-The [Secure Configuration Guide](../../../compliance/secure-configuration-guide.md) describes each. Your customers' apps call `https://<host>/api/v1/activation/...` (or `apiHost`'s): expose it through your ingress with TLS.
+The [Secure Configuration Guide](../../../compliance/secure-configuration-guide.md) describes each. Your customers' apps call `https://<host>/api/v1/activation/...`, on `apiHost` when it's set: expose it through your ingress with TLS. Move these settings out of `extraEnv` if you set them there before: `extraEnv` is rendered last, so its duplicate would win.
 
 ## Notes
 

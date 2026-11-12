@@ -325,7 +325,10 @@ func TestPlatformSettings(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
 		}
 	}
-	if _, err := exec.Command("helm", "template", "t", "licenseforge", "--set", "secrets.server=s", "--set", "secrets.migrate=m", "--set", "platformMFAPolicy=strong").Output(); err == nil {
-		t.Error("platformMFAPolicy=strong rendered, want the schema to refuse it")
+	for k, v := range map[string]string{"platformMFAPolicy": "strong", "apiHost": "https://api.example.com", "session.idleTimeout": "30"} {
+		out, err := exec.Command("helm", "template", "t", "licenseforge", "--set", "secrets.server=s", "--set", "secrets.migrate=m", "--set-string", k+"="+v).CombinedOutput()
+		if field := k[strings.LastIndex(k, ".")+1:]; err == nil || !strings.Contains(string(out), field) {
+			t.Errorf("%s=%s: %v %s, want the schema to refuse it", k, v, err, out)
+		}
 	}
 }

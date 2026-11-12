@@ -26,16 +26,16 @@
       }
     },
     "trustedProxies": {"type": "string"},
-    "apiHost": {"type": "string"},
+    "apiHost": {"type": "string", "pattern": "^[^/:]*$"},
     "bootstrapAdmin": {"type": "string"},
     "platformMFAPolicy": {"type": "string", "enum": ["", "none", "mfa", "phishing_resistant"]},
-    "loginBanner": {"type": "string", "maxLength": 4096},
+    "loginBanner": {"type": "string"},
     "session": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "idleTimeout": {"type": "string"},
-        "maxAge": {"type": "string"}
+        "idleTimeout": {"type": "string", "pattern": "^(([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)?$"},
+        "maxAge": {"type": "string", "pattern": "^(([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)?$"}
       }
     },
     "databaseAllowPlaintext": {"type": "boolean"},

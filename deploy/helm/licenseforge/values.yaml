@@ -47,7 +47,8 @@ trustedProxies: ""
 
 # The host that serves the API alone (api.example.com), when you split it
 # from the dashboard's: API tokens and license keys are accepted only there,
-# sessions only on the other hosts. Empty: one host serves both.
+# sessions only on the other hosts. A bare hostname: no scheme, port or
+# path. Empty: one host serves both.
 apiHost: ""
 
 # The first platform admin (ADR-0031): "issuer|subject", or an email the IdP
@@ -58,7 +59,9 @@ bootstrapAdmin: ""
 # What platform admins' sessions need on the platform routes (ADR-0038):
 # none (empty: the default), mfa or phishing_resistant.
 platformMFAPolicy: ""
-# System use notification shown before login (AC-8), plain text up to 4 KB.
+# System use notification shown before login (AC-8), plain text up to 4 KB
+# (the server checks it at start: too long or with control characters, the
+# new pods don't start).
 loginBanner: ""
 # Dashboard sessions (AC-12), as Go durations. Empty: the server's defaults.
 session:
