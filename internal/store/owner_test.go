@@ -46,6 +46,15 @@ func TestOwnerResetPlatformAdmins(t *testing.T) {
 	if ok, err := f.d.BootstrapPlatformAdmin(ctx, f.ownerA, noAudit); ok || err != nil {
 		t.Errorf("second bootstrap: %v %v", ok, err)
 	}
+	// A reset never hands the role to a disabled user.
+	if _, err := o.ResetPlatformAdmins(ctx, func(*ent.Tx, []string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	f.owner(t, `UPDATE users SET disabled_at = now() WHERE id = $1`, f.ownerA)
+	t.Cleanup(func() { f.owner(t, `UPDATE users SET disabled_at = NULL WHERE id = $1`, f.ownerA) })
+	if ok, err := f.d.BootstrapPlatformAdmin(ctx, f.ownerA, noAudit); ok || err != nil || f.admins(t) != 0 {
+		t.Errorf("bootstrap of a disabled user after reset: %v %v", ok, err)
+	}
 }
 
 // A sink no longer exported stops holding retention back once removed; an

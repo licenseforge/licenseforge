@@ -224,5 +224,8 @@ spec:
 ## Recovery
 These commands are the way out of states the product can't leave by itself. They run by hand on the owner login, like `migrate`: set `LICENSEFORGE_OWNER_DATABASE_URL` (or `_FILE`) in a one-off pod or shell, never in the server's environment. Each is audited on the platform chain as the system, `via: cli`.
 
-- **No platform admin can sign in** (ADR-0031): the admin left, or their IdP account is gone. Point `bootstrapAdmin` (`LICENSEFORGE_BOOTSTRAP_ADMIN`) at a person who can sign in, then run `licenseforge admin reset --yes`. It removes every platform admin; that person's next sign-in becomes the platform admin.
-- **A SIEM sink you no longer export to** (ADR-0036): remove it from `audit.export`, roll the pods, then run `licenseforge audit remove-sink --name NAME`. Until then audit retention waits for the sink and prunes nothing. Its entries not yet exported become prunable. A server still configured with the sink registers it again at start.
+- **No platform admin can sign in** (ADR-0031): the admin left, or their IdP account is gone.
+  1. Point `bootstrapAdmin` (`LICENSEFORGE_BOOTSTRAP_ADMIN`) at a person who can sign in, and roll the pods so every server has the new value. Until then, a server could still bootstrap the old value: whoever now holds that email at your IdP.
+  2. Run `licenseforge admin reset --yes`. It removes every platform admin.
+  3. That person's next sign-in becomes the platform admin.
+- **A SIEM sink you no longer export to** (ADR-0036): remove it from `audit.export`, roll the pods, then run `licenseforge audit remove-sink --name NAME`. Until then audit retention waits for the sink and prunes nothing. Its entries not yet exported become prunable. A server still configured with the sink registers it again at start; one still running with it only logs export errors until it is restarted.

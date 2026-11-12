@@ -37,7 +37,7 @@ func adminReset(ctx context.Context, args []string, out io.Writer) error {
 	removed, err := o.ResetPlatformAdmins(ctx, func(tx *ent.Tx, removed []string) error {
 		_, err := audit.Record(ctx, tx, audit.PlatformTenant, audit.Event{ActorType: auditevent.ActorTypeSystem,
 			Action: "platform_admin.reset", ObjectType: "platform_admin", Outcome: auditevent.OutcomeSuccess,
-			Details: map[string]any{"via": "cli", "removed_user_ids": removed}})
+			Details: withSession(ctx, tx, map[string]any{"via": "cli", "removed_user_ids": append([]string{}, removed...)})})
 		return err
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func auditRemoveSink(ctx context.Context, args []string, out io.Writer) error {
 	err = o.RemoveExportSink(ctx, *name, func(tx *ent.Tx, cursors int) error {
 		_, err := audit.Record(ctx, tx, audit.PlatformTenant, audit.Event{ActorType: auditevent.ActorTypeSystem,
 			Action: "audit.export_sink_remove", ObjectType: "audit_export_sink", ObjectID: *name, Outcome: auditevent.OutcomeSuccess,
-			Details: map[string]any{"via": "cli", "cursors_dropped": cursors}})
+			Details: withSession(ctx, tx, map[string]any{"via": "cli", "cursors_dropped": cursors})})
 		return err
 	})
 	if errors.Is(err, store.ErrNoSuchSink) {
@@ -85,4 +85,24 @@ func openOwner(ctx context.Context) (*store.Owner, error) {
 		return nil, err
 	}
 	return store.OpenOwner(ctx, dsn)
+}
+
+// withSession adds who ran the command, as the database sees it: the owner
+// login can be shared, so the entry names the session's login and client
+// address (AU-3), next to the cluster's own exec audit.
+func withSession(ctx context.Context, tx *ent.Tx, d map[string]any) map[string]any {
+	var login string
+	var addr *string
+	rows, err := tx.QueryContext(ctx, `SELECT session_user, host(inet_client_addr())`)
+	if err != nil {
+		return d
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() && rows.Scan(&login, &addr) == nil {
+		d["db_login"] = login
+		if addr != nil {
+			d["db_client_addr"] = *addr
+		}
+	}
+	return d
 }

@@ -48,6 +48,11 @@ func TestRecoveryCommands(t *testing.T) {
 	if count("platform_admin.reset") != resets+1 {
 		t.Error("reset not audited")
 	}
+	var details string
+	if err := owner.QueryRowContext(ctx, `SELECT details::text FROM audit_events WHERE tenant_id = $1 AND action = 'platform_admin.reset' ORDER BY seq DESC LIMIT 1`,
+		audit.PlatformTenant).Scan(&details); err != nil || !strings.Contains(details, `"db_login"`) || !strings.Contains(details, `"removed_user_ids":[`) {
+		t.Errorf("reset details %s, %v", details, err)
+	}
 	if _, err := owner.ExecContext(ctx, `INSERT INTO audit_export_sinks (id, created_at) VALUES ('cli-siem', now())`); err != nil {
 		t.Fatal(err)
 	}
