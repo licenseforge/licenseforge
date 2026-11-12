@@ -2118,6 +2118,9 @@ type ServerInterface interface {
 	// SetLicenseExpiresAt Move a license's expiry (renew or correct it).
 	// (POST /tenants/{tenant}/licenses/{id}/expires-at)
 	SetLicenseExpiresAt(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
+	// ExportLicenseFile The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+	// (POST /tenants/{tenant}/licenses/{id}/file)
+	ExportLicenseFile(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -3582,6 +3585,41 @@ func (siw *ServerInterfaceWrapper) SetLicenseExpiresAt(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetLicenseExpiresAt(w, r, tenant, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportLicenseFile operation middleware
+func (siw *ServerInterfaceWrapper) ExportLicenseFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportLicenseFile(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5170,6 +5208,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/updates-until", wrapper.SetLicenseUpdatesUntil)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/file", wrapper.ExportLicenseFile)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/expires-at", wrapper.SetLicenseExpiresAt)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
@@ -10209,6 +10248,123 @@ func (response SetLicenseExpiresAt422ApplicationProblemPlusJSONResponse) VisitSe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFileRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type ExportLicenseFileResponseObject interface {
+	VisitExportLicenseFileResponse(w http.ResponseWriter) error
+}
+
+type ExportLicenseFile201JSONResponse struct {
+	// LicenseFile The signed lf1 license file (armored).
+	LicenseFile string `json:"license_file"`
+}
+
+func (response ExportLicenseFile201JSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ExportLicenseFile401ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile403ResponseHeaders
+}
+
+func (response ExportLicenseFile403ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile409ResponseHeaders
+}
+
+func (response ExportLicenseFile409ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile503ResponseHeaders
+}
+
+func (response ExportLicenseFile503ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -15334,6 +15490,9 @@ type StrictServerInterface interface {
 	// SetLicenseExpiresAt Move a license's expiry (renew or correct it).
 	// (POST /tenants/{tenant}/licenses/{id}/expires-at)
 	SetLicenseExpiresAt(ctx context.Context, request SetLicenseExpiresAtRequestObject) (SetLicenseExpiresAtResponseObject, error)
+	// ExportLicenseFile The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+	// (POST /tenants/{tenant}/licenses/{id}/file)
+	ExportLicenseFile(ctx context.Context, request ExportLicenseFileRequestObject) (ExportLicenseFileResponseObject, error)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(ctx context.Context, request ResetRehostsRequestObject) (ResetRehostsResponseObject, error)
@@ -16499,6 +16658,33 @@ func (sh *strictHandler) SetLicenseExpiresAt(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetLicenseExpiresAtResponseObject); ok {
 		if err := validResponse.VisitSetLicenseExpiresAtResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportLicenseFile operation middleware
+func (sh *strictHandler) ExportLicenseFile(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request ExportLicenseFileRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportLicenseFile(ctx, request.(ExportLicenseFileRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportLicenseFile")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportLicenseFileResponseObject); ok {
+		if err := validResponse.VisitExportLicenseFileResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

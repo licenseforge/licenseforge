@@ -241,3 +241,21 @@ func TestOfflineJourney(t *testing.T) {
 		}
 	}
 }
+
+// A site license (a plan that binds nothing): the vendor exports its signed
+// file through the API, and the customer's app verifies it offline with the
+// trusted keys alone: no activation, no fingerprint, no server. Activation
+// refuses it.
+func TestSiteLicenseFile(t *testing.T) {
+	e := loadEnv(t)
+	b, tn := owner(t, e)
+	product, lic, _ := newLicense(t, b, tn, map[string]any{"bind_type": "none", "offline_allowed": true, "max_activations": nil})
+	var out struct {
+		LicenseFile string `json:"license_file"`
+	}
+	b.do("POST", "/api/v1/tenants/"+tn.Slug+"/licenses/"+lic.ID+"/file", nil, 201, &out)
+	c, status, err := licensefile.Open(out.LicenseFile, trustedKeys(t, b, tn.Slug), licensefile.CheckOptions{Now: time.Now(), Product: product.Slug})
+	if err != nil || status != licensefile.StatusValid || c.LicenseID != lic.ID || c.Binding.Type != licensefile.BindNone || !c.Entitlements.HasFeature("sso") {
+		t.Fatalf("the site license file: %+v %v %v", c, status, err)
+	}
+}

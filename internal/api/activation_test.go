@@ -67,6 +67,9 @@ func actSetup(t *testing.T) *actFixture {
 			"pro":     func(c *ent.PlanCreate) { c.SetDurationMonths(12).SetMaxActivations(2).SetLeaseSeconds(3600) },
 			"cluster": func(c *ent.PlanCreate) { c.SetBindType(plan.BindTypeCluster) },
 			"offline": func(c *ent.PlanCreate) { c.SetMaxActivations(1).SetOfflineAllowed(true).SetMaxOfflineSeconds(86400) },
+			"site": func(c *ent.PlanCreate) {
+				c.SetDurationMonths(12).SetBindType(plan.BindTypeNone).SetOfflineAllowed(true)
+			},
 		} {
 			pc := tx.Plan.Create().SetTenantID(f.a.ID).SetProductID(f.prodA).SetSlug(slug).SetName(slug)
 			c(pc)
@@ -1251,4 +1254,34 @@ func TestActivateWithoutSigningKey(t *testing.T) {
 		opts := append([]opt{licenseAuth(is.Key)}, idem...)
 		a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), opts...).problem(t, 503, "no_signing_key")
 	}
+}
+
+// A site license's file over the API (issue.OfflineFile): it verifies
+// offline with the tenant's keys and no fingerprint. A machine-bound
+// license is not_issuable, and a viewer (no activation:offline) gets none.
+func TestExportLicenseFile(t *testing.T) {
+	a := actSetup(t)
+	site, bound := a.issue(t, "site"), a.issue(t, "pro")
+	path := func(id string) string { return Prefix + "/tenants/" + a.a.Slug + "/licenses/" + id + "/file" }
+	r := a.do(t, "POST", path(site.License.ID), "", a.session(t, a.adminA, true))
+	if r.code != 201 {
+		t.Fatalf("export: %d %s", r.code, r.raw)
+	}
+	file, _ := r.body["license_file"].(string)
+	kid, err := a.keys.Active(context.Background(), a.a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk, err := a.keys.Public(context.Background(), a.a.ID, kid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := licensefile.Open(file, licensefile.KeySet{{KID: pk.KID, Alg: licensefile.AlgEd25519, Key: pk.Key}}, licensefile.CheckOptions{Now: time.Now(), Product: "db"})
+	if err != nil || c.LicenseID != site.License.ID || c.Binding.Type != licensefile.BindNone {
+		t.Fatalf("the file: %+v %v", c, err)
+	}
+	a.do(t, "POST", path(bound.License.ID), "", a.session(t, a.adminA, true)).problem(t, 409, "not_issuable")
+	a.do(t, "POST", path(site.License.ID), "", a.session(t, a.viewerA, true)).problem(t, 403, "forbidden")
+	a.do(t, "POST", path(site.License.ID), "", a.session(t, a.adminA, false)).problem(t, 403, "csrf_failed")
+	a.do(t, "POST", path("lic_"+strings.Repeat("a", 26)), "", a.session(t, a.adminA, true)).problem(t, 403, "forbidden") // unknown: no oracle
 }

@@ -475,6 +475,41 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /tenants/{tenant}/licenses/{id}/file:
+    parameters:
+      - $ref: "#/components/parameters/Tenant"
+      - $ref: "#/components/parameters/LicenseId"
+    post:
+      operationId: exportLicenseFile
+      summary: The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+      description: |
+        For a license whose plan binds nothing (`bind_type: none`) and allows
+        offline use; the app verifies it offline with the trusted key set
+        (the Go SDK's `licensefile.Open`). Machine- and cluster-bound
+        licenses get their file through an offline activation instead.
+        Needs activation:offline on the license's product. The file is valid
+        until the license's expiry plus grace and can't be revoked once
+        handed out; each export is audited (`license.offline_file`).
+        `not_issuable` (409): not a site license, not active, expired, or
+        offline use not allowed. `no_signing_key` (503). An unknown or
+        malformed ID, or another tenant's license, answers 403 `forbidden`
+        like a missing right, so the route reveals nothing. Each call is a
+        new file (its own `iat`) and a new audit entry.
+      responses:
+        "201":
+          description: The signed license file.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [license_file]
+                properties:
+                  license_file: { type: string, description: "The signed lf1 license file (armored)." }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /tenants/{tenant}/licenses/{id}/expires-at:
     parameters:
       - $ref: "#/components/parameters/Tenant"

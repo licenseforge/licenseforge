@@ -339,6 +339,32 @@ describe("offline (ADR-0043)", () => {
   };
   const file = "-----BEGIN LICENSEFORGE LICENSE-----\nlf1.x\n-----END LICENSEFORGE LICENSE-----\n";
 
+  it("exports a site license's file, and offers it only on a plan that binds nothing", async () => {
+    const posts: string[] = [];
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:site"), revokeObjectURL: vi.fn() }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const path = new URL(req.url).pathname;
+        if (path.endsWith("/plans")) return json({ items: [plan("pln_1", "Pro"), { ...plan("pln_site", "Site"), bind_type: "none", offline_allowed: true }] });
+        if (req.method === "GET") return json({ items: [] });
+        posts.push(path);
+        return json({ license_file: file }, 201);
+      }),
+    );
+    const site = { ...license, id: "lic_site", plan_id: "pln_site", plan_slug: "site" };
+    const { el, button } = await render(<LicenseDialog tenant="acme" license={site} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await vi.waitFor(() => expect(button("Export license file")).toBeDefined());
+    await act(async () => button("Export license file")!.click());
+    await vi.waitFor(() => expect(el.querySelector<HTMLAnchorElement>('a[download="license.lic"]')?.href).toBe("blob:site"));
+    expect(posts).toEqual(["/api/v1/tenants/acme/licenses/lic_site/file"]);
+    act(() => root?.unmount());
+    const machine = await render(<LicenseDialog tenant="acme" license={license} manage names={names} onClose={() => {}} onChanged={() => {}} />);
+    await vi.waitFor(() => expect(machine.button("Offline activation")).toBeDefined());
+    await new Promise((r) => setTimeout(r, 20)); // the plans have loaded
+    expect(machine.button("Export license file")).toBeUndefined();
+  });
+
   it("turns a request into a downloadable file, retrying with the same Idempotency-Key, and keeps the request nowhere", async () => {
     const posts: { path: string; key: string | null; body: unknown }[] = [];
     let attempt = 0;

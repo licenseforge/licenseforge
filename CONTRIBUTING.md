@@ -20,7 +20,7 @@ Without `LICENSEFORGE_TEST_DATABASE_URL`, a plain `go test` skips the database t
 `make run` runs the server directly; it needs the `LICENSEFORGE_*` variables listed in `cmd/licenseforge/main.go`.
 
 ## End-to-end tests
-Journeys through the real chart, server, identity provider and Go SDK (ADR-0041). They run locally on minikube and aren't part of CI yet. A PR that changes a journey's path (catalog, issuing, activation, login, roles) runs them and says so.
+Journeys through the real chart, server, identity provider and Go SDK (ADR-0041). They run on minikube, locally and in CI (`.github/workflows/e2e.yml`: nightly on main, and on PRs that change `e2e/`, `deploy/`, the Dockerfile or the browser tests). A PR that changes a journey's path (catalog, issuing, activation, login, roles) runs them locally and says so.
 ```
 minikube start --driver=docker --cpus=4 --memory=6g --addons=ingress
 e2e/env/up.sh   # deploys this checkout (see e2e/env/README.md)
