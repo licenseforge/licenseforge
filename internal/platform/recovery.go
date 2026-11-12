@@ -2,7 +2,9 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"licenseforge.io/licenseforge/internal/audit"
 	"licenseforge.io/licenseforge/internal/authz"
@@ -12,7 +14,6 @@ import (
 	"licenseforge.io/licenseforge/internal/store/ent/membership"
 	"licenseforge.io/licenseforge/internal/store/ent/membershipproduct"
 	"licenseforge.io/licenseforge/internal/store/ent/tenant"
-	"licenseforge.io/licenseforge/internal/store/ent/user"
 )
 
 // Break-glass recovery for a tenant nobody inside can fix (ADR-0042 and
@@ -23,10 +24,12 @@ import (
 // Recovered is what RecoverOwner did: promoted an existing member, or
 // invited a new owner (Token shown once).
 type Recovered struct {
-	Tenant     *ent.Tenant
-	Promoted   *ent.Membership
-	Invitation *ent.Invitation
-	Token      string
+	Tenant        *ent.Tenant
+	Promoted      *ent.Membership
+	PromotedEmail string // and issuer: who got the role, for the operator to check
+	PromotedIss   string
+	Invitation    *ent.Invitation
+	Token         string
 }
 
 // RecoverOwner gives a tenant whose owners can't sign in any more an owner
@@ -53,18 +56,31 @@ func (s Service) RecoverOwner(ctx context.Context, a Actor, ref, email string) (
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.owner_invitation:' || $1, 0))`, r.Tenant.ID); err != nil {
 			return err
 		}
-		members, err := tx.Membership.Query().Where(membership.TenantID(r.Tenant.ID),
-			membership.HasUserWith(user.EmailEqualFold(email), user.EmailVerified(true), user.DisabledAtIsNil())).ForUpdate().All(ctx)
+		// Every member whose email an invitation for this address would match
+		// (acceptance's own rule: NFC, lowercase), so none is missed.
+		cands, err := similarMembers(ctx, tx, r.Tenant.ID, email)
 		if err != nil {
 			return err
 		}
+		conflict := func(msg string) error { return &InvalidError{Field: "/", Message: msg, Conflict: true} }
 		switch {
-		case len(members) > 1:
-			return &InvalidError{Field: "/email", Message: "several members have this verified email", Conflict: true}
-		case len(members) == 1 && members[0].Role == membership.RoleOwner:
-			return &InvalidError{Field: "/email", Message: "this member is already an owner", Conflict: true}
-		case len(members) == 1:
-			m := members[0]
+		case len(cands) > 1:
+			return conflict("several members have this email")
+		case len(cands) == 1 && (!cands[0].verified || cands[0].disabled):
+			return conflict("a member has this email, but it isn't verified or the user is disabled: they can't accept an invitation either")
+		case len(cands) == 1 && !asciiFold(cands[0].email, email):
+			// The highest privilege, granted at once: like the bootstrap
+			// admin (identity.BootstrapMatches), no Unicode look-alike folding.
+			return conflict("a member's email matches this one only after Unicode folding: change their role by hand, checking who they are")
+		case len(cands) == 1 && cands[0].m.Role == membership.RoleOwner:
+			return conflict("this member is already an owner")
+		case len(cands) == 1:
+			m := cands[0].m
+			r.PromotedEmail, r.PromotedIss = cands[0].email, cands[0].issuer
+			products, err := tx.MembershipProduct.Query().Where(membershipproduct.MembershipID(m.ID)).Count(ctx)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.MembershipProduct.Delete().Where(membershipproduct.MembershipID(m.ID)).Exec(ctx); err != nil {
 				return err
 			}
@@ -73,7 +89,10 @@ func (s Service) RecoverOwner(ctx context.Context, a Actor, ref, email string) (
 			}
 			up := a.event("member.update", "membership")
 			up.ObjectID, up.Outcome = m.ID, auditevent.OutcomeSuccess
-			up.Details["from"], up.Details["to"], up.Details["recovery"] = string(m.Role), "owner", true
+			for k, v := range map[string]any{"from_role": string(m.Role), "from_scope_all": m.ScopeAll, "from_products": products,
+				"role": "owner", "scope_all": true, "products": 0, "tokens_revoked": 0, "invitations_revoked": 0, "recovery": true} {
+				up.Details[k] = v // members.Update's keys
+			}
 			if _, err := audit.Record(ctx, tx, r.Tenant.ID, up); err != nil {
 				return err
 			}
@@ -111,12 +130,17 @@ func (s Service) LowerMFAPolicy(ctx context.Context, a Actor, ref string, policy
 			return err
 		}
 		ev.ObjectID = t.ID
+		// The owner-change lock first, as ReinviteOwner and RecoverOwner take
+		// it: one lock order for the tenant row and the audit chains.
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('licenseforge.owner_invitation:' || $1, 0))`, t.ID); err != nil {
+			return err
+		}
 		if t, err = tx.Tenant.Query().Where(tenant.ID(t.ID)).ForUpdate().Only(ctx); err != nil {
 			return err
 		}
 		from := authz.Assurance(t.MfaPolicy)
 		if !from.Meets(policy) || from == policy {
-			return &InvalidError{Field: "/mfa_policy", Message: "can only lower the policy (it is " + string(from) + ")", Conflict: true}
+			return &InvalidError{Field: "/", Message: "can only lower the policy (it is " + string(from) + ")", Conflict: true}
 		}
 		if t, err = tx.Tenant.UpdateOne(t).SetMfaPolicy(tenant.MfaPolicy(policy)).Save(ctx); err != nil {
 			return err
@@ -145,4 +169,58 @@ func findTenant(ctx context.Context, tx *ent.Tx, ref string) (*ent.Tenant, error
 		return nil, ErrNotFound
 	}
 	return t, err
+}
+
+type candidate struct {
+	m                  *ent.Membership
+	email, issuer      string
+	verified, disabled bool
+}
+
+// similarMembers returns tenantID's members whose email equals email after
+// NFC normalization and lowercasing, locked for the change.
+func similarMembers(ctx context.Context, tx *ent.Tx, tenantID, email string) ([]candidate, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT m.id, u.email, u.issuer, u.email_verified, u.disabled_at IS NOT NULL
+		FROM memberships m JOIN users u ON u.id = m.user_id
+		WHERE m.tenant_id = $1 AND u.email IS NOT NULL AND lower(normalize(u.email, NFC)) = lower(normalize($2, NFC))
+		ORDER BY m.id FOR UPDATE OF m`, tenantID, strings.TrimSpace(email))
+	if err != nil {
+		return nil, err
+	}
+	var out []candidate
+	var ids []string
+	for rows.Next() {
+		var c candidate
+		var id string
+		if err := rows.Scan(&id, &c.email, &c.issuer, &c.verified, &c.disabled); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids, out = append(ids, id), append(out, c)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	for i, id := range ids {
+		m, err := tx.Membership.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out[i].m = m
+	}
+	return out, nil
+}
+
+// asciiFold is identity.BootstrapMatches' email rule: both ASCII, equal but
+// for ASCII case.
+func asciiFold(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	for _, s := range []string{a, b} {
+		for i := 0; i < len(s); i++ {
+			if s[i] >= utf8.RuneSelf {
+				return false
+			}
+		}
+	}
+	return strings.EqualFold(a, b)
 }

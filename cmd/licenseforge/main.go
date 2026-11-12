@@ -747,7 +747,7 @@ func tenantRecoverOwner(ctx context.Context, args []string, out io.Writer) error
 		return fmt.Errorf("tenant recover-owner: %w", err)
 	}
 	if r.Promoted != nil {
-		_, err = fmt.Fprintf(out, "tenant %s (%s): member %s is now an owner\n", r.Tenant.Slug, r.Tenant.ID, r.Promoted.ID)
+		_, err = fmt.Fprintf(out, "tenant %s (%s): member %s (%s, signed in through %s) is now an owner\n", r.Tenant.Slug, r.Tenant.ID, r.Promoted.ID, r.PromotedEmail, r.PromotedIss)
 		return err
 	}
 	_, err = fmt.Fprintf(out, "tenant %s (%s): no member has that email\nowner invite for %s, valid until %s, shown once:\n  /invite#token=%s\n",

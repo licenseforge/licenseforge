@@ -28,6 +28,8 @@ A tenant can't be created through the product: no route, no command, no screen. 
   - `licenseforge tenant recover-owner --tenant T --email E` runs on the platform login only. An API caller is refused, so it needs the operator's cluster access, like `tenant create`.
   - If one member has E as a verified email (an admin left behind, say), that member becomes an owner of every product. If no member has it, an owner invitation for E is created and printed once.
   - Several members with E, or a member who is already an owner, is a conflict.
+  - Only an exact ASCII email match is promoted, as for the bootstrap admin. A member whose email matches only after Unicode folding, or isn't verified, or is disabled, is refused rather than invited, since they couldn't accept an invitation either.
+  - The command doesn't check that the owners really can't sign in: it is the operator's power, and the tenant's audit log records it.
   - It is audited on the tenant's own chain (`member.update` or `invitation.create`, by the system, `via: cli`) and on the platform chain (`tenant.owner_recovery`), so the tenant sees it.
   - This is the one exception to "platform admins never add members to a tenant that has one". It is an operator's act, not a dashboard feature. The "re-enable that user" above has no command, since users can't be disabled through the product yet.
 - The platform tenant list says whether a tenant has members (`has_members`: no count, roles or identities; the 409 above reveals the same), so the dashboard offers the re-issue only where it can work.
