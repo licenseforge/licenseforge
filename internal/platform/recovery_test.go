@@ -74,11 +74,17 @@ func TestRecoverOwnerRefusals(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	disabled := f.user(t, "disabled@amb.example")
+	f.member(t, c.Tenant.ID, disabled, "disabled@amb.example", invitation.RoleAdmin)
+	if err := f.db.WithPlatform(ctx, func(tx *ent.Tx) error { return tx.User.UpdateOneID(disabled).SetDisabledAt(time.Now()).Exec(ctx) }); err != nil {
+		t.Fatal(err)
+	}
 	kelvin := f.user(t, "\u212Aate@amb.example") // the Kelvin sign: NFC makes it K
 	f.member(t, c.Tenant.ID, kelvin, "\u212Aate@amb.example", invitation.RoleAdmin)
 	for email, want := range map[string]string{
 		"twin@amb.example":       "several members",
 		"unverified@amb.example": "isn't verified",
+		"disabled@amb.example":   "is disabled",
 		"kate@amb.example":       "Unicode folding",
 		"first@amb.example":      "already an owner",
 	} {
@@ -93,6 +99,12 @@ func TestRecoverOwnerRefusals(t *testing.T) {
 	}
 	if f.role(t, c.Tenant.ID, kelvin) != membership.RoleAdmin || f.role(t, c.Tenant.ID, unverified) != membership.RoleAdmin {
 		t.Error("a refused member changed")
+	}
+	// A non-ASCII email typed exactly as stored is no look-alike: promoted.
+	jose := f.user(t, "jos\u00e9@amb.example")
+	f.member(t, c.Tenant.ID, jose, "jos\u00e9@amb.example", invitation.RoleAdmin)
+	if r, err := f.s.RecoverOwner(ctx, Actor{}, slug, "jos\u00e9@amb.example"); err != nil || r.Promoted == nil || f.role(t, c.Tenant.ID, jose) != membership.RoleOwner {
+		t.Errorf("exact non-ASCII email: %+v, %v", r, err)
 	}
 	if _, err := f.s.RecoverOwner(ctx, Actor{}, audit.PlatformTenant, "x@amb.example"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the platform tenant: %v", err)

@@ -68,10 +68,11 @@ func (s Service) RecoverOwner(ctx context.Context, a Actor, ref, email string) (
 			return conflict("several members have this email")
 		case len(cands) == 1 && (!cands[0].verified || cands[0].disabled):
 			return conflict("a member has this email, but it isn't verified or the user is disabled: they can't accept an invitation either")
-		case len(cands) == 1 && !asciiFold(cands[0].email, email):
+		case len(cands) == 1 && !asciiFold(cands[0].email, email) && strings.TrimSpace(cands[0].email) != strings.TrimSpace(email):
 			// The highest privilege, granted at once: like the bootstrap
-			// admin (identity.BootstrapMatches), no Unicode look-alike folding.
-			return conflict("a member's email matches this one only after Unicode folding: change their role by hand, checking who they are")
+			// admin (identity.BootstrapMatches), no Unicode look-alike
+			// folding; a non-ASCII email must be typed exactly as stored.
+			return conflict("a member's email matches this one only after Unicode folding: pass their email exactly as they signed in with it, or use another address")
 		case len(cands) == 1 && cands[0].m.Role == membership.RoleOwner:
 			return conflict("this member is already an owner")
 		case len(cands) == 1:
