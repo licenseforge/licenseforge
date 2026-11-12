@@ -12,5 +12,4 @@ oidc:
   egress: {port: 443, to: []}
 extraCA: {secretName: local-ca}   # Keycloak's certificate is from the local CA
 databaseAllowPlaintext: true   # the in-cluster test database has no TLS
-extraEnv:
-  - {name: LICENSEFORGE_BOOTSTRAP_ADMIN, value: admin@licenseforge.local}
+bootstrapAdmin: admin@licenseforge.local

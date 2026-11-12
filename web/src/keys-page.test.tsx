@@ -229,3 +229,9 @@ it("a live tenant has no test-mode banner or note", async () => {
   expect(el.textContent).not.toContain("never in release builds");
   expect([...el.querySelectorAll("header option")].map((o) => o.textContent)).toEqual(["Acme"]);
 });
+
+it("shows the tenant ID the SDKs need, to every member", async () => {
+  const { el } = await open("viewer", [key()], undefined, false);
+  await vi.waitFor(() => expect(el.textContent).toContain("Tenant ID"));
+  expect(el.querySelector("code")?.textContent).toBe("tnt_1");
+});

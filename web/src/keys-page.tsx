@@ -45,6 +45,11 @@ export function KeysPage() {
         </div>
         {manage && list.isSuccess && !pending && <Button onClick={() => setConfirm({ action: "create" })}>{t("keys.new")}</Button>}
       </div>
+      {caller && (
+        <p className="mt-4 text-sm">
+          {t("keys.tenantId")} <code className="select-all rounded border px-1 font-mono text-xs">{caller.id}</code>
+        </p>
+      )}
       {caller?.test && <p className="mt-4 text-sm font-medium">{t("keys.testTenant")}</p>}
       {!canReadKeys(caller) && caller && <p className="mt-6 text-sm">{t("keys.scoped")}</p>}
       {list.isError && (

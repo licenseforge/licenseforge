@@ -5416,6 +5416,30 @@ func (response Activate429ApplicationProblemPlusJSONResponse) VisitActivateRespo
 	return err
 }
 
+type Activate503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type Activate503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers Activate503ResponseHeaders
+}
+
+func (response Activate503ApplicationProblemPlusJSONResponse) VisitActivateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeactivateRequestObject struct {
 	Tenant ActivationTenant `json:"tenant"`
 	Body   *DeactivateJSONRequestBody
@@ -5786,6 +5810,30 @@ func (response RefreshLease429ApplicationProblemPlusJSONResponse) VisitRefreshLe
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshLease503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type RefreshLease503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers RefreshLease503ResponseHeaders
+}
+
+func (response RefreshLease503ApplicationProblemPlusJSONResponse) VisitRefreshLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6796,6 +6844,30 @@ func (response CreateOfflineActivation422ApplicationProblemPlusJSONResponse) Vis
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOfflineActivation503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateOfflineActivation503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers CreateOfflineActivation503ResponseHeaders
+}
+
+func (response CreateOfflineActivation503ApplicationProblemPlusJSONResponse) VisitCreateOfflineActivationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }

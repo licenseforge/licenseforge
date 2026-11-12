@@ -368,6 +368,23 @@ func TestIdempotentActivateOneConnection(t *testing.T) {
 	}
 }
 
+// Activate and refresh without an Idempotency-Key sign in their own
+// transaction too (ADR-0034 as amended): one pool connection is enough.
+func TestActivateAndRefreshOneConnection(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	a.db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	withCtx := func(r *http.Request) { *r = *r.WithContext(ctx) }
+	body := actBody(newFP())
+	for _, op := range []string{"activate", "refresh"} {
+		if r := a.do(t, "POST", actPath(a.a.ID, op), body, licenseAuth(is.Key), withCtx); r.code != 200 {
+			t.Fatalf("%s: %d %s", op, r.code, r.raw)
+		}
+	}
+}
+
 // Past maxKeys distinct keys in a minute, new keys pass untracked (memory
 // stays bounded); keys already counted stay limited.
 func TestKeyLimiterBounded(t *testing.T) {
@@ -1163,5 +1180,24 @@ func TestOfflineRenewalBurst(t *testing.T) {
 		if r := a.do(t, "POST", p, string(b), admin, header("Idempotency-Key", fmt.Sprintf("burst-%d", i))); r.code != 201 {
 			t.Fatalf("request %d: %d %s", i, r.code, r.raw)
 		}
+	}
+}
+
+// noKey is a tenant's keys with none active (before the owner generates
+// the first one).
+type noKey struct{ signing.Local }
+
+func (noKey) Active(context.Context, string) (string, error) { return "", signing.ErrNoActiveKey }
+
+// A tenant without an active signing key answers 503 no_signing_key, on
+// both activation paths: the server log and raw callers say what to fix, and
+// the SDKs retry (5xx) until an owner generates the key.
+func TestActivateWithoutSigningKey(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	a.srv.Activations.Issuer.Keys = noKey{a.keys}
+	for _, idem := range [][]opt{nil, {header("Idempotency-Key", "k1")}} {
+		opts := append([]opt{licenseAuth(is.Key)}, idem...)
+		a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), opts...).problem(t, 503, "no_signing_key")
 	}
 }

@@ -224,9 +224,16 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 		return Lease{}, err
 	}
 	var g granted
+	var out Lease
 	err := s.DB.WithTenant(ctx, req.TenantID, func(tx *ent.Tx) error {
 		var err error
-		g, err = s.grant(ctx, tx, req, activate)
+		if g, err = s.grant(ctx, tx, req, activate); err != nil {
+			return err
+		}
+		// Signed before the commit, as in activateTx: a lease that can't be
+		// signed (no active key yet) rolls back the seat, the term's start
+		// and the activation.create entry with its webhook.
+		out, err = s.withTx(tx).sign(ctx, req.TenantID, g)
 		return err
 	})
 	if err != nil {
@@ -235,9 +242,19 @@ func (s Service) lease(ctx context.Context, req Request, activate bool) (Lease, 
 		}
 		return Lease{}, s.refused(ctx, req.TenantID, g.ev, err)
 	}
-	// Signed after the commit: if signing fails, the seat stays taken and a
-	// retry reuses it.
-	return s.sign(ctx, req.TenantID, g)
+	return out, nil
+}
+
+// withTx signs in tx: a signer opening its own transactions would need a
+// second pool connection while tx holds the license and key locks.
+// ponytail: only signing.Local is tx-aware; other Signer types (KMS) fall
+// back to their own transactions, bringing back the pool-exhaustion risk.
+// Upgrade path: a WithTx method on the Signer interface.
+func (s Service) withTx(tx *ent.Tx) Service {
+	if l, ok := s.Issuer.Keys.(signing.Local); ok {
+		s.Issuer.Keys = l.WithTx(tx)
+	}
+	return s
 }
 
 func (s Service) sign(ctx context.Context, tenantID string, g granted) (Lease, error) {
@@ -259,14 +276,7 @@ func (s Service) ActivateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease
 }
 
 func (s Service) activateTx(ctx context.Context, tx *ent.Tx, req Request) (Lease, error) {
-	// Sign in tx too: a signer opening its own transactions would need a
-	// second pool connection while tx holds the license and key locks.
-	// ponytail: only signing.Local is tx-aware; other Signer types (KMS)
-	// fall back to their own transactions, bringing back the pool-exhaustion
-	// risk. Upgrade path: a WithTx method on the Signer interface.
-	if l, ok := s.Issuer.Keys.(signing.Local); ok {
-		s.Issuer.Keys = l.WithTx(tx)
-	}
+	s = s.withTx(tx) // the lease is signed in tx too
 	g, err := s.grant(ctx, tx, req, true)
 	if err != nil {
 		if ev, ok := refusal(g.ev, err); ok {

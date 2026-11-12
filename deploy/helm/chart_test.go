@@ -59,6 +59,7 @@ type container struct {
 	} `yaml:"ports"`
 	Env []struct {
 		Name      string `yaml:"name"`
+		Value     string `yaml:"value"`
 		ValueFrom struct {
 			SecretKeyRef map[string]any `yaml:"secretKeyRef"`
 		} `yaml:"valueFrom"`
@@ -284,5 +285,50 @@ func checkFields(bad func(string, ...any), f securityFields) {
 	}
 	if t := f.AppArmorProfile.Type; t != "" && t != "RuntimeDefault" && t != "Localhost" {
 		bad("AppArmor profile %q", t)
+	}
+}
+
+// The platform and session values reach the server as its LICENSEFORGE_*
+// settings, and nothing is set while they're empty (the server's defaults).
+func TestPlatformSettings(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		if os.Getenv("LICENSEFORGE_REQUIRE_HELM") != "" {
+			t.Fatal("helm not found and LICENSEFORGE_REQUIRE_HELM is set")
+		}
+		t.Skip("helm not installed")
+	}
+	want := map[string]string{
+		"LICENSEFORGE_API_HOST": "api.example.com", "LICENSEFORGE_BOOTSTRAP_ADMIN": "admin@example.com",
+		"LICENSEFORGE_PLATFORM_MFA_POLICY": "phishing_resistant", "LICENSEFORGE_LOGIN_BANNER": "Authorized use only, monitored",
+		"LICENSEFORGE_SESSION_IDLE_TIMEOUT": "30m", "LICENSEFORGE_SESSION_MAX_AGE": "8h",
+	}
+	env := func(extra ...string) map[string]string {
+		got := map[string]string{}
+		for _, o := range render(t, extra) {
+			if o.Kind == "Deployment" {
+				for _, e := range o.Spec.Template.Spec.Containers[0].Env {
+					if _, ok := want[e.Name]; ok {
+						got[e.Name] = e.Value
+					}
+				}
+			}
+		}
+		return got
+	}
+	if got := env(); len(got) != 0 {
+		t.Errorf("defaults set %v, want none", got)
+	}
+	got := env("--set", "apiHost=api.example.com", "--set", "bootstrapAdmin=admin@example.com", "--set", "platformMFAPolicy=phishing_resistant",
+		"--set", "loginBanner=Authorized use only\\, monitored", "--set", "session.idleTimeout=30m", "--set", "session.maxAge=8h")
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	for k, v := range map[string]string{"platformMFAPolicy": "strong", "apiHost": "https://api.example.com", "session.idleTimeout": "30"} {
+		out, err := exec.Command("helm", "template", "t", "licenseforge", "--set", "secrets.server=s", "--set", "secrets.migrate=m", "--set-string", k+"="+v).CombinedOutput()
+		if field := k[strings.LastIndex(k, ".")+1:]; err == nil || !strings.Contains(string(out), field) {
+			t.Errorf("%s=%s: %v %s, want the schema to refuse it", k, v, err, out)
+		}
 	}
 }

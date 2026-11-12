@@ -1486,7 +1486,7 @@
                     "text": "TestCreate"
                   }
                 ],
-                "remarks": "Personal and other data (users, customers, activations, audit entries) aren't encrypted by the application; they rely on the operator's disk, database and backup encryption (inherited, a deployment requirement). No license-issuing service writes licenses yet; the schema and keyring enforce the format (Roadmap v0.1: license lifecycle). The webhook columns (URL, secrets) have no plaintext CHECK in the database; only the application encrypts them."
+                "remarks": "Personal and other data (users, customers, activations, audit entries) aren't encrypted by the application; they rely on the operator's disk, database and backup encryption (inherited, a deployment requirement). The webhook columns (URL, secrets) have no plaintext CHECK in the database; only the application encrypts them."
               },
               {
                 "uuid": "1ae5ac0a-4acd-5b53-8991-b9b82ab0f6dc",

@@ -23,9 +23,9 @@ Every variable marked *Secret* can instead name a file: `<VARIABLE>_FILE=/path`.
 | `LICENSEFORGE_OIDC_CLIENT_ID` | with the issuer | – | Also the required audience of ID tokens |
 | `LICENSEFORGE_OIDC_CLIENT_SECRET` | no | empty = public client (PKCE only) | Prefer a confidential client. Secret: the chart takes it from `oidc.clientSecret` and mounts it as a file (`_FILE`), never a literal |
 | `LICENSEFORGE_OIDC_REDIRECT_URL` | with the issuer | – | `https://<public host>/auth/callback`. Its origin is the only trusted origin for unsafe requests (CSRF) |
-| `LICENSEFORGE_SESSION_IDLE_TIMEOUT` | no | `1h` | Dashboard session idle timeout (AC-12): at least `5m`, at most the max age. Out of bounds stops the server |
-| `LICENSEFORGE_SESSION_MAX_AGE` | no | `12h` | Dashboard session lifetime after login (AC-12, IA-11): `1h` to `24h` (the database cap) |
-| `LICENSEFORGE_LOGIN_BANNER` | no | unset = no banner | System use notification shown on `/login` before sign-in (AC-8): plain text, at most 4 KB, newlines and tabs allowed, no other control, format or separator characters. Users must agree before login starts |
+| `LICENSEFORGE_SESSION_IDLE_TIMEOUT` | no | `1h` | Dashboard session idle timeout (AC-12): at least `5m`, at most the max age. Out of bounds stops the server (chart: `session.idleTimeout`) |
+| `LICENSEFORGE_SESSION_MAX_AGE` | no | `12h` | Dashboard session lifetime after login (AC-12, IA-11): `1h` to `24h` (the database cap) (chart: `session.maxAge`) |
+| `LICENSEFORGE_LOGIN_BANNER` | no | unset = no banner | System use notification shown on `/login` before sign-in (AC-8): plain text, at most 4 KB, newlines and tabs allowed, no other control, format or separator characters. Users must agree before login starts (chart: `loginBanner`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_ADDR` | no | unset = no SIEM export | `host:port` of the collector (RFC 5424 over TLS, RFC 5425; ADR-0036). TLS 1.2+, the certificate is always verified. Set it: the SIEM is the external anchor of the audit chains (AU-6, AU-9) |
 | `LICENSEFORGE_AUDIT_SYSLOG_CA_FILE` | no | system roots | PEM roots for the collector's certificate (chart: `audit.export.syslog.caSecret`) |
 | `LICENSEFORGE_AUDIT_SYSLOG_CERT_FILE`, `_KEY_FILE` | no | no client certificate | mTLS client certificate and key, both or neither (chart: `audit.export.syslog.clientSecret`) |
@@ -38,12 +38,13 @@ Every variable marked *Secret* can instead name a file: `<VARIABLE>_FILE=/path`.
 | `LICENSEFORGE_AUDIT_OTLP_HEADERS` | no | none | Request headers `k=v,k2=v2`, values %-encoded (e.g. an API key). Secret: the chart takes it from `headersSecret` and mounts it as a file (`_FILE`) |
 | `LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT` | no | unset = TLS required | `true` lets database URLs skip verifying the server (no TLS) to non-local hosts. Development clusters only; never in production (SC-8) |
 | `LICENSEFORGE_TRUSTED_PROXIES` | no | unset = no proxy trusted | Comma-separated CIDRs or addresses of your ingress/load balancer. Only their `X-Forwarded-For` is believed, read from the right: the client is the right-most hop that isn't a trusted proxy. List proxies only, never client networks. Prefixes broader than /8 (IPv4) or /32 (IPv6) are refused at start |
+| `LICENSEFORGE_API_HOST` | no | unset = one host serves both | A hostname (no scheme or path) that serves the API alone: API tokens and the activation API only there, dashboard sessions only on other hosts (chart: `apiHost`) |
 | `LICENSEFORGE_RATE_LIMIT_ACTIVATION` | no | `1200` | Requests per client address per minute, per replica, on `/api/v1/activation/` (`0` = off). Many installs can share a customer's egress address; each license key is limited separately (60/min) |
 | `LICENSEFORGE_RATE_LIMIT_MANAGEMENT` | no | `600` | The same for the rest of `/api/v1` and `/auth/` except login |
 | `LICENSEFORGE_RATE_LIMIT_LOGIN` | no | `60` | The same for `/auth/login` and `/auth/callback` |
-| `LICENSEFORGE_PLATFORM_MFA_POLICY` | no | `none` | What platform admins' sessions need on `/api/v1/platform` (ADR-0038, ADR-0042): `none`, `mfa` or `phishing_resistant`. **Set `mfa` or `phishing_resistant` in production** (FedRAMP: `phishing_resistant`); `none` only keeps an install without IdP MFA from locking out its operator |
+| `LICENSEFORGE_PLATFORM_MFA_POLICY` | no | `none` | What platform admins' sessions need on `/api/v1/platform` (ADR-0038, ADR-0042): `none`, `mfa` or `phishing_resistant`. **Set `mfa` or `phishing_resistant` in production** (FedRAMP: `phishing_resistant`); `none` only keeps an install without IdP MFA from locking out its operator (chart: `platformMFAPolicy`) |
 
-`LICENSEFORGE_BOOTSTRAP_ADMIN` (ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
+`LICENSEFORGE_BOOTSTRAP_ADMIN` (chart: `bootstrapAdmin`; ADR-0003, ADR-0031): `issuer|subject` (recommended) or a verified email. The matching user becomes the first platform admin at login, only while there is none, recorded on the platform audit chain. Read at start. Unset after the first admin exists if you like: it never grants again while any admin exists.
 
 ## Audit verification and alerts
 
@@ -202,4 +203,4 @@ spec:
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
 - **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
-- **Audit log**: kept in full until the retention job ships (*planned*). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.
+- **Audit log**: kept in full unless audit retention is on (`auditRetention.enabled` in the chart, off by default; ADR-0036). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.
