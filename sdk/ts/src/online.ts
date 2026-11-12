@@ -492,7 +492,8 @@ export class Client {
       if (type === "application/problem+json") {
         try {
           const p = JSON.parse(raw);
-          if (typeof p?.code === "string") detail += `: ${p.code}${typeof p.detail === "string" && p.detail ? `: ${p.detail}` : ""}`;
+          // Server text in a log line: one line, bounded.
+          if (typeof p?.code === "string") detail += `: ${p.code}${typeof p.detail === "string" && p.detail ? `: ${p.detail}` : ""}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 300);
           if (typeof p?.request_id === "string") requestId = p.request_id;
         } catch {
           // not a problem answer after all

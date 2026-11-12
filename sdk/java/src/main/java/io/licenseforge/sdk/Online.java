@@ -730,7 +730,11 @@ public final class Online {
         if (type.equals("application/problem+json")) {
           try {
             if (Json.parseValue(a.body()) instanceof Map<?, ?> p) {
-              if (p.get("code") instanceof String code) detail += ": " + code + (p.get("detail") instanceof String d && !d.isEmpty() ? ": " + d : "");
+              if (p.get("code") instanceof String code) {
+                // Server text in a log line: one line, bounded.
+                String text = (": " + code + (p.get("detail") instanceof String d && !d.isEmpty() ? ": " + d : "")).replaceAll("\\p{Cntrl}", " ");
+                detail += text.substring(0, Math.min(text.length(), 300));
+              }
               if (p.get("request_id") instanceof String r) requestId = r;
             }
           } catch (Json.JsonException e) {
