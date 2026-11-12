@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The e2e environment (ADR-0041): LicenseForge on minikube with PostgreSQL 17,
 # Keycloak (OIDC) and HTTPS ingresses on nip.io hostnames signed by a local
-# CA. Local only: every secret here is a dev value. Re-runnable.
+# CA. For a developer's machine or a CI runner: every secret here is a dev
+# value. Re-runnable.
 #
 #   e2e/env/up.sh --local              chart and image built from this checkout (default)
 #   e2e/env/up.sh --release VERSION    a published release, e.g. 0.1.0-alpha.1
@@ -67,7 +68,15 @@ apply create configmap db-setup --from-file=setup.sql="$REPO/deploy/database-set
 render postgres.yaml | kubectl apply -f - >/dev/null
 apply create configmap keycloak-realm --from-file=licenseforge-realm.json=<(render realm.json)
 render keycloak.yaml | kubectl apply -f - >/dev/null
-render ingress.yaml | kubectl apply -f - >/dev/null
+# The ingress addon's admission webhook refuses connections for a while
+# after a fresh minikube start (as in CI), even once its controller is
+# ready: retry for up to two minutes.
+kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s >/dev/null
+for i in $(seq 24); do
+  render ingress.yaml | kubectl apply -f - >/dev/null 2>&1 && break
+  [ "$i" = 24 ] && { render ingress.yaml | kubectl apply -f - >/dev/null; exit 1; }   # the last try shows the error
+  sleep 5
+done
 
 # 3. LicenseForge's Secrets: the database logins of database-setup.sql, a
 #    master key (kept, so license keys stay decryptable across runs), the
