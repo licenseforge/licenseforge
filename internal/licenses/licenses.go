@@ -49,6 +49,9 @@ var (
 	// ErrState means the license's status doesn't allow the change (e.g.
 	// reinstating a revoked license; revocation is final).
 	ErrState = errors.New("licenses: not allowed in the license's status")
+	// ErrNoTerm: a perpetual or not yet started license has no expiry to
+	// move (ADR-0049). It is an ErrState too.
+	ErrNoTerm = fmt.Errorf("%w: no term", ErrState)
 
 	// errNoProduct answers a missing, hidden or malformed product_id alike
 	// (ADR-0032: a body reference).
@@ -515,15 +518,48 @@ func (s Service) SetUpdatesUntil(ctx context.Context, p authz.Principal, license
 	return s.change(ctx, p, licenseID, t)
 }
 
-// validUpdatesUntil is a maintenance end in whole seconds, after issue and
-// within the license format's years (UTC 9999 at most).
+// SetExpiresAt moves the end of a license's term (ADR-0049): a renewal, or a
+// correction, to any time after issue. Like SetUpdatesUntil: p needs
+// license:write on its product, a revoked license is refused, and the next
+// lease carries it. A perpetual license, or one whose term starts at a first
+// activation that hasn't happened, has no end to move (ErrState).
+func (s Service) SetExpiresAt(ctx context.Context, p authz.Principal, licenseID string, at time.Time) (Changed, error) {
+	t := transition{action: "license.expires_at", from: []license.Status{license.StatusActive, license.StatusSuspended},
+		set: `expires_at = $3`, args: []any{nil}}
+	t.check = func(l *ent.License) error {
+		u, err := validDate("/expires_at", at, l.IssuedAt)
+		if err != nil {
+			return err
+		}
+		switch {
+		case l.DurationMonths == nil && l.DurationSeconds == nil:
+			return fmt.Errorf("%w: a perpetual license doesn't expire", ErrNoTerm)
+		case l.ExpiresAt == nil: // licenses_unstarted_no_expiry; a start is final
+			return fmt.Errorf("%w: the term starts at the first activation", ErrNoTerm)
+		}
+		t.args[0] = *u // shared with the copy change() runs
+		return nil
+	}
+	t.detail = func(was, row *ent.License) map[string]any {
+		return map[string]any{"previous": rfc3339(was.ExpiresAt), "expires_at": rfc3339(row.ExpiresAt), "product_id": row.ProductID,
+			"customer_id": row.CustomerID, "plan_id": row.PlanID, "plan_slug": row.PlanSlug}
+	}
+	return s.change(ctx, p, licenseID, t)
+}
+
 func validUpdatesUntil(t time.Time, issued time.Time) (*time.Time, error) {
+	return validDate("/updates_until", t, issued)
+}
+
+// validDate is a license date in whole seconds, after issue and within the
+// license format's years (UTC 9999 at most).
+func validDate(field string, t time.Time, issued time.Time) (*time.Time, error) {
 	u := t.UTC().Truncate(time.Second)
 	switch {
 	case !u.After(issued):
-		return &u, &InvalidError{"/updates_until", "must be after the license's issue"}
+		return &u, &InvalidError{field, "must be after the license's issue"}
 	case u.Year() > 9999:
-		return &u, &InvalidError{"/updates_until", "must be in year 9999 or earlier (UTC)"}
+		return &u, &InvalidError{field, "must be in year 9999 or earlier (UTC)"}
 	}
 	return &u, nil
 }

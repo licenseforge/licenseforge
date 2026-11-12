@@ -60,6 +60,12 @@ Renew maintenance to a date (ADR-0045):
 licenseforge api POST '/tenants/{tenant}/licenses/lic_…/updates-until' --data '{"updates_until":"2027-12-31T23:59:59Z"}'
 ```
 
+Renew a license to a date, keeping its key and machines (ADR-0049):
+
+```sh
+licenseforge api POST '/tenants/{tenant}/licenses/lic_…/expires-at' --data '{"expires_at":"2027-12-31T23:59:59Z"}'
+```
+
 Page through every license:
 
 ```sh
