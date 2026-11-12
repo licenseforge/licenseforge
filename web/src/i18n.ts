@@ -169,6 +169,8 @@ const en = {
   "webhooks.dcol.duration": "Time",
   "webhooks.result.success": "Delivered",
   "problem.webhook_limit_reached": "This tenant already has the most webhook endpoints allowed (10).",
+  "problem.webhook_secret_unreadable": "This endpoint's signing secret can't be read. Rotate the secret, then enable the endpoint.",
+  "problem.webhook_url_unreadable": "This endpoint's URL can't be read. Edit the endpoint and enter its URL again, then enable it.",
   "tokens.title": "API tokens",
   "tokens.body": "Tokens let scripts and integrations call the API as this tenant.",
   "tokens.new": "New token",

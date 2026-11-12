@@ -193,6 +193,10 @@ func webhookProblem(err error) *problem {
 		return errNotFound
 	case errors.Is(err, webhooks.ErrLimit):
 		return &problem{status: http.StatusConflict, code: "webhook_limit_reached", detail: "The tenant already has the most webhook endpoints allowed (10)."}
+	case errors.Is(err, webhooks.ErrSecretUnreadable):
+		return &problem{status: http.StatusConflict, code: "webhook_secret_unreadable", detail: "The endpoint's signing secret can't be read: rotate it, then enable the endpoint."}
+	case errors.Is(err, webhooks.ErrURLUnreadable):
+		return &problem{status: http.StatusConflict, code: "webhook_url_unreadable", detail: "The endpoint's URL can't be read: update it, then enable the endpoint."}
 	case errors.Is(err, webhooks.ErrState):
 		return &problem{status: http.StatusConflict, code: "invalid_state", detail: "The endpoint's state doesn't allow this (already disabled, not disabled, or not the event held back)."}
 	}

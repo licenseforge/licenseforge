@@ -106,6 +106,45 @@ describe("IssueDialog", () => {
   });
 });
 
+describe("IssueDialog while issuing", () => {
+  it("can't be closed until the answer is in, so the key shown once isn't lost", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        if (req.method !== "POST") return plansOf(req) ?? json({ code: "internal" }, 500);
+        await held;
+        return json({ ...license, key: "LF-KEPT-KEY" }, 201);
+      }),
+    );
+    let closed = 0;
+    const { el, button } = await render(<IssueDialog tenant="acme" names={names} onClose={() => closed++} />);
+    const set = (name: string, value: string) => {
+      const f = el.querySelector<HTMLSelectElement>(`[name="${name}"]`)!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(f, value);
+      f.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    await act(async () => {
+      set("product_id", "prd_1");
+      set("customer_id", "cus_1");
+    });
+    await vi.waitFor(() => expect(el.querySelector('select[name="plan_id"] option[value="pln_1"]')).not.toBeNull());
+    await act(async () => set("plan_id", "pln_1"));
+    await act(async () => el.querySelector("form")!.requestSubmit());
+    await vi.waitFor(() => expect(button("Cancel")!.disabled).toBe(true));
+    await act(async () => {
+      document.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })); // Esc
+      button("Cancel")!.click();
+    });
+    expect(closed).toBe(0);
+    await act(async () => release());
+    await vi.waitFor(() => expect(el.querySelector<HTMLInputElement>("input[readonly]")?.value).toBe("LF-KEPT-KEY"));
+    await act(async () => button("Close")!.click());
+    expect(closed).toBe(1);
+  });
+});
+
 describe("LicenseDialog", () => {
   function server() {
     const posts: string[] = [];

@@ -1577,7 +1577,7 @@ paths:
       - $ref: "#/components/parameters/WebhookID"
     post:
       operationId: enableWebhook
-      summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled.
+      summary: Resume a disabled endpoint at the event it stopped on, with a fresh retry schedule. 409 if not disabled, or `webhook_secret_unreadable` / `webhook_url_unreadable` if it would fail at once (rotate the secret or update the URL first).
       responses:
         "200": { description: Enabled., content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
         "400": { $ref: "#/components/responses/Problem" }
