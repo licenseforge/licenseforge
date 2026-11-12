@@ -38,6 +38,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Added
+- **Recovery commands on the owner login:**
+  - `licenseforge admin reset --yes`: when no platform admin can sign in, it removes every admin so the bootstrap admin's next sign-in recovers the role (ADR-0031).
+  - `licenseforge audit remove-sink --name N`: unregisters a SIEM sink you no longer export to, which until now held audit retention back for good (ADR-0036).
+  - Both are audited on the platform chain. See the Secure Configuration Guide, Recovery.
 - **Try it locally:** `docker compose up --build` now includes a Keycloak with a demo user (`demo` / `demo`, platform admin), so the dashboard can be signed in to at http://localhost:8080. The server shares Keycloak's network namespace, so one `http://localhost:8081` issuer works for the browser and the server. Development and evaluation only.
 - **License renewal** (ADR-0049): `POST /tenants/{t}/licenses/{id}/expires-at` moves a license's expiry, later (a renewal) or earlier (a correction), keeping its key, machines and plan terms. Needs `license:write`; audited as `license.expires_at` with the previous value. A perpetual license, or one whose term hasn't started at a first activation, answers 409 `no_term`. Online leases carry the new date from their next refresh, an expired license's included (the same activation, no new seat); offline files keep theirs until replaced. The dashboard's license dialog has an Expiry date.
 - **Java SDK releases** (`io.licenseforge:licenseforge-sdk` on Maven Central, tag `sdk/java/vX.Y.Z`): `sdk-java-release.yml` builds and tests the jar, sources and javadoc with a read-only token on JDK 17 and checks the jar's contents, then in the protected `maven-central` environment PGP-signs the built files, attests their SLSA provenance and uploads the bundle for a maintainer to publish. The first version is `0.1.0-alpha.1`; `SDK_VERSION` follows the pom (tested). See [verifying releases](docs/verifying-releases.md).
@@ -153,6 +157,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `make test` and `make test-fips` fail when `LICENSEFORGE_TEST_DATABASE_URL` isn't set, as CI already did, instead of skipping the database tests and printing `ok` (`LICENSEFORGE_REQUIRE_TEST_DB=1`).
 
 ### Fixed
+- Secure Configuration Guide: tenant owners can't set their own audit retention yet; the guide said they could.
 - **Dashboard: a shown-once secret could be lost.** The issue-license, new-token and invite dialogs could be closed while their request was running. The license, token or invitation was then created with its key or link gone. For a license, a retry from a new dialog issued a second one. They now stay open until the answer is in.
 - **Webhooks: Enable no longer loops.** An endpoint disabled because its secret or URL can't be read used to be re-enabled and disabled again at once. Enable now refuses it with 409 `webhook_secret_unreadable` or `webhook_url_unreadable` until the secret is rotated or the URL updated.
 - A tenant without an active signing key now answers activations and refreshes with **503 `no_signing_key`**, not 500 `internal`, visible to raw HTTP callers, in the server's error log (with the request ID), on the dashboard (offline activation, license files) and in the SDKs' error message (below). The SDKs retry it as any 5xx.

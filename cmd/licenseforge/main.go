@@ -108,7 +108,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n       licenseforge api METHOD PATH [--data JSON|@FILE|-]   one REST API request (ADR-0048; LICENSEFORGE_URL, _TENANT, _TOKEN)\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge admin reset --yes   remove every platform admin, so the bootstrap admin's next sign-in recovers the role (ADR-0031; owner login)\n       licenseforge audit remove-sink --name N   unregister a SIEM sink no longer exported, so retention stops waiting for it (ADR-0036; owner login)\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n       licenseforge api METHOD PATH [--data JSON|@FILE|-]   one REST API request (ADR-0048; LICENSEFORGE_URL, _TENANT, _TOKEN)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -124,8 +124,9 @@ func main() {
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
 	cmd := strings.Join(flag.Args(), " ")
-	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") {
-		cmd = "tenant " + args[1] // with its own flags
+	if args := flag.Args(); len(args) >= 2 && (args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") ||
+		args[0] == "admin" && args[1] == "reset" || args[0] == "audit" && args[1] == "remove-sink") {
+		cmd = args[0] + " " + args[1] // with its own flags
 	} else if len(args) >= 1 && (args[0] == "offline" || args[0] == "api") {
 		cmd = args[0]
 	}
@@ -157,6 +158,10 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0) // the usage was printed
 		}
+	case "admin reset":
+		err = adminReset(ctx, flag.Args()[2:], os.Stdout)
+	case "audit remove-sink":
+		err = auditRemoveSink(ctx, flag.Args()[2:], os.Stdout)
 	case "tenant invite-owner":
 		err = tenantInviteOwner(ctx, flag.Args()[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {
