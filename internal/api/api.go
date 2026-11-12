@@ -539,6 +539,9 @@ func mapErr(err error) *problem {
 		p = platformProblem(err)
 	case webhookProblem(err) != nil:
 		p = webhookProblem(err)
+	case errors.Is(err, signing.ErrNoActiveKey):
+		// 503: nothing the caller can fix, and the SDKs retry it.
+		p = &problem{status: http.StatusServiceUnavailable, code: "no_signing_key", detail: "The tenant has no active signing key, so nothing can be signed; an owner generates one on the Signing keys page."}
 	case errors.Is(err, signing.ErrPendingExists):
 		p = &problem{status: http.StatusConflict, code: "pending_key_exists", detail: "The tenant already has a pending key; promote or discard it first."}
 	case errors.Is(err, signing.ErrNotPending):

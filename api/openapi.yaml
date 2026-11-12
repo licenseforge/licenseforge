@@ -812,7 +812,9 @@ paths:
         Activation API (ADR-0004, ADR-0034): authenticated by the license key,
         not by a token or session. Activating an already active fingerprint
         reuses its activation (no new seat). With `Idempotency-Key`, a retry
-        gets the first answer back (ADR-0032).
+        gets the first answer back (ADR-0032). `no_signing_key` (503): the
+        tenant has no active signing key yet; nothing was changed, and a
+        retry works once an owner generates one.
       security:
         - licenseKey: []
       parameters:
@@ -836,13 +838,14 @@ paths:
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
   /activation/tenants/{tenant}/refresh:
     parameters:
       - $ref: "#/components/parameters/ActivationTenant"
     post:
       operationId: refreshLease
       summary: Refresh an active activation's lease (also validate). Never takes a seat.
-      description: "`not_activated` (404) asks the SDK to activate again. `offline_seat` (409): the machine's seat is an offline activation (ADR-0043); it uses its offline file."
+      description: "`not_activated` (404) asks the SDK to activate again. `offline_seat` (409): the machine's seat is an offline activation (ADR-0043); it uses its offline file. `no_signing_key` (503): the tenant has no active signing key; nothing was changed."
       security:
         - licenseKey: []
       requestBody:
@@ -864,6 +867,7 @@ paths:
         "413": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
   /activation/tenants/{tenant}/deactivate:
     parameters:
       - $ref: "#/components/parameters/ActivationTenant"

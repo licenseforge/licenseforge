@@ -419,6 +419,7 @@ const en = {
   "problem.license_suspended": "The license is suspended.",
   "problem.license_revoked": "The license is revoked.",
   "problem.license_expired": "The license has expired.",
+  "problem.no_signing_key": "This tenant has no active signing key yet, so nothing can be signed. An owner generates one on the Signing keys page.",
   "problem.not_activated": "That machine has no seat on this license.",
   "problem.activation_limit_reached": "Every seat of this license is taken. Return or deactivate a machine first.",
   "problem.rehost_limit_reached": "The license's machines have moved as often as it allows. Reset the moves (Machines) to allow another.",
