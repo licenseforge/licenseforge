@@ -1182,3 +1182,22 @@ func TestOfflineRenewalBurst(t *testing.T) {
 		}
 	}
 }
+
+// noKey is a tenant's keys with none active (before the owner generates
+// the first one).
+type noKey struct{ signing.Local }
+
+func (noKey) Active(context.Context, string) (string, error) { return "", signing.ErrNoActiveKey }
+
+// A tenant without an active signing key answers 503 no_signing_key, on
+// both activation paths: the server log and raw callers say what to fix, and
+// the SDKs retry (5xx) until an owner generates the key.
+func TestActivateWithoutSigningKey(t *testing.T) {
+	a := actSetup(t)
+	is := a.issue(t, "pro")
+	a.srv.Activations.Issuer.Keys = noKey{a.keys}
+	for _, idem := range [][]opt{nil, {header("Idempotency-Key", "k1")}} {
+		opts := append([]opt{licenseAuth(is.Key)}, idem...)
+		a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(newFP()), opts...).problem(t, 503, "no_signing_key")
+	}
+}

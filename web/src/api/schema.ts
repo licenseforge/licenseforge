@@ -711,7 +711,9 @@ export interface paths {
          * @description Activation API (ADR-0004, ADR-0034): authenticated by the license key,
          *     not by a token or session. Activating an already active fingerprint
          *     reuses its activation (no new seat). With `Idempotency-Key`, a retry
-         *     gets the first answer back (ADR-0032).
+         *     gets the first answer back (ADR-0032). `no_signing_key` (503): the
+         *     tenant has no active signing key yet; nothing was changed, and a
+         *     retry works once an owner generates one.
          */
         post: operations["activate"];
         delete?: never;
@@ -734,7 +736,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh an active activation's lease (also validate). Never takes a seat.
-         * @description `not_activated` (404) asks the SDK to activate again. `offline_seat` (409): the machine's seat is an offline activation (ADR-0043); it uses its offline file.
+         * @description `not_activated` (404) asks the SDK to activate again. `offline_seat` (409): the machine's seat is an offline activation (ADR-0043); it uses its offline file. `no_signing_key` (503): the tenant has no active signing key; nothing was changed.
          */
         post: operations["refreshLease"];
         delete?: never;
@@ -815,7 +817,8 @@ export interface paths {
          * Answer an offline activation request with a license file for that machine (ADR-0043).
          * @description The request is the `lfreq1` text an air-gapped machine's SDK wrote
          *     (license format spec, Offline activation); it carries the license
-         *     key, so treat it like the key. Needs activation:offline on the
+         *     key, so treat it like the key. `no_signing_key` (503): the tenant has
+         *     no active signing key; nothing was changed. Needs activation:offline on the
          *     license's product; an unknown key or a license outside the caller's
          *     scope answers 404. The license must be usable (403
          *     `license_suspended`, `license_revoked`, `license_expired`; no grace)
@@ -3333,6 +3336,7 @@ export interface operations {
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["Problem"];
         };
     };
     refreshLease: {
@@ -3368,6 +3372,7 @@ export interface operations {
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["Problem"];
         };
     };
     deactivate: {
@@ -3470,6 +3475,7 @@ export interface operations {
             409: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     listProducts: {
