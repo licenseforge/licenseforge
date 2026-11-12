@@ -532,6 +532,7 @@ func (s Service) SetExpiresAt(ctx context.Context, p authz.Principal, licenseID 
 			return err
 		}
 		switch {
+		case l.Status == license.StatusRevoked: // final, so the unlocked read holds: change() answers invalid_state
 		case l.DurationMonths == nil && l.DurationSeconds == nil:
 			return fmt.Errorf("%w: a perpetual license doesn't expire", ErrNoTerm)
 		case l.ExpiresAt == nil: // licenses_unstarted_no_expiry; a start is final

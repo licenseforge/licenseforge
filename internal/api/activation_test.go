@@ -1207,7 +1207,11 @@ func TestRenewExpiredLicense(t *testing.T) {
 	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)).problem(t, 403, "license_expired")
 	owner := a.session(t, a.ownerA, true)
 	u := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + is.License.ID + "/expires-at"
-	a.do(t, "POST", u, `{}`, owner).problem(t, 422, "validation_failed")
+	for _, body := range []string{`{}`, `{"expires_at":null}`} {
+		if r := a.do(t, "POST", u, body, owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), "required") {
+			t.Errorf("%s: %v", body, r)
+		}
+	}
 	a.do(t, "POST", u, `{"expires_at":"2100-01-01T00:00:00Z"}`, a.session(t, a.viewerA, true)).problem(t, 403, "forbidden")
 	soon := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second) // before the plan's 1 h lease ends
 	if r := a.do(t, "POST", u, `{"expires_at":"`+soon.Format(time.RFC3339)+`"}`, owner); r.code != 200 || r.body["expires_at"] != soon.Format(time.RFC3339) {

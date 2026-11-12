@@ -138,6 +138,9 @@ func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRe
 }
 
 func (s *server) SetLicenseExpiresAt(ctx context.Context, req apigen.SetLicenseExpiresAtRequestObject) (apigen.SetLicenseExpiresAtResponseObject, error) {
+	if req.Body.ExpiresAt.IsZero() { // absent or null decode to the zero time
+		return nil, invalid(fieldError{"/expires_at", "required: a date-time"})
+	}
 	c, err := s.Licenses.SetExpiresAt(ctx, principal(ctx), req.Id, req.Body.ExpiresAt)
 	if err != nil {
 		return nil, err

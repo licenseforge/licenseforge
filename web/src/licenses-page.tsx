@@ -58,7 +58,7 @@ function useNames(tenant: string) {
 }
 
 export const expiryText = (l: Pick<License, "expires_at" | "expiry_basis">) =>
-  l.expires_at ? date.format(new Date(l.expires_at)) : l.expiry_basis === "from_first_activation" ? t("licenses.fromFirstActivation") : t("licenses.perpetual");
+  l.expires_at ? t("licenses.utcDate", { date: utcDay.format(new Date(l.expires_at)) }) : l.expiry_basis === "from_first_activation" ? t("licenses.fromFirstActivation") : t("licenses.perpetual");
 
 export function LicensesPage() {
   const { slug } = useParams({ from: "/app/t/$slug/licenses" });

@@ -412,7 +412,7 @@ const en = {
   "licenses.maintenanceClear": "Cover every build",
   "licenses.renewal": "Expiry",
   "licenses.renewalHelp": "Renew or correct the license: it ends after this day (UTC). The key and machines stay. Apps pick a change up at their next lease refresh, an expired license's too; offline files already issued keep their date.",
-  "licenses.renewalDate": "Valid through",
+  "licenses.renewalDate": "Ends after the day (UTC)",
   "licenses.renewalSave": "Save expiry",
   "licenses.fromFirstActivation": "Counted from first activation",
   "licenses.unlimited": "Unlimited",

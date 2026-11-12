@@ -7,7 +7,7 @@ A license's term is a snapshot of its plan at issue ([ADR-0013](0013-license-dat
 
 ## Decision
 - **`POST /tenants/{t}/licenses/{id}/expires-at`** with `{"expires_at": <timestamp>}` sets the end of the license's term. It is the same shape as `updates-until` ([ADR-0045](0045-maintenance-entitlement-updates-until.md)).
-  - Later is a renewal; earlier, even in the past, is a correction, or ends the term now.
+  - Later is a renewal; earlier, even in the past, is a correction, or ends the term now. The license's `grace_seconds` still applies after the new date, as after any expiry.
   - Stored in whole seconds. It must be after `issued_at` (the existing CHECK) and in year 9999 or earlier (UTC).
   - The key, the activations, the plan terms (duration, basis, seats, lease) and `updates_until` stay. Maintenance is a separate decision; a connector that sells both renews both.
 - **An explicit date, not "one more term".** The payment provider knows the paid period's end (Stripe's `current_period_end`), and so does a person entering a contract date. "Add one term from the old expiry or from now" (Keygen's renewal basis) can be computed by the caller in one line. This also keeps one rule for humans, the CLI and connectors.

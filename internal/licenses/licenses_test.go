@@ -1483,6 +1483,14 @@ func TestSetExpiresAt(t *testing.T) {
 			t.Errorf("%s: event %+v", name, e)
 		}
 	}
+	// Revocation is answered first: final, whatever the term.
+	rp := issue(perpetual)
+	if _, err := f.s.Revoke(ctx, m, rp.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetExpiresAt(ctx, m, rp.ID, at); !errors.Is(err, ErrState) || errors.Is(err, ErrNoTerm) {
+		t.Errorf("revoked perpetual: %v", err)
+	}
 	started := issue(firstAct)
 	f.tx(t, f.a.id, func(tx *ent.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE licenses SET first_activated_at = clock_timestamp(), expires_at = clock_timestamp() + interval '1 year' WHERE id = $1`, started.ID)
