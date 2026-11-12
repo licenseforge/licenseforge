@@ -13,7 +13,7 @@ make dev-db   # throwaway PostgreSQL 17 for tests; prints the variables to expor
 make test     # go test -race ./...; fails if the dev-db variables aren't exported
 make lint     # go vet + golangci-lint
 make build    # bin/licenseforge
-docker compose up --build   # server + PostgreSQL with the production logins (no TLS, dev only), on 127.0.0.1:8080
+docker compose up --build   # server, PostgreSQL and Keycloak (demo / demo), dev only: http://localhost:8080
 ```
 Without `LICENSEFORGE_TEST_DATABASE_URL`, a plain `go test` skips the database tests (and still prints `ok`); `make test` and CI fail instead, so a green run means they ran.
 

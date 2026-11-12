@@ -88,7 +88,7 @@ Create them with [`deploy/database-setup.sql`](../deploy/database-setup.sql) as 
 | `licenseforge_login` | `licenseforge_identity` | Login, sessions, invitation acceptance | Identity tables only; no licensing data |
 | `licenseforge_pruner` | `licenseforge_retention` | Audit retention only (ADR-0036) | The only login that deletes audit entries. The database lets it delete only entries at least 365 days old and at or below its chain's newest anchor, and lets it anchor only on a real entry that is at least 365 days old and not the chain's last. That the deleted entries form a prefix is checked by the job's count check (a mismatch rolls the batch back) and detected by Verify and the SIEM's continuity check if bypassed, not enforced by the database. No other table. Upgrading: create the group before `licenseforge migrate` |
 
-**Upgrading to audit retention (ADR-0036).** Before running `licenseforge migrate` (the Helm migration Job) on an install that predates it, create the group role as a database admin: `CREATE ROLE licenseforge_retention NOLOGIN;`, then the pruner login (`deploy/database-setup.sql`). The migration stops with that message otherwise. Retention runs as `licenseforge audit prune` (the chart's `auditRetention` CronJob) with `LICENSEFORGE_RETENTION_DATABASE_URL`; `LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS` (365 to 36,500, unset keeps everything) sets the platform chain's retention, and tenant owners set their own chain's (365 to 36,500 days, audited). Every cut is recorded in the chain as an `audit.retention` entry with the retention period in force (AU-11), and nothing a registered SIEM sink hasn't received is pruned.
+**Upgrading to audit retention (ADR-0036).** Before running `licenseforge migrate` (the Helm migration Job) on an install that predates it, create the group role as a database admin: `CREATE ROLE licenseforge_retention NOLOGIN;`, then the pruner login (`deploy/database-setup.sql`). The migration stops with that message otherwise. Retention runs as `licenseforge audit prune` (the chart's `auditRetention` CronJob) with `LICENSEFORGE_RETENTION_DATABASE_URL`; `LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS` (365 to 36,500, unset keeps everything) sets the platform chain's retention, and a tenant's chain is kept in full: there is no setting for a tenant's retention yet. Every cut is recorded in the chain as an `audit.retention` entry with the retention period in force (AU-11), and nothing a registered SIEM sink hasn't received is pruned. A sink stays registered after you remove it from `audit.export`, and holds retention back until you run `licenseforge audit remove-sink` ([Recovery](#recovery)).
 
 **Why the server must never hold the owner login.** Tenant isolation is enforced by forced row-level security, and RLS is a backstop only if the serving process can't turn it off. The owner sees every row, can alter or drop policies and switch RLS off, and can rewrite the audit chain. A serving pod with the owner login would turn any bug or compromise in the internet-facing process into full access to every tenant. So:
 
@@ -201,6 +201,33 @@ spec:
 
 - **Database**: use your platform's encrypted backups with point-in-time recovery, run by a database admin, not by a LicenseForge login. Test restores. Licenses, keys, members and the audit log all live here.
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
+- **What a loss means** (plan for it before it happens). Files and leases already issued keep verifying in your customers' apps until `exp` plus grace or `iat` plus `max_offline`, whichever comes first.
+  - **The master keys, with the database intact:**
+    - Signing keys and license keys can't be decrypted. Every activation and refresh fails with a server error, and nothing new can be signed.
+    - Recovery: set new `LICENSEFORGE_MASTER_KEYS`, generate a new signing key, and ship builds that trust it.
+    - Existing license keys can't be recovered (ADR-0025), so issue your customers new licenses.
+    - Keep the old public keys (the retired keys on the Signing keys page) in the trusted set, so files they signed still verify.
+  - **The database, with no usable backup:**
+    - Everything above, and the license and activation records are gone too.
+    - The old public keys survive only in your builds and records.
+  - **A restore to an earlier point:**
+    - **Every change after that point is undone.** Revocations and suspensions after it are lost: those licenses authenticate again. Re-apply them from the audit trail exported to your SIEM, if you export one (`audit.checkpoint` entries carry each chain's head, which shows where the restored chain ends).
+    - Licenses issued after that point don't exist: their keys answer `unauthenticated`, so issue them again.
+    - Activations and rehost counts revert, in both directions:
+      - machines activated after that point get `not_activated` on their next refresh, and the SDK activates again;
+      - seats freed after it are taken again.
+    - A signing key created or promoted after that point is missing. Builds that trust the restored keys keep working.
 - **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
 - **Audit log**: kept in full unless audit retention is on (`auditRetention.enabled` in the chart, off by default; ADR-0036). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.
+
+## Recovery
+These commands are the way out of states the product can't leave by itself. They run by hand: the first two on the owner login, like `migrate` (set `LICENSEFORGE_OWNER_DATABASE_URL` or `_FILE` in a one-off pod or shell, never in the server's environment), the tenant ones on the platform login, like `tenant create` (`kubectl exec` into a server pod). Each is audited on the platform chain as the system, `via: cli`.
+
+- **No platform admin can sign in** (ADR-0031): the admin left, or their IdP account is gone.
+  1. Point `bootstrapAdmin` (`LICENSEFORGE_BOOTSTRAP_ADMIN`) at a person who can sign in, and roll the pods so every server has the new value. Until then, a server could still bootstrap the old value: whoever now holds that email at your IdP.
+  2. Run `licenseforge admin reset --yes`. It removes every platform admin.
+  3. That person's next sign-in becomes the platform admin.
+- **A SIEM sink you no longer export to** (ADR-0036): remove it from `audit.export`, roll the pods, then run `licenseforge audit remove-sink --name NAME`. Until then audit retention waits for the sink and prunes nothing. Its entries not yet exported become prunable. A server still configured with the sink registers it again at start; one still running with it only logs export errors until it is restarted.
+- **A tenant whose owners can't sign in** (ADR-0042, platform login): run `licenseforge tenant recover-owner --tenant SLUG --email E`. A member with E as a verified email becomes an owner; otherwise an owner invitation for E is printed once. The tenant's audit log shows it.
+- **A tenant locked out by its MFA policy** (ADR-0038, platform login): when its members can no longer meet the policy (the IdP stopped sending the assurance), run `licenseforge tenant set-mfa-policy --tenant SLUG --policy mfa` (or `none`). It only lowers the policy; the owners raise it again once they can meet it.

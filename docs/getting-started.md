@@ -2,6 +2,8 @@
 
 From an empty cluster to an app that checks its license. Every step links to the reference that covers it in full. Alpha: see the [README](../README.md) for what isn't released yet.
 
+Just evaluating? `docker compose up --build` runs everything on your machine, sign-in included: see [Try it locally](../README.md#try-it-locally), then continue here from step 5.
+
 ## 1. What you need
 
 - **Kubernetes** with an ingress controller (or a load balancer) that terminates TLS for one public host, say `licenses.vendor.example`. Your customers' apps call it, as do you and your team.
@@ -19,6 +21,8 @@ Run [`deploy/database-setup.sql`](../deploy/database-setup.sql) once as a databa
 - you lose your signing keys;
 - every customer needs a build that trusts new keys;
 - online leases stop renewing.
+
+[What a loss means](../compliance/secure-configuration-guide.md#backups), and how to recover.
 
 ## 3. Install
 
@@ -67,7 +71,7 @@ Everything here also works through the API (`api/openapi.yaml`) with an API toke
 
 ## 7. Your app
 
-Your app takes the license key from its user, activates once per machine or cluster, and then checks the signed lease before licensed work. The SDKs do all of it, retries and offline verification included. **They aren't published yet** (alpha): the Go module isn't tagged, and the npm and Maven Central releases are pending. Until then, build them from this repository.
+Your app takes the license key from its user, activates once per machine or cluster, and then checks the signed lease before licensed work. The SDKs do all of it, retries and offline verification included. **They aren't published yet** (alpha): the Go module isn't tagged, and the npm and Maven Central releases are pending. Until then, build them from this repository: each SDK's README says how.
 
 - [Go](../sdk/go/README.md#online-activation)
 - [TypeScript](../sdk/ts/README.md) (Node 22+)

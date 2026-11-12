@@ -680,10 +680,15 @@ func (c *Client) once(ctx context.Context, u string, body []byte, idemKey string
 	}
 	ae := &APIError{Status: resp.StatusCode, RetryAfter: retryAfter(resp.Header.Get("Retry-After"), c.now())}
 	// The stable codes count only in a problem answer with a 4xx status: a
-	// proxy's error page or a garbled 5xx must not read as "revoked".
+	// proxy's error page or a garbled 5xx must not read as "revoked". A 5xx
+	// problem's code and detail (e.g. no_signing_key) are kept to report,
+	// but it stays ErrServer.
 	if mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mt == "application/problem+json" &&
-		resp.StatusCode >= 400 && resp.StatusCode < 500 && json.Unmarshal(raw, &p) == nil {
-		ae.Code, ae.Detail, ae.RequestID, ae.kind = p.Code, p.Detail, p.RequestID, codes[p.Code]
+		resp.StatusCode >= 400 && json.Unmarshal(raw, &p) == nil {
+		ae.Code, ae.Detail, ae.RequestID = p.Code, p.Detail, p.RequestID
+		if resp.StatusCode < 500 {
+			ae.kind = codes[p.Code]
+		}
 	}
 	switch {
 	case ae.kind != nil:

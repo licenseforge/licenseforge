@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"licenseforge.io/licenseforge/internal/audit"
+	"licenseforge.io/licenseforge/internal/secrets"
 	"licenseforge.io/licenseforge/internal/store/ent"
 )
 
@@ -52,6 +53,19 @@ func (s Service) Enable(ctx context.Context, id string) (Endpoint, error) {
 		}
 		if row.DisabledReason != nil {
 			ev.Details["disabled_reason"] = *row.DisabledReason
+		}
+		// What the dispatcher checks before a send, so Enable never leads
+		// straight back to "disabled": a lost master key, or a secret or URL
+		// the dispatcher refused, stays refused until rotated or updated.
+		if u, err := s.decrypt(secrets.PurposeWebhookURL, row.TenantID, id, row.URLCiphertext); err != nil {
+			return ErrURLUnreadable
+		} else if _, err := checkURL(u); err != nil {
+			return ErrURLUnreadable
+		}
+		if sec, err := s.decrypt(secrets.PurposeWebhookSecret, row.TenantID, id, row.SecretCiphertext); err != nil {
+			return ErrSecretUnreadable
+		} else if _, err := Signature("", 0, nil, sec); err != nil {
+			return ErrSecretUnreadable
 		}
 		if err := tx.WebhookEndpoint.UpdateOneID(id).SetEnabled(true).ClearDisabledReason().Exec(ctx); err != nil {
 			return err

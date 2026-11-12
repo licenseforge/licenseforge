@@ -1187,6 +1187,57 @@ func TestOfflineRenewalBurst(t *testing.T) {
 // the first one).
 type noKey struct{ signing.Local }
 
+// A renewal (ADR-0049) brings an expired license back without a new key or
+// a new activation: the same machine refreshes, and its lease ends with the
+// license's new expiry when that comes first.
+func TestRenewExpiredLicense(t *testing.T) {
+	a := actSetup(t)
+	ctx := context.Background()
+	is := a.issue(t, "pro")
+	fp := newFP()
+	if r := a.do(t, "POST", actPath(a.a.ID, "activate"), actBody(fp), licenseAuth(is.Key)); r.code != 200 {
+		t.Fatal(r.raw)
+	}
+	if err := a.db.WithTenant(ctx, a.a.ID, func(tx *ent.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE licenses SET expires_at = issued_at + interval '1 microsecond', grace_seconds = 0 WHERE id = $1`, is.License.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key)).problem(t, 403, "license_expired")
+	owner := a.session(t, a.ownerA, true)
+	u := Prefix + "/tenants/" + a.a.Slug + "/licenses/" + is.License.ID + "/expires-at"
+	for _, body := range []string{`{}`, `{"expires_at":null}`} {
+		if r := a.do(t, "POST", u, body, owner).problem(t, 422, "validation_failed"); !strings.Contains(fmt.Sprint(r["errors"]), "required") {
+			t.Errorf("%s: %v", body, r)
+		}
+	}
+	a.do(t, "POST", u, `{"expires_at":"2100-01-01T00:00:00Z"}`, a.session(t, a.viewerA, true)).problem(t, 403, "forbidden")
+	soon := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second) // before the plan's 1 h lease ends
+	if r := a.do(t, "POST", u, `{"expires_at":"`+soon.Format(time.RFC3339)+`"}`, owner); r.code != 200 || r.body["expires_at"] != soon.Format(time.RFC3339) {
+		t.Fatalf("renew: %d %s", r.code, r.raw)
+	}
+	r := a.do(t, "POST", actPath(a.a.ID, "refresh"), actBody(fp), licenseAuth(is.Key))
+	if r.code != 200 {
+		t.Fatalf("refresh after renewal: %d %s", r.code, r.raw)
+	}
+	pk, err := a.keys.Public(ctx, a.a.ID, r.body["kid"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, status, err := licensefile.Open(r.body["lease"].(string), licensefile.KeySet{{KID: pk.KID, Alg: licensefile.AlgEd25519, Key: pk.Key}},
+		licensefile.CheckOptions{Now: time.Now(), Product: "db", Fingerprint: fp})
+	if err != nil || status != licensefile.StatusValid || c.Expires == nil || !c.Expires.Equal(soon) {
+		t.Errorf("lease: %v %v %+v", status, err, c)
+	}
+	if n := len(a.activations(t, is.License.ID)); n != 1 {
+		t.Errorf("%d activations", n)
+	}
+	// Perpetual: nothing to move.
+	perp := a.issue(t, "cluster")
+	a.do(t, "POST", Prefix+"/tenants/"+a.a.Slug+"/licenses/"+perp.License.ID+"/expires-at", `{"expires_at":"2100-01-01T00:00:00Z"}`, owner).problem(t, 409, "no_term")
+}
+
 func (noKey) Active(context.Context, string) (string, error) { return "", signing.ErrNoActiveKey }
 
 // A tenant without an active signing key answers 503 no_signing_key, on
