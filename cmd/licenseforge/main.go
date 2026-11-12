@@ -7,7 +7,7 @@
 //	LICENSEFORGE_DATABASE_URL           tenant pool login (licenseforge_api)
 //	LICENSEFORGE_PLATFORM_DATABASE_URL  platform pool login (licenseforge_admin)
 //	LICENSEFORGE_IDENTITY_DATABASE_URL  login-path pool (licenseforge_login, ADR-0029)
-//	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` only
+//	LICENSEFORGE_OWNER_DATABASE_URL     schema owner, for `migrate` and the recovery commands (`admin reset`, `audit remove-sink`) only
 //	LICENSEFORGE_RETENTION_DATABASE_URL audit retention login, for `audit prune` only (ADR-0036)
 //	LICENSEFORGE_PLATFORM_AUDIT_RETENTION_DAYS  `audit prune`: the platform chain's retention, 365 to 36,500 days; unset = keep everything
 //	LICENSEFORGE_DATABASE_ALLOW_PLAINTEXT  true: database URLs need not verify the server (development only; SC-8)
@@ -108,7 +108,7 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("LICENSEFORGE_METRICS_ADDR", ":9090"), "metrics listen address (no auth: keep it off the public network)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n       licenseforge api METHOD PATH [--data JSON|@FILE|-]   one REST API request (ADR-0048; LICENSEFORGE_URL, _TENANT, _TOKEN)\n")
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: licenseforge [flags]       run the server\n       licenseforge migrate       apply database migrations\n       licenseforge audit prune   apply audit retention (ADR-0036)\n       licenseforge tenant create --slug S --name N --owner-email E   create a tenant and invite its first owner (ADR-0042)\n       licenseforge tenant invite-owner --tenant SLUG|ID --owner-email E   a new owner invitation for a tenant without an owner\n       licenseforge admin reset --yes   remove every platform admin, so the bootstrap admin's next sign-in recovers the role (ADR-0031; owner login)\n       licenseforge audit remove-sink --name N   unregister a SIEM sink no longer exported, so retention stops waiting for it (ADR-0036; owner login)\n       licenseforge offline activate --request FILE > license.lic   answer an air-gapped machine's request (ADR-0043; LICENSEFORGE_URL, _TENANT, _TOKEN)\n       licenseforge offline return --receipt FILE   return its seat with its deactivation receipt\n       licenseforge api METHOD PATH [--data JSON|@FILE|-]   one REST API request (ADR-0048; LICENSEFORGE_URL, _TENANT, _TOKEN)\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -124,8 +124,9 @@ func main() {
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one exits at once
 
 	cmd := strings.Join(flag.Args(), " ")
-	if args := flag.Args(); len(args) >= 2 && args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") {
-		cmd = "tenant " + args[1] // with its own flags
+	if args := flag.Args(); len(args) >= 2 && (args[0] == "tenant" && (args[1] == "create" || args[1] == "invite-owner") ||
+		args[0] == "admin" && args[1] == "reset" || args[0] == "audit" && args[1] == "remove-sink") {
+		cmd = args[0] + " " + args[1] // with its own flags
 	} else if len(args) >= 1 && (args[0] == "offline" || args[0] == "api") {
 		cmd = args[0]
 	}
@@ -155,6 +156,11 @@ func main() {
 	case "tenant create":
 		err = tenantCreate(ctx, flag.Args()[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0) // the usage was printed
+		}
+	case "admin reset", "audit remove-sink":
+		run := map[string]func(context.Context, []string, io.Writer) error{"admin reset": adminReset, "audit remove-sink": auditRemoveSink}[cmd]
+		if err = run(ctx, flag.Args()[2:], os.Stdout); errors.Is(err, flag.ErrHelp) {
 			os.Exit(0) // the usage was printed
 		}
 	case "tenant invite-owner":
@@ -298,7 +304,7 @@ func serve(ctx context.Context, ln, mln net.Listener, log *slog.Logger) error {
 	warnPlaintextDatabase(log)
 	defer func() { _ = ln.Close(); _ = mln.Close() }()
 	if envSet("LICENSEFORGE_OWNER_DATABASE_URL") {
-		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL (or _FILE) is set: the server must not hold the owner login; use it for `licenseforge migrate` only")
+		return errors.New("LICENSEFORGE_OWNER_DATABASE_URL (or _FILE) is set: the server must not hold the owner login; use it for `licenseforge migrate` and the recovery commands only")
 	}
 	if envSet("LICENSEFORGE_RETENTION_DATABASE_URL") { // ADR-0036: no DELETE on audit entries in serving pods
 		return errors.New("LICENSEFORGE_RETENTION_DATABASE_URL (or _FILE) is set: the server must not hold the retention login; use it for `licenseforge audit prune` only")
