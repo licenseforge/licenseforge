@@ -201,6 +201,22 @@ spec:
 
 - **Database**: use your platform's encrypted backups with point-in-time recovery, run by a database admin, not by a LicenseForge login. Test restores. Licenses, keys, members and the audit log all live here.
 - **Master keys**: back up the Secret value separately from the database, in a different system with different access. Without the keys, stored license keys and signing keys can't be decrypted (licenses already issued still verify; new ones can't be signed with the old keys). The two together expose them.
+- **What a loss means** (plan for it before it happens). Files and leases already issued keep verifying in your customers' apps until `exp` plus grace or `iat` plus `max_offline`, whichever comes first.
+  - **The master keys, with the database intact:**
+    - Signing keys and license keys can't be decrypted. Every activation and refresh fails with a server error, and nothing new can be signed.
+    - Recovery: set new `LICENSEFORGE_MASTER_KEYS`, generate a new signing key, and ship builds that trust it.
+    - Existing license keys can't be recovered (ADR-0025), so issue your customers new licenses.
+    - Keep the old public keys (the retired keys on the Signing keys page) in the trusted set, so files they signed still verify.
+  - **The database, with no usable backup:**
+    - Everything above, and the license and activation records are gone too.
+    - The old public keys survive only in your builds and records.
+  - **A restore to an earlier point:**
+    - **Every change after that point is undone.** Revocations and suspensions after it are lost: those licenses authenticate again. Re-apply them from the audit trail exported to your SIEM, if you export one (`audit.checkpoint` entries carry each chain's head, which shows where the restored chain ends).
+    - Licenses issued after that point don't exist: their keys answer `unauthenticated`, so issue them again.
+    - Activations and rehost counts revert, in both directions:
+      - machines activated after that point get `not_activated` on their next refresh, and the SDK activates again;
+      - seats freed after it are taken again.
+    - A signing key created or promoted after that point is missing. Builds that trust the restored keys keep working.
 - **After a restore**: run `licenseforge migrate` with the same or a newer version. It refuses a database whose migrations were changed or are newer than the binary. The server itself doesn't check the schema version at start, so don't skip this step.
 - **Signing key retirement isn't destruction**: a retired key's ciphertext remains in older backups and WAL until the master key it was encrypted with is rotated out of the keyring and those backups expire (ADR-0026).
 - **Audit log**: kept in full unless audit retention is on (`auditRetention.enabled` in the chart, off by default; ADR-0036). The `audit.checkpoint` entries exported to the SIEM carry each chain's verified head; compare them after a restore to see what the restored database lacks.

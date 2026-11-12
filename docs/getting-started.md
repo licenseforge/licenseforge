@@ -20,6 +20,8 @@ Run [`deploy/database-setup.sql`](../deploy/database-setup.sql) once as a databa
 - every customer needs a build that trusts new keys;
 - online leases stop renewing.
 
+[What a loss means](../compliance/secure-configuration-guide.md#backups), and how to recover.
+
 ## 3. Install
 
 ```sh
