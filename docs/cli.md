@@ -1,6 +1,6 @@
 # Command line
 
-The `licenseforge` binary is also the CLI (ADR-0048). Commands that talk to a running LicenseForge use the REST API with an API token, and read three environment variables:
+The `licenseforge` binary is also the CLI (ADR-0048). Each release attaches it for Linux, macOS and Windows ([verify it](verifying-releases.md#server-binaries)). Commands that talk to a running LicenseForge use the REST API with an API token, and read three environment variables:
 
 | Variable | Value |
 |---|---|

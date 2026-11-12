@@ -7,7 +7,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | Server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z` | cosign | attestation | attestation |
 | FIPS server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z-fips` | cosign | attestation | attestation |
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
-| Server binaries, linux amd64 and arm64 | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
+| Server binaries, linux amd64 and arm64; the same binary for macOS (amd64, arm64) and Windows (amd64, `.exe`) as the CLI | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
 | TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
 | Java SDK | Maven Central `io.licenseforge:licenseforge-sdk` (its own version, tag `sdk/java/vX.Y.Z`) | PGP (`.asc`, Central's requirement) | | attestation |
 
@@ -51,7 +51,7 @@ Install by the verified digest: `helm install licenseforge oci://ghcr.io/license
 
 ## Server binaries
 
-Download the binary for your architecture, `SHA256SUMS` and `SHA256SUMS.sigstore.json` from the release, then:
+Download the binary for your OS and architecture (`licenseforge_<version>_<os>_<arch>`, `.exe` on Windows), `SHA256SUMS` and `SHA256SUMS.sigstore.json` from the release, then:
 
 ```sh
 gh release download "v$VERSION" --repo licenseforge/licenseforge \

@@ -60,9 +60,12 @@ jobs:
         run: |
           make web # the dashboard bundle (npm ci from the lockfile, no install scripts), embedded with TAGS=webui
           mkdir -p out/bin
-          for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch make build VERSION="$VERSION" TAGS=webui
-            mv bin/licenseforge "out/bin/licenseforge_${VERSION}_linux_${arch}"
+          # The server runs on Linux; macOS and Windows builds are for the CLI
+          # (licenseforge api, offline) on a vendor's workstation.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os=${target%/*} arch=${target#*/} ext=""; [ "$os" = windows ] && ext=.exe
+            GOOS=$os GOARCH=$arch make build VERSION="$VERSION" TAGS=webui
+            mv bin/licenseforge "out/bin/licenseforge_${VERSION}_${os}_${arch}${ext}"
           done
           (cd out/bin && sha256sum licenseforge_* > SHA256SUMS && cat SHA256SUMS)
       - name: Images, linux/amd64 and linux/arm64, standard and FIPS (OCI archives)
@@ -92,7 +95,7 @@ jobs:
             if grep -aq 'This binary was built without the dashboard' "$1"; then echo "$1: placeholder page"; exit 1; fi
             echo "$1: dashboard embedded"
           }
-          for f in out/bin/licenseforge_*_linux_*; do check "$f"; done
+          for f in out/bin/licenseforge_*; do check "$f"; done # every OS and arch
           for suffix in "" -fips; do
             for arch in amd64 arm64; do
               d=$(mktemp -d)
