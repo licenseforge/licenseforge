@@ -58,7 +58,7 @@ As the tenant's owner:
 
 1. **Products → New product** (its slug, such as `acme-db`, goes in your app). On the product's page:
    - add **features**: on/off, or limits such as `seats`;
-   - add **plans** (duration, max activations, lease and offline settings, machine or cluster binding). Plans with binding None, for site licenses, have no activations and no way yet to deliver their file to an app;
+   - add **plans** (duration, max activations, lease and offline settings, machine or cluster binding). Plans with binding None are site licenses: no activations; you export the signed file instead (step 7);
    - fill in the feature × plan matrix.
 2. **Customers → New customer.**
 3. **Licenses → Issue license**: product, plan, customer. **The license key is shown once**: send it to your customer.
@@ -78,6 +78,8 @@ Each needs the server URL, the tenant ID, the product slug, the user's license k
 - give the app's ServiceAccount `get` and `update` on it by name, plus `get` on the `kube-system` namespace for the cluster fingerprint.
 
 Each SDK's README has the details.
+
+**Site licenses** (a plan that binds nothing and allows offline use): on the license's page, **Site license file → Export license file**, or `POST /tenants/{t}/licenses/{id}/file`. Give the customer the file. Their app verifies it offline with the trusted key set, with no fingerprint and no server (Go: `licensefile.Open`; TypeScript: `open`; Java: `LicenseFile.open`).
 
 **Air-gapped customers:**
 1. Their app writes a request file.

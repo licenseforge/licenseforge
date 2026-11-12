@@ -10,6 +10,7 @@ import {
   canManageLicenses,
   changeLicense,
   createOfflineActivation,
+  exportLicenseFile,
   deactivateActivation,
   endOfDayUTC,
   issueLicense,
@@ -208,6 +209,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
       <Machines key={l.status} tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
       {manage && l.status !== "revoked" && <Maintenance key={l.updates_until ?? ""} tenant={tenant} license={l} onChanged={onChanged} />}
       {manage && <Offline tenant={tenant} license={l} />}
+      {manage && <SiteFile tenant={tenant} license={l} />}
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
         <div role="group" aria-label={t(`licenses.confirm.${confirm}`)} className="mt-4 rounded-md border p-3 text-sm">
@@ -445,6 +447,43 @@ function Offline({ tenant, license: l }: { tenant: string; license: License }) {
           </p>
         )}
         {returned && <p>{returned}</p>}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A site license's file (plan binding none): no activations, so the vendor
+ * exports the signed file and hands it to the customer. Shown only for
+ * licenses on such a plan; the server checks the rest (not_issuable).
+ */
+function SiteFile({ tenant, license: l }: { tenant: string; license: License }) {
+  const plans = useQuery(productPlansQuery(tenant, l.product_id));
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  if (plans.data?.items.find((p) => p.id === l.plan_id)?.bind_type !== "none") return null;
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      setUrl(URL.createObjectURL(new Blob([await exportLicenseFile(tenant, l.id)], { type: "application/octet-stream" })));
+    } catch (err) {
+      onAuthError(err);
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section aria-labelledby="site-file-title" className="mt-4">
+      <h3 id="site-file-title" className="font-semibold">{t("siteFile.title")}</h3>
+      <p className="mt-1 text-xs text-muted-foreground">{t("siteFile.intro")}</p>
+      <Button className="mt-2" variant="ghost" disabled={busy} onClick={run}>{t("siteFile.export")}</Button>
+      {error !== null && <p role="alert" className="mt-2 text-sm font-medium">{errorText(error)}</p>}
+      <div role="status" className="mt-2 text-sm">
+        {url && <a className="underline" href={url} download="license.lic">{t("offline.download")}</a>}
       </div>
     </section>
   );

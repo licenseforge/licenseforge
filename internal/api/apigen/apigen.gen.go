@@ -2107,6 +2107,9 @@ type ServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId)
+	// ExportLicenseFile The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+	// (POST /tenants/{tenant}/licenses/{id}/file)
+	ExportLicenseFile(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -3536,6 +3539,41 @@ func (siw *ServerInterfaceWrapper) DeactivateActivation(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeactivateActivation(w, r, tenant, id, activationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportLicenseFile operation middleware
+func (siw *ServerInterfaceWrapper) ExportLicenseFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportLicenseFile(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5124,6 +5162,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/updates-until", wrapper.SetLicenseUpdatesUntil)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/file", wrapper.ExportLicenseFile)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
@@ -9999,6 +10038,171 @@ func (response DeactivateActivation404ApplicationProblemPlusJSONResponse) VisitD
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFileRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+}
+
+type ExportLicenseFileResponseObject interface {
+	VisitExportLicenseFileResponse(w http.ResponseWriter) error
+}
+
+type ExportLicenseFile201JSONResponse struct {
+	// LicenseFile The signed lf1 license file (armored).
+	LicenseFile string `json:"license_file"`
+}
+
+func (response ExportLicenseFile201JSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ExportLicenseFile400ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile401ResponseHeaders
+}
+
+func (response ExportLicenseFile401ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile403ResponseHeaders
+}
+
+func (response ExportLicenseFile403ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile404ResponseHeaders
+}
+
+func (response ExportLicenseFile404ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile409ResponseHeaders
+}
+
+func (response ExportLicenseFile409ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportLicenseFile503ResponseHeaders struct {
+	XRequestId *string
+}
+
+type ExportLicenseFile503ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ExportLicenseFile503ResponseHeaders
+}
+
+func (response ExportLicenseFile503ApplicationProblemPlusJSONResponse) VisitExportLicenseFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -15121,6 +15325,9 @@ type StrictServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(ctx context.Context, request DeactivateActivationRequestObject) (DeactivateActivationResponseObject, error)
+	// ExportLicenseFile The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+	// (POST /tenants/{tenant}/licenses/{id}/file)
+	ExportLicenseFile(ctx context.Context, request ExportLicenseFileRequestObject) (ExportLicenseFileResponseObject, error)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(ctx context.Context, request ResetRehostsRequestObject) (ResetRehostsResponseObject, error)
@@ -16252,6 +16459,33 @@ func (sh *strictHandler) DeactivateActivation(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeactivateActivationResponseObject); ok {
 		if err := validResponse.VisitDeactivateActivationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportLicenseFile operation middleware
+func (sh *strictHandler) ExportLicenseFile(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request ExportLicenseFileRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportLicenseFile(ctx, request.(ExportLicenseFileRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportLicenseFile")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportLicenseFileResponseObject); ok {
+		if err := validResponse.VisitExportLicenseFileResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

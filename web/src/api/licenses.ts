@@ -90,6 +90,11 @@ export async function createOfflineActivation(tenant: string, request: string, i
   );
 }
 
+/** A site license's signed file (binding none, offline allowed), for an air-gapped install. Each export is audited. */
+export async function exportLicenseFile(tenant: string, id: string): Promise<string> {
+  return unwrap(await api.POST("/tenants/{tenant}/licenses/{id}/file", { params: { path: { tenant, id } } })).license_file;
+}
+
 /** Returns an offline seat on the machine's deactivation receipt (ADR-0043). */
 export async function returnOfflineSeat(tenant: string, receipt: string): Promise<Activation> {
   return unwrap(await api.POST("/tenants/{tenant}/deactivation-receipts", { params: { path: { tenant } }, body: { receipt } }));

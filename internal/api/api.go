@@ -34,6 +34,7 @@ import (
 	"licenseforge.io/licenseforge/internal/idempotency"
 	"licenseforge.io/licenseforge/internal/identity"
 	"licenseforge.io/licenseforge/internal/invitations"
+	"licenseforge.io/licenseforge/internal/issue"
 	"licenseforge.io/licenseforge/internal/licenses"
 	"licenseforge.io/licenseforge/internal/members"
 	"licenseforge.io/licenseforge/internal/metrics"
@@ -539,6 +540,8 @@ func mapErr(err error) *problem {
 		p = platformProblem(err)
 	case webhookProblem(err) != nil:
 		p = webhookProblem(err)
+	case errors.Is(err, issue.ErrNotIssuable):
+		p = &problem{status: http.StatusConflict, code: "not_issuable", detail: "The license can't be exported as a file: " + strings.TrimPrefix(err.Error(), issue.ErrNotIssuable.Error()+": ") + "."}
 	case errors.Is(err, signing.ErrNoActiveKey):
 		// 503: nothing the caller can fix, and the SDKs retry it.
 		p = &problem{status: http.StatusServiceUnavailable, code: "no_signing_key", detail: "The tenant has no active signing key, so nothing can be signed; an owner generates one on the Signing keys page."}

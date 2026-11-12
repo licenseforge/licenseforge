@@ -366,6 +366,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenant}/licenses/{id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The signed license file of a site license, for an air-gapped install (ADR-0006, ADR-0043).
+         * @description For a license whose plan binds nothing (`bind_type: none`) and allows
+         *     offline use; the app verifies it offline with the trusted key set
+         *     (the Go SDK's `licensefile.Open`). Machine- and cluster-bound
+         *     licenses get their file through an offline activation instead.
+         *     Needs activation:offline on the license's product. The file is valid
+         *     until the license's expiry plus grace and can't be revoked once
+         *     handed out; each export is audited (`license.offline_file`).
+         *     `not_issuable` (409): not a site license, not active, expired, or
+         *     offline use not allowed. `no_signing_key` (503).
+         */
+        post: operations["exportLicenseFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/licenses/{id}/reinstate": {
         parameters: {
             query?: never;
@@ -2889,6 +2921,39 @@ export interface operations {
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    exportLicenseFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tenant's slug or ID (`tnt_…`). */
+                tenant: components["parameters"]["Tenant"];
+                id: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The signed license file. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The signed lf1 license file (armored). */
+                        license_file: string;
+                    };
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     reinstateLicense: {
