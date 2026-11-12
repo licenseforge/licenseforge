@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - **Maintenance entitlement** `updates_until` (ADR-0045), daily metrics and overview charts (ADR-0046), the signing keys screen, the `licenseforge api` CLI (ADR-0048).
 - **Hardening:** database connections must verify the server, secrets are mounted as files, weak and mixed-order Ed25519 keys are refused, Kubernetes hardening guide.
 - **Getting started:** [docs/getting-started.md](docs/getting-started.md).
+- **License renewal** (ADR-0049): move a license's expiry, keeping its key and machines.
 
 ### Upgrade notes
 - **Chart and image must come from the same release**: the chart now mounts Secrets as files (`*_FILE`), which older images can't read (Security, "Secrets as files").
@@ -37,6 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Added
+- **License renewal** (ADR-0049): `POST /tenants/{t}/licenses/{id}/expires-at` moves a license's expiry, later (a renewal) or earlier (a correction), keeping its key, machines and plan terms. Needs `license:write`; audited as `license.expires_at` with the previous value. A perpetual license, or one whose term hasn't started at a first activation, answers 409 `no_term`. Online leases carry the new date from their next refresh, an expired license's included (the same activation, no new seat); offline files keep theirs until replaced. The dashboard's license dialog has an Expiry date.
 - **Java SDK releases** (`io.licenseforge:licenseforge-sdk` on Maven Central, tag `sdk/java/vX.Y.Z`): `sdk-java-release.yml` builds and tests the jar, sources and javadoc with a read-only token on JDK 17 and checks the jar's contents, then in the protected `maven-central` environment PGP-signs the built files, attests their SLSA provenance and uploads the bundle for a maintainer to publish. The first version is `0.1.0-alpha.1`; `SDK_VERSION` follows the pom (tested). See [verifying releases](docs/verifying-releases.md).
 - **TypeScript SDK releases** (`@licenseforge/sdk` on npm, tag `sdk/ts/vX.Y.Z`): `sdk-ts-release.yml` builds and tests the tarball with a read-only token, checks its contents and installs it in an empty project, then publishes it from the protected `npm` environment with npm trusted publishing (no npm token) and provenance. Prereleases go to the `next` dist-tag. The first version is `0.1.0-alpha.1`; `SDK_VERSION` follows `package.json` (tested). See [verifying releases](docs/verifying-releases.md).
 - `docs/getting-started.md`: one walk-through from an empty cluster to an app checking its license (install, OIDC, first tenant, signing key, catalog, license, SDK, air-gapped customers, operations), linked first from the README.

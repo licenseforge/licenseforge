@@ -52,3 +52,4 @@ We record significant decisions as ADRs ([ADR-0001](0001-record-architecture-dec
 | [ADR-0046](0046-daily-metrics-series.md) | Daily metrics series | accepted |
 | [ADR-0047](0047-test-mode-tenants.md) | Test-mode tenants | accepted |
 | [ADR-0048](0048-admin-cli-via-the-rest-api.md) | Admin CLI via the REST API | accepted |
+| [ADR-0049](0049-license-renewal-by-moving-expires-at.md) | License renewal by moving expires_at | accepted |

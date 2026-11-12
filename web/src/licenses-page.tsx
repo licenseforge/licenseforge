@@ -12,6 +12,7 @@ import {
   createOfflineActivation,
   deactivateActivation,
   endOfDayUTC,
+  setExpiresAt,
   issueLicense,
   type License,
   type LicenseAction,
@@ -57,7 +58,7 @@ function useNames(tenant: string) {
 }
 
 export const expiryText = (l: Pick<License, "expires_at" | "expiry_basis">) =>
-  l.expires_at ? date.format(new Date(l.expires_at)) : l.expiry_basis === "from_first_activation" ? t("licenses.fromFirstActivation") : t("licenses.perpetual");
+  l.expires_at ? t("licenses.utcDate", { date: utcDay.format(new Date(l.expires_at)) }) : l.expiry_basis === "from_first_activation" ? t("licenses.fromFirstActivation") : t("licenses.perpetual");
 
 export function LicensesPage() {
   const { slug } = useParams({ from: "/app/t/$slug/licenses" });
@@ -207,6 +208,7 @@ export function LicenseDialog({ tenant, license: l, manage, machines = false, na
       {/* keyed by status: a status change (e.g. revoked meanwhile) drops an open confirmation and its error */}
       <Machines key={l.status} tenant={tenant} license={l} manage={machines} onChanged={onChanged} />
       {manage && l.status !== "revoked" && <Maintenance key={l.updates_until ?? ""} tenant={tenant} license={l} onChanged={onChanged} />}
+      {manage && l.status !== "revoked" && l.expires_at && <Renewal key={l.expires_at} tenant={tenant} license={l} expiresAt={l.expires_at} onChanged={onChanged} />}
       {manage && <Offline tenant={tenant} license={l} />}
       {act.isError && <p role="alert" className="mt-3 text-sm font-medium">{errorText(act.error)}</p>}
       {confirm ? (
@@ -264,6 +266,39 @@ function Maintenance({ tenant, license: l, onChanged }: { tenant: string; licens
       </div>
       {save.isError && (
         <p id="maintenance-error" role="alert" className="mt-2 font-medium">{fieldErrors(save.error).updates_until ?? errorText(save.error)}</p>
+      )}
+    </section>
+  );
+}
+
+/** Moves the end of a license's term (ADR-0049): renews it, or corrects it. Shown only when it has an end. */
+function Renewal({ tenant, license: l, expiresAt, onChanged }: { tenant: string; license: License; expiresAt: string; onChanged: (l: License) => void }) {
+  const qc = useQueryClient();
+  const held = expiresAt.slice(0, 10); // the UTC day (the API answers in UTC)
+  const [day, setDay] = useState(held);
+  const save = useMutation({
+    mutationFn: (at: string) => setExpiresAt(tenant, l.id, at),
+    onSuccess: async (updated) => {
+      await qc.invalidateQueries({ queryKey: ["licenses", tenant] });
+      onChanged(updated);
+    },
+  });
+  return (
+    <section aria-labelledby="renewal-title" className="mt-4 text-sm">
+      <h3 id="renewal-title" className="font-semibold">{t("licenses.renewal")}</h3>
+      <p id="renewal-help" className="mt-1 text-xs text-muted-foreground">{t("licenses.renewalHelp")}</p>
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          {t("licenses.renewalDate")}
+          <input type="date" className={input} value={day} min={l.issued_at.slice(0, 10)} max="9999-12-31" onChange={(e) => setDay(e.target.value)}
+            aria-invalid={save.isError && !!fieldErrors(save.error).expires_at} aria-describedby={save.isError ? "renewal-help renewal-error" : "renewal-help"} />
+        </label>
+        <Button variant="ghost" disabled={save.isPending || day === "" || day === held} onClick={() => save.mutate(endOfDayUTC(day))}>
+          {t("licenses.renewalSave")}
+        </Button>
+      </div>
+      {save.isError && (
+        <p id="renewal-error" role="alert" className="mt-2 font-medium">{fieldErrors(save.error).expires_at ?? errorText(save.error)}</p>
       )}
     </section>
   );

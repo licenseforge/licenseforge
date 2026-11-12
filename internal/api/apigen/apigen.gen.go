@@ -1855,6 +1855,11 @@ type ListActivationsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// SetLicenseExpiresAtJSONBody defines parameters for SetLicenseExpiresAt.
+type SetLicenseExpiresAtJSONBody struct {
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // SetLicenseUpdatesUntilJSONBody defines parameters for SetLicenseUpdatesUntil.
 type SetLicenseUpdatesUntilJSONBody struct {
 	UpdatesUntil *time.Time `json:"updates_until"`
@@ -1975,6 +1980,9 @@ type CreateInvitationJSONRequestBody = InvitationCreate
 
 // IssueLicenseJSONRequestBody defines body for IssueLicense for application/json ContentType.
 type IssueLicenseJSONRequestBody = LicenseIssue
+
+// SetLicenseExpiresAtJSONRequestBody defines body for SetLicenseExpiresAt for application/json ContentType.
+type SetLicenseExpiresAtJSONRequestBody SetLicenseExpiresAtJSONBody
 
 // SetLicenseUpdatesUntilJSONRequestBody defines body for SetLicenseUpdatesUntil for application/json ContentType.
 type SetLicenseUpdatesUntilJSONRequestBody SetLicenseUpdatesUntilJSONBody
@@ -2107,6 +2115,9 @@ type ServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId, activationId ActivationId)
+	// SetLicenseExpiresAt Move a license's expiry (renew or correct it).
+	// (POST /tenants/{tenant}/licenses/{id}/expires-at)
+	SetLicenseExpiresAt(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId)
@@ -3536,6 +3547,41 @@ func (siw *ServerInterfaceWrapper) DeactivateActivation(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeactivateActivation(w, r, tenant, id, activationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetLicenseExpiresAt operation middleware
+func (siw *ServerInterfaceWrapper) SetLicenseExpiresAt(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tenant" -------------
+	var tenant Tenant
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id LicenseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetLicenseExpiresAt(w, r, tenant, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5124,6 +5170,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}", wrapper.GetLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/suspend", wrapper.SuspendLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/updates-until", wrapper.SetLicenseUpdatesUntil)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/expires-at", wrapper.SetLicenseExpiresAt)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/reinstate", wrapper.ReinstateLicense)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/revoke", wrapper.RevokeLicense)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/tenants/{tenant}/licenses/{id}/activations", wrapper.ListActivations)
@@ -9999,6 +10046,169 @@ func (response DeactivateActivation404ApplicationProblemPlusJSONResponse) VisitD
 		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
 	}
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAtRequestObject struct {
+	Tenant Tenant    `json:"tenant"`
+	Id     LicenseId `json:"id"`
+	Body   *SetLicenseExpiresAtJSONRequestBody
+}
+
+type SetLicenseExpiresAtResponseObject interface {
+	VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error
+}
+
+type SetLicenseExpiresAt200JSONResponse License
+
+func (response SetLicenseExpiresAt200JSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SetLicenseExpiresAt400ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt401ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseExpiresAt401ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseExpiresAt401ResponseHeaders
+}
+
+func (response SetLicenseExpiresAt401ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt403ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseExpiresAt403ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseExpiresAt403ResponseHeaders
+}
+
+func (response SetLicenseExpiresAt403ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt404ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseExpiresAt404ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseExpiresAt404ResponseHeaders
+}
+
+func (response SetLicenseExpiresAt404ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt409ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseExpiresAt409ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseExpiresAt409ResponseHeaders
+}
+
+func (response SetLicenseExpiresAt409ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetLicenseExpiresAt422ResponseHeaders struct {
+	XRequestId *string
+}
+
+type SetLicenseExpiresAt422ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers SetLicenseExpiresAt422ResponseHeaders
+}
+
+func (response SetLicenseExpiresAt422ApplicationProblemPlusJSONResponse) VisitSetLicenseExpiresAtResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -15121,6 +15331,9 @@ type StrictServerInterface interface {
 	// DeactivateActivation Deactivate a machine or cluster, freeing its seat, as the SDK's deactivate does.
 	// (POST /tenants/{tenant}/licenses/{id}/activations/{activation_id}/deactivate)
 	DeactivateActivation(ctx context.Context, request DeactivateActivationRequestObject) (DeactivateActivationResponseObject, error)
+	// SetLicenseExpiresAt Move a license's expiry (renew or correct it).
+	// (POST /tenants/{tenant}/licenses/{id}/expires-at)
+	SetLicenseExpiresAt(ctx context.Context, request SetLicenseExpiresAtRequestObject) (SetLicenseExpiresAtResponseObject, error)
 	// ResetRehosts Reset the license's seat-move counter (support rehost, ADR-0039).
 	// (POST /tenants/{tenant}/licenses/{id}/rehosts/reset)
 	ResetRehosts(ctx context.Context, request ResetRehostsRequestObject) (ResetRehostsResponseObject, error)
@@ -16252,6 +16465,40 @@ func (sh *strictHandler) DeactivateActivation(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeactivateActivationResponseObject); ok {
 		if err := validResponse.VisitDeactivateActivationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetLicenseExpiresAt operation middleware
+func (sh *strictHandler) SetLicenseExpiresAt(w http.ResponseWriter, r *http.Request, tenant Tenant, id LicenseId) {
+	var request SetLicenseExpiresAtRequestObject
+
+	request.Tenant = tenant
+	request.Id = id
+
+	var body SetLicenseExpiresAtJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetLicenseExpiresAt(ctx, request.(SetLicenseExpiresAtRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetLicenseExpiresAt")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetLicenseExpiresAtResponseObject); ok {
+		if err := validResponse.VisitSetLicenseExpiresAtResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

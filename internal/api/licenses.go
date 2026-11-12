@@ -137,6 +137,17 @@ func (s *server) SuspendLicense(ctx context.Context, req apigen.SuspendLicenseRe
 	return apigen.SuspendLicense200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
 }
 
+func (s *server) SetLicenseExpiresAt(ctx context.Context, req apigen.SetLicenseExpiresAtRequestObject) (apigen.SetLicenseExpiresAtResponseObject, error) {
+	if req.Body.ExpiresAt.IsZero() { // absent or null decode to the zero time
+		return nil, invalid(fieldError{"/expires_at", "required: a date-time"})
+	}
+	c, err := s.Licenses.SetExpiresAt(ctx, principal(ctx), req.Id, req.Body.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetLicenseExpiresAt200JSONResponse(licenseView(c.License, c.ActiveActivations)), nil
+}
+
 func (s *server) SetLicenseUpdatesUntil(ctx context.Context, req apigen.SetLicenseUpdatesUntilRequestObject) (apigen.SetLicenseUpdatesUntilResponseObject, error) {
 	// Required, nullable: absent must not read as null (every build covered).
 	if req.Body.UpdatesUntil == nil && len(nulls(ctx, "updates_until")) == 0 {
