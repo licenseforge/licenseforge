@@ -40,7 +40,7 @@ jobs:
         with: { node-version-file: web/.nvmrc }
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with: { distribution: temurin, java-version: "21" }
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with: { version: v4.3.1 }
       - name: minikube, kubectl and Maven
         run: |
