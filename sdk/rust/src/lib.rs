@@ -1,16 +1,23 @@
 //! LicenseForge SDK for Rust: verify lf1 license files offline
 //! (spec/license-format.md, ADR-0050).
 //!
-//! [`verify`] checks a license's envelope and Ed25519 signature against the
-//! trusted keys embedded in your build ([`parse_key_set`] reads the
-//! dashboard's JSON) and returns the verified payload. Every step follows the
-//! spec's order, so each SDK reports the same [`Code`] for the same input.
+//! [`open`] is the usual entry point: it checks a license's envelope and
+//! Ed25519 signature against the trusted keys embedded in your build
+//! ([`parse_key_set`] reads the dashboard's JSON), decodes its claims and runs
+//! the claim checks. [`verify`], [`parse_claims`] and [`check`] are the steps
+//! on their own. Every step follows the spec's order, so each SDK reports the
+//! same [`Code`] for the same input.
 
 #![forbid(unsafe_code)]
 
+mod claims;
 mod error;
 mod json;
 
+pub use claims::{
+    Binding, BindingType, CheckOptions, Claims, DEFAULT_CLOCK_TOLERANCE, Entitlements, Status,
+    check, parse_claims, parse_duration, parse_time,
+};
 pub use error::{Code, Error};
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -40,6 +47,22 @@ pub struct Verified {
     pub payload: Vec<u8>,
     /// The key ID that signed it.
     pub kid: String,
+}
+
+/// A usable license: its claims and status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Opened {
+    pub claims: Claims,
+    pub status: Status,
+}
+
+/// Verifies a license, decodes its claims and checks them. The claims come
+/// back only when everything passed; otherwise the first failing step's error.
+pub fn open(license: &str, keys: &[PublicKey], options: &CheckOptions) -> Result<Opened, Error> {
+    let claims = parse_claims(&verify(license, keys)?.payload)?;
+    let status = check(&claims, options)?;
+    Ok(Opened { claims, status })
 }
 
 /// Reads a trusted key set (the dashboard's Settings → Signing keys JSON, the
