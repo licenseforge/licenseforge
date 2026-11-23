@@ -15,7 +15,7 @@ Two more official SDKs, Apache-2.0, held to the same spec and conformance vector
 | Rust (`sdk/rust`, crate `licenseforge`) | `ed25519-dalek` (3.x), `curve25519-dalek` for the subgroup check | `sha2`, `hmac` (RustCrypto) | CLIs, services, agents; stable Rust, MSRV documented and tested |
 | C++ (`sdk/cpp`, C++17, CMake) | OpenSSL 3 `libcrypto` (EVP Ed25519) | the same libcrypto (SHA-256, HMAC) | desktop and on-prem native apps on Linux, macOS, Windows |
 
-- **Dependencies:** neither language has Ed25519 in its standard library, so each SDK takes exactly one well-audited crypto dependency (the RustCrypto/dalek crates; OpenSSL, which is already on almost every target). Nothing else: JSON and base64url are hand-written to the spec, as in the Java SDK.
+- **Dependencies:** neither language has Ed25519 in its standard library, so each SDK takes one well-audited crypto project (the dalek crates; OpenSSL, which is already on almost every target). Nothing else: JSON and base64url are hand-written to the spec, as in the Java SDK.
 - **Same answers:** verification is cofactorless and refuses a non-canonical S, like Go, SunEC and OpenSSL. The SDK refuses weak keys and weak R itself, before calling the library. The conformance vectors are the gate in each SDK's CI.
 - **FIPS (C++):** OpenSSL 3.5+ has a FIPS provider that approves Ed25519. The C++ SDK gets a FIPS mode later, the same way as Java (the validated provider by name, no fallback). The Rust SDK has no FIPS mode; a buyer who needs one uses Go, Java or C++.
 - **Scope, in order:**

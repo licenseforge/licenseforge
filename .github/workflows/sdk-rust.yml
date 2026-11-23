@@ -27,9 +27,15 @@ jobs:
         run: |
           rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy,rustfmt
           rustup default "${{ matrix.rust }}"
-      - name: Format, lint, test (Cargo.lock as committed)
+      - name: Format and lint (stable only; lints change between versions)
+        if: matrix.rust == 'stable'
         working-directory: sdk/rust
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked
+      - name: Test (Cargo.lock as committed)
+        working-directory: sdk/rust
+        run: cargo test --locked
+      - name: Test with dalek's lenient mode on (another crate in an app may enable it)
+        working-directory: sdk/rust
+        run: cargo test --locked --features ed25519-dalek/legacy_compatibility

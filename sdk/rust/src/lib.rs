@@ -6,6 +6,8 @@
 //! dashboard's JSON) and returns the verified payload. Every step follows the
 //! spec's order, so each SDK reports the same [`Code`] for the same input.
 
+#![forbid(unsafe_code)]
+
 mod error;
 mod json;
 
@@ -22,15 +24,21 @@ const END: &str = "-----END LICENSEFORGE LICENSE-----";
 /// A trusted verification key. `alg` binds the algorithm to the key, never the file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKey {
+    /// The key ID licenses name.
     pub kid: String,
+    /// The algorithm, e.g. `"ed25519"`.
     pub alg: String,
+    /// The raw public key bytes (32 for Ed25519).
     pub key: Vec<u8>,
 }
 
 /// A verified payload and the key ID that signed it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Verified {
+    /// The payload JSON's bytes, signature checked, not yet parsed.
     pub payload: Vec<u8>,
+    /// The key ID that signed it.
     pub kid: String,
 }
 
@@ -85,7 +93,8 @@ pub fn parse_key_set(json: &[u8]) -> Result<Vec<PublicKey>, Error> {
 
 /// Checks a license's envelope and signature against the trusted keys and
 /// returns the verified payload bytes and the key ID. It doesn't look at the
-/// claims.
+/// claims. A license file is text: read it with `read_to_string`, and treat a
+/// file that isn't UTF-8 as malformed.
 pub fn verify(license: &str, keys: &[PublicKey]) -> Result<Verified, Error> {
     let e = envelope(license)?;
     let mut found = keys.iter().filter(|k| k.kid == e.kid);
@@ -121,6 +130,14 @@ pub fn verify(license: &str, keys: &[PublicKey]) -> Result<Verified, Error> {
         .map_err(|_| Error::with(Code::Malformed, "signature length"))?;
     // A weak R (spec): with R = identity and S = k·a, cofactorless verification (Go) accepts and OpenSSL refuses.
     if weak_ed25519(sig[..32].try_into().unwrap()) {
+        return Err(Error::new(Code::BadSignature));
+    }
+    // S < L checked here, not left to ed25519-dalek: its legacy_compatibility feature, which any
+    // other crate in the app's build can turn on (Cargo unifies features), skips that check.
+    if curve25519_dalek::Scalar::from_canonical_bytes(sig[32..].try_into().unwrap())
+        .is_none()
+        .into()
+    {
         return Err(Error::new(Code::BadSignature));
     }
     // A 32-byte value that isn't a curve point can't verify anything (bad_signature).
@@ -212,7 +229,7 @@ fn b64url(s: &str) -> Option<Vec<u8>> {
     for chunk in b.chunks(4) {
         let mut n = 0u32;
         for &c in chunk {
-            n = n << 6 | val(c)?;
+            n = (n << 6) | val(c)?;
         }
         match chunk.len() {
             4 => out.extend_from_slice(&[(n >> 16) as u8, (n >> 8) as u8, n as u8]),
@@ -243,7 +260,7 @@ const SMALL_ORDER: [[u8; 32]; 8] = {
             const fn d(c: u8) -> u8 {
                 if c <= b'9' { c - b'0' } else { c - b'a' + 10 }
             }
-            out[i] = d(b[2 * i]) << 4 | d(b[2 * i + 1]);
+            out[i] = (d(b[2 * i]) << 4) | d(b[2 * i + 1]);
             i += 1;
         }
         out

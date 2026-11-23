@@ -16,8 +16,8 @@ match licenseforge::verify(&std::fs::read_to_string("license.lic")?, &keys) {
 ```
 
 - Every step runs in the spec's order, so the error class is the same as in the Go, Java and TypeScript SDKs: `malformed`, `unknown_key`, `unsupported_alg`, `bad_signature`, `invalid_key_set` (`Code`, `#[non_exhaustive]`).
-- Verification is cofactorless and refuses a non-canonical `S`, like Go, the JDK and OpenSSL. Weak and mixed-order trusted keys (`invalid_key_set`) and a weak `R` (`bad_signature`) are refused before the signature check, as the spec requires.
+- Verification is cofactorless and refuses a non-canonical `S` (checked by the SDK itself, whatever dalek features the rest of your build enables), like Go, the JDK and OpenSSL. Weak and mixed-order trusted keys (`invalid_key_set`) and a weak `R` (`bad_signature`) are refused before the signature check, as the spec requires.
 - Keys load as given: an unknown `alg`, a duplicate `kid` or a wrong key length surface in `verify`, when that key is used.
-- Error messages never echo the license or key set.
+- Error messages never echo the license or key set, beyond a validated `kid`.
 
 Build and test: `cargo test` (serde_json reads the vectors in tests only).

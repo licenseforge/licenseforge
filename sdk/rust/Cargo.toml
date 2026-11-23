@@ -12,9 +12,11 @@ homepage = "https://licenseforge.io"
 readme = "README.md"
 keywords = ["license", "licensing", "ed25519", "offline", "entitlements"]
 categories = ["cryptography", "authentication"]
+# Until the release workflow exists (the tests read ../../spec/vectors).
+publish = false
 
 [dependencies]
-curve25519-dalek = { version = "5.0.0", default-features = false, features = ["precomputed-tables"] }
+curve25519-dalek = { version = "5.0.0", default-features = false }
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast"] }
 
 [dev-dependencies]
