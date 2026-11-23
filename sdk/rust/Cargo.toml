@@ -20,4 +20,5 @@ curve25519-dalek = { version = "5.0.0", default-features = false }
 ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast"] }
 
 [dev-dependencies]
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast"] }
 serde_json = "1.0.154"

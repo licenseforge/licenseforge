@@ -15,6 +15,7 @@ const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
 /// What a license is bound to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BindingType {
     /// A site license: no fingerprint.
     None,
@@ -26,6 +27,7 @@ pub enum BindingType {
 
 /// A license's binding: its type and, unless `None`, the fingerprint (`"sha256:…"`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Binding {
     pub kind: BindingType,
     pub fingerprint: String,
@@ -33,6 +35,7 @@ pub struct Binding {
 
 /// The features and limits a license grants (ADR-0015). Unknown keys are never an error.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Entitlements {
     pub features: Vec<String>,
     pub limits: HashMap<String, i64>,
@@ -61,6 +64,7 @@ impl Entitlements {
 
 /// A license's decoded payload. Absent optional strings are empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Claims {
     pub license_id: String,
     pub tenant: String,
@@ -76,7 +80,7 @@ pub struct Claims {
     pub updates_until: Option<SystemTime>,
     /// Zero when absent.
     pub grace: Duration,
-    /// None: no limit. Zero is set: only usable at `issued_at`.
+    /// None: no limit. `Some(ZERO)` is a real limit: usable only until `issued_at`.
     pub max_offline: Option<Duration>,
     pub binding: Binding,
     pub entitlements: Entitlements,
@@ -84,6 +88,7 @@ pub struct Claims {
 
 /// The local facts a license is checked against.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CheckOptions {
     /// The time to check with (a clock guard's, when there is one).
     pub now: SystemTime,
@@ -93,7 +98,8 @@ pub struct CheckOptions {
     pub fingerprint: String,
     /// The app's build date; when None, `updates_until` isn't checked.
     pub build_date: Option<SystemTime>,
-    /// How far in the future `iat` may be; zero is strict.
+    /// How far in the future `iat` may be; zero is strict. Any value works (no
+    /// overflow); the spec's durations stop at 36,500 days.
     pub clock_tolerance: Duration,
 }
 
@@ -109,16 +115,19 @@ impl CheckOptions {
         }
     }
 
+    #[must_use]
     pub fn with_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
         self.fingerprint = fingerprint.into();
         self
     }
 
+    #[must_use]
     pub fn with_build_date(mut self, build_date: SystemTime) -> Self {
         self.build_date = Some(build_date);
         self
     }
 
+    #[must_use]
     pub fn with_clock_tolerance(mut self, clock_tolerance: Duration) -> Self {
         self.clock_tolerance = clock_tolerance;
         self

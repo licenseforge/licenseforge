@@ -67,28 +67,86 @@ fn lf1_claims() {
 
 #[test]
 fn open_runs_every_step() {
+    use ed25519_dalek::{Signer, SigningKey};
     use licenseforge::{CheckOptions, Status, open, parse_time};
     let v = vectors("lf1.json");
-    let c = v["cases"]
-        .as_array()
+    let seed: [u8; 32] = v["test_seed"]
+        .as_str()
         .unwrap()
-        .iter()
-        .find(|c| c["name"] == "valid_bare")
+        .as_bytes()
+        .try_into()
         .unwrap();
-    let license = c["license"].as_str().unwrap();
-    // The valid payload has no iat, so open reports malformed after a good signature.
-    let opts = CheckOptions::new(parse_time("2026-11-15T00:00:00Z").unwrap(), "acme-db");
-    let payload = c["payload"].as_str().unwrap();
-    if payload.contains("\"iat\"") {
-        assert_eq!(open(license, &keys(), &opts).unwrap().status, Status::Valid);
-    } else {
-        assert_eq!(
-            open(license, &keys(), &opts).unwrap_err().code(),
-            Code::Malformed
-        );
-    }
+    let b64 = |b: &[u8]| {
+        const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for c in b.chunks(3) {
+            let n = c
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, &x)| n | ((x as u32) << (16 - 8 * i)));
+            for i in 0..=c.len() {
+                out.push(A[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            }
+        }
+        out
+    };
+    let payload = r#"{"v":1,"lid":"lic_open","product":"acme-db","iat":"2026-11-01T00:00:00Z","exp":"2026-12-01T00:00:00Z","grace":"P7D"}"#;
+    let body = format!("lf1.test:2026-11.{}", b64(payload.as_bytes()));
+    let license = format!(
+        "{body}.{}",
+        b64(&SigningKey::from_bytes(&seed)
+            .sign(body.as_bytes())
+            .to_bytes())
+    );
+    let at = |t: &str| parse_time(t).unwrap();
+    let lic = open(
+        &license,
+        &keys(),
+        &CheckOptions::new(at("2026-11-15T00:00:00Z"), "acme-db"),
+    )
+    .unwrap();
     assert_eq!(
-        open("lf1.x.y.z", &keys(), &opts).unwrap_err().code(),
+        (lic.status, lic.claims.license_id.as_str()),
+        (Status::Valid, "lic_open")
+    );
+    assert_eq!(
+        open(
+            &license,
+            &keys(),
+            &CheckOptions::new(at("2026-12-03T00:00:00Z"), "acme-db")
+        )
+        .unwrap()
+        .status,
+        Status::Grace
+    );
+    assert_eq!(
+        open(
+            &license,
+            &keys(),
+            &CheckOptions::new(at("2026-12-09T00:00:00Z"), "acme-db")
+        )
+        .unwrap_err()
+        .code(),
+        Code::Expired
+    );
+    assert_eq!(
+        open(
+            &license,
+            &keys(),
+            &CheckOptions::new(at("2026-11-15T00:00:00Z"), "other")
+        )
+        .unwrap_err()
+        .code(),
+        Code::WrongProduct
+    );
+    assert_eq!(
+        open(
+            "lf1.x.y.z",
+            &keys(),
+            &CheckOptions::new(at("2026-11-15T00:00:00Z"), "acme-db")
+        )
+        .unwrap_err()
+        .code(),
         Code::Malformed
     );
 }

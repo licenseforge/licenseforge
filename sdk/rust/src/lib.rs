@@ -51,6 +51,7 @@ pub struct Verified {
 
 /// A usable license: its claims and status.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Opened {
     pub claims: Claims,
     pub status: Status,
