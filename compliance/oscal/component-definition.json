@@ -1390,7 +1390,7 @@
               {
                 "uuid": "e00928a9-27dc-5c89-967b-9fe4649a29e4",
                 "control-id": "sc-13",
-                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256 (also webhook signatures, Standard Webhooks), HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails.",
+                "description": "A FIPS build is available (not the default). Only Go standard library crypto: Ed25519 for license signatures, AES-256-GCM with random nonces, HMAC-SHA256 (also webhook signatures, Standard Webhooks), HKDF-SHA256, SHA-256, and RSA/ECDSA verification of OIDC ID tokens (go-jose, on the standard library). The FIPS build (GOFIPS140=certified, Go Cryptographic Module v1.0.0, CMVP #5247) runs the whole test suite in CI on every PR with GODEBUG=fips140=only, so a non-approved algorithm fails. The Java SDK has a FIPS mode (-Dlicenseforge.fips=true) that verifies license signatures only through Bouncy Castle FIPS Java 2.1.1 (CMVP #4943) and never falls back to the JDK; its suite runs again in that mode, approved-only, in CI. It covers signature verification; the SDK's TLS and other crypto follow the app's provider configuration.",
                 "props": [
                   {
                     "name": "implementation-status",
@@ -1421,6 +1421,11 @@
                     "href": "https://github.com/licenseforge/licenseforge/blob/main/internal/webhooks/receiver_test.go",
                     "rel": "reference",
                     "text": "TestReceiverSnippet"
+                  },
+                  {
+                    "href": "https://github.com/licenseforge/licenseforge/blob/main/sdk/java/src/test/java/io/licenseforge/sdk/FipsModeTest.java",
+                    "rel": "reference",
+                    "text": "FipsModeTest"
                   }
                 ],
                 "remarks": "The default build and image are not FIPS (GOFIPS140=off). Every release also publishes signed -fips images (ghcr.io/licenseforge/licenseforge:<version>-fips, linux/amd64 and linux/arm64) built with GOFIPS140=certified."
