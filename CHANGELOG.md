@@ -38,7 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Added
-- **Java SDK FIPS mode**: `-Dlicenseforge.fips=true` verifies signatures only through Bouncy Castle FIPS Java 2.1.1 (CMVP #4943) and fails closed without it; the SDK's suite also runs in that mode, approved-only (ADR-0010, ADR-0024; sdk/java README, "FIPS mode").
+- **Java SDK FIPS mode**: `-Dlicenseforge.fips=true` verifies license signatures only through Bouncy Castle FIPS Java 2.1.1 (CMVP #4943) and fails closed without it (TLS and other crypto follow the app's providers); the SDK's suite also runs in that mode, approved-only (ADR-0010, ADR-0024; sdk/java README, "FIPS mode").
 - **Restore archived products, features, plans and customers** (ADR-0015, amended): `POST …/{id}/restore` and a Restore button. Archive is now a soft delete. The dashboard lists archived rows for 30 days, then hides them behind "Show N archived more than 30 days ago"; they stay restorable. The database still refuses made-up or moved archive dates.
 - **Recovery commands on the owner login:**
   - `licenseforge admin reset --yes`: when no platform admin can sign in, it removes every admin so the bootstrap admin's next sign-in recovers the role (ADR-0031).

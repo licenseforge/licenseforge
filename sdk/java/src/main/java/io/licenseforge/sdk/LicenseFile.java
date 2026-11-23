@@ -183,12 +183,12 @@ public final class LicenseFile {
     System.arraycopy(raw, 0, spki, ED25519_SPKI.length, 32);
     boolean ok;
     try {
-      // The JDK's own provider, never the first one installed: another (e.g. plain BouncyCastle,
-      // not BC FIPS) verifies cofactored or throws unchecked, and the answer must match every SDK's.
+      // A provider by name (SunEC, or BCFIPS in FIPS mode), never the first one installed: another
+      // (e.g. plain BouncyCastle) verifies cofactored or throws unchecked, and the answer must match every SDK's.
       Signature s = Signature.getInstance("Ed25519", PROVIDER);
       s.initVerify(KeyFactory.getInstance("Ed25519", PROVIDER).generatePublic(new X509EncodedKeySpec(spki)));
       s.update(("lf1." + kid + "." + e.body()).getBytes(StandardCharsets.US_ASCII));
-      ok = s.verify(e.sig()); // SunEC refuses a non-canonical S (S ≥ L) and verifies cofactorless, like Go and OpenSSL
+      ok = s.verify(e.sig()); // SunEC and BCFIPS refuse a non-canonical S (S ≥ L) and verify cofactorless, like Go and OpenSSL
     } catch (NoSuchAlgorithmException | NoSuchProviderException x) {
       throw new IllegalStateException(PROVIDER.equals("BCFIPS")
           ? "licenseforge: FIPS mode (licenseforge.fips=true) needs the Bouncy Castle FIPS provider (BCFIPS) installed"

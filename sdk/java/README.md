@@ -60,15 +60,18 @@ try {
   - `offlineSha256` identifies a request or receipt, ignoring changed line endings.
   - The encoders write the same bytes as the Go and TypeScript SDKs (sorted keys, Go's escaping), and refuse what the parser would.
 
-- Signatures are checked with the JDK's `SunEC` provider by name, whatever providers your app installs first (BouncyCastle, for example, would give different answers on crafted inputs). A jlinked runtime on JDK 17 to 21 needs the `jdk.crypto.ec` module.
+- Outside FIPS mode, signatures are checked with the JDK's `SunEC` provider by name, whatever providers your app installs first (BouncyCastle, for example, would give different answers on crafted inputs). A jlinked runtime on JDK 17 to 21 needs the `jdk.crypto.ec` module.
+- `LicenseFile.Status` may gain values: keep a `default` branch when you switch on it.
 
 ## FIPS mode
 
-For FIPS 140-3, run with `-Dlicenseforge.fips=true`. Signatures are then checked only by the Bouncy Castle FIPS provider (`BCFIPS`), never by the JDK; if `BCFIPS` isn't installed, `verify` throws `IllegalStateException` rather than fall back.
+Start the JVM with `-Dlicenseforge.fips=true` (exactly `true`; it is read once, when the SDK loads, so setting it later in code has no effect). License signatures are then checked only by the Bouncy Castle FIPS provider (`BCFIPS`), never by the JDK; if `BCFIPS` isn't installed, `verify` throws `IllegalStateException` rather than fall back.
 
-- Use the validated jar: `org.bouncycastle:bc-fips:2.1.1` (BC-FJA 2.1.1, CMVP certificate #4943, Ed25519 approved under FIPS 186-5; tested by NIST on Java 8, 11, 17 and 21), or a later version once a CMVP certificate lists it. The SDK doesn't bring it: add it to your app.
-- Install `BCFIPS` as the first provider, so the SDK's other algorithms (SHA-256, HMAC-SHA256, `SecureRandom`) come from it too, and set `-Dorg.bouncycastle.fips.approved_only=true`. For TLS (the online client), also install Bouncy Castle's JSSE (`bctls-fips`). A `java.security` override like [`src/test/fips.security`](src/test/fips.security) works.
-- The SDK's tests run twice: once with SunEC, once in FIPS mode with BC-FJA 2.1.1 in approved-only mode, against the same conformance vectors (`FipsModeTest` checks which provider is used).
-- `LicenseFile.Status` may gain values: keep a `default` branch when you switch on it.
+**What it covers:** license-signature verification only. The SDK's other crypto (SHA-256, HMAC-SHA256, `SecureRandom`, and TLS in the online client) uses whatever providers your app has configured, so a FIPS-only process is your app's JVM setup:
 
+- Use the validated jar: `org.bouncycastle:bc-fips:2.1.1` (BC-FJA 2.1.1, CMVP certificate #4943, interim validation; Ed25519 approved under FIPS 186-5; the certificate's tested environments are Java 8, 11, 17 and 21), or a later version once a CMVP certificate lists it. The SDK doesn't bring it: add it to your app.
+- Replace the provider list (`-Djava.security.properties==your.security`, with two `=`; one `=` only overrides the entries you list and keeps the JDK's others) with `BCFIPS` first, Bouncy Castle's JSSE (`bctls-fips`) configured as `fips:BCFIPS` for TLS, and `SUN`; set `-Dorg.bouncycastle.fips.approved_only=true`. Follow Bouncy Castle's FIPS user guide for key stores (BCFKS) and the TLS settings.
+- On JDK 24 and later, add `--enable-native-access=ALL-UNNAMED` (bc-fips loads native code).
+
+The SDK's tests run twice: once with SunEC, once in FIPS mode with BC-FJA 2.1.1 in approved-only mode and BCFIPS as the first provider ([`src/test/fips.security`](src/test/fips.security), a test fixture that keeps the JDK's providers, not a deployment config), against the same conformance vectors. `FipsModeTest` checks which provider verifies.
 Build and test: `mvn verify` (Maven 3.9; JUnit is a test-only dependency).
