@@ -143,8 +143,12 @@ public final class LicenseFile {
     return new Envelope(token, parts[1], parts[2], sig, payload);
   }
 
-  /** The JDK's Ed25519 provider (ADR-0010). */
-  static final String PROVIDER = "SunEC";
+  /**
+   * The Ed25519 provider (ADR-0010): the JDK's SunEC, or in FIPS mode
+   * ({@code -Dlicenseforge.fips=true}) the validated Bouncy Castle FIPS jar,
+   * which the app installs. Never a fallback from one to the other.
+   */
+  static final String PROVIDER = Boolean.getBoolean("licenseforge.fips") ? "BCFIPS" : "SunEC";
 
   /** The bare token after the envelope checks (armor, BOM and whitespace removed). */
   static String envelopeToken(String license) throws LicenseException {
@@ -186,7 +190,9 @@ public final class LicenseFile {
       s.update(("lf1." + kid + "." + e.body()).getBytes(StandardCharsets.US_ASCII));
       ok = s.verify(e.sig()); // SunEC refuses a non-canonical S (S ≥ L) and verifies cofactorless, like Go and OpenSSL
     } catch (NoSuchAlgorithmException | NoSuchProviderException x) {
-      throw new IllegalStateException("licenseforge: no SunEC Ed25519 (a jlinked image on JDK 17-21 needs the jdk.crypto.ec module)", x);
+      throw new IllegalStateException(PROVIDER.equals("BCFIPS")
+          ? "licenseforge: FIPS mode (licenseforge.fips=true) needs the Bouncy Castle FIPS provider (BCFIPS) installed"
+          : "licenseforge: no SunEC Ed25519 (a jlinked image on JDK 17-21 needs the jdk.crypto.ec module)", x);
     } catch (GeneralSecurityException | RuntimeException x) {
       // A 32-byte value that isn't a curve point can't verify anything. SunEC throws
       // checked exceptions for it; RuntimeException is defence in depth (no test reaches it).

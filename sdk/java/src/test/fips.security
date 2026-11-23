@@ -1,0 +1,6 @@
+# FIPS mode in the tests (pom.xml, fips execution) and the README example:
+# BCFIPS first, so every algorithm the SDK asks for by name alone comes from it.
+security.provider.1=org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider
+security.provider.2=SUN
+security.provider.3=SunEC
+security.provider.4=SunJSSE

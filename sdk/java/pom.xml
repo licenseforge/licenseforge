@@ -81,6 +81,13 @@
       <version>6.1.3</version>
       <scope>test</scope>
     </dependency>
+    <!-- FIPS mode tests only: Bouncy Castle FIPS Java API 2.1.1, CMVP certificate #4943. Apps add it themselves. -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bc-fips</artifactId>
+      <version>2.1.1</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -117,6 +124,19 @@
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.6.1</version>
+        <executions>
+          <!-- The whole suite again in FIPS mode, against the validated jar (README → FIPS mode). -->
+          <execution>
+            <id>fips</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <argLine>-Dlicenseforge.fips=true -Dorg.bouncycastle.fips.approved_only=true -Djava.security.properties=${project.basedir}/src/test/fips.security</argLine>
+              <reportsDirectory>${project.build.directory}/surefire-reports-fips</reportsDirectory>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <artifactId>maven-jar-plugin</artifactId>
