@@ -8,6 +8,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | FIPS server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z-fips` | cosign | attestation | attestation |
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
 | Server binaries, linux amd64 and arm64; the same binary for macOS (amd64, arm64) and Windows (amd64, `.exe`) as the CLI | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
+| Air-gapped install bundle `licenseforge_X.Y.Z_airgap.tar`: both images, the chart, the database setup and the conformance vectors ([air-gapped install](air-gapped-install.md)) | GitHub release asset | cosign bundle of `SHA256SUMS` | attestation (the server binary's SBOM, the same server as in the images) | attestation |
 | TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
 | Java SDK | Maven Central `io.licenseforge:licenseforge-sdk` (its own version, tag `sdk/java/vX.Y.Z`) | PGP (`.asc`, Central's requirement) | | attestation |
 
@@ -99,6 +100,8 @@ gh attestation verify "licenseforge-sdk-$V.jar" --repo licenseforge/licenseforge
 A "Good signature" from another key proves nothing: Central accepts any key on a public keyserver, so only the fingerprint ties a release to LicenseForge. In a build, pin the version, and check signatures with your build tool where it can (Gradle's dependency verification with the key's fingerprint, or Maven's PGP verification plugin).
 
 ## Air-gapped verification
+
+The [air-gapped install bundle](air-gapped-install.md) is verified like a binary (Server binaries, above) on a connected machine before it crosses the gap.
 
 `gh attestation download oci://$IMAGE --repo licenseforge/licenseforge` (and the same for the chart or a binary) saves the attestation bundles. Verify them offline with `gh attestation verify --bundle <file> --custom-trusted-root <trusted_root.jsonl>`; get the trusted root with `gh attestation trusted-root` while online.
 

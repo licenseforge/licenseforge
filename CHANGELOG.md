@@ -38,6 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Client TLS policy is tested in both builds: TLS 1.1 servers are refused, and in FIPS 140-3 mode a server offering only non-approved suites (ChaCha20) is refused.
 
 ### Added
+- **Air-gapped install bundle** (ADR-0006, ADR-0024): every release adds `licenseforge_<version>_airgap.tar` with both images (OCI archives, the signed digests), the chart, the database setup and the conformance vectors, covered by the signed `SHA256SUMS` and its provenance ([docs/air-gapped-install.md](docs/air-gapped-install.md)).
 - **Restore archived products, features, plans and customers** (ADR-0015, amended): `POST …/{id}/restore` and a Restore button. Archive is now a soft delete. The dashboard lists archived rows for 30 days, then hides them behind "Show N archived more than 30 days ago"; they stay restorable. The database still refuses made-up or moved archive dates.
 - **Recovery commands on the owner login:**
   - `licenseforge admin reset --yes`: when no platform admin can sign in, it removes every admin so the bootstrap admin's next sign-in recovers the role (ADR-0031).
