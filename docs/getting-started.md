@@ -38,7 +38,7 @@ helm install licenseforge oci://ghcr.io/licenseforge/charts/licenseforge --versi
   --set-string trustedProxies='10.0.0.0/8\,fd00::/8'   # your ingress controller's CIDRs; escape commas for --set
 ```
 
-[Verify the release](verifying-releases.md) first. Route `licenses.vendor.example` to the `licenseforge` Service (port 80) through your ingress. The chart creates no Ingress, because its TLS and class are yours. `curl https://licenses.vendor.example/readyz` answers `ok` when the server is up.
+[Verify the release](verifying-releases.md) first. Without internet access, install from the [air-gapped bundle](air-gapped-install.md) instead. Route `licenses.vendor.example` to the `licenseforge` Service (port 80) through your ingress. The chart creates no Ingress, because its TLS and class are yours. `curl https://licenses.vendor.example/readyz` answers `ok` when the server is up.
 
 `bootstrapAdmin` makes you the platform admin at your first login: an email your IdP marks verified, or `'issuer|subject'` (quote it in the shell). The [chart README](../deploy/helm/licenseforge/README.md#platform-and-session-settings) lists the other settings. Set `platformMFAPolicy` to `mfa` or stronger in production.
 
