@@ -1,0 +1,23 @@
+# LicenseForge SDK for Rust (ADR-0050): Ed25519 from the dalek crates, nothing
+# else at runtime; serde_json reads the conformance vectors in tests only.
+[package]
+name = "licenseforge"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Verify LicenseForge lf1 license files offline."
+repository = "https://github.com/licenseforge/licenseforge"
+homepage = "https://licenseforge.io"
+readme = "README.md"
+keywords = ["license", "licensing", "ed25519", "offline", "entitlements"]
+categories = ["cryptography", "authentication"]
+# Until the release workflow exists (the tests read ../../spec/vectors).
+publish = false
+
+[dependencies]
+curve25519-dalek = { version = "5.0.0", default-features = false }
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast"] }
+
+[dev-dependencies]
+serde_json = "1.0.154"

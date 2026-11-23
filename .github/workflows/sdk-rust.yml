@@ -1,0 +1,41 @@
+name: Rust SDK
+# sdk/rust (ADR-0050): formatted, linted and tested against the shared
+# conformance vectors on the minimum supported Rust (rust-version in
+# Cargo.toml) and on stable. Path-filtered like sdk-java.yml.
+on:
+  push:
+    branches: [main]
+    paths: [sdk/rust/**, spec/**, .github/workflows/sdk-rust.yml]
+  pull_request:
+    paths: [sdk/rust/**, spec/**, .github/workflows/sdk-rust.yml]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  sdk-rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        rust: ["1.85", stable]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Toolchain (the runner's rustup, no third-party action)
+        run: |
+          rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy,rustfmt
+          rustup default "${{ matrix.rust }}"
+      - name: Format and lint (stable only; lints change between versions)
+        if: matrix.rust == 'stable'
+        working-directory: sdk/rust
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Test (Cargo.lock as committed)
+        working-directory: sdk/rust
+        run: cargo test --locked
+      - name: Test with dalek's lenient mode on (another crate in an app may enable it)
+        working-directory: sdk/rust
+        run: cargo test --locked --features ed25519-dalek/legacy_compatibility

@@ -24,6 +24,11 @@ updates:
     schedule: { interval: weekly }
     groups:
       sdk-java: { patterns: ["*"] }
+  - package-ecosystem: cargo
+    directory: /sdk/rust # the dalek crates (runtime) and serde_json (tests)
+    schedule: { interval: weekly }
+    groups:
+      sdk-rust: { patterns: ["*"] }
   - package-ecosystem: docker
     directory: / # the Dockerfile's digest-pinned base images
     schedule: { interval: weekly }
