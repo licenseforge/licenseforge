@@ -21,6 +21,15 @@ on:
       - web/index.html
       - web/vite.config.*
       - web/scripts/**
+      # Read by the air-gapped bundle step.
+      - spec/**
+      - deploy/database-setup.sql
+      - docs/air-gapped-install.md
+      - docs/getting-started.md
+      - docs/verifying-releases.md
+      - docs/cli.md
+      - LICENSE
+      - NOTICE
 permissions: {}
 defaults:
   run:
@@ -178,18 +187,23 @@ jobs:
           # attests it and uploads it with the binaries.
           b="licenseforge_${VERSION}_airgap"
           d="$RUNNER_TEMP/$b"
-          mkdir -p "$d/images" "$d/chart" "$d/spec"
+          mkdir -p "$d/images" "$d/chart" "$d/spec" "$d/sbom" "$d/docs"
           for suffix in "" -fips; do
             cp "out/oci/image$suffix.tar" "$d/images/licenseforge$suffix.oci.tar"
+            cp "out/sbom/image$suffix.spdx.json" "$d/sbom/licenseforge$suffix.spdx.json"
             # The digest ghcr serves and cosign signed: the index the push job copies.
-            echo "sha256:$(skopeo inspect --raw "oci-archive:out/oci/image$suffix.tar" | sha256sum | cut -d' ' -f1)  images/licenseforge$suffix.oci.tar" >> "$d/images/DIGESTS"
+            # "<image> <digest>", so it can't be taken for a checksum file.
+            echo "licenseforge:$VERSION$suffix sha256:$(skopeo inspect --raw "oci-archive:out/oci/image$suffix.tar" | sha256sum | cut -d' ' -f1)" >> "$d/images/DIGESTS"
           done
           cp "out/chart/licenseforge-$VERSION.tgz" "$d/chart/"
           cp deploy/database-setup.sql LICENSE NOTICE "$d/"
-          cp docs/air-gapped-install.md "$d/README.md"
+          # The guide and the pages it links to, so its links work inside the gap.
+          cp docs/air-gapped-install.md docs/getting-started.md docs/verifying-releases.md docs/cli.md "$d/docs/"
+          printf 'LicenseForge %s, air-gapped install bundle.\nStart with docs/air-gapped-install.md.\n' "$VERSION" > "$d/README.md"
           cp -R spec/license-format.md spec/vectors "$d/spec/"
-          (cd "$d" && find . -type f -printf '%P\n' | LC_ALL=C sort | xargs sha256sum > "$RUNNER_TEMP/sums") && mv "$RUNNER_TEMP/sums" "$d/SHA256SUMS"
-          # Reproducible: fixed order, owner and times (the commit's).
+          (cd "$d" && find . -type f -printf '%P\0' | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/sums") && mv "$RUNNER_TEMP/sums" "$d/SHA256SUMS"
+          # Deterministic packaging (fixed order, owner and times, the commit's);
+          # the images and chart inside are what the steps above built.
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git log -1 --format=%ct)" \
             -cf "out/bin/$b.tar" -C "$RUNNER_TEMP" "$b"
           # What an operator runs inside the air gap, run here once.

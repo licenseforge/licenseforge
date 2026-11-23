@@ -5,11 +5,13 @@ Every release has one file with what an install without internet access needs: `
 | Path | What |
 |---|---|
 | `images/licenseforge.oci.tar`, `images/licenseforge-fips.oci.tar` | The server images, standard and FIPS, linux/amd64 and linux/arm64 (OCI archives, the same bytes as on ghcr.io) |
-| `images/DIGESTS` | Each image's digest: what the cosign signatures cover and what to deploy by |
+| `images/DIGESTS` | Each image's digest (`<image> <digest>`, not a checksum file): what the cosign signatures cover and what to deploy by |
+| `sbom/` | Each image's SBOM (SPDX), the same as attested on ghcr.io |
 | `chart/licenseforge-<version>.tgz` | The Helm chart |
 | `database-setup.sql` | The one-time database setup ([getting started](getting-started.md), step 2) |
 | `spec/` | The license format and its conformance vectors, for testing an SDK or your own verifier |
-| `README.md` | This page |
+| `docs/` | This page, getting started, verifying releases and the CLI reference |
+| `README.md`, `LICENSE`, `NOTICE` | A pointer to this page; the license and notices |
 | `SHA256SUMS` | Checksums of everything above |
 
 PostgreSQL 17+ and an OIDC identity provider (e.g. Keycloak) are not in the bundle: run your own, as for any install.
@@ -49,13 +51,14 @@ To enforce signatures in the cluster (e.g. a cosign admission policy), the signa
 
 ## 4. Database, Secrets, install
 
-Run `database-setup.sql` and create the Secrets as in [getting started](getting-started.md), step 2. Install from the bundled chart, pointing it at your registry and deploying by digest:
+Run `database-setup.sql` and create the Secrets as in [getting started](getting-started.md), step 2. Install from the bundled chart, pointing it at your registry and deploying by digest (from `images/DIGESTS`; the `-fips` line for the FIPS image), with the other settings from [getting started](getting-started.md), step 3:
 
 ```sh
 helm install licenseforge "chart/licenseforge-$VERSION.tgz" -n licenseforge \
   --set image.repository="$REGISTRY/licenseforge" \
-  --set image.digest=sha256:…   # from images/DIGESTS; the -fips line for the FIPS image
-  # …and the settings from getting started, step 3
+  --set image.digest=sha256:… \
+  --set secrets.server=licenseforge-server --set secrets.migrate=licenseforge-migrate \
+  --set oidc.enabled=true --set oidc.issuer=…   # and the rest of step 3
 ```
 
 The server never calls out: activations, refreshes and webhooks only reach what you configure. For machines that can't reach the server either, use [offline activation](cli.md).

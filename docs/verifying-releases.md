@@ -8,7 +8,7 @@ Every release is built by [`.github/workflows/release.yml`](../.github/workflows
 | FIPS server image | `ghcr.io/licenseforge/licenseforge:X.Y.Z-fips` | cosign | attestation | attestation |
 | Helm chart | `oci://ghcr.io/licenseforge/charts/licenseforge`, version `X.Y.Z` | cosign | | attestation |
 | Server binaries, linux amd64 and arm64; the same binary for macOS (amd64, arm64) and Windows (amd64, `.exe`) as the CLI | GitHub release assets | cosign bundle of `SHA256SUMS` | attestation and `.spdx.json` asset | attestation |
-| Air-gapped install bundle `licenseforge_X.Y.Z_airgap.tar`: both images, the chart, the database setup and the conformance vectors ([air-gapped install](air-gapped-install.md)) | GitHub release asset | cosign bundle of `SHA256SUMS` | attestation (the server binary's SBOM, the same server as in the images) | attestation |
+| Air-gapped install bundle `licenseforge_X.Y.Z_airgap.tar`: both images, the chart, the database setup and the conformance vectors ([air-gapped install](air-gapped-install.md)) | GitHub release asset | cosign bundle of `SHA256SUMS` | `sbom/` in the bundle (the images'); attestation (the server binary's) | attestation |
 | TypeScript SDK | npm `@licenseforge/sdk` (its own version, tag `sdk/ts/vX.Y.Z`) | npm registry signature | | npm provenance |
 | Java SDK | Maven Central `io.licenseforge:licenseforge-sdk` (its own version, tag `sdk/java/vX.Y.Z`) | PGP (`.asc`, Central's requirement) | | attestation |
 
